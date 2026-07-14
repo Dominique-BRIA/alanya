@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../theme/alanya_theme.dart';
+import '../theme/alanya_theme.dart';
 
 /// Fond décoratif réutilisant le motif africain d'Alanya, avec un voile crème
 /// par-dessus pour garder le contenu lisible.
@@ -17,7 +17,6 @@ class MotifBackground extends StatelessWidget {
           child: Image.asset(
             "assets/images/motif_bg.png",
             repeat: ImageRepeat.repeat,
-            // Si l'asset manque, on retombe sur un fond crème uni.
             errorBuilder: (_, __, ___) => const ColoredBox(color: AlanyaColors.cream),
           ),
         ),

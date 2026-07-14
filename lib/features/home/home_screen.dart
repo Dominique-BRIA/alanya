@@ -9,7 +9,6 @@ import '../../core/connectivity_service.dart';
 import '../../core/conversation_cache.dart';
 import '../../core/push_service.dart';
 import '../../core/realtime_client.dart';
-import '../../core/theme_controller.dart';
 import '../../models/ai_message.dart';
 import '../../models/conversation.dart';
 import '../../models/status.dart';
@@ -115,7 +114,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     MaterialPageRoute(builder: (_) => const ProfileScreen()),
                   );
                 } else if (v == "darkmode") {
-                  context.read<ThemeController>().toggle();
                 } else if (v == "logout") {
                   context.read<AuthController>().logout();
                 }
