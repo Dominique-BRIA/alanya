@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "854184379004",
+    "project_id": "alanya00",
+    "storage_bucket": "alanya00.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:854184379004:android:c09fe4301e61fedc323ff9",
+        "android_client_info": {
+          "package_name": "com.alanya.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDHdCoM62u7bQd6nNAJ055bcElYWIpM-ZI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:854184379004:android:daf6c3a59da598d3323ff9",
+        "android_client_info": {
+          "package_name": "com.example.sewachat"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDHdCoM62u7bQd6nNAJ055bcElYWIpM-ZI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,55 @@
+workflows:
+  android-build:
+    name: Build Android APK
+    max_build_duration: 60
+
+    environment:
+      flutter: 3.24.5   # Version stable fixe
+      java: 17
+
+    scripts:
+      - name: Get dependencies
+        script: |
+          flutter pub get
+
+      - name: Patch Plugins SDK Overrides
+        script: |
+          echo "=== Modification des plugins dans le pub cache ==="
+          
+          # Force compileSdkVersion 36 dans les fichiers build.gradle (Groovy) des plugins tiers
+          find $PUB_CACHE -name "build.gradle" -exec sed -i '' 's/compileSdkVersion .*/compileSdkVersion 36/g' {} + 2>/dev/null || \
+          find $PUB_CACHE -name "build.gradle" -exec sed -i 's/compileSdkVersion .*/compileSdkVersion 36/g' {} +
+          
+          # Force compileSdk/compileSdkVersion dans les fichiers build.gradle.kts (Kotlin) des plugins tiers
+          find $PUB_CACHE -name "build.gradle.kts" -exec sed -i '' 's/compileSdk = .*/compileSdk = 36/g' {} + 2>/dev/null || \
+          find $PUB_CACHE -name "build.gradle.kts" -exec sed -i 's/compileSdk = .*/compileSdk = 36/g' {} +
+          find $PUB_CACHE -name "build.gradle.kts" -exec sed -i '' 's/compileSdkVersion = .*/compileSdkVersion = 36/g' {} + 2>/dev/null || \
+          find $PUB_CACHE -name "build.gradle.kts" -exec sed -i 's/compileSdkVersion = .*/compileSdkVersion = 36/g' {} +
+
+          echo "=== Vérification et alignement de l'application principale ==="
+          # S'assure que ton application utilise bien compileSdk = 36
+          sed -i '' 's/compileSdk = .*/compileSdk = 36/g' android/app/build.gradle.kts 2>/dev/null || \
+          sed -i 's/compileSdk = .*/compileSdk = 36/g' android/app/build.gradle.kts
+
+      - name: Build APK release
+        script: |
+          # --split-per-abi : produit 3 APKs séparés (arm64-v8a, armeabi-v7a,
+          # x86_64) au lieu d'un fat APK. Chaque APK ne contient les binaires
+          # natifs (flutter_webrtc, PdfiumAndroid, ExoPlayer...) que pour SA
+          # cible → économie de ~60 Mo sur l'APK distribué.
+          # → arm64-v8a couvre 95% des téléphones du marché (à privilégier).
+          flutter build apk --release --split-per-abi \
+            --android-skip-build-dependency-validation \
+            --dart-define=API_URL=https://backend-alanya.vercel.app \
+            --dart-define=WS_URL=wss://alanya-ws.d-bria00.workers.dev
+
+    artifacts:
+      - build/app/outputs/flutter-apk/*.apk
+
+    publishing:
+      email:
+        recipients:
+          - d.bria00@gmail.com
+        notify:
+          success: true
+          failure: true
