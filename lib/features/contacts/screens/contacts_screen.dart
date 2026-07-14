@@ -230,7 +230,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
           const Divider(height: 1),
           _actionTile(
             icon: Icons.person_add,
-            color: AlanyaColors.fabPrimary,
+            color: AlanyaColors.terracotta,
             title: "Ajouter un contact",
             subtitle: "Rechercher par numéro Alanya",
             onTap: () async {
@@ -284,7 +284,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
             const Divider(height: 1),
             _actionTile(
               icon: Icons.person_add,
-              color: AlanyaColors.fabPrimary,
+              color: AlanyaColors.terracotta,
               title: "Ajouter un contact",
               subtitle: "Rechercher par numéro Alanya",
               onTap: () async {
@@ -334,7 +334,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
         name: c.displayName,
         avatarUrl: c.avatarUrl,
         radius: 22,
-        backgroundColor: c.isBlocked ? Colors.grey : AlanyaColors.clay,
+        backgroundColor: c.isBlocked ? Colors.grey : AlanyaColors.gold,
       ),
       title: Text(c.displayName, style: const TextStyle(fontWeight: FontWeight.w600)),
       subtitle: Text("Numéro : ${c.publicNumber}${c.isBlocked ? " · bloqué" : ""}"),

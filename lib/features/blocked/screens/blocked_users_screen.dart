@@ -124,7 +124,7 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.block, size: 64, color: AlanyaColors.clay),
+                Icon(Icons.block, size: 64, color: AlanyaColors.gold),
                 SizedBox(height: 12),
                 Text(
                   "Aucun utilisateur bloqué.\nLes personnes bloquées ne pourront plus vous envoyer de messages ni vous appeler.",

@@ -126,7 +126,7 @@ class _NewChatScreenState extends State<NewChatScreen> {
               Center(
                 child: CircleAvatar(
                   radius: 44,
-                  backgroundColor: AlanyaColors.fabPrimary,
+                  backgroundColor: AlanyaColors.terracotta,
                   child: const Icon(Icons.person_add, size: 40, color: Colors.white),
                 ),
               ),

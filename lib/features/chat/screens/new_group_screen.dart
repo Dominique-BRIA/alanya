@@ -154,7 +154,7 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
                               title: Text(c.displayName),
                               subtitle: Text("Numéro : ${c.publicNumber}"),
                               secondary: CircleAvatar(
-                                backgroundColor: AlanyaColors.clay,
+                                backgroundColor: AlanyaColors.gold,
                                 child: Text(
                                   c.displayName.isNotEmpty ? c.displayName[0].toUpperCase() : "?",
                                   style: const TextStyle(color: Colors.white),

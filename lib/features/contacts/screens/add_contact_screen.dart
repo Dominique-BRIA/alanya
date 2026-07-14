@@ -203,7 +203,7 @@ class _AddContactScreenState extends State<AddContactScreen> {
             Row(
               children: [
                 CircleAvatar(
-                  backgroundColor: AlanyaColors.clay,
+                  backgroundColor: AlanyaColors.gold,
                   child: Text(
                     name.isNotEmpty ? name[0].toUpperCase() : "?",
                     style: const TextStyle(color: Colors.white),

@@ -419,7 +419,7 @@ class _ChatScreenState extends State<ChatScreen> {
       return Icon(Icons.access_time, size: 13, color: baseColor);
     }
     if (status == "READ") {
-      return const Icon(Icons.done_all, size: 15, color: AlanyaColors.tickBlue);
+      return const Icon(Icons.done_all, size: 15, color: AlanyaColors.tickRead);
     } else if (status == "DELIVERED") {
       return Icon(Icons.done_all, size: 15, color: baseColor);
     }
