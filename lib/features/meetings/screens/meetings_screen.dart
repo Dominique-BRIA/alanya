@@ -3,10 +3,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../theme/app_theme.dart';
-import '../../widgets/motif_background.dart';
-import '../../models/meeting.dart';
-import '../meetings/meetings_repository.dart';
+import '../../../theme/app_theme.dart';
+import '../../../widgets/motif_background.dart';
+import '../../../models/meeting.dart';
+import '../meetings_repository.dart';
 import 'create_meeting_screen.dart';
 import 'meeting_detail_screen.dart';
 
