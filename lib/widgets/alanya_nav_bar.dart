@@ -1,10 +1,7 @@
 import 'package:flutter/material.dart';
 import '../theme/alanya_theme.dart';
 
-/// NavigationBar premium pour Alanya.
-///
-/// Design : indicateur arrondi animé, icônes fines, labels discrets,
-/// fond transparent avec effet de flou léger.
+/// NavigationBar flottante style Telegram — arrondie, avec indicateur animé.
 class AlanyaNavBar extends StatelessWidget {
   const AlanyaNavBar({
     super.key,
@@ -20,37 +17,34 @@ class AlanyaNavBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bgColor = isDark
-        ? const Color(0xFF121010).withValues(alpha: 0.95)
-        : AlanyaColors.warmWhite.withValues(alpha: 0.95);
 
-    return Container(
-      decoration: BoxDecoration(
-        color: bgColor,
-        border: Border(
-          top: BorderSide(
-            color: isDark
-                ? Colors.white.withValues(alpha: 0.06)
-                : AlanyaColors.grey200,
-            width: 0.5,
-          ),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: Container(
+        height: 64,
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1E1B18) : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.08),
+              blurRadius: 20,
+              offset: const Offset(0, 4),
+            ),
+          ],
         ),
-      ),
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: List.generate(items.length, (i) {
-              return _NavTile(
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: List.generate(items.length, (i) {
+            return Expanded(
+              child: _NavTile(
                 item: items[i],
                 isSelected: i == currentIndex,
                 onTap: () => onTap(i),
                 isDark: isDark,
-              );
-            }),
-          ),
+              ),
+            );
+          }),
         ),
       ),
     );
@@ -69,7 +63,7 @@ class AlanyaNavItem {
   final String label;
 }
 
-class _NavTile extends StatelessWidget {
+class _NavTile extends StatefulWidget {
   const _NavTile({
     required this.item,
     required this.isSelected,
@@ -83,50 +77,66 @@ class _NavTile extends StatelessWidget {
   final bool isDark;
 
   @override
+  State<_NavTile> createState() => _NavTileState();
+}
+
+class _NavTileState extends State<_NavTile> {
+  bool _hovering = false;
+
+  @override
   Widget build(BuildContext context) {
     final activeColor = AlanyaColors.terracotta;
-    final inactiveColor = isDark
+    final inactiveColor = widget.isDark
         ? AlanyaColors.grey500
         : AlanyaColors.grey400;
+    final hoverColor = widget.isDark
+        ? Colors.white.withValues(alpha: 0.04)
+        : AlanyaColors.grey100;
 
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeOutCubic,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? activeColor.withValues(alpha: 0.10)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 200),
-              child: Icon(
-                isSelected ? item.activeIcon : item.icon,
-                key: ValueKey(isSelected),
-                size: 24,
-                color: isSelected ? activeColor : inactiveColor,
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+          decoration: BoxDecoration(
+            color: widget.isSelected
+                ? activeColor.withValues(alpha: 0.12)
+                : _hovering
+                    ? hoverColor
+                    : Colors.transparent,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 200),
+                child: Icon(
+                  widget.isSelected ? widget.item.activeIcon : widget.item.icon,
+                  key: ValueKey(widget.isSelected),
+                  size: 22,
+                  color: widget.isSelected ? activeColor : inactiveColor,
+                ),
               ),
-            ),
-            const SizedBox(height: 3),
-            AnimatedDefaultTextStyle(
-              duration: const Duration(milliseconds: 200),
-              style: TextStyle(
-                fontFamily: 'Inter',
-                fontSize: 10.5,
-                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                color: isSelected ? activeColor : inactiveColor,
-                letterSpacing: 0.2,
+              const SizedBox(height: 2),
+              AnimatedDefaultTextStyle(
+                duration: const Duration(milliseconds: 200),
+                style: TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 10,
+                  fontWeight: widget.isSelected ? FontWeight.w600 : FontWeight.w500,
+                  color: widget.isSelected ? activeColor : inactiveColor,
+                  letterSpacing: 0.2,
+                ),
+                child: Text(widget.item.label),
               ),
-              child: Text(item.label),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

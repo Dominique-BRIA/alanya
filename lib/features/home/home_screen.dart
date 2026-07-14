@@ -9,6 +9,7 @@ import '../../core/connectivity_service.dart';
 import '../../core/conversation_cache.dart';
 import '../../core/push_service.dart';
 import '../../core/realtime_client.dart';
+import '../../core/theme_controller.dart';
 import '../../models/ai_message.dart';
 import '../../models/conversation.dart';
 import '../../models/status.dart';
@@ -96,27 +97,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-          title: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [AlanyaColors.terracotta, AlanyaColors.terracottaDark],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Center(
-                  child: Icon(Icons.chat_bubble, size: 18, color: Colors.white),
-                ),
-              ),
-              const SizedBox(width: 10),
-              const Text("Alanya"),
-            ],
+          title: const Text(
+            "ALANYA",
+            style: TextStyle(
+              fontFamily: 'Inter',
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 4,
+              height: 1,
+            ),
           ),
           actions: [
             PopupMenuButton<String>(
@@ -125,12 +114,33 @@ class _HomeScreenState extends State<HomeScreen> {
                   Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const ProfileScreen()),
                   );
+                } else if (v == "darkmode") {
+                  context.read<ThemeController>().toggle();
                 } else if (v == "logout") {
                   context.read<AuthController>().logout();
                 }
               },
               itemBuilder: (_) => [
                 const PopupMenuItem(value: "profile", child: Text("Mon profil")),
+                PopupMenuItem(
+                  value: "darkmode",
+                  child: Row(
+                    children: [
+                      Icon(
+                        Theme.of(context).brightness == Brightness.dark
+                            ? Icons.light_mode_outlined
+                            : Icons.dark_mode_outlined,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        Theme.of(context).brightness == Brightness.dark
+                            ? "Mode clair"
+                            : "Mode nuit",
+                      ),
+                    ],
+                  ),
+                ),
                 const PopupMenuItem(value: "logout", child: Text("Se déconnecter")),
               ],
             ),
@@ -155,8 +165,8 @@ class _HomeScreenState extends State<HomeScreen> {
               label: 'Chats',
             ),
             AlanyaNavItem(
-              icon: Icons.circle_outlined,
-              activeIcon: Icons.circle,
+              icon: Icons.radio_button_unchecked,
+              activeIcon: Icons.adjust,
               label: 'Status',
             ),
             AlanyaNavItem(
@@ -568,32 +578,41 @@ class _StatusTabState extends State<_StatusTab> {
 
   Widget _myStatusTile(StatusGroup? me) {
     final has = me != null && me.statuses.isNotEmpty;
+    final user = context.read<AuthController>().user;
     return ListTile(
       leading: Stack(
         children: [
-          CircleAvatar(
+          AvatarCircle(
+            name: user?.pseudo ?? "?",
+            avatarUrl: user?.avatarUrl,
             radius: 26,
             backgroundColor: AlanyaColors.terracotta,
-            child: const Icon(Icons.person, color: Colors.white),
           ),
           Positioned(
             right: 0,
             bottom: 0,
-            child: CircleAvatar(
-              radius: 9,
-              backgroundColor: AlanyaColors.forest,
+            child: Container(
+              width: 20,
+              height: 20,
+              decoration: BoxDecoration(
+                color: AlanyaColors.forest,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 2),
+              ),
               child: const Icon(Icons.add, color: Colors.white, size: 12),
             ),
           ),
         ],
       ),
       title: const Text("Mon statut", style: TextStyle(fontWeight: FontWeight.w600)),
-      subtitle: Text(has ? "${me!.statuses.length} statut(s) · appuie pour voir" : "Appuie pour ajouter"),
+      subtitle: Text(has ? "${me!.statuses.length} statut(s)" : "Appuie pour ajouter"),
       onTap: has ? () => _openViewer(me!, isMine: true) : _openCreate,
-      trailing: IconButton(
-        icon: const Icon(Icons.add_circle, color: AlanyaColors.forest),
-        onPressed: _openCreate,
-      ),
+      trailing: has
+          ? IconButton(
+              icon: Icon(Icons.camera_alt, color: AlanyaColors.terracotta),
+              onPressed: _openCreate,
+            )
+          : null,
     );
   }
 

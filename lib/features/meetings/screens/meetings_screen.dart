@@ -73,7 +73,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
             right: 16,
             bottom: 16,
             child: FloatingActionButton(
-              backgroundColor: AlanyaColors.terracotta,
+              backgroundColor: AlanyaColors.fabPrimary,
               onPressed: _create,
               child: const Icon(Icons.add, color: Colors.white),
             ),
@@ -106,7 +106,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.videocam_outlined, size: 64, color: AlanyaColors.gold),
+                Icon(Icons.videocam_outlined, size: 64, color: AlanyaColors.clay),
                 SizedBox(height: 12),
                 Text(
                   "Aucune réunion.\nAppuie sur + pour créer une réunion audio ou vidéo.",

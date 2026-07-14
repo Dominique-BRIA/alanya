@@ -419,7 +419,7 @@ class _ChatScreenState extends State<ChatScreen> {
       return Icon(Icons.access_time, size: 13, color: baseColor);
     }
     if (status == "READ") {
-      return const Icon(Icons.done_all, size: 15, color: AlanyaColors.tickRead);
+      return const Icon(Icons.done_all, size: 15, color: AlanyaColors.tickBlue);
     } else if (status == "DELIVERED") {
       return Icon(Icons.done_all, size: 15, color: baseColor);
     }
@@ -2021,7 +2021,7 @@ class _ChatScreenState extends State<ChatScreen> {
         alignment: Alignment.center,
         children: [
           CircleAvatar(
-            backgroundColor: _recording ? Colors.red : AlanyaColors.forest,
+            backgroundColor: _recording ? Colors.red : AlanyaColors.chocolate,
             child: Icon(
               _recording ? Icons.mic : Icons.mic_none,
               color: Colors.white,

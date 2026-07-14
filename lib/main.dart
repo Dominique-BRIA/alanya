@@ -29,6 +29,7 @@ import 'features/blocked/blocked_repository.dart';
 import 'features/meetings/meetings_repository.dart';
 import 'features/status/status_repository.dart';
 import 'theme/alanya_theme.dart';
+import 'core/theme_controller.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -92,6 +93,9 @@ void main() async {
             ctx.read<RealtimeClient>(),
           ),
         ),
+        ChangeNotifierProvider<ThemeController>(
+          create: (_) => ThemeController(),
+        ),
         ChangeNotifierProvider<AuthController>(
           create: (_) => AuthController(repo, storage)..bootstrap(),
         ),
@@ -107,13 +111,14 @@ class AlanyaApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localeCtrl = context.watch<LocaleController>();
+    final themeCtrl = context.watch<ThemeController>();
     return MaterialApp(
       navigatorKey: PushService.navigatorKey,
       title: "Alanya",
       debugShowCheckedModeBanner: false,
       theme: AlanyaTheme.light,
       darkTheme: AlanyaTheme.dark,
-      themeMode: ThemeMode.system,
+      themeMode: themeCtrl.mode,
       locale: localeCtrl.locale,
       supportedLocales: const [
         Locale('fr'),

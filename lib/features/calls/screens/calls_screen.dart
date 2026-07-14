@@ -148,14 +148,14 @@ class _CallsScreenState extends State<CallsScreen> {
     return ListTile(
       leading: c.isGroup
           ? CircleAvatar(
-              backgroundColor: AlanyaColors.gold,
+              backgroundColor: AlanyaColors.clay,
               child: const Icon(Icons.groups, color: Colors.white, size: 20),
             )
           : AvatarCircle(
               name: c.peerName,
               avatarUrl: c.peerAvatarUrl,
               radius: 22,
-              backgroundColor: AlanyaColors.gold,
+              backgroundColor: AlanyaColors.clay,
             ),
       title: Text(c.peerName, style: const TextStyle(fontWeight: FontWeight.w600)),
       subtitle: Text(

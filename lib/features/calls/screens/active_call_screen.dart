@@ -366,7 +366,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                       objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
                     )
                   else
-                    const ColoredBox(color: AlanyaColors.gold),
+                    const ColoredBox(color: AlanyaColors.clay),
                   Positioned(
                     left: 8,
                     bottom: 8,
@@ -402,7 +402,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
           final connected = cc.remoteStreams.containsKey(id);
           return Chip(
             avatar: CircleAvatar(
-              backgroundColor: connected ? AlanyaColors.forest : AlanyaColors.gold,
+              backgroundColor: connected ? AlanyaColors.forest : AlanyaColors.clay,
               child: Text(label.isNotEmpty ? label[0].toUpperCase() : "?",
                   style: const TextStyle(color: Colors.white, fontSize: 12)),
             ),

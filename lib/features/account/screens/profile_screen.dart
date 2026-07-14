@@ -346,7 +346,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ]),
         const SizedBox(height: 8),
         Row(children: [
-          const Icon(Icons.email_outlined, color: AlanyaColors.gold),
+          const Icon(Icons.email_outlined, color: AlanyaColors.clay),
           const SizedBox(width: 10),
           Expanded(
               child: Text(email, style: const TextStyle(color: Colors.black87))),
