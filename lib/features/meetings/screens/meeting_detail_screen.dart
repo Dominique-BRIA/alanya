@@ -283,7 +283,7 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
           name: p.displayName,
           avatarUrl: p.avatarUrl,
           radius: 20,
-          backgroundColor: AlanyaColors.clay,
+          backgroundColor: AlanyaColors.gold,
         ),
         title: Text(p.displayName,
             style: const TextStyle(fontWeight: FontWeight.w600)),
