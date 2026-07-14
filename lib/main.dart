@@ -29,7 +29,6 @@ import 'features/blocked/blocked_repository.dart';
 import 'features/meetings/meetings_repository.dart';
 import 'features/status/status_repository.dart';
 import 'theme/alanya_theme.dart';
-import 'core/theme_controller.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -93,65 +92,6 @@ void main() async {
             ctx.read<RealtimeClient>(),
           ),
         ),
-        ChangeNotifierProvider<ThemeController>(
-          create: (_) => ThemeController(),
-        ),
-        ChangeNotifierProvider<AuthController>(
-          create: (_) => AuthController(repo, storage)..bootstrap(),
-        ),
-      ],
-      child: const AlanyaApp(),
-    ),
-  );
-}
-
-class AlanyaApp extends StatelessWidget {
-  const AlanyaApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final localeCtrl = context.watch<LocaleController>();
-    final themeCtrl = context.watch<ThemeController>();
-    return MaterialApp(
-      navigatorKey: PushService.navigatorKey,
-      title: "Alanya",
-      debugShowCheckedModeBanner: false,
-      theme: AlanyaTheme.light,
-      darkTheme: AlanyaTheme.dark,
-      themeMode: themeCtrl.mode,
-      locale: localeCtrl.locale,
-      supportedLocales: const [
-        Locale('fr'),
-        Locale('en'),
-        Locale('zh'),
-        Locale('es'),
-        Locale('de'),
-        Locale('pt'),
-        Locale('ru'),
-        Locale('sv'),
-        Locale('no'),
-      ],
-      localizationsDelegates: const [
-        GlobalMaterialLocalizations.delegate,
-        GlobalWidgetsLocalizations.delegate,
-        GlobalCupertinoLocalizations.delegate,
-      ],
-      home: const AuthGate(),
-    );
-  }
-}
-
-class AuthGate extends StatelessWidget {
-  const AuthGate({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final auth = context.watch<AuthController>();
-    switch (auth.status) {
-      case AuthStatus.unknown:
-        return const Scaffold(
-          body: Center(child: CircularProgressIndicator()),
-        );
       case AuthStatus.authenticated:
         // OfflineBanner : bandeau gris "En attente de connexion…" en haut
         // de l'écran quand le réseau est absent. Disparaît automatiquement.

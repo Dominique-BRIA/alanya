@@ -9,7 +9,6 @@ import '../../core/connectivity_service.dart';
 import '../../core/conversation_cache.dart';
 import '../../core/push_service.dart';
 import '../../core/realtime_client.dart';
-import '../../core/theme_controller.dart';
 import '../../models/ai_message.dart';
 import '../../models/conversation.dart';
 import '../../models/status.dart';
@@ -114,8 +113,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const ProfileScreen()),
                   );
-                } else if (v == "darkmode") {
-                  context.read<ThemeController>().toggle();
                 } else if (v == "logout") {
                   context.read<AuthController>().logout();
                 }
@@ -123,13 +120,9 @@ class _HomeScreenState extends State<HomeScreen> {
               itemBuilder: (_) => [
                 const PopupMenuItem(value: "profile", child: Text("Mon profil")),
                 PopupMenuItem(
-                  value: "darkmode",
                   child: Row(
                     children: [
                       Icon(
-                        Theme.of(context).brightness == Brightness.dark
-                            ? Icons.light_mode_outlined
-                            : Icons.dark_mode_outlined,
                         size: 20,
                       ),
                       const SizedBox(width: 12),
