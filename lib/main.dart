@@ -28,7 +28,7 @@ import 'features/media/media_repository.dart';
 import 'features/blocked/blocked_repository.dart';
 import 'features/meetings/meetings_repository.dart';
 import 'features/status/status_repository.dart';
-import 'theme/app_theme.dart';
+import '../../theme/alanya_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -143,8 +143,8 @@ class AuthGate extends StatelessWidget {
     switch (auth.status) {
       case AuthStatus.unknown:
         return const Scaffold(
-          backgroundColor: AppColors.cream,
-          body: Center(child: CircularProgressIndicator(color: AppColors.terracotta)),
+          backgroundColor: AlanyaColors.cream,
+          body: Center(child: CircularProgressIndicator(color: AlanyaColors.terracotta)),
         );
       case AuthStatus.authenticated:
         // OfflineBanner : bandeau gris "En attente de connexion…" en haut

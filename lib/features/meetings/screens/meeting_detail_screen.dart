@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/api_client.dart';
-import '../../../theme/app_theme.dart';
+import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../../../widgets/motif_background.dart';
@@ -150,7 +150,7 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppColors.sand),
+                  border: Border.all(color: AlanyaColors.sand),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -159,7 +159,7 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
                       children: [
                         Icon(
                           m.isVideo ? Icons.videocam : Icons.call,
-                          color: m.isFinished ? Colors.grey : AppColors.forest,
+                          color: m.isFinished ? Colors.grey : AlanyaColors.forest,
                         ),
                         const SizedBox(width: 10),
                         Expanded(
@@ -202,7 +202,7 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
                         : const Icon(Icons.login),
                     label: const Text("Rejoindre la réunion"),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.forest,
+                      backgroundColor: AlanyaColors.forest,
                       foregroundColor: Colors.white,
                       minimumSize: const Size(double.infinity, 48),
                     ),
@@ -283,7 +283,7 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
           name: p.displayName,
           avatarUrl: p.avatarUrl,
           radius: 20,
-          backgroundColor: AppColors.clay,
+          backgroundColor: AlanyaColors.clay,
         ),
         title: Text(p.displayName,
             style: const TextStyle(fontWeight: FontWeight.w600)),

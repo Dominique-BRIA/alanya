@@ -22,7 +22,7 @@ import '../../../core/translate_service.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../models/message.dart';
 import '../../../models/conversation.dart';
-import '../../../theme/app_theme.dart';
+import '../../../theme/alanya_theme.dart';
 import '../../../widgets/auth_network_image.dart';
 import '../../../widgets/avatar_circle.dart';
 import '../../../widgets/back_app_bar.dart';
@@ -419,7 +419,7 @@ class _ChatScreenState extends State<ChatScreen> {
       return Icon(Icons.access_time, size: 13, color: baseColor);
     }
     if (status == "READ") {
-      return const Icon(Icons.done_all, size: 15, color: AppColors.tickBlue);
+      return const Icon(Icons.done_all, size: 15, color: AlanyaColors.tickBlue);
     } else if (status == "DELIVERED") {
       return Icon(Icons.done_all, size: 15, color: baseColor);
     }
@@ -552,8 +552,8 @@ class _ChatScreenState extends State<ChatScreen> {
     final original = _findMessage(m.replyToId);
     if (snapshot == null && original == null) return const SizedBox.shrink();
 
-    final onColor = mine ? Colors.white : AppColors.ink;
-    final barColor = mine ? Colors.white70 : AppColors.terracotta;
+    final onColor = mine ? Colors.white : AlanyaColors.ink;
+    final barColor = mine ? Colors.white70 : AlanyaColors.terracotta;
     final previewText = _replyPreviewText(original, snapshot);
     final senderName = _replySenderName(original, snapshot);
     final canScroll = original != null;
@@ -564,7 +564,7 @@ class _ChatScreenState extends State<ChatScreen> {
         margin: const EdgeInsets.only(bottom: 6),
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         decoration: BoxDecoration(
-          color: mine ? Colors.white.withOpacity(0.15) : AppColors.sand.withOpacity(0.5),
+          color: mine ? Colors.white.withOpacity(0.15) : AlanyaColors.sand.withOpacity(0.5),
           borderRadius: BorderRadius.circular(8),
           border: Border(left: BorderSide(color: barColor, width: 3)),
         ),
@@ -923,7 +923,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (mime.startsWith("text/")) {
       return const _FileVisual(Icons.article, Color(0xFF455A64));
     }
-    return const _FileVisual(Icons.insert_drive_file, AppColors.chocolate);
+    return const _FileVisual(Icons.insert_drive_file, AlanyaColors.chocolate);
   }
 
   String _humanSize(int? bytes) {
@@ -1008,7 +1008,7 @@ class _ChatScreenState extends State<ChatScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.delete_outline, color: AppColors.chocolate),
+              leading: const Icon(Icons.delete_outline, color: AlanyaColors.chocolate),
               title: Text(tr(context, 'delete_for_me')),
               onTap: () => Navigator.pop(ctx, "me"),
             ),
@@ -1069,7 +1069,7 @@ class _ChatScreenState extends State<ChatScreen> {
           children: [
             if (!m.isDeleted) ...[
               ListTile(
-                leading: const Icon(Icons.reply, color: AppColors.terracotta),
+                leading: const Icon(Icons.reply, color: AlanyaColors.terracotta),
                 title: Text(tr(context, 'reply')),
                 onTap: () {
                   Navigator.pop(ctx);
@@ -1077,7 +1077,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.forward, color: AppColors.forest),
+                leading: const Icon(Icons.forward, color: AlanyaColors.forest),
                 title: Text(tr(context, 'forward')),
                 onTap: () {
                   Navigator.pop(ctx);
@@ -1085,7 +1085,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.copy, color: AppColors.chocolate),
+                leading: const Icon(Icons.copy, color: AlanyaColors.chocolate),
                 title: Text(tr(context, 'copy')),
                 onTap: () {
                   Navigator.pop(ctx);
@@ -1144,7 +1144,7 @@ class _ChatScreenState extends State<ChatScreen> {
   /// - Tap sur le nom → écran détails contact (uniquement pour DM)
   PreferredSizeWidget _whatsappAppBar() {
     return AppBar(
-      backgroundColor: AppColors.terracotta,
+      backgroundColor: AlanyaColors.terracotta,
       foregroundColor: Colors.white,
       leadingWidth: 40,
       titleSpacing: 0,
@@ -1253,7 +1253,7 @@ class _ChatScreenState extends State<ChatScreen> {
           children: [
             Expanded(
               child: _loading
-                  ? const Center(child: CircularProgressIndicator(color: AppColors.terracotta))
+                  ? const Center(child: CircularProgressIndicator(color: AlanyaColors.terracotta))
                   : _messages.isEmpty
                       ? Center(child: Text(tr(context, 'no_messages')))
                       : ListView.builder(
@@ -1292,7 +1292,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 style: const TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
-                  color: AppColors.forest,
+                  color: AlanyaColors.forest,
                 ),
               ),
             ),
@@ -1308,9 +1308,9 @@ class _ChatScreenState extends State<ChatScreen> {
             : const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         constraints: const BoxConstraints(maxWidth: 280),
         decoration: BoxDecoration(
-          color: mine ? AppColors.terracotta : Colors.white,
+          color: mine ? AlanyaColors.terracotta : Colors.white,
           borderRadius: BorderRadius.circular(14),
-          border: mine ? null : Border.all(color: AppColors.sand),
+          border: mine ? null : Border.all(color: AlanyaColors.sand),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1497,7 +1497,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final name = media.filename ?? tr(context, 'file');
     final ext = _ext(name);
     final size = _humanSize(media.sizeBytes);
-    final onText = mine ? Colors.white : AppColors.ink;
+    final onText = mine ? Colors.white : AlanyaColors.ink;
     final onSub = mine ? Colors.white70 : Colors.black45;
     final isPdf = media.mimeType == "application/pdf" || ext.toLowerCase() == "pdf";
     return InkWell(
@@ -1581,7 +1581,7 @@ class _ChatScreenState extends State<ChatScreen> {
         media.durationMs != null ? Duration(milliseconds: media.durationMs!) : null;
     final secs = totalDuration?.inSeconds;
     final onSub = mine ? Colors.white70 : Colors.black45;
-    final accent = mine ? Colors.white : AppColors.terracotta;
+    final accent = mine ? Colors.white : AlanyaColors.terracotta;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1690,7 +1690,7 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget _textBubble(Message m, bool mine) {
     final translated = _translations[m.id];
     final isTranslating = _translating.contains(m.id);
-    final onTextColor = mine ? Colors.white : AppColors.ink;
+    final onTextColor = mine ? Colors.white : AlanyaColors.ink;
     final onSubColor = mine ? Colors.white70 : Colors.black45;
 
     return GestureDetector(
@@ -1709,7 +1709,7 @@ class _ChatScreenState extends State<ChatScreen> {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: mine ? Colors.white.withOpacity(0.15) : AppColors.sand.withOpacity(0.7),
+                color: mine ? Colors.white.withOpacity(0.15) : AlanyaColors.sand.withOpacity(0.7),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Column(
@@ -1778,7 +1778,7 @@ class _ChatScreenState extends State<ChatScreen> {
         top: false,
         child: Container(
           padding: const EdgeInsets.all(8),
-          color: AppColors.cream,
+          color: AlanyaColors.cream,
           child: Row(
             children: [
               GestureDetector(
@@ -1824,7 +1824,7 @@ class _ChatScreenState extends State<ChatScreen> {
               GestureDetector(
                 onTap: _uploading ? null : () => _stopVoiceRecord(),
                 child: CircleAvatar(
-                  backgroundColor: AppColors.terracotta,
+                  backgroundColor: AlanyaColors.terracotta,
                   child: const Icon(Icons.send, color: Colors.white),
                 ),
               ),
@@ -1848,14 +1848,14 @@ class _ChatScreenState extends State<ChatScreen> {
           if (_replyTo != null)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              color: AppColors.cream,
+              color: AlanyaColors.cream,
               child: Row(
                 children: [
                   Container(
                     width: 3,
                     height: 32,
                     decoration: BoxDecoration(
-                      color: AppColors.terracotta,
+                      color: AlanyaColors.terracotta,
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
@@ -1871,7 +1871,7 @@ class _ChatScreenState extends State<ChatScreen> {
                           style: const TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.bold,
-                            color: AppColors.terracotta,
+                            color: AlanyaColors.terracotta,
                           ),
                         ),
                         Text(
@@ -1897,7 +1897,7 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           Container(
             padding: const EdgeInsets.all(8),
-            color: AppColors.cream,
+            color: AlanyaColors.cream,
             child: Row(
               children: [
                 // Bouton pièce jointe — Offstage préserve la structure du Row
@@ -1910,7 +1910,7 @@ class _ChatScreenState extends State<ChatScreen> {
                             width: 20,
                             height: 20,
                             child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.attach_file, color: AppColors.chocolate),
+                        : const Icon(Icons.attach_file, color: AlanyaColors.chocolate),
                     onPressed: _uploading ? null : _pickAndSendFile,
                   ),
                 ),
@@ -1942,7 +1942,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     children: [
                       const SizedBox(width: 8),
                       CircleAvatar(
-                        backgroundColor: AppColors.terracotta,
+                        backgroundColor: AlanyaColors.terracotta,
                         child: IconButton(
                           icon: const Icon(Icons.send, color: Colors.white),
                           onPressed: _sending ? null : _send,
@@ -2021,7 +2021,7 @@ class _ChatScreenState extends State<ChatScreen> {
         alignment: Alignment.center,
         children: [
           CircleAvatar(
-            backgroundColor: _recording ? Colors.red : AppColors.forest,
+            backgroundColor: _recording ? Colors.red : AlanyaColors.forest,
             child: Icon(
               _recording ? Icons.mic : Icons.mic_none,
               color: Colors.white,
@@ -2169,7 +2169,7 @@ class _ForwardPickerState extends State<_ForwardPicker> {
                         ? ''
                         : '${_selected.length}',
                     style: TextStyle(
-                      color: _selected.isEmpty ? Colors.grey : AppColors.terracotta,
+                      color: _selected.isEmpty ? Colors.grey : AlanyaColors.terracotta,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
@@ -2189,10 +2189,10 @@ class _ForwardPickerState extends State<_ForwardPicker> {
                 final isSelected = _selected.contains(conv.id);
                 return ListTile(
                   leading: CircleAvatar(
-                    backgroundColor: isSelected ? AppColors.terracotta : AppColors.sand,
+                    backgroundColor: isSelected ? AlanyaColors.terracotta : AlanyaColors.sand,
                     child: Icon(
                       isSelected ? Icons.check : (conv.isGroup ? Icons.group : Icons.person),
-                      color: isSelected ? Colors.white : AppColors.chocolate,
+                      color: isSelected ? Colors.white : AlanyaColors.chocolate,
                     ),
                   ),
                   title: Text(conv.title ?? 'Conversation'),
@@ -2218,7 +2218,7 @@ class _ForwardPickerState extends State<_ForwardPicker> {
                 width: double.infinity,
                 child: ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.terracotta,
+                    backgroundColor: AlanyaColors.terracotta,
                     foregroundColor: Colors.white,
                   ),
                   onPressed: () => Navigator.pop(context, _selected),

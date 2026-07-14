@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../../theme/app_theme.dart';
+import '../../../theme/alanya_theme.dart';
 import '../../../widgets/motif_background.dart';
 import '../../../models/meeting.dart';
 import '../meetings_repository.dart';
@@ -73,7 +73,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
             right: 16,
             bottom: 16,
             child: FloatingActionButton(
-              backgroundColor: AppColors.fabPrimary,
+              backgroundColor: AlanyaColors.fabPrimary,
               onPressed: _create,
               child: const Icon(Icons.add, color: Colors.white),
             ),
@@ -86,7 +86,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
   Widget _buildList() {
     if (_meetings == null && !_error) {
       return const Center(
-        child: CircularProgressIndicator(color: AppColors.terracotta),
+        child: CircularProgressIndicator(color: AlanyaColors.terracotta),
       );
     }
     if (_error) {
@@ -106,7 +106,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.videocam_outlined, size: 64, color: AppColors.clay),
+                Icon(Icons.videocam_outlined, size: 64, color: AlanyaColors.clay),
                 SizedBox(height: 12),
                 Text(
                   "Aucune réunion.\nAppuie sur + pour créer une réunion audio ou vidéo.",
@@ -160,7 +160,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
       child: ListTile(
         leading: CircleAvatar(
           backgroundColor:
-              m.isFinished ? Colors.grey.shade300 : AppColors.forest,
+              m.isFinished ? Colors.grey.shade300 : AlanyaColors.forest,
           child: Icon(icon, color: Colors.white, size: 20),
         ),
         title: Text(m.objet,

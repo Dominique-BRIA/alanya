@@ -12,7 +12,7 @@ import '../../core/realtime_client.dart';
 import '../../models/ai_message.dart';
 import '../../models/conversation.dart';
 import '../../models/status.dart';
-import '../../theme/app_theme.dart';
+import '../../theme/alanya_theme.dart';
 import '../../widgets/avatar_circle.dart';
 import '../../widgets/motif_background.dart';
 import '../account/screens/avatar_viewer_screen.dart';
@@ -117,7 +117,7 @@ class _HomeScreenState extends State<HomeScreen> {
         body: IndexedStack(index: _tab, children: tabs),
         floatingActionButton: _tab == 0
             ? FloatingActionButton(
-                backgroundColor: AppColors.fabPrimary,
+                backgroundColor: AlanyaColors.fabPrimary,
                 onPressed: () => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const ContactsScreen()),
                 ),
@@ -294,7 +294,7 @@ class _ConversationsTabState extends State<_ConversationsTab> {
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AppColors.sand),
+                border: Border.all(color: AlanyaColors.sand),
               ),
               child: Row(
                 children: [
@@ -302,7 +302,7 @@ class _ConversationsTabState extends State<_ConversationsTab> {
                     name: user.pseudo ?? "?",
                     avatarUrl: user.avatarUrl,
                     radius: 22,
-                    backgroundColor: AppColors.terracotta,
+                    backgroundColor: AlanyaColors.terracotta,
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (_) => AvatarViewerScreen(
@@ -340,7 +340,7 @@ class _ConversationsTabState extends State<_ConversationsTab> {
 
   Widget _buildList() {
     if (_convs == null && !_error) {
-      return const Center(child: CircularProgressIndicator(color: AppColors.terracotta));
+      return const Center(child: CircularProgressIndicator(color: AlanyaColors.terracotta));
     }
     if (_error) {
       return ListView(children: const [
@@ -396,14 +396,14 @@ class _ConversationsTabState extends State<_ConversationsTab> {
     return ListTile(
       leading: c.isGroup
           ? CircleAvatar(
-              backgroundColor: AppColors.forest,
+              backgroundColor: AlanyaColors.forest,
               child: const Icon(Icons.groups, color: Colors.white, size: 22),
             )
           : AvatarCircle(
               name: title,
               avatarUrl: c.avatarUrl,
               radius: 22,
-              backgroundColor: AppColors.clay,
+              backgroundColor: AlanyaColors.clay,
             ),
       title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
       subtitle: Text(
@@ -416,7 +416,7 @@ class _ConversationsTabState extends State<_ConversationsTab> {
       trailing: c.unread > 0
           ? CircleAvatar(
               radius: 11,
-              backgroundColor: AppColors.forest,
+              backgroundColor: AlanyaColors.forest,
               child: Text("${c.unread}",
                   style: const TextStyle(color: Colors.white, fontSize: 12)),
             )
@@ -532,7 +532,7 @@ class _StatusTabState extends State<_StatusTab> {
         children: [
           CircleAvatar(
             radius: 26,
-            backgroundColor: AppColors.terracotta,
+            backgroundColor: AlanyaColors.terracotta,
             child: const Icon(Icons.person, color: Colors.white),
           ),
           Positioned(
@@ -540,7 +540,7 @@ class _StatusTabState extends State<_StatusTab> {
             bottom: 0,
             child: CircleAvatar(
               radius: 9,
-              backgroundColor: AppColors.forest,
+              backgroundColor: AlanyaColors.forest,
               child: const Icon(Icons.add, color: Colors.white, size: 12),
             ),
           ),
@@ -550,7 +550,7 @@ class _StatusTabState extends State<_StatusTab> {
       subtitle: Text(has ? "${me!.statuses.length} statut(s) · appuie pour voir" : "Appuie pour ajouter"),
       onTap: has ? () => _openViewer(me!, isMine: true) : _openCreate,
       trailing: IconButton(
-        icon: const Icon(Icons.add_circle, color: AppColors.forest),
+        icon: const Icon(Icons.add_circle, color: AlanyaColors.forest),
         onPressed: _openCreate,
       ),
     );
@@ -563,13 +563,13 @@ class _StatusTabState extends State<_StatusTab> {
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           border: Border.all(
-            color: g.hasUnviewed ? AppColors.forest : AppColors.sand,
+            color: g.hasUnviewed ? AlanyaColors.forest : AlanyaColors.sand,
             width: 2.5,
           ),
         ),
         child: CircleAvatar(
           radius: 24,
-          backgroundColor: AppColors.clay,
+          backgroundColor: AlanyaColors.clay,
           child: Text(g.displayName[0].toUpperCase(),
               style: const TextStyle(color: Colors.white)),
         ),
@@ -676,7 +676,7 @@ class _AiTabState extends State<_AiTab> {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             child: Row(
               children: [
-                const Icon(Icons.auto_awesome, color: AppColors.terracotta),
+                const Icon(Icons.auto_awesome, color: AlanyaColors.terracotta),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -686,7 +686,7 @@ class _AiTabState extends State<_AiTab> {
                 ),
                 IconButton(
                   tooltip: "Partager la conversation",
-                  icon: const Icon(Icons.share_outlined, color: AppColors.chocolate),
+                  icon: const Icon(Icons.share_outlined, color: AlanyaColors.chocolate),
                   onPressed: _messages.isEmpty ? null : _shareConversation,
                 ),
                 IconButton(
@@ -699,7 +699,7 @@ class _AiTabState extends State<_AiTab> {
           ),
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator(color: AppColors.terracotta))
+                ? const Center(child: CircularProgressIndicator(color: AlanyaColors.terracotta))
                 : (_messages.isEmpty
                     ? const Center(
                         child: Padding(
@@ -707,7 +707,7 @@ class _AiTabState extends State<_AiTab> {
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.auto_awesome, size: 56, color: AppColors.clay),
+                              Icon(Icons.auto_awesome, size: 56, color: AlanyaColors.clay),
                               SizedBox(height: 12),
                               Text("Pose-moi une question pour commencer.",
                                   textAlign: TextAlign.center,
@@ -785,14 +785,14 @@ class _AiTabState extends State<_AiTab> {
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           constraints: const BoxConstraints(maxWidth: 300),
           decoration: BoxDecoration(
-            color: mine ? AppColors.terracotta : Colors.white,
+            color: mine ? AlanyaColors.terracotta : Colors.white,
             borderRadius: BorderRadius.circular(14),
-            border: mine ? null : Border.all(color: AppColors.sand),
+            border: mine ? null : Border.all(color: AlanyaColors.sand),
           ),
           child: typing
               ? const Text("L'assistant écrit…",
                   style: TextStyle(color: Colors.black54, fontStyle: FontStyle.italic))
-              : Text(text, style: TextStyle(color: mine ? Colors.white : AppColors.ink)),
+              : Text(text, style: TextStyle(color: mine ? Colors.white : AlanyaColors.ink)),
         ),
       ),
     );
@@ -807,7 +807,7 @@ class _AiTabState extends State<_AiTab> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.copy, color: AppColors.chocolate),
+              leading: const Icon(Icons.copy, color: AlanyaColors.chocolate),
               title: const Text("Copier"),
               onTap: () {
                 Navigator.pop(ctx);
@@ -818,7 +818,7 @@ class _AiTabState extends State<_AiTab> {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.share, color: AppColors.forest),
+              leading: const Icon(Icons.share, color: AlanyaColors.forest),
               title: const Text("Partager"),
               onTap: () {
                 Navigator.pop(ctx);
@@ -870,7 +870,7 @@ class _AiTabState extends State<_AiTab> {
       top: false,
       child: Container(
         padding: const EdgeInsets.all(8),
-        color: AppColors.cream,
+        color: AlanyaColors.cream,
         child: Row(
           children: [
             Expanded(
@@ -888,7 +888,7 @@ class _AiTabState extends State<_AiTab> {
             ),
             const SizedBox(width: 8),
             CircleAvatar(
-              backgroundColor: AppColors.forest,
+              backgroundColor: AlanyaColors.forest,
               child: IconButton(
                 icon: const Icon(Icons.send, color: Colors.white),
                 onPressed: _sending ? null : _send,
@@ -913,7 +913,7 @@ class _Placeholder extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 64, color: AppColors.clay),
+          Icon(icon, size: 64, color: AlanyaColors.clay),
           const SizedBox(height: 12),
           Text(label, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
           const SizedBox(height: 4),

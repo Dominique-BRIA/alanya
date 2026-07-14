@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../../core/call_cache.dart';
 import '../../../models/call_record.dart';
-import '../../../theme/app_theme.dart';
+import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
 import '../../../widgets/motif_background.dart';
 import '../call_controller.dart';
@@ -107,7 +107,7 @@ class _CallsScreenState extends State<CallsScreen> {
     if (_calls == null && !_error) {
       return ListView(children: const [
         SizedBox(height: 120),
-        Center(child: CircularProgressIndicator(color: AppColors.terracotta)),
+        Center(child: CircularProgressIndicator(color: AlanyaColors.terracotta)),
       ]);
     }
     if (_error) {
@@ -144,18 +144,18 @@ class _CallsScreenState extends State<CallsScreen> {
     final icon = c.isOutgoing
         ? Icons.call_made
         : (c.status == "MISSED" ? Icons.call_missed : Icons.call_received);
-    final color = c.status == "MISSED" ? Colors.red : AppColors.forest;
+    final color = c.status == "MISSED" ? Colors.red : AlanyaColors.forest;
     return ListTile(
       leading: c.isGroup
           ? CircleAvatar(
-              backgroundColor: AppColors.clay,
+              backgroundColor: AlanyaColors.clay,
               child: const Icon(Icons.groups, color: Colors.white, size: 20),
             )
           : AvatarCircle(
               name: c.peerName,
               avatarUrl: c.peerAvatarUrl,
               radius: 22,
-              backgroundColor: AppColors.clay,
+              backgroundColor: AlanyaColors.clay,
             ),
       title: Text(c.peerName, style: const TextStyle(fontWeight: FontWeight.w600)),
       subtitle: Text(
