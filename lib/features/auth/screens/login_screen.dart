@@ -133,9 +133,17 @@ class _LoginScreenState extends State<LoginScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const SizedBox(height: 8),
-                Text(
-                  tr(context, 'login_welcome'),
-                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                Row(
+                  children: [
+                    Icon(Icons.waving_hand, size: 24, color: AlanyaColors.gold),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        tr(context, 'login_welcome'),
+                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 24),
                 TextFormField(

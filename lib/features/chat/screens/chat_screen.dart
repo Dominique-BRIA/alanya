@@ -1260,7 +1260,14 @@ class _ChatScreenState extends State<ChatScreen> {
                           controller: _scrollCtrl,
                           padding: const EdgeInsets.all(12),
                           itemCount: _messages.length,
-                          itemBuilder: (_, i) => _bubble(_messages[i], _messages[i].senderId == myId),
+                          itemBuilder: (_, i) {
+                            final widgets = <Widget>[];
+                            if (_needsDateSeparator(i)) {
+                              widgets.add(_dateChip(_dateLabel(_messages[i].createdAt)));
+                            }
+                            widgets.add(_bubble(_messages[i], _messages[i].senderId == myId));
+                            return Column(children: widgets);
+                          },
                         ),
             ),
             _composer(),
@@ -1768,6 +1775,55 @@ class _ChatScreenState extends State<ChatScreen> {
   String _time(DateTime d) {
     final l = d.toLocal();
     return "${l.hour.toString().padLeft(2, '0')}:${l.minute.toString().padLeft(2, '0')}";
+  }
+
+  /// Label de date pour les séparateurs (style WhatsApp).
+  /// Séparateur de date (style WhatsApp) — capsule centrée avec le jour.
+  Widget _dateChip(String label) {
+    return Center(
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+            color: AlanyaColors.grey600,
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _dateLabel(DateTime d) {
+    final l = d.toLocal();
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final msgDay = DateTime(l.year, l.month, l.day);
+    final diff = today.difference(msgDay).inDays;
+
+    if (diff == 0) return "Aujourd'hui";
+    if (diff == 1) return "Hier";
+    if (diff < 7) {
+      const days = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
+      return days[l.weekday - 1];
+    }
+    const months = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+                     'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+    return "${l.day} ${months[l.month - 1]} ${l.year}";
+  }
+
+  /// Vrai si le message précédent est d'un jour différent.
+  bool _needsDateSeparator(int index) {
+    if (index == 0) return true;
+    final prev = _messages[index - 1].createdAt.toLocal();
+    final curr = _messages[index].createdAt.toLocal();
+    return prev.year != curr.year || prev.month != curr.month || prev.day != curr.day;
   }
 
   Widget _composer() {

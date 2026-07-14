@@ -9,6 +9,7 @@ import '../../core/connectivity_service.dart';
 import '../../core/conversation_cache.dart';
 import '../../core/push_service.dart';
 import '../../core/realtime_client.dart';
+import '../../core/theme_controller.dart';
 import '../../models/ai_message.dart';
 import '../../models/conversation.dart';
 import '../../models/status.dart';
@@ -113,6 +114,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const ProfileScreen()),
                   );
+                } else if (v == "darkmode") {
+                  context.read<ThemeController>().toggle();
                 } else if (v == "logout") {
                   context.read<AuthController>().logout();
                 }
@@ -120,9 +123,13 @@ class _HomeScreenState extends State<HomeScreen> {
               itemBuilder: (_) => [
                 const PopupMenuItem(value: "profile", child: Text("Mon profil")),
                 PopupMenuItem(
+                  value: "darkmode",
                   child: Row(
                     children: [
                       Icon(
+                        Theme.of(context).brightness == Brightness.dark
+                            ? Icons.light_mode_outlined
+                            : Icons.dark_mode_outlined,
                         size: 20,
                       ),
                       const SizedBox(width: 12),
@@ -333,12 +340,12 @@ class _ConversationsTabState extends State<_ConversationsTab> {
           if (user != null)
             Container(
               width: double.infinity,
-              margin: const EdgeInsets.all(12),
+              margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AlanyaColors.sand),
+                border: Border.all(color: AlanyaColors.grey200, width: 0.5),
               ),
               child: Row(
                 children: [
@@ -371,6 +378,32 @@ class _ConversationsTabState extends State<_ConversationsTab> {
                 ],
               ),
             ),
+          // --- Barre de recherche ---
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+            child: TextField(
+              decoration: InputDecoration(
+                hintText: "Rechercher une discussion…",
+                prefixIcon: Icon(Icons.search, color: AlanyaColors.grey400, size: 20),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                filled: true,
+                fillColor: Colors.white,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide(color: AlanyaColors.grey200, width: 0.5),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide(color: AlanyaColors.grey200, width: 0.5),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: const BorderSide(color: AlanyaColors.terracotta, width: 1),
+                ),
+              ),
+              style: const TextStyle(fontSize: 14),
+            ),
+          ),
           Expanded(
             child: RefreshIndicator(
               onRefresh: _refresh,

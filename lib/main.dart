@@ -33,16 +33,11 @@ import 'theme/alanya_theme.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // MediaStore : sauvegarde des téléchargements dans le dossier public
-  // "Alanya" (Pictures/Movies/Music/Download selon le type de fichier).
-  // Import fait conditionnellement pour ne pas casser le web build.
   if (!kIsWeb) {
     try {
       await MediaStore.ensureInitialized();
       MediaStore.appFolder = 'Alanya';
-    } catch (_) {
-      // Non-Android ou plateforme non supportée : on ignore silencieusement.
-    }
+    } catch (_) {}
   }
 
   final api = ApiClient();
@@ -51,8 +46,6 @@ void main() async {
   final authedApi = AuthedApi(api, storage);
   final realtime = RealtimeClient(storage);
 
-  // Initialise les notifications push FCM (crée le canal + demande la permission
-  // + enregistre le token auprès du backend).
   await PushService.instance.tryInitialize(api: api, storage: storage);
 
   runApp(
@@ -74,12 +67,9 @@ void main() async {
         ChangeNotifierProvider<LocaleController>(
           create: (_) => LocaleController()..load(),
         ),
-        // Service de connectivité — dérivé de RealtimeClient + retours HTTP.
         ChangeNotifierProvider<ConnectivityService>(
           create: (ctx) => ConnectivityService(ctx.read<RealtimeClient>()),
         ),
-        // File d'attente des messages envoyés offline (WhatsApp-like).
-        // Dépend de ChatRepository + ConnectivityService.
         ChangeNotifierProvider<Outbox>(
           create: (ctx) => Outbox(
             ctx.read<ChatRepository>(),
@@ -92,9 +82,61 @@ void main() async {
             ctx.read<RealtimeClient>(),
           ),
         ),
+        ChangeNotifierProvider<AuthController>(
+          create: (_) => AuthController(repo, storage)..bootstrap(),
+        ),
+      ],
+      child: const AlanyaApp(),
+    ),
+  );
+}
+
+class AlanyaApp extends StatelessWidget {
+  const AlanyaApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final localeCtrl = context.watch<LocaleController>();
+    return MaterialApp(
+      navigatorKey: PushService.navigatorKey,
+      title: "Alanya",
+      debugShowCheckedModeBanner: false,
+      theme: AlanyaTheme.light,
+      themeMode: ThemeMode.light,
+      locale: localeCtrl.locale,
+      supportedLocales: const [
+        Locale('fr'),
+        Locale('en'),
+        Locale('zh'),
+        Locale('es'),
+        Locale('de'),
+        Locale('pt'),
+        Locale('ru'),
+        Locale('sv'),
+        Locale('no'),
+      ],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      home: const AuthGate(),
+    );
+  }
+}
+
+class AuthGate extends StatelessWidget {
+  const AuthGate({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final auth = context.watch<AuthController>();
+    switch (auth.status) {
+      case AuthStatus.unknown:
+        return const Scaffold(
+          body: Center(child: CircularProgressIndicator()),
+        );
       case AuthStatus.authenticated:
-        // OfflineBanner : bandeau gris "En attente de connexion…" en haut
-        // de l'écran quand le réseau est absent. Disparaît automatiquement.
         return OfflineBanner(
           child: CallListener(child: const HomeScreen()),
         );

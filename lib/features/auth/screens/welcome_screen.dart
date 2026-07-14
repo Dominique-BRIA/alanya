@@ -23,18 +23,56 @@ class WelcomeScreen extends StatelessWidget {
             child: Column(
               children: [
                 const Spacer(flex: 2),
-                Image.asset(
-                  "assets/images/logo.png",
-                  width: 280,
-                  fit: BoxFit.contain,
-                  filterQuality: FilterQuality.high,
-                  errorBuilder: (_, __, ___) => const Icon(
-                    Icons.chat_bubble_rounded,
-                    size: 120,
-                    color: AlanyaColors.terracotta,
+                // --- Logo avec brouillard progressif ---
+                Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    // Brouillard / glow derrière le logo
+                    Positioned(
+                      child: Container(
+                        width: 260,
+                        height: 260,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: RadialGradient(
+                            colors: [
+                              AlanyaColors.terracotta.withValues(alpha: 0.12),
+                              AlanyaColors.terracotta.withValues(alpha: 0.04),
+                              Colors.transparent,
+                            ],
+                            stops: const [0.3, 0.6, 1.0],
+                          ),
+                        ),
+                      ),
+                    ),
+                    Image.asset(
+                      "assets/images/logo.png",
+                      width: 280,
+                      fit: BoxFit.contain,
+                      filterQuality: FilterQuality.high,
+                      errorBuilder: (_, __, ___) => const Icon(
+                        Icons.chat_bubble_rounded,
+                        size: 120,
+                        color: AlanyaColors.terracotta,
+                      ),
+                    ),
+                  ],
+                ),
+                // Dégradé qui fond vers le bas
+                Container(
+                  height: 40,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        AlanyaColors.terracotta.withValues(alpha: 0.06),
+                        Colors.transparent,
+                      ],
+                    ),
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 8),
                 Text(
                   tr(context, 'app_tagline'),
                   textAlign: TextAlign.center,
@@ -63,7 +101,7 @@ class WelcomeScreen extends StatelessWidget {
                   child: Text(tr(context, 'have_account')),
                 ),
                 const SizedBox(height: 20),
-                // --- Sélecteur de langue (liste) ---
+                // --- Sélecteur de langue (liste avec drapeaux) ---
                 Container(
                   decoration: BoxDecoration(
                     color: Colors.white,
@@ -103,6 +141,9 @@ class WelcomeScreen extends StatelessWidget {
                                 : Colors.transparent,
                             child: Row(
                               children: [
+                                // Drapeau
+                                Text(l.flag, style: const TextStyle(fontSize: 18)),
+                                const SizedBox(width: 12),
                                 Expanded(
                                   child: Text(
                                     l.nativeName,
