@@ -28,7 +28,7 @@ import 'features/media/media_repository.dart';
 import 'features/blocked/blocked_repository.dart';
 import 'features/meetings/meetings_repository.dart';
 import 'features/status/status_repository.dart';
-import '../../theme/alanya_theme.dart';
+import 'theme/alanya_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -111,7 +111,9 @@ class AlanyaApp extends StatelessWidget {
       navigatorKey: PushService.navigatorKey,
       title: "Alanya",
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.light,
+      theme: AlanyaTheme.light,
+      darkTheme: AlanyaTheme.dark,
+      themeMode: ThemeMode.system,
       locale: localeCtrl.locale,
       supportedLocales: const [
         Locale('fr'),
@@ -143,8 +145,7 @@ class AuthGate extends StatelessWidget {
     switch (auth.status) {
       case AuthStatus.unknown:
         return const Scaffold(
-          backgroundColor: AlanyaColors.cream,
-          body: Center(child: CircularProgressIndicator(color: AlanyaColors.terracotta)),
+          body: Center(child: CircularProgressIndicator()),
         );
       case AuthStatus.authenticated:
         // OfflineBanner : bandeau gris "En attente de connexion…" en haut

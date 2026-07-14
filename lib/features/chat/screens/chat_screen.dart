@@ -514,7 +514,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (original.isDeleted) return tr(context, 'message_deleted');
     if (original.content != null) return original.content!;
     if (original.media.isNotEmpty) {
-      return '📎 ${original.media.first.filename ?? tr(context, 'file')}';
+      return original.media.first.filename ?? 'Fichier';
     }
     return _typeLabel(original.type);
   }
@@ -524,11 +524,11 @@ class _ChatScreenState extends State<ChatScreen> {
       case 'IMAGE':
         return '📷 ${tr(context, 'photo')}';
       case 'AUDIO':
-        return '🎙️ ${tr(context, 'voice_message')}';
+        return 'Message vocal';
       case 'VIDEO':
-        return '🎥 ${tr(context, 'video')}';
+        return 'Vidéo';
       case 'FILE':
-        return '📎 ${tr(context, 'file')}';
+        return 'Fichier';
       default:
         return '[${type}]';
     }

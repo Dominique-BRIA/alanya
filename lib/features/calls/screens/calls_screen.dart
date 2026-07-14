@@ -124,7 +124,7 @@ class _CallsScreenState extends State<CallsScreen> {
           child: Padding(
             padding: EdgeInsets.all(24),
             child: Text(
-              "Aucun appel pour le moment.\nLance un appel depuis une discussion (icône 📞).",
+              "Aucun appel pour le moment.\nLance un appel depuis une discussion (icône d'appel).",
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.black54),
             ),

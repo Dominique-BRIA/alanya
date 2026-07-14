@@ -172,9 +172,16 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
           "$typeLabel · $statusLabel · ${_formatDate(m.startTime)}",
           style: const TextStyle(fontSize: 12),
         ),
-        trailing: Text(
-          "${m.participants.length} 👥",
-          style: const TextStyle(fontSize: 13, color: Colors.black54),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.people_outline, size: 16, color: AlanyaColors.grey400),
+            const SizedBox(width: 4),
+            Text(
+              "${m.participants.length}",
+              style: const TextStyle(fontSize: 13, color: Colors.black54),
+            ),
+          ],
         ),
         onTap: () async {
           await Navigator.of(context).push(

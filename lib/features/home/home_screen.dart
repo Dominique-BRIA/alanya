@@ -13,6 +13,7 @@ import '../../models/ai_message.dart';
 import '../../models/conversation.dart';
 import '../../models/status.dart';
 import '../../theme/alanya_theme.dart';
+import '../../widgets/alanya_nav_bar.dart';
 import '../../widgets/avatar_circle.dart';
 import '../../widgets/motif_background.dart';
 import '../account/screens/avatar_viewer_screen.dart';
@@ -95,7 +96,28 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-          title: const Text("Alanya"),
+          title: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [AlanyaColors.terracotta, AlanyaColors.terracottaDark],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Center(
+                  child: Icon(Icons.chat_bubble, size: 18, color: Colors.white),
+                ),
+              ),
+              const SizedBox(width: 10),
+              const Text("Alanya"),
+            ],
+          ),
           actions: [
             PopupMenuButton<String>(
               onSelected: (v) {
@@ -117,22 +139,41 @@ class _HomeScreenState extends State<HomeScreen> {
         body: IndexedStack(index: _tab, children: tabs),
         floatingActionButton: _tab == 0
             ? FloatingActionButton(
-                backgroundColor: AlanyaColors.fabPrimary,
                 onPressed: () => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const ContactsScreen()),
                 ),
-                child: const Icon(Icons.chat_bubble, color: Colors.white),
+                child: const Icon(Icons.edit, color: Colors.white),
               )
             : null,
-        bottomNavigationBar: NavigationBar(
-          selectedIndex: _tab,
-          onDestinationSelected: (i) => setState(() => _tab = i),
-          destinations: [
-            NavigationDestination(icon: const Icon(Icons.chat_bubble_outline), label: tr(context, 'chats')),
-            NavigationDestination(icon: const Icon(Icons.donut_large), label: tr(context, 'status')),
-            NavigationDestination(icon: const Icon(Icons.call_outlined), label: tr(context, 'calls')),
-            NavigationDestination(icon: const Icon(Icons.videocam_outlined), label: "Réunions"),
-            NavigationDestination(icon: const Icon(Icons.auto_awesome), label: "IA"),
+        bottomNavigationBar: AlanyaNavBar(
+          currentIndex: _tab,
+          onTap: (i) => setState(() => _tab = i),
+          items: const [
+            AlanyaNavItem(
+              icon: Icons.chat_bubble_outline,
+              activeIcon: Icons.chat_bubble,
+              label: 'Chats',
+            ),
+            AlanyaNavItem(
+              icon: Icons.circle_outlined,
+              activeIcon: Icons.circle,
+              label: 'Status',
+            ),
+            AlanyaNavItem(
+              icon: Icons.call_outlined,
+              activeIcon: Icons.call,
+              label: 'Appels',
+            ),
+            AlanyaNavItem(
+              icon: Icons.videocam_outlined,
+              activeIcon: Icons.videocam,
+              label: 'Réunions',
+            ),
+            AlanyaNavItem(
+              icon: Icons.auto_awesome_outlined,
+              activeIcon: Icons.auto_awesome,
+              label: 'IA',
+            ),
           ],
         ),
     );
@@ -200,16 +241,16 @@ class _ConversationsTabState extends State<_ConversationsTab> {
     String body;
     switch (type) {
       case "IMAGE":
-        body = "🖼️ Image";
+        body = "Photo";
         break;
       case "AUDIO":
-        body = "🎤 Message vocal";
+        body = "Message vocal";
         break;
       case "FILE":
-        body = "📎 Fichier";
+        body = "Fichier";
         break;
       case "VIDEO":
-        body = "🎥 Vidéo";
+        body = "Vidéo";
         break;
       default:
         body = content ?? "Nouveau message";
@@ -376,11 +417,11 @@ class _ConversationsTabState extends State<_ConversationsTab> {
     final preview = last == null
         ? "—"
         : (last.type == "AUDIO"
-            ? "🎤 Message vocal"
+            ? "Message vocal"
             : last.type == "IMAGE"
-                ? "🖼️ Image"
+                ? "Photo"
                 : last.type == "FILE"
-                    ? "📎 Fichier"
+                    ? "Fichier"
                     : (last.content ?? "[${last.type}]"));
     final title = c.title ?? "Discussion";
     // Pour un DM, trouve le membre "autre que moi" pour connaître son userId
@@ -403,7 +444,7 @@ class _ConversationsTabState extends State<_ConversationsTab> {
               name: title,
               avatarUrl: c.avatarUrl,
               radius: 22,
-              backgroundColor: AlanyaColors.clay,
+              backgroundColor: AlanyaColors.gold,
             ),
       title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
       subtitle: Text(
@@ -569,7 +610,7 @@ class _StatusTabState extends State<_StatusTab> {
         ),
         child: CircleAvatar(
           radius: 24,
-          backgroundColor: AlanyaColors.clay,
+          backgroundColor: AlanyaColors.gold,
           child: Text(g.displayName[0].toUpperCase(),
               style: const TextStyle(color: Colors.white)),
         ),
@@ -707,7 +748,7 @@ class _AiTabState extends State<_AiTab> {
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.auto_awesome, size: 56, color: AlanyaColors.clay),
+                              Icon(Icons.auto_awesome, size: 56, color: AlanyaColors.gold),
                               SizedBox(height: 12),
                               Text("Pose-moi une question pour commencer.",
                                   textAlign: TextAlign.center,
@@ -913,7 +954,7 @@ class _Placeholder extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 64, color: AlanyaColors.clay),
+          Icon(icon, size: 64, color: AlanyaColors.gold),
           const SizedBox(height: 12),
           Text(label, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
           const SizedBox(height: 4),

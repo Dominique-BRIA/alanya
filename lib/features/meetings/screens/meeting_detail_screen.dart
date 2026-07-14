@@ -132,7 +132,7 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final m = _meeting;
-    final typeLabel = m.isVideo ? "📹 Vidéo" : "📞 Audio";
+    final typeLabel = m.isVideo ? "Vidéo" : "Audio";
     final statusLabel = m.isFinished ? "Terminée" : "En cours";
 
     return Scaffold(
@@ -269,12 +269,12 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
 
   Widget _participantTile(MeetingParticipant p) {
     final statusText = p.isConnected
-        ? "🟢 Connecté"
+        ? "Connecté"
         : p.status == 1
-            ? "✅ Accepté"
+            ? "Accepté"
             : p.status == 2
-                ? "❌ Décliné"
-                : "⏳ Invité";
+                ? "Décliné"
+                : "Invité";
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
