@@ -27,7 +27,6 @@ class WelcomeScreen extends StatelessWidget {
                 Stack(
                   alignment: Alignment.center,
                   children: [
-                    // Brouillard / glow derrière le logo
                     Positioned(
                       child: Container(
                         width: 260,
@@ -58,7 +57,6 @@ class WelcomeScreen extends StatelessWidget {
                     ),
                   ],
                 ),
-                // Dégradé qui fond vers le bas
                 Container(
                   height: 40,
                   decoration: BoxDecoration(
@@ -101,84 +99,39 @@ class WelcomeScreen extends StatelessWidget {
                   child: Text(tr(context, 'have_account')),
                 ),
                 const SizedBox(height: 20),
-                // --- Sélecteur de langue (liste avec drapeaux) ---
+                // --- Sélecteur de langue (dropdown comme dans le profil) ---
                 Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(color: AlanyaColors.grey200, width: 0.5),
                   ),
-                  child: Column(
+                  child: Row(
                     children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
-                        child: Row(
-                          children: [
-                            Icon(Icons.language, size: 18, color: AlanyaColors.grey500),
-                            const SizedBox(width: 8),
-                            Text(
-                              tr(context, 'language'),
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: AlanyaColors.grey500,
-                                letterSpacing: 0.5,
-                              ),
-                            ),
-                          ],
+                      Icon(Icons.language, size: 18, color: AlanyaColors.grey500),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            value: LocaleController.supported
+                                    .any((l) => l.code == localeCtrl.languageCode)
+                                ? localeCtrl.languageCode
+                                : 'fr',
+                            isExpanded: true,
+                            icon: Icon(Icons.expand_more, color: AlanyaColors.grey400),
+                            items: LocaleController.supported.map((l) {
+                              return DropdownMenuItem(
+                                value: l.code,
+                                child: Text('${l.flag}  ${l.nativeName}'),
+                              );
+                            }).toList(),
+                            onChanged: (code) {
+                              if (code != null) localeCtrl.setLocale(code);
+                            },
+                          ),
                         ),
                       ),
-                      const Divider(height: 1),
-                      ...LocaleController.supported.map((l) {
-                        final selected = localeCtrl.languageCode == l.code;
-                        return InkWell(
-                          onTap: () => localeCtrl.setLocale(l.code),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 11),
-                            color: selected
-                                ? AlanyaColors.terracotta.withValues(alpha: 0.06)
-                                : Colors.transparent,
-                            child: Row(
-                              children: [
-                                // Drapeau
-                                Text(l.flag, style: const TextStyle(fontSize: 18)),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Text(
-                                    l.nativeName,
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: selected
-                                          ? FontWeight.w600
-                                          : FontWeight.w400,
-                                      color: selected
-                                          ? AlanyaColors.terracotta
-                                          : AlanyaColors.ink,
-                                    ),
-                                  ),
-                                ),
-                                Text(
-                                  l.code.toUpperCase(),
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w500,
-                                    color: selected
-                                        ? AlanyaColors.terracotta
-                                        : AlanyaColors.grey400,
-                                  ),
-                                ),
-                                if (selected) ...[
-                                  const SizedBox(width: 8),
-                                  Icon(Icons.check,
-                                      size: 18,
-                                      color: AlanyaColors.terracotta),
-                                ],
-                              ],
-                            ),
-                          ),
-                        );
-                      }),
                     ],
                   ),
                 ),

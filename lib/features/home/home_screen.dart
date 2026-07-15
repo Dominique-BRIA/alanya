@@ -113,32 +113,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const ProfileScreen()),
                   );
-                } else if (v == "darkmode") {
                 } else if (v == "logout") {
                   context.read<AuthController>().logout();
                 }
               },
               itemBuilder: (_) => [
                 const PopupMenuItem(value: "profile", child: Text("Mon profil")),
-                PopupMenuItem(
-                  value: "darkmode",
-                  child: Row(
-                    children: [
-                      Icon(
-                        Theme.of(context).brightness == Brightness.dark
-                            ? Icons.light_mode_outlined
-                            : Icons.dark_mode_outlined,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 12),
-                      Text(
-                        Theme.of(context).brightness == Brightness.dark
-                            ? "Mode clair"
-                            : "Mode nuit",
-                      ),
-                    ],
-                  ),
-                ),
                 const PopupMenuItem(value: "logout", child: Text("Se déconnecter")),
               ],
             ),
@@ -200,6 +180,8 @@ class _ConversationsTabState extends State<_ConversationsTab> {
   bool _error = false;
   Timer? _pollTimer;
   StreamSubscription<Map<String, dynamic>>? _rtSub;
+  final _searchCtrl = TextEditingController();
+  String _searchQuery = '';
 
   @override
   void initState() {
@@ -277,6 +259,7 @@ class _ConversationsTabState extends State<_ConversationsTab> {
   void dispose() {
     _pollTimer?.cancel();
     _rtSub?.cancel();
+    _searchCtrl.dispose();
     super.dispose();
   }
 
@@ -380,9 +363,20 @@ class _ConversationsTabState extends State<_ConversationsTab> {
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
             child: TextField(
+              controller: _searchCtrl,
+              onChanged: (v) => setState(() => _searchQuery = v.trim().toLowerCase()),
               decoration: InputDecoration(
                 hintText: "Rechercher une discussion…",
                 prefixIcon: Icon(Icons.search, color: AlanyaColors.grey400, size: 20),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: Icon(Icons.close, color: AlanyaColors.grey400, size: 18),
+                        onPressed: () {
+                          _searchCtrl.clear();
+                          setState(() => _searchQuery = '');
+                        },
+                      )
+                    : null,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 filled: true,
                 fillColor: Colors.white,
@@ -423,8 +417,8 @@ class _ConversationsTabState extends State<_ConversationsTab> {
         Center(child: Text("Erreur de chargement. Tire pour réessayer.")),
       ]);
     }
-    final convs = _convs ?? [];
-    if (convs.isEmpty) {
+    final allConvs = _convs ?? [];
+    if (allConvs.isEmpty) {
       return ListView(children: const [
         SizedBox(height: 100),
         Center(
@@ -439,6 +433,42 @@ class _ConversationsTabState extends State<_ConversationsTab> {
         ),
       ]);
     }
+
+    // Filtre les conversations selon la recherche (WhatsApp-like)
+    final convs = _searchQuery.isEmpty
+        ? allConvs
+        : allConvs.where((c) {
+            final title = (c.title ?? '').toLowerCase();
+            if (title.contains(_searchQuery)) return true;
+            // Cherche dans les numéros des membres
+            for (final m in c.members) {
+              if (m.publicNumber.toLowerCase().contains(_searchQuery)) return true;
+            }
+            // Cherche dans le dernier message
+            final content = (c.lastMessage?.content ?? '').toLowerCase();
+            if (content.contains(_searchQuery)) return true;
+            return false;
+          }).toList();
+
+    if (convs.isEmpty && _searchQuery.isNotEmpty) {
+      return ListView(children: [
+        const SizedBox(height: 80),
+        Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.search_off, size: 48, color: AlanyaColors.grey300),
+              const SizedBox(height: 12),
+              Text(
+                "Aucun résultat pour \"$_searchQuery\"",
+                style: TextStyle(color: AlanyaColors.grey500),
+              ),
+            ],
+          ),
+        ),
+      ]);
+    }
+
     return ListView.separated(
       itemCount: convs.length,
       separatorBuilder: (_, __) => const Divider(height: 1),
