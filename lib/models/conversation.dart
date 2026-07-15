@@ -26,15 +26,37 @@ class ConvMember {
   final String id;
   final String? pseudo;
   final String publicNumber;
+  final int isOnline;
+  final DateTime? lastSeen;
 
-  ConvMember({required this.id, required this.pseudo, required this.publicNumber});
+  ConvMember({
+    required this.id,
+    required this.pseudo,
+    required this.publicNumber,
+    this.isOnline = 0,
+    this.lastSeen,
+  });
 
   String get displayName => pseudo ?? publicNumber;
+  bool get online => isOnline == 1;
+
+  /// "en ligne" ou "vu il y a 5 min"
+  String get onlineStatus {
+    if (online) return "en ligne";
+    if (lastSeen == null) return "";
+    final diff = DateTime.now().difference(lastSeen!);
+    if (diff.inMinutes < 1) return "vu à l'instant";
+    if (diff.inMinutes < 60) return "vu il y a ${diff.inMinutes} min";
+    if (diff.inHours < 24) return "vu il y a ${diff.inHours}h";
+    return "vu il y a ${diff.inDays}j";
+  }
 
   factory ConvMember.fromJson(Map<String, dynamic> j) => ConvMember(
         id: j["id"] as String,
         pseudo: j["pseudo"] as String?,
         publicNumber: j["publicNumber"] as String,
+        isOnline: (j["isOnline"] as num?)?.toInt() ?? 0,
+        lastSeen: j["lastSeen"] != null ? DateTime.tryParse(j["lastSeen"] as String) : null,
       );
 }
 

@@ -35,6 +35,8 @@ class Contact {
   final String publicNumber;
   final String? pseudo;
   final String? avatarUrl;
+  final int isOnline;
+  final DateTime? lastSeen;
 
   Contact({
     required this.id,
@@ -44,9 +46,22 @@ class Contact {
     required this.publicNumber,
     required this.pseudo,
     required this.avatarUrl,
+    this.isOnline = 0,
+    this.lastSeen,
   });
 
   String get displayName => alias ?? pseudo ?? publicNumber;
+  bool get online => isOnline == 1;
+
+  String get onlineStatus {
+    if (online) return "en ligne";
+    if (lastSeen == null) return "";
+    final diff = DateTime.now().difference(lastSeen!);
+    if (diff.inMinutes < 1) return "vu à l'instant";
+    if (diff.inMinutes < 60) return "vu il y a ${diff.inMinutes} min";
+    if (diff.inHours < 24) return "vu il y a ${diff.inHours}h";
+    return "vu il y a ${diff.inDays}j";
+  }
 
   factory Contact.fromJson(Map<String, dynamic> j) {
     final user = j["user"] as Map<String, dynamic>;
@@ -58,6 +73,8 @@ class Contact {
       publicNumber: user["publicNumber"] as String,
       pseudo: user["pseudo"] as String?,
       avatarUrl: user["avatarUrl"] as String?,
+      isOnline: (user["isOnline"] as num?)?.toInt() ?? 0,
+      lastSeen: user["lastSeen"] != null ? DateTime.tryParse(user["lastSeen"] as String) : null,
     );
   }
 }

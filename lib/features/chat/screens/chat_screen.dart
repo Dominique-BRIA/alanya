@@ -55,6 +55,8 @@ class ChatScreen extends StatefulWidget {
     this.otherStatusMsg,
     this.contactId,
     this.isBlocked = false,
+    this.otherIsOnline = 0,
+    this.otherLastSeen,
   });
   final String convId;
   final String title;
@@ -67,6 +69,8 @@ class ChatScreen extends StatefulWidget {
   final String? otherStatusMsg;
   final String? contactId;      // pour ContactInfoScreen (bloquer/débloquer)
   final bool isBlocked;
+  final int otherIsOnline;      // F5 : 1 = en ligne
+  final DateTime? otherLastSeen; // F5 : dernière connexion
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -1173,7 +1177,21 @@ class _ChatScreenState extends State<ChatScreen> {
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                   ),
-                  if (!widget.isGroup && widget.otherStatusMsg?.isNotEmpty == true)
+                  if (!widget.isGroup && widget.otherIsOnline == 1)
+                    const Text(
+                      "en ligne",
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 11, color: Colors.white70),
+                    )
+                  else if (!widget.isGroup && widget.otherLastSeen != null)
+                    Text(
+                      _lastSeenLabel(widget.otherLastSeen!),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 11, color: Colors.white70),
+                    )
+                  else if (!widget.isGroup && widget.otherStatusMsg?.isNotEmpty == true)
                     Text(
                       widget.otherStatusMsg!,
                       maxLines: 1,
@@ -1775,6 +1793,15 @@ class _ChatScreenState extends State<ChatScreen> {
   String _time(DateTime d) {
     final l = d.toLocal();
     return "${l.hour.toString().padLeft(2, '0')}:${l.minute.toString().padLeft(2, '0')}";
+  }
+
+  /// Label "vu il y a X" pour l'AppBar.
+  String _lastSeenLabel(DateTime d) {
+    final diff = DateTime.now().difference(d);
+    if (diff.inMinutes < 1) return "vu à l'instant";
+    if (diff.inMinutes < 60) return "vu il y a ${diff.inMinutes} min";
+    if (diff.inHours < 24) return "vu il y a ${diff.inHours}h";
+    return "vu il y a ${diff.inDays}j";
   }
 
   /// Label de date pour les séparateurs (style WhatsApp).

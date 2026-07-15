@@ -537,6 +537,8 @@ class _ConversationsTabState extends State<_ConversationsTab> {
               avatarUrl: c.avatarUrl,
               otherUserId: other?.id,
               otherPublicNumber: other?.publicNumber,
+              otherIsOnline: other?.isOnline ?? 0,
+              otherLastSeen: other?.lastSeen,
             ),
           ),
         );

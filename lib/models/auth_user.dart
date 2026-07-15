@@ -9,6 +9,8 @@ class AuthUser {
   final String? nom;
   final int? idPays;
   final int typeCompte;
+  final int isOnline;
+  final DateTime? lastSeen;
 
   AuthUser({
     required this.id,
@@ -20,6 +22,8 @@ class AuthUser {
     this.nom,
     this.idPays,
     this.typeCompte = 0,
+    this.isOnline = 0,
+    this.lastSeen,
   });
 
   AuthUser copyWith({
@@ -29,6 +33,8 @@ class AuthUser {
     String? nom,
     int? idPays,
     int? typeCompte,
+    int? isOnline,
+    DateTime? lastSeen,
   }) =>
       AuthUser(
         id: id,
@@ -40,6 +46,8 @@ class AuthUser {
         nom: nom ?? this.nom,
         idPays: idPays ?? this.idPays,
         typeCompte: typeCompte ?? this.typeCompte,
+        isOnline: isOnline ?? this.isOnline,
+        lastSeen: lastSeen ?? this.lastSeen,
       );
 
   factory AuthUser.fromJson(Map<String, dynamic> json) => AuthUser(
@@ -52,5 +60,7 @@ class AuthUser {
         nom: json["nom"] as String?,
         idPays: (json["idPays"] as num?)?.toInt(),
         typeCompte: (json["typeCompte"] as num?)?.toInt() ?? 0,
+        isOnline: (json["isOnline"] as num?)?.toInt() ?? 0,
+        lastSeen: json["lastSeen"] != null ? DateTime.tryParse(json["lastSeen"] as String) : null,
       );
 }
