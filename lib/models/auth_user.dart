@@ -2,10 +2,12 @@
 class AuthUser {
   final String id;
   final String email;
-  final String publicNumber; // numéro public à 6 ou 8 chiffres
+  final String publicNumber;
   final String? pseudo;
   final String? avatarUrl;
   final String? statusMsg;
+  final String? nom;
+  final int? idPays;
 
   AuthUser({
     required this.id,
@@ -14,15 +16,26 @@ class AuthUser {
     this.pseudo,
     this.avatarUrl,
     this.statusMsg,
+    this.nom,
+    this.idPays,
   });
 
-  AuthUser copyWith({String? pseudo, String? avatarUrl, String? statusMsg}) => AuthUser(
+  AuthUser copyWith({
+    String? pseudo,
+    String? avatarUrl,
+    String? statusMsg,
+    String? nom,
+    int? idPays,
+  }) =>
+      AuthUser(
         id: id,
         email: email,
         publicNumber: publicNumber,
         pseudo: pseudo ?? this.pseudo,
         avatarUrl: avatarUrl ?? this.avatarUrl,
         statusMsg: statusMsg ?? this.statusMsg,
+        nom: nom ?? this.nom,
+        idPays: idPays ?? this.idPays,
       );
 
   factory AuthUser.fromJson(Map<String, dynamic> json) => AuthUser(
@@ -32,5 +45,7 @@ class AuthUser {
         pseudo: json["pseudo"] as String?,
         avatarUrl: json["avatarUrl"] as String?,
         statusMsg: json["statusMsg"] as String?,
+        nom: json["nom"] as String?,
+        idPays: (json["idPays"] as num?)?.toInt(),
       );
 }

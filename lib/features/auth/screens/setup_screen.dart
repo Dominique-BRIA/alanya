@@ -9,7 +9,44 @@ import '../../../widgets/back_app_bar.dart';
 import '../auth_controller.dart';
 import '../auth_repository.dart';
 
-/// Étape 3 : choix du pseudo + mot de passe. Affiche le numéro public attribué.
+/// Données pays statiques pour l'inscription (évite un appel API non authentifié).
+class _PaysOption {
+  final int id;
+  final String flag;
+  final String nom;
+  final String prefix;
+  const _PaysOption(this.id, this.flag, this.nom, this.prefix);
+}
+
+const _paysList = [
+  _PaysOption(1, "🇨🇲", "Cameroun", "+237"),
+  _PaysOption(2, "🇫🇷", "France", "+33"),
+  _PaysOption(3, "🇨🇮", "Côte d'Ivoire", "+225"),
+  _PaysOption(4, "🇸🇳", "Sénégal", "+221"),
+  _PaysOption(5, "🇨🇩", "RD Congo", "+243"),
+  _PaysOption(6, "🇬🇦", "Gabon", "+241"),
+  _PaysOption(7, "🇹🇩", "Tchad", "+235"),
+  _PaysOption(8, "🇨🇬", "Congo", "+242"),
+  _PaysOption(9, "🇧🇯", "Bénin", "+229"),
+  _PaysOption(10, "🇹🇬", "Togo", "+228"),
+  _PaysOption(11, "🇲🇱", "Mali", "+223"),
+  _PaysOption(12, "🇧🇫", "Burkina Faso", "+226"),
+  _PaysOption(13, "🇳🇪", "Niger", "+227"),
+  _PaysOption(14, "🇬🇳", "Guinée", "+224"),
+  _PaysOption(15, "🇲🇦", "Maroc", "+212"),
+  _PaysOption(16, "🇩🇿", "Algérie", "+213"),
+  _PaysOption(17, "🇹🇳", "Tunisie", "+216"),
+  _PaysOption(18, "🇳🇬", "Nigeria", "+234"),
+  _PaysOption(19, "🇬🇭", "Ghana", "+233"),
+  _PaysOption(20, "🇨🇦", "Canada", "+1"),
+  _PaysOption(21, "🇧🇪", "Belgique", "+32"),
+  _PaysOption(22, "🇨🇭", "Suisse", "+41"),
+  _PaysOption(23, "🇩🇪", "Allemagne", "+49"),
+  _PaysOption(24, "🇬🇧", "Royaume-Uni", "+44"),
+  _PaysOption(25, "🇺🇸", "États-Unis", "+1"),
+];
+
+/// Étape 3 : choix du pseudo + mot de passe + pays. Affiche le numéro public attribué.
 class SetupScreen extends StatefulWidget {
   const SetupScreen({super.key, required this.setupToken, required this.publicNumber});
   final String setupToken;
@@ -21,13 +58,16 @@ class SetupScreen extends StatefulWidget {
 
 class _SetupScreenState extends State<SetupScreen> {
   final _formKey = GlobalKey<FormState>();
+  final _nomCtrl = TextEditingController();
   final _pseudoCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
+  int? _selectedPaysId;
   bool _loading = false;
   bool _obscure = true;
 
   @override
   void dispose() {
+    _nomCtrl.dispose();
     _pseudoCtrl.dispose();
     _passwordCtrl.dispose();
     super.dispose();
@@ -41,11 +81,12 @@ class _SetupScreenState extends State<SetupScreen> {
             setupToken: widget.setupToken,
             pseudo: _pseudoCtrl.text.trim(),
             password: _passwordCtrl.text,
+            nom: _nomCtrl.text.trim().isNotEmpty ? _nomCtrl.text.trim() : null,
+            idPays: _selectedPaysId,
           );
       if (!mounted) return;
       await context.read<AuthController>().completeSetup(session);
       if (!mounted) return;
-      // L'AuthGate à la racine bascule sur l'accueil ; on dépile les écrans d'auth.
       Navigator.of(context).popUntil((r) => r.isFirst);
     } on ApiException catch (e) {
       showAppSnackBar(e.message);
@@ -102,16 +143,49 @@ class _SetupScreenState extends State<SetupScreen> {
                   ),
                 ),
                 const SizedBox(height: 24),
+
+                // --- Nom ---
+                TextFormField(
+                  controller: _nomCtrl,
+                  textCapitalization: TextCapitalization.words,
+                  decoration: const InputDecoration(
+                    labelText: "Nom",
+                    hintText: "Ex: BRIA",
+                    prefixIcon: Icon(Icons.badge_outlined),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // --- Pseudo ---
                 TextFormField(
                   controller: _pseudoCtrl,
                   decoration: InputDecoration(
                     labelText: tr(context, 'pseudo'),
-                    prefixIcon: Icon(Icons.person_outline),
+                    prefixIcon: const Icon(Icons.person_outline),
                   ),
                   validator: (v) =>
                       (v ?? "").trim().length < 2 ? "Pseudo trop court" : null,
                 ),
                 const SizedBox(height: 16),
+
+                // --- Pays ---
+                DropdownButtonFormField<int>(
+                  value: _selectedPaysId,
+                  decoration: const InputDecoration(
+                    labelText: "Pays",
+                    prefixIcon: Icon(Icons.public_outlined),
+                  ),
+                  items: _paysList.map((p) {
+                    return DropdownMenuItem(
+                      value: p.id,
+                      child: Text("${p.flag}  ${p.nom}  (${p.prefix})"),
+                    );
+                  }).toList(),
+                  onChanged: (v) => setState(() => _selectedPaysId = v),
+                ),
+                const SizedBox(height: 16),
+
+                // --- Mot de passe ---
                 TextFormField(
                   controller: _passwordCtrl,
                   obscureText: _obscure,
@@ -127,6 +201,7 @@ class _SetupScreenState extends State<SetupScreen> {
                       (v ?? "").length < 8 ? tr(context, 'password_min_8') : null,
                 ),
                 const SizedBox(height: 24),
+
                 ElevatedButton(
                   onPressed: _loading ? null : _submit,
                   child: _loading

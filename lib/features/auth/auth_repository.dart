@@ -51,10 +51,19 @@ class AuthRepository {
     required String setupToken,
     required String pseudo,
     required String password,
+    String? nom,
+    int? idPays,
   }) async {
+    final body = <String, dynamic>{
+      "pseudo": pseudo,
+      "password": password,
+    };
+    if (nom != null) body["nom"] = nom;
+    if (idPays != null) body["idPays"] = idPays;
+
     final data = await _api.post(
       "/api/auth/setup",
-      {"pseudo": pseudo, "password": password},
+      body,
       bearer: setupToken,
     );
     return _session(data);
