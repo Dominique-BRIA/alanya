@@ -22,14 +22,6 @@ class MeetingsRepository {
     return Meeting.fromJson(res as Map<String, dynamic>);
   }
 
-  /// Crée une réunion.
-  ///
-  /// [objet] — sujet de la réunion.
-  /// [typeMedia] — 1 = audio, 2 = vidéo.
-  /// [duree] — durée prévue en secondes (défaut 3600 = 1h).
-  /// [participantNumbers] — liste de numéros public Alanya des invités.
-  /// [startTime] — date de début (ISO 8601), défaut = maintenant.
-  /// [room] — identifiant de salle personnalisé (auto-généré si absent).
   /// Crée une réunion et retourne son idMeeting.
   Future<int> createMeeting({
     required String objet,
@@ -51,10 +43,15 @@ class MeetingsRepository {
     if (room != null) body["room"] = room;
 
     final res = await _api.post("/api/meetings", body);
-    return (res["idMeeting"] as num).toInt();
+    // Protection : le backend peut renvoyer idMeeting ou id
+    final id = res["idMeeting"] ?? res["id"];
+    if (id == null) {
+      throw Exception("Réponse invalide du serveur : idMeeting manquant");
+    }
+    return (id as num).toInt();
   }
 
-  /// Rejoindre une réunion (accepte l'invitation, marque comme connecté).
+  /// Rejoindre une réunion.
   Future<void> joinMeeting(int idMeeting) async {
     await _api.post("/api/meetings/$idMeeting/join", {});
   }
