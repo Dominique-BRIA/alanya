@@ -30,7 +30,8 @@ class MeetingsRepository {
   /// [participantNumbers] — liste de numéros public Alanya des invités.
   /// [startTime] — date de début (ISO 8601), défaut = maintenant.
   /// [room] — identifiant de salle personnalisé (auto-généré si absent).
-  Future<Meeting> createMeeting({
+  /// Crée une réunion et retourne son idMeeting.
+  Future<int> createMeeting({
     required String objet,
     required int typeMedia,
     int duree = 3600,
@@ -50,11 +51,7 @@ class MeetingsRepository {
     if (room != null) body["room"] = room;
 
     final res = await _api.post("/api/meetings", body);
-    return Meeting.fromJson({
-      ...res as Map<String, dynamic>,
-      "organiser": <String, dynamic>{}, // minimal — re-fetch si besoin
-      "participants": <dynamic>[],
-    });
+    return (res["idMeeting"] as num).toInt();
   }
 
   /// Rejoindre une réunion (accepte l'invitation, marque comme connecté).
