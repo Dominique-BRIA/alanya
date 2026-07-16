@@ -210,7 +210,21 @@ class RealtimeClient extends ChangeNotifier {
         if (userId != null) "userId": userId,
         if (displayName != null) "displayName": displayName,
       });
+      
+  void meetingJoin(int meetingId) =>
+      _send({"type": "meeting_join", "meetingId": meetingId});
 
+  void meetingLeave(int meetingId) =>
+      _send({"type": "meeting_leave", "meetingId": meetingId});
+
+  void meetingSignal(int meetingId, String toUserId, Map<String, dynamic> signal) =>
+      _send({
+        "type": "meeting_signal",
+        "meetingId": meetingId,
+        "toUserId": toUserId,
+        "signal": signal,
+      });
+      
   void disconnect() {
     _reconnectTimer?.cancel();
     _pingTimer?.cancel();
