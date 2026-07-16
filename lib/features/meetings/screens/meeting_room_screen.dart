@@ -234,7 +234,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     }
     return ClipRRect(
       borderRadius: BorderRadius.circular(isLarge ? 16 : 12),
-      child: RTCVideoRendererObject(stream: stream).build(),
+      child: RTCVideoRendererObject(stream: stream),
     );
   }
 
@@ -244,7 +244,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     final entry = streams.entries.first;
     return ClipRRect(
       borderRadius: BorderRadius.circular(0),
-      child: RTCVideoRendererObject(stream: entry.value).build(),
+      child: RTCVideoRendererObject(stream: entry.value),
     );
   }
 
@@ -259,7 +259,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       child: Stack(
         children: [
           Positioned.fill(
-            child: RTCVideoRendererObject(stream: stream).build(),
+            child: RTCVideoRendererObject(stream: stream),
           ),
           Positioned(
             left: 8,
@@ -487,6 +487,6 @@ class _RTCVideoRendererObjectState extends State<RTCVideoRendererObject> {
     if (!_initialized) {
       return const Center(child: CircularProgressIndicator(color: Colors.white));
     }
-    return RTCVideo(_renderer, objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover);
+    return RTCVideoView(_renderer, objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover);
   }
 }
