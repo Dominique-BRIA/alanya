@@ -495,33 +495,93 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   /// Fait défiler la liste vers le message cité (clic sur l'aperçu de réponse).
-  /// Si le message n'est pas chargé, tente de charger plus de messages.
-  void _scrollToMessage(String id) {
+  /// Si le message n'est pas chargé, charge automatiquement plus de messages
+  /// jusqu'à le trouver (comme WhatsApp).
+  Future<void> _scrollToMessage(String id) async {
+    // 1. Cherche si le message est déjà dans la liste
     final key = _messageKeys[id];
     final ctx = key?.currentContext;
+
     if (ctx != null) {
+      // Message trouvé → scroll + highlight
       Scrollable.ensureVisible(ctx,
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeInOut,
         alignment: 0.4,
       );
-      // Highlight temporaire 2 secondes
-      setState(() => _highlightedMessageId = id);
-      Future.delayed(const Duration(seconds: 2), () {
-        if (mounted && _highlightedMessageId == id) {
-          setState(() => _highlightedMessageId = null);
+      _highlightMessage(id);
+      return;
+    }
+
+    // 2. Message pas trouvé → charge les anciens messages (pagination)
+    int attempts = 0;
+    const maxAttempts = 10; // Max 10 pages × 50 = 500 messages
+
+    while (attempts < maxAttempts) {
+      attempts++;
+
+      // Charge la page suivante
+      try {
+        final repo = context.read<ChatRepository>();
+        final older = await repo.getMessages(widget.convId,
+            cursor: _messages.isNotEmpty ? _messages.first.id : null);
+
+        if (older.isEmpty) break; // Plus de messages
+
+        // Ajoute les anciens messages au début de la liste
+        final newMessages = older.reversed.toList();
+        setState(() {
+          _messages = [...newMessages, ..._messages];
+        });
+
+        // Met en cache
+        for (final m in newMessages) {
+          _cacheMsg(m);
         }
-      });
-    } else {
-      // Message pas dans la liste actuelle — on ne peut pas scroller
-      // mais on affiche quand même le highlight si on le trouve après chargement
+
+        // Vérifie si le message cible est maintenant chargé
+        final foundIdx = _messages.indexWhere((m) => m.id == id);
+        if (foundIdx >= 0) {
+          // Attend que le widget soit reconstruit
+          await Future.delayed(const Duration(milliseconds: 100));
+          if (!mounted) return;
+
+          final newKey = _messageKeys[id];
+          final newCtx = newKey?.currentContext;
+          if (newCtx != null) {
+            Scrollable.ensureVisible(newCtx,
+              duration: const Duration(milliseconds: 400),
+              curve: Curves.easeInOut,
+              alignment: 0.4,
+            );
+            _highlightMessage(id);
+            return;
+          }
+        }
+      } catch (_) {
+        break; // Erreur réseau → arrête
+      }
+    }
+
+    // 3. Message introuvable même après avoir tout chargé
+    if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("Message original non chargé dans la vue actuelle"),
+          content: Text("Message introuvable"),
           duration: Duration(seconds: 2),
         ),
       );
     }
+  }
+
+  /// Highlight temporaire d'un message (2 secondes).
+  void _highlightMessage(String id) {
+    setState(() => _highlightedMessageId = id);
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted && _highlightedMessageId == id) {
+        setState(() => _highlightedMessageId = null);
+      }
+    });
   }
 
   /// Détermine le texte d'aperçu selon le type de message cité.
