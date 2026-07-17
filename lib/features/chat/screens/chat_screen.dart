@@ -495,83 +495,84 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   /// Fait défiler la liste vers le message cité (clic sur l'aperçu de réponse).
-  /// Si le message n'est pas chargé, charge automatiquement plus de messages
-  /// jusqu'à le trouver (comme WhatsApp).
+  /// Charge automatiquement les anciens messages si nécessaire (comme WhatsApp).
   Future<void> _scrollToMessage(String id) async {
-    // 1. Cherche si le message est déjà dans la liste
-    final key = _messageKeys[id];
-    final ctx = key?.currentContext;
+    // 1. Cherche le message dans la liste actuelle
+    int foundIdx = _messages.indexWhere((m) => m.id == id);
 
-    if (ctx != null) {
-      // Message trouvé → scroll + highlight
-      Scrollable.ensureVisible(ctx,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeInOut,
-        alignment: 0.4,
-      );
-      _highlightMessage(id);
-      return;
-    }
-
-    // 2. Message pas trouvé → charge les anciens messages (pagination)
-    int attempts = 0;
-    const maxAttempts = 10; // Max 10 pages × 50 = 500 messages
-
-    while (attempts < maxAttempts) {
-      attempts++;
-
-      // Charge la page suivante
-      try {
-        final repo = context.read<ChatRepository>();
-        final older = await repo.getMessages(widget.convId,
-            cursor: _messages.isNotEmpty ? _messages.first.id : null);
-
-        if (older.isEmpty) break; // Plus de messages
-
-        // Ajoute les anciens messages au début de la liste
-        final newMessages = older.reversed.toList();
-        setState(() {
-          _messages = [...newMessages, ..._messages];
-        });
-
-        // Met en cache
-        for (final m in newMessages) {
-          _cacheMsg(m);
-        }
-
-        // Vérifie si le message cible est maintenant chargé
-        final foundIdx = _messages.indexWhere((m) => m.id == id);
-        if (foundIdx >= 0) {
-          // Attend que le widget soit reconstruit
-          await Future.delayed(const Duration(milliseconds: 100));
-          if (!mounted) return;
-
-          final newKey = _messageKeys[id];
-          final newCtx = newKey?.currentContext;
-          if (newCtx != null) {
-            Scrollable.ensureVisible(newCtx,
-              duration: const Duration(milliseconds: 400),
-              curve: Curves.easeInOut,
-              alignment: 0.4,
-            );
-            _highlightMessage(id);
-            return;
+    // 2. Si pas trouvé, charge les anciens messages par pages
+    if (foundIdx < 0) {
+      int attempts = 0;
+      while (attempts < 10) {
+        attempts++;
+        try {
+          final cursor = _messages.isNotEmpty ? _messages.first.id : null;
+          if (cursor == null) break;
+          final older = await context.read<ChatRepository>().getMessages(
+                widget.convId,
+                cursor: cursor,
+              );
+          if (older.isEmpty) break;
+          final newMsgs = older.reversed.toList();
+          setState(() => _messages = [...newMsgs, ..._messages]);
+          for (final m in newMsgs) {
+            _cacheMsg(m);
           }
+          foundIdx = _messages.indexWhere((m) => m.id == id);
+          if (foundIdx >= 0) break;
+        } catch (_) {
+          break;
         }
-      } catch (_) {
-        break; // Erreur réseau → arrête
       }
     }
 
-    // 3. Message introuvable même après avoir tout chargé
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Message introuvable"),
-          duration: Duration(seconds: 2),
-        ),
+    // 3. Message introuvable
+    if (foundIdx < 0) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Message introuvable"),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      return;
+    }
+
+    // 4. Scroll vers le message par index
+    //    Utilise _scrollCtrl pour positionner, puis attend que le widget soit
+    //    rendu pour faire le highlight.
+    if (!_scrollCtrl.hasClients) return;
+
+    // Estime la position cible (approximative, sera corrigée après)
+    final itemHeight = 80.0; // hauteur moyenne d'une bulle
+    final targetOffset = (foundIdx * itemHeight).clamp(
+      0.0,
+      _scrollCtrl.position.maxScrollExtent,
+    );
+
+    _scrollCtrl.animateTo(
+      targetOffset,
+      duration: const Duration(milliseconds: 400),
+      curve: Curves.easeInOut,
+    );
+
+    // 5. Attend que le widget soit rendu, puis scroll précis + highlight
+    await Future.delayed(const Duration(milliseconds: 500));
+    if (!mounted) return;
+
+    final key = _messageKeys[id];
+    final ctx = key?.currentContext;
+    if (ctx != null) {
+      Scrollable.ensureVisible(ctx,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeInOut,
+        alignment: 0.4,
       );
     }
+
+    // 6. Highlight temporaire 2 secondes
+    _highlightMessage(id);
   }
 
   /// Highlight temporaire d'un message (2 secondes).
