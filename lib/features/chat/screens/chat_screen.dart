@@ -98,6 +98,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   // --- Réponse à un message (swipe-to-reply) ---
   Message? _replyTo;
+  String? _highlightedMessageId;
   // Clés globales pour chaque message → permet le scroll-to-message au clic sur une réponse.
   final Map<String, GlobalKey> _messageKeys = {};
   // Cache local des snapshots de messages cités (replyTo).
@@ -495,17 +496,23 @@ class _ChatScreenState extends State<ChatScreen> {
 
   /// Fait défiler la liste vers le message cité (clic sur l'aperçu de réponse).
   void _scrollToMessage(String id) {
-    final key = _messageKeys[id];
-    final ctx = key?.currentContext;
-    if (ctx != null) {
-      Scrollable.ensureVisible(
-        ctx,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeInOut,
-        alignment: 0.4,
-      );
-    }
+  final key = _messageKeys[id];
+  final ctx = key?.currentContext;
+  if (ctx != null) {
+    Scrollable.ensureVisible(ctx,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+      alignment: 0.4,
+    );
+    // Highlight temporaire 2 secondes
+    setState(() => _highlightedMessageId = id);
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted && _highlightedMessageId == id) {
+        setState(() => _highlightedMessageId = null);
+      }
+    });
   }
+}
 
   /// Détermine le texte d'aperçu selon le type de message cité.
   String _replyPreviewText(Message? original, ReplyPreview? snapshot) {
@@ -1295,7 +1302,7 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _bubble(Message m, bool mine) {
+    Widget _bubble(Message m, bool mine) {
     final isImage = m.type == "IMAGE" && m.media.isNotEmpty;
     final isVideo = m.type == "VIDEO" && m.media.isNotEmpty;
     final isFile = m.type == "FILE" && m.media.isNotEmpty;
@@ -1303,6 +1310,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final senderLabel = widget.isGroup && !mine
         ? (widget.memberNames[m.senderId] ?? "Membre")
         : null;
+    final isHighlighted = _highlightedMessageId == m.id;
     return Align(
       key: _messageKeys.putIfAbsent(m.id, () => GlobalKey()),
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
@@ -1325,25 +1333,30 @@ class _ChatScreenState extends State<ChatScreen> {
           onReply: () => _setReplyTo(m),
           child: GestureDetector(
           onLongPress: () => _showMessageOptions(m),
-          child: Container(
+          child: AnimatedContainer(
+        duration: const Duration(milliseconds: 400),
         margin: const EdgeInsets.symmetric(vertical: 4),
-        // Image : marge interne fine pour une vignette quasi pleine bulle (style WhatsApp).
         padding: isImage
             ? const EdgeInsets.all(3)
             : const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         constraints: const BoxConstraints(maxWidth: 280),
         decoration: BoxDecoration(
-          color: mine ? AlanyaColors.terracotta : Colors.white,
+          color: isHighlighted
+              ? AlanyaColors.gold.withValues(alpha: 0.3)
+              : (mine ? AlanyaColors.terracotta : Colors.white),
           borderRadius: BorderRadius.circular(14),
-          border: mine ? null : Border.all(color: AlanyaColors.sand),
+          border: mine
+              ? null
+              : Border.all(
+                  color: isHighlighted
+                      ? AlanyaColors.gold
+                      : AlanyaColors.sand),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Aperçu du message cité (si réponse)
             if (m.replyToId != null && !m.isDeleted)
               _replyPreviewHeader(m, mine),
-            // Contenu de la bulle
             m.isDeleted
                 ? _deletedBubble(m, mine)
                 : isImage
@@ -1357,7 +1370,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                 : _textBubble(m, mine),
           ],
         ),
-          ), // Container
+          ), // AnimatedContainer
         ), // GestureDetector
         ), // _SwipeToReply
         ],
