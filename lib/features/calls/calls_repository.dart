@@ -102,6 +102,11 @@ class CallsRepository {
     await _api.post("/api/calls/$callId/leave", {});
   }
 
+  /// Supprime un appel de l'historique.
+  Future<void> deleteCall(String callId) async {
+    await _api.delete("/api/calls/$callId/delete");
+  }
+
   Future<List<Map<String, dynamic>>> iceServers() async {
     final data = await _api.get("/api/calls/ice");
     final list = (data["iceServers"] as List?) ?? [];

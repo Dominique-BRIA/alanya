@@ -6,6 +6,7 @@ import '../../../models/call_record.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
 import '../../../widgets/motif_background.dart';
+import '../../../widgets/multi_select_mixin.dart';
 import '../call_controller.dart';
 import '../calls_repository.dart';
 import '../../chat/screens/chat_screen.dart';
@@ -17,7 +18,8 @@ class CallsScreen extends StatefulWidget {
   State<CallsScreen> createState() => _CallsScreenState();
 }
 
-class _CallsScreenState extends State<CallsScreen> {
+class _CallsScreenState extends State<CallsScreen>
+    with MultiSelectMixin<CallsScreen> {
   List<CallRecord>? _calls;
   bool _error = false;
   bool _wasBusy = false;
@@ -42,7 +44,6 @@ class _CallsScreenState extends State<CallsScreen> {
   }
 
   Future<void> _load() async {
-    // 1) Cache local d'abord (offline-first).
     final cached = await CallCache.getAll();
     if (cached.isNotEmpty && mounted) {
       setState(() {
@@ -50,7 +51,6 @@ class _CallsScreenState extends State<CallsScreen> {
         _error = false;
       });
     }
-    // 2) Rafraîchit depuis le serveur.
     try {
       final calls = await context.read<CallsRepository>().history();
       if (!mounted) return;
@@ -92,14 +92,58 @@ class _CallsScreenState extends State<CallsScreen> {
     return _statusLabel(c.status);
   }
 
+  Future<void> _deleteSelected() async {
+    final count = selectedCount;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text("Supprimer $count appel(s) ?"),
+        content: const Text("Cette action est irréversible."),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text("Annuler")),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text("Supprimer",
+                  style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    final repo = context.read<CallsRepository>();
+    for (final id in selectedIds) {
+      try {
+        await repo.deleteCall(id);
+      } catch (_) {}
+    }
+    clearSelection();
+    _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     return MotifBackground(
       overlayOpacity: 0.92,
-      child: RefreshIndicator(
-        onRefresh: _load,
-        child: _buildBody(),
-      ),
+      child: isSelecting
+          ? Scaffold(
+              appBar: selectAppBar(
+                title: "Appels",
+                onDelete: _deleteSelected,
+                onCancel: clearSelection,
+                onSelectAll: () => selectAll(
+                    (_calls ?? []).map((c) => c.id).toList()),
+              ),
+              body: RefreshIndicator(
+                onRefresh: _load,
+                child: _buildBody(),
+              ),
+            )
+          : RefreshIndicator(
+              onRefresh: _load,
+              child: _buildBody(),
+            ),
     );
   }
 
@@ -124,7 +168,7 @@ class _CallsScreenState extends State<CallsScreen> {
           child: Padding(
             padding: EdgeInsets.all(24),
             child: Text(
-              "Aucun appel pour le moment.\nLance un appel depuis une discussion (icône d'appel).",
+              "Aucun appel pour le moment.\nLance un appel depuis une discussion.",
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.black54),
             ),
@@ -140,40 +184,48 @@ class _CallsScreenState extends State<CallsScreen> {
   }
 
   Widget _tile(CallRecord c) {
-    final isVideo = c.type == "VIDEO";
     final icon = c.isOutgoing
         ? Icons.call_made
         : (c.status == "MISSED" ? Icons.call_missed : Icons.call_received);
     final color = c.status == "MISSED" ? Colors.red : AlanyaColors.forest;
     return ListTile(
-      leading: c.isGroup
-          ? CircleAvatar(
-              backgroundColor: AlanyaColors.gold,
-              child: const Icon(Icons.groups, color: Colors.white, size: 20),
-            )
-          : AvatarCircle(
-              name: c.peerName,
-              avatarUrl: c.peerAvatarUrl,
-              radius: 22,
-              backgroundColor: AlanyaColors.gold,
-            ),
-      title: Text(c.peerName, style: const TextStyle(fontWeight: FontWeight.w600)),
+      leading: isSelecting
+          ? selectCheckbox(c.id)
+          : (c.isGroup
+              ? CircleAvatar(
+                  backgroundColor: AlanyaColors.gold,
+                  child: const Icon(Icons.groups, color: Colors.white, size: 20),
+                )
+              : AvatarCircle(
+                  name: c.peerName,
+                  avatarUrl: c.peerAvatarUrl,
+                  radius: 22,
+                  backgroundColor: AlanyaColors.gold,
+                )),
+      title: Text(c.peerName,
+          style: const TextStyle(fontWeight: FontWeight.w600)),
       subtitle: Text(
         "${c.isGroup ? "Groupe · " : ""}${c.isOutgoing ? "Sortant" : "Entrant"} · ${_duration(c)}",
-        style: TextStyle(color: c.status == "MISSED" ? Colors.red.shade700 : Colors.black54),
+        style: TextStyle(
+            color: c.status == "MISSED" ? Colors.red.shade700 : Colors.black54),
       ),
-      trailing: Icon(icon, color: color, size: 20),
-      onTap: c.convId == null
+      trailing: isSelecting
           ? null
-          : () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => ChatScreen(
-                    convId: c.convId!,
-                    title: c.peerName,
-                    isGroup: c.isGroup,
-                  ),
-                ),
-              ),
+          : Icon(icon, color: color, size: 20),
+      onLongPress: () => startSelecting(c.id),
+      onTap: isSelecting
+          ? () => toggleSelect(c.id)
+          : (c.convId == null
+              ? null
+              : () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => ChatScreen(
+                        convId: c.convId!,
+                        title: c.peerName,
+                        isGroup: c.isGroup,
+                      ),
+                    ),
+                  )),
     );
   }
 }

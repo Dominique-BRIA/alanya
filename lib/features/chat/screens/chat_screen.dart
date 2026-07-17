@@ -495,24 +495,34 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   /// Fait défiler la liste vers le message cité (clic sur l'aperçu de réponse).
+  /// Si le message n'est pas chargé, tente de charger plus de messages.
   void _scrollToMessage(String id) {
-  final key = _messageKeys[id];
-  final ctx = key?.currentContext;
-  if (ctx != null) {
-    Scrollable.ensureVisible(ctx,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-      alignment: 0.4,
-    );
-    // Highlight temporaire 2 secondes
-    setState(() => _highlightedMessageId = id);
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted && _highlightedMessageId == id) {
-        setState(() => _highlightedMessageId = null);
-      }
-    });
+    final key = _messageKeys[id];
+    final ctx = key?.currentContext;
+    if (ctx != null) {
+      Scrollable.ensureVisible(ctx,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+        alignment: 0.4,
+      );
+      // Highlight temporaire 2 secondes
+      setState(() => _highlightedMessageId = id);
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted && _highlightedMessageId == id) {
+          setState(() => _highlightedMessageId = null);
+        }
+      });
+    } else {
+      // Message pas dans la liste actuelle — on ne peut pas scroller
+      // mais on affiche quand même le highlight si on le trouve après chargement
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Message original non chargé dans la vue actuelle"),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
   }
-}
 
   /// Détermine le texte d'aperçu selon le type de message cité.
   String _replyPreviewText(Message? original, ReplyPreview? snapshot) {

@@ -5,14 +5,13 @@ import 'package:provider/provider.dart';
 
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/motif_background.dart';
+import '../../../widgets/multi_select_mixin.dart';
 import '../../../models/meeting.dart';
 import '../meetings_repository.dart';
 import 'create_meeting_screen.dart';
 import 'meeting_detail_screen.dart';
 
 /// Onglet "Réunions" intégré dans la barre de navigation du HomeScreen.
-///
-/// Affiche la liste des réunions à venir et passées, avec un FAB pour créer.
 class MeetingsScreen extends StatefulWidget {
   const MeetingsScreen({super.key});
 
@@ -20,7 +19,8 @@ class MeetingsScreen extends StatefulWidget {
   State<MeetingsScreen> createState() => _MeetingsScreenState();
 }
 
-class _MeetingsScreenState extends State<MeetingsScreen> {
+class _MeetingsScreenState extends State<MeetingsScreen>
+    with MultiSelectMixin<MeetingsScreen> {
   List<Meeting>? _meetings;
   bool _error = false;
   Timer? _pollTimer;
@@ -58,28 +58,74 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
     if (created == true) _load();
   }
 
+  Future<void> _deleteSelected() async {
+    final count = selectedCount;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text("Supprimer $count réunion(s) ?"),
+        content: const Text("Seules les réunions terminées peuvent être supprimées."),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text("Annuler")),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text("Supprimer",
+                  style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    final repo = context.read<MeetingsRepository>();
+    for (final id in selectedIds) {
+      try {
+        await repo.deleteMeeting(int.parse(id));
+      } catch (_) {}
+    }
+    clearSelection();
+    _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     return MotifBackground(
       overlayOpacity: 0.92,
-      child: Stack(
-        children: [
-          RefreshIndicator(
-            onRefresh: _load,
-            child: _buildList(),
-          ),
-          // FAB positionné en bas à droite
-          Positioned(
-            right: 16,
-            bottom: 16,
-            child: FloatingActionButton(
-              backgroundColor: AlanyaColors.terracotta,
-              onPressed: _create,
-              child: const Icon(Icons.add, color: Colors.white),
+      child: isSelecting
+          ? Scaffold(
+              appBar: selectAppBar(
+                title: "Réunions",
+                onDelete: _deleteSelected,
+                onCancel: clearSelection,
+                onSelectAll: () => selectAll(
+                    (_meetings ?? [])
+                        .where((m) => m.isFinished)
+                        .map((m) => m.idMeeting.toString())
+                        .toList()),
+              ),
+              body: RefreshIndicator(
+                onRefresh: _load,
+                child: _buildList(),
+              ),
+            )
+          : Stack(
+              children: [
+                RefreshIndicator(
+                  onRefresh: _load,
+                  child: _buildList(),
+                ),
+                Positioned(
+                  right: 16,
+                  bottom: 16,
+                  child: FloatingActionButton(
+                    backgroundColor: AlanyaColors.terracotta,
+                    onPressed: _create,
+                    child: const Icon(Icons.add, color: Colors.white),
+                  ),
+                ),
+              ],
             ),
-          ),
-        ],
-      ),
     );
   }
 
@@ -135,15 +181,34 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
           ...active.map(_tile),
         ],
         if (ended.isNotEmpty) ...[
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 20, 16, 4),
-            child: Text("Terminées",
-                style: TextStyle(
-                    color: Colors.black38, fontWeight: FontWeight.bold)),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
+            child: Row(
+              children: [
+                const Text("Terminées",
+                    style: TextStyle(
+                        color: Colors.black38, fontWeight: FontWeight.bold)),
+                const Spacer(),
+                if (!isSelecting && ended.isNotEmpty)
+                  TextButton.icon(
+                    onPressed: () {
+                      // Sélectionne toutes les réunions terminées
+                      for (final m in ended) {
+                        startSelecting(m.idMeeting.toString());
+                      }
+                    },
+                    icon: const Icon(Icons.delete_outline, size: 16),
+                    label: const Text("Supprimer", style: TextStyle(fontSize: 12)),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.red.shade400,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                    ),
+                  ),
+              ],
+            ),
           ),
           ...ended.map(_tile),
         ],
-        // Espace en bas pour laisser de la place au FAB
         const SizedBox(height: 80),
       ],
     );
@@ -158,11 +223,13 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor:
-              m.isFinished ? Colors.grey.shade300 : AlanyaColors.forest,
-          child: Icon(icon, color: Colors.white, size: 20),
-        ),
+        leading: isSelecting
+            ? selectCheckbox(m.idMeeting.toString())
+            : CircleAvatar(
+                backgroundColor:
+                    m.isFinished ? Colors.grey.shade300 : AlanyaColors.forest,
+                child: Icon(icon, color: Colors.white, size: 20),
+              ),
         title: Text(m.objet,
             style: TextStyle(
               fontWeight: FontWeight.w600,
@@ -172,25 +239,32 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
           "$typeLabel · $statusLabel · ${_formatDate(m.startTime)}",
           style: const TextStyle(fontSize: 12),
         ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.people_outline, size: 16, color: AlanyaColors.grey400),
-            const SizedBox(width: 4),
-            Text(
-              "${m.participants.length}",
-              style: const TextStyle(fontSize: 13, color: Colors.black54),
-            ),
-          ],
-        ),
-        onTap: () async {
-          await Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => MeetingDetailScreen(meeting: m),
-            ),
-          );
-          _load();
-        },
+        trailing: isSelecting
+            ? null
+            : Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.people_outline,
+                      size: 16, color: AlanyaColors.grey400),
+                  const SizedBox(width: 4),
+                  Text(
+                    "${m.participants.length}",
+                    style:
+                        const TextStyle(fontSize: 13, color: Colors.black54),
+                  ),
+                ],
+              ),
+        onLongPress: m.isFinished ? () => startSelecting(m.idMeeting.toString()) : null,
+        onTap: isSelecting
+            ? () => toggleSelect(m.idMeeting.toString())
+            : () async {
+                await Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => MeetingDetailScreen(meeting: m),
+                  ),
+                );
+                _load();
+              },
       ),
     );
   }

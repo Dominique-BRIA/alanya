@@ -65,4 +65,9 @@ class MeetingsRepository {
   Future<void> endMeeting(int idMeeting) async {
     await _api.post("/api/meetings/$idMeeting/end", {});
   }
+
+  /// Supprime une réunion terminée.
+  Future<void> deleteMeeting(int idMeeting) async {
+    await _api.delete("/api/meetings/$idMeeting/delete");
+  }
 }
