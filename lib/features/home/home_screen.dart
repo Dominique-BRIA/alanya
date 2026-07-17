@@ -16,6 +16,7 @@ import '../../theme/alanya_theme.dart';
 import '../../widgets/alanya_nav_bar.dart';
 import '../../widgets/avatar_circle.dart';
 import '../../widgets/motif_background.dart';
+import '../../widgets/multi_select_mixin.dart';
 import '../account/screens/avatar_viewer_screen.dart';
 import '../account/screens/profile_screen.dart';
 import '../ai/ai_repository.dart';
@@ -175,7 +176,8 @@ class _ConversationsTab extends StatefulWidget {
   State<_ConversationsTab> createState() => _ConversationsTabState();
 }
 
-class _ConversationsTabState extends State<_ConversationsTab> {
+class _ConversationsTabState extends State<_ConversationsTab>
+    with MultiSelectMixin<_ConversationsTab> {
   List<Conversation>? _convs;
   bool _error = false;
   Timer? _pollTimer;
@@ -314,6 +316,27 @@ class _ConversationsTabState extends State<_ConversationsTab> {
   @override
   Widget build(BuildContext context) {
     final user = context.watch<AuthController>().user;
+
+    // Mode sélection : AppBar dédiée
+    if (isSelecting) {
+      return Scaffold(
+        appBar: selectAppBar(
+          title: "Conversations",
+          onDelete: _deleteSelected,
+          onCancel: clearSelection,
+          onSelectAll: () =>
+              selectAll((_convs ?? []).map((c) => c.id).toList()),
+        ),
+        body: MotifBackground(
+          overlayOpacity: 0.92,
+          child: RefreshIndicator(
+            onRefresh: _refresh,
+            child: _buildList(),
+          ),
+        ),
+      );
+    }
+
     return MotifBackground(
       overlayOpacity: 0.92,
       child: Column(
@@ -488,8 +511,6 @@ class _ConversationsTabState extends State<_ConversationsTab> {
                     ? "Fichier"
                     : (last.content ?? "[${last.type}]"));
     final title = c.title ?? "Discussion";
-    // Pour un DM, trouve le membre "autre que moi" pour connaître son userId
-    // et son numéro (utile côté ChatScreen pour ouvrir ContactInfoScreen).
     final myId = context.read<AuthController>().user?.id;
     final other = c.isGroup
         ? null
@@ -499,17 +520,19 @@ class _ConversationsTabState extends State<_ConversationsTab> {
           );
 
     return ListTile(
-      leading: c.isGroup
-          ? CircleAvatar(
-              backgroundColor: AlanyaColors.forest,
-              child: const Icon(Icons.groups, color: Colors.white, size: 22),
-            )
-          : AvatarCircle(
-              name: title,
-              avatarUrl: c.avatarUrl,
-              radius: 22,
-              backgroundColor: AlanyaColors.gold,
-            ),
+      leading: isSelecting
+          ? selectCheckbox(c.id)
+          : (c.isGroup
+              ? CircleAvatar(
+                  backgroundColor: AlanyaColors.forest,
+                  child: const Icon(Icons.groups, color: Colors.white, size: 22),
+                )
+              : AvatarCircle(
+                  name: title,
+                  avatarUrl: c.avatarUrl,
+                  radius: 22,
+                  backgroundColor: AlanyaColors.gold,
+                )),
       title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
       subtitle: Text(
         c.isGroup && c.members.isNotEmpty
@@ -518,15 +541,22 @@ class _ConversationsTabState extends State<_ConversationsTab> {
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
-      trailing: c.unread > 0
-          ? CircleAvatar(
-              radius: 11,
-              backgroundColor: AlanyaColors.forest,
-              child: Text("${c.unread}",
-                  style: const TextStyle(color: Colors.white, fontSize: 12)),
-            )
-          : null,
+      trailing: isSelecting
+          ? null
+          : (c.unread > 0
+              ? CircleAvatar(
+                  radius: 11,
+                  backgroundColor: AlanyaColors.forest,
+                  child: Text("${c.unread}",
+                      style: const TextStyle(color: Colors.white, fontSize: 12)),
+                )
+              : null),
+      onLongPress: () => startSelecting(c.id),
       onTap: () async {
+        if (isSelecting) {
+          toggleSelect(c.id);
+          return;
+        }
         await Navigator.of(context).push(
           MaterialPageRoute(
             builder: (_) => ChatScreen(
@@ -545,6 +575,36 @@ class _ConversationsTabState extends State<_ConversationsTab> {
         _refresh();
       },
     );
+  }
+
+  Future<void> _deleteSelected() async {
+    final count = selectedCount;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text("Supprimer $count conversation(s) ?"),
+        content: const Text("Cette action est irréversible."),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text("Annuler")),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text("Supprimer",
+                  style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    final repo = context.read<ChatRepository>();
+    for (final id in selectedIds) {
+      try {
+        await repo.deleteConversation(id);
+      } catch (_) {}
+    }
+    clearSelection();
+    _load();
   }
 }
 

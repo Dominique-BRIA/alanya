@@ -59,6 +59,11 @@ class ChatRepository {
     await _api.post("/api/conversations/$convId/read", {});
   }
 
+  /// Supprime une conversation complète.
+  Future<void> deleteConversation(String convId) async {
+    await _api.delete("/api/conversations/$convId/delete");
+  }
+
   /// Supprime un message : scope "me" (masque pour moi) ou "everyone" (efface pour tous).
   Future<void> deleteMessage(String convId, String messageId, {String scope = "me"}) async {
     await _api.delete("/api/conversations/$convId/messages/$messageId?scope=$scope");
