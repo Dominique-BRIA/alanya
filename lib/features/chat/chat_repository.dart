@@ -74,6 +74,15 @@ class ChatRepository {
     await _api.patch("/api/conversations/$convId/archive", {"archived": archived});
   }
 
+  /// F9 : Liste les conversations archivées.
+  Future<List<Conversation>> listArchived() async {
+    final data = await _api.get("/api/conversations?archived=true");
+    return ((data["conversations"] as List?) ?? [])
+        .map((c) => Conversation.fromJson(c as Map<String, dynamic>))
+        .where((c) => c.isArchived)
+        .toList();
+  }
+
   /// Supprime un message : scope "me" (masque pour moi) ou "everyone" (efface pour tous).
   Future<void> deleteMessage(String convId, String messageId, {String scope = "me"}) async {
     await _api.delete("/api/conversations/$convId/messages/$messageId?scope=$scope");

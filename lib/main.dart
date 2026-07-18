@@ -24,6 +24,7 @@ import 'features/chat/chat_repository.dart';
 import 'features/contacts/contacts_repository.dart';
 import 'features/home/home_screen.dart';
 import 'widgets/offline_banner.dart';
+import 'widgets/biometric_gate.dart';
 import 'features/media/media_repository.dart';
 import 'features/blocked/blocked_repository.dart';
 import 'features/meetings/meetings_repository.dart';
@@ -137,9 +138,11 @@ class AuthGate extends StatelessWidget {
           body: Center(child: CircularProgressIndicator()),
         );
       case AuthStatus.authenticated:
-        return OfflineBanner(
-          child: CallListener(child: const HomeScreen()),
-        );
+  	return OfflineBanner(
+    		child: BiometricGate(
+      		child: CallListener(child: const HomeScreen()),
+    		),
+  	);
       case AuthStatus.unauthenticated:
         return const WelcomeScreen();
     }
