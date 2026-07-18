@@ -140,9 +140,9 @@ class AuthGate extends StatelessWidget {
       case AuthStatus.authenticated:
   	return OfflineBanner(
     		child: BiometricGate(
-      		child: CallListener(child: const HomeScreen()),
-    		),
-  	);
+      			child: CallListener(child: const HomeScreen()),
+    			),
+ 	 );
       case AuthStatus.unauthenticated:
         return const WelcomeScreen();
     }

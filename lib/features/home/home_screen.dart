@@ -19,6 +19,7 @@ import '../../widgets/motif_background.dart';
 import '../../widgets/multi_select_mixin.dart';
 import '../account/screens/avatar_viewer_screen.dart';
 import '../account/screens/profile_screen.dart';
+import '../settings/screens/settings_screen.dart';
 import '../ai/ai_repository.dart';
 import '../auth/auth_controller.dart';
 import '../chat/chat_repository.dart';
@@ -110,26 +111,16 @@ class _HomeScreenState extends State<HomeScreen> {
           actions: [
             PopupMenuButton<String>(
               onSelected: (v) {
-                if (v == "profile") {
+                if (v == "settings") {
                   Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const ProfileScreen()),
                   );
-                } else if (v == "archived") {
-                  _showArchived();
                 } else if (v == "logout") {
                   context.read<AuthController>().logout();
                 }
               },
               itemBuilder: (_) => [
-                const PopupMenuItem(value: "profile", child: Text("Mon profil")),
-                const PopupMenuItem(
-                  value: "archived",
-                  child: ListTile(
-                    leading: Icon(Icons.archive_outlined),
-                    title: Text("Conversations archivées"),
-                    contentPadding: EdgeInsets.zero,
-                  ),
-                ),
+                const PopupMenuItem(value: "settings", child: ListTile(leading: Icon(Icons.settings_outlined), title: Text("Paramètres"), contentPadding: EdgeInsets.zero,)),
                 const PopupMenuItem(value: "logout", child: Text("Se déconnecter")),
               ],
             ),
@@ -669,86 +660,6 @@ class _ConversationsTabState extends State<_ConversationsTab>
         ),
       ),
     );
-  }
-
-  /// Affiche les conversations archivées dans un bottom sheet.
-  Future<void> _showArchived() async {
-    try {
-      final repo = context.read<ChatRepository>();
-      final data = await repo.listArchived();
-      if (!mounted) return;
-
-      showModalBottomSheet(
-        context: context,
-        isScrollControlled: true,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        builder: (ctx) => DraggableScrollableSheet(
-          initialChildSize: 0.7,
-          minChildSize: 0.4,
-          maxChildSize: 0.9,
-          expand: false,
-          builder: (_, scrollCtrl) => Column(
-            children: [
-              Container(
-                margin: const EdgeInsets.only(top: 12, bottom: 8),
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AlanyaColors.grey300,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const Padding(
-                padding: EdgeInsets.all(16),
-                child: Text("Conversations archivées",
-                    style:
-                        TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              ),
-              const Divider(height: 1),
-              Expanded(
-                child: data.isEmpty
-                    ? const Center(
-                        child: Text("Aucune conversation archivée",
-                            style: TextStyle(color: Colors.black54)))
-                    : ListView.builder(
-                        controller: scrollCtrl,
-                        itemCount: data.length,
-                        itemBuilder: (_, i) {
-                          final c = data[i];
-                          final title = c.title ?? "Discussion";
-                          return ListTile(
-                            leading: AvatarCircle(
-                              name: title,
-                              avatarUrl: c.avatarUrl,
-                              radius: 20,
-                              backgroundColor: AlanyaColors.gold,
-                            ),
-                            title: Text(title),
-                            trailing: TextButton(
-                              onPressed: () async {
-                                await repo.archiveConversation(c.id, false);
-                                Navigator.pop(ctx);
-                                _load();
-                              },
-                              child: const Text("Désarchiver"),
-                            ),
-                          );
-                        },
-                      ),
-              ),
-            ],
-          ),
-        ),
-      );
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Impossible de charger les archivées")),
-        );
-      }
-    }
   }
 
   Future<void> _deleteSelected() async {
