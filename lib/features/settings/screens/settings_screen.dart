@@ -32,12 +32,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadBiometric() async {
     final enabled = await BiometricService.isEnabled();
-    final supported = await BiometricService.isDeviceSupported();
-    final canCheck = await BiometricService.canCheckBiometrics();
+    final available = await BiometricService.isAvailable();
     if (mounted) {
       setState(() {
         _biometricEnabled = enabled;
-        _biometricAvailable = supported || canCheck;
+        _biometricAvailable = available;
         _loadingBiometric = false;
       });
     }
@@ -52,7 +51,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
 
     if (value) {
-      // Teste l'authentification avant d'activer
       final ok = await BiometricService.authenticate();
       if (!ok || !mounted) return;
     }
@@ -62,9 +60,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() => _biometricEnabled = value);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(value
-              ? "Biométrie activée"
-              : "Biométrie désactivée"),
+          content: Text(value ? "Biométrie activée" : "Biométrie désactivée"),
         ),
       );
     }
@@ -74,7 +70,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) {
     final user = context.watch<AuthController>().user;
     final localeCtrl = context.watch<LocaleController>();
-    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
       appBar: backAppBar(context, "Paramètres"),
@@ -84,19 +79,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // SECTION : PROFIL
           // ================================================================
           _sectionHeader("Profil"),
-          // Carte profil
-          Container(
-            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF1E1B18) : Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: isDark
-                    ? const Color(0xFF2A2520)
-                    : AlanyaColors.grey200,
-                width: 0.5,
-              ),
-            ),
+          _settingsCard(
             child: ListTile(
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -111,11 +94,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       fontWeight: FontWeight.bold, fontSize: 16)),
               subtitle: Text(
                 "Numéro Alanya : ${user?.publicNumber ?? '—'}",
-                style: TextStyle(
-                    fontSize: 13, color: AlanyaColors.grey500),
+                style: TextStyle(fontSize: 13, color: AlanyaColors.grey500),
               ),
-              trailing:
-                  const Icon(Icons.chevron_right, color: Colors.grey),
+              trailing: const Icon(Icons.chevron_right, color: Colors.grey),
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const ProfileScreen()),
               ),
@@ -132,9 +113,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: "Verrouillage biométrique",
             subtitle: _loadingBiometric
                 ? "Chargement..."
-                : (_biometricEnabled
-                    ? "Activé — l'app se verrouille avec votre empreinte"
-                    : "Désactivé — déverrouiller sans authentification"),
+                : (!_biometricAvailable
+                    ? "Non disponible sur cet appareil"
+                    : (_biometricEnabled
+                        ? "Activé"
+                        : "Désactivé")),
             trailing: _loadingBiometric
                 ? const SizedBox(
                     width: 20,
@@ -142,7 +125,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     child: CircularProgressIndicator(strokeWidth: 2))
                 : Switch(
                     value: _biometricEnabled,
-                    onChanged: _toggleBiometric,
+                    onChanged: _biometricAvailable ? _toggleBiometric : null,
                     activeColor: AlanyaColors.terracotta,
                   ),
           ),
@@ -166,32 +149,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
             iconColor: AlanyaColors.forest,
             title: tr(context, 'language'),
             subtitle: _currentLanguageName(localeCtrl),
-            trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-            onTap: () => _showLanguagePicker(localeCtrl),
-          ),
-          _settingsTile(
-            icon: Icons.notifications_outlined,
-            iconColor: AlanyaColors.gold,
-            title: "Notifications",
-            subtitle: "Gérer les notifications push",
-            trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text("Bientôt disponible")),
-              );
-            },
-          ),
-          _settingsTile(
-            icon: Icons.privacy_tip_outlined,
-            iconColor: AlanyaColors.chocolate,
-            title: "Confidentialité",
-            subtitle: "Paramètres de confidentialité",
-            trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text("Bientôt disponible")),
-              );
-            },
+            trailing: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: LocaleController.supported
+                        .any((l) => l.code == localeCtrl.languageCode)
+                    ? localeCtrl.languageCode
+                    : 'fr',
+                icon: Icon(Icons.chevron_right,
+                    color: AlanyaColors.grey400, size: 20),
+                items: LocaleController.supported.map((l) {
+                  return DropdownMenuItem(
+                    value: l.code,
+                    child: Text('${l.flag}  ${l.nativeName}',
+                        style: const TextStyle(fontSize: 14)),
+                  );
+                }).toList(),
+                onChanged: (code) {
+                  if (code != null) localeCtrl.setLocale(code);
+                },
+              ),
+            ),
           ),
 
           // ================================================================
@@ -206,7 +183,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             trailing: const Icon(Icons.chevron_right, color: Colors.grey),
             onTap: () => _showAbout(),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 24),
           // Bouton déconnexion
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -268,6 +245,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Widget _settingsCard({required Widget child}) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AlanyaColors.grey200, width: 0.5),
+      ),
+      child: child,
+    );
+  }
+
   Widget _settingsTile({
     required IconData icon,
     required Color iconColor,
@@ -278,10 +267,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
-      ),
       child: ListTile(
         leading: Container(
           width: 40,
@@ -310,55 +295,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return match.isNotEmpty ? match.first.nativeName : 'Français';
   }
 
-  void _showLanguagePicker(LocaleController localeCtrl) {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              margin: const EdgeInsets.only(top: 12, bottom: 8),
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AlanyaColors.grey300,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text("Choisir la langue",
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            ),
-            const Divider(height: 1),
-            ...LocaleController.supported.map((l) {
-              final selected = localeCtrl.languageCode == l.code;
-              return ListTile(
-                leading: Text(l.flag, style: const TextStyle(fontSize: 22)),
-                title: Text(l.nativeName,
-                    style: TextStyle(
-                        fontWeight:
-                            selected ? FontWeight.bold : FontWeight.normal)),
-                trailing: selected
-                    ? Icon(Icons.check, color: AlanyaColors.terracotta)
-                    : null,
-                onTap: () {
-                  localeCtrl.setLocale(l.code);
-                  Navigator.pop(ctx);
-                },
-              );
-            }),
-            const SizedBox(height: 16),
-          ],
-        ),
-      ),
-    );
-  }
-
   void _showAbout() {
     showDialog(
       context: context,
@@ -367,17 +303,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [AlanyaColors.terracotta, AlanyaColors.terracottaDark],
+            // Logo de l'app (même que l'icône)
+            Image.asset(
+              "assets/images/app_icon.png",
+              width: 72,
+              height: 72,
+              errorBuilder: (_, __, ___) => Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [AlanyaColors.terracotta, AlanyaColors.terracottaDark],
+                  ),
+                  borderRadius: BorderRadius.circular(18),
                 ),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: const Center(
-                child: Icon(Icons.chat_bubble, size: 32, color: Colors.white),
+                child: const Center(
+                  child: Icon(Icons.chat_bubble, size: 36, color: Colors.white),
+                ),
               ),
             ),
             const SizedBox(height: 16),

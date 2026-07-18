@@ -3,8 +3,6 @@ import 'package:local_auth/local_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Service biométrie local — gère l'authentification par empreinte/visage.
-/// La préférence est stockée localement sur l'appareil (SharedPreferences).
-/// La vérification utilise le package `local_auth` (Secure Enclave de l'OS).
 class BiometricService {
   static const _prefKey = 'biometric_enabled';
   static final _auth = LocalAuthentication();
@@ -18,7 +16,7 @@ class BiometricService {
     }
   }
 
-  /// Vérifie si la biométrie est disponible (empreinte ou visage configuré).
+  /// Vérifie si la biométrie est disponible.
   static Future<bool> canCheckBiometrics() async {
     try {
       final available = await _auth.getAvailableBiometrics();
@@ -28,31 +26,50 @@ class BiometricService {
     }
   }
 
-  /// Vérifie si la biométrie est activée dans les préférences locales.
+  /// Vérifie si la biométrie est activée dans les préférences.
   static Future<bool> isEnabled() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_prefKey) ?? false;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getBool(_prefKey) ?? false;
+    } catch (_) {
+      return false;
+    }
   }
 
-  /// Active ou désactive la biométrie dans les préférences locales.
+  /// Active ou désactive la biométrie.
   static Future<void> setEnabled(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_prefKey, enabled);
   }
 
   /// Demande l'authentification biométrique.
-  /// Retourne `true` si l'utilisateur s'est authentifié avec succès.
   static Future<bool> authenticate() async {
     try {
+      final canCheck = await canCheckBiometrics();
+      if (!canCheck) return false;
+
       return await _auth.authenticate(
         localizedReason: 'Déverrouiller Alanya',
         options: const AuthenticationOptions(
           stickyAuth: true,
-          biometricOnly: true,
+          biometricOnly: false, // autorise le PIN en fallback
           useErrorDialogs: true,
         ),
       );
     } on PlatformException catch (_) {
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Vérifie si l'appareil peut utiliser la biométrie (supporté + configuré).
+  static Future<bool> isAvailable() async {
+    try {
+      final supported = await isDeviceSupported();
+      final canCheck = await canCheckBiometrics();
+      return supported || canCheck;
+    } catch (_) {
       return false;
     }
   }

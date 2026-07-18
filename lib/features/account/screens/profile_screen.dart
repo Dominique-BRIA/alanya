@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/api_client.dart';
-import '../../../core/locale_controller.dart';
 import '../../../core/server_config.dart';
 import '../../../core/token_storage.dart';
 import '../../../l10n/app_localizations.dart';
@@ -15,7 +14,6 @@ import '../../../widgets/auth_network_image.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../../../widgets/motif_background.dart';
 import '../../auth/auth_controller.dart';
-import '../../blocked/screens/blocked_users_screen.dart';
 import '../../media/media_repository.dart';
 import '../account_repository.dart';
 
@@ -291,31 +289,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
               const SizedBox(height: 24),
-              // --- Utilisateurs bloqués ---
-              Container(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AlanyaColors.sand),
-                ),
-                child: ListTile(
-                  leading: const Icon(Icons.block, color: Colors.red),
-                  title: const Text(
-                    "Utilisateurs bloqués",
-                    style: TextStyle(fontWeight: FontWeight.w500),
-                  ),
-                  subtitle: const Text(
-                    "Gérer les personnes que tu as bloquées",
-                    style: TextStyle(fontSize: 12, color: Colors.black54),
-                  ),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                        builder: (_) => const BlockedUsersScreen()),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 24),
+              
               OutlinedButton.icon(
                 onPressed: () => context.read<AuthController>().logout(),
                 icon: const Icon(Icons.logout),
