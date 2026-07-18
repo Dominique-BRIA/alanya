@@ -11,6 +11,8 @@ class AuthUser {
   final int typeCompte;
   final int isOnline;
   final DateTime? lastSeen;
+  final int exclus;
+  final int biometric;
 
   AuthUser({
     required this.id,
@@ -24,6 +26,8 @@ class AuthUser {
     this.typeCompte = 0,
     this.isOnline = 0,
     this.lastSeen,
+    this.exclus = 0,
+    this.biometric = 0,
   });
 
   AuthUser copyWith({
@@ -35,6 +39,8 @@ class AuthUser {
     int? typeCompte,
     int? isOnline,
     DateTime? lastSeen,
+    int? exclus,
+    int? biometric,
   }) =>
       AuthUser(
         id: id,
@@ -48,6 +54,8 @@ class AuthUser {
         typeCompte: typeCompte ?? this.typeCompte,
         isOnline: isOnline ?? this.isOnline,
         lastSeen: lastSeen ?? this.lastSeen,
+        exclus: exclus ?? this.exclus,
+        biometric: biometric ?? this.biometric,
       );
 
   factory AuthUser.fromJson(Map<String, dynamic> json) => AuthUser(
@@ -62,5 +70,7 @@ class AuthUser {
         typeCompte: (json["typeCompte"] as num?)?.toInt() ?? 0,
         isOnline: (json["isOnline"] as num?)?.toInt() ?? 0,
         lastSeen: json["lastSeen"] != null ? DateTime.tryParse(json["lastSeen"] as String) : null,
+        exclus: (json["exclus"] as num?)?.toInt() ?? 0,
+        biometric: (json["biometric"] as num?)?.toInt() ?? 0,
       );
 }
