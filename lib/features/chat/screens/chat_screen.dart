@@ -539,40 +539,54 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
-    // 4. Scroll vers le message par index
-    //    Utilise _scrollCtrl pour positionner, puis attend que le widget soit
-    //    rendu pour faire le highlight.
+    // 4. Scroll progressif : commence par scroller vers une position estimée
+    //    pour forcer le ListView à construire les widgets autour de la cible.
     if (!_scrollCtrl.hasClients) return;
 
-    // Estime la position cible (approximative, sera corrigée après)
-    final itemHeight = 80.0; // hauteur moyenne d'une bulle
-    final targetOffset = (foundIdx * itemHeight).clamp(
-      0.0,
-      _scrollCtrl.position.maxScrollExtent,
-    );
+    // Estimation basée sur la position relative dans la liste
+    final maxScroll = _scrollCtrl.position.maxScrollExtent;
+    final viewport = _scrollCtrl.position.viewportDimension;
+    final ratio = foundIdx / _messages.length;
+    final estimatedOffset = (ratio * maxScroll).clamp(0.0, maxScroll);
 
-    _scrollCtrl.animateTo(
-      targetOffset,
-      duration: const Duration(milliseconds: 400),
-      curve: Curves.easeInOut,
-    );
+    _scrollCtrl.jumpTo(estimatedOffset);
 
-    // 5. Attend que le widget soit rendu, puis scroll précis + highlight
-    await Future.delayed(const Duration(milliseconds: 500));
+    // 5. Attend que le widget soit construit (le ListView rend les items visibles)
+    await Future.delayed(const Duration(milliseconds: 300));
     if (!mounted) return;
 
-    final key = _messageKeys[id];
-    final ctx = key?.currentContext;
-    if (ctx != null) {
-      Scrollable.ensureVisible(ctx,
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeInOut,
-        alignment: 0.4,
+    // 6. Essaie de trouver le widget et de scroller précisément
+    var key = _messageKeys[id];
+    var ctx = key?.currentContext;
+
+    if (ctx == null) {
+      // Widget pas encore construit → scroll un peu plus et réessaie
+      _scrollCtrl.jumpTo(
+        (estimatedOffset + 200).clamp(0.0, maxScroll),
       );
+      await Future.delayed(const Duration(milliseconds: 300));
+      if (!mounted) return;
+      key = _messageKeys[id];
+      ctx = key?.currentContext;
     }
 
-    // 6. Highlight temporaire 2 secondes
-    _highlightMessage(id);
+    if (ctx != null) {
+      // Widget trouvé → scroll précis
+      Scrollable.ensureVisible(ctx,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+        alignment: 0.3,
+      );
+      _highlightMessage(id);
+    } else {
+      // Dernier essai : scroll doux vers la position estimée et highlight
+      _scrollCtrl.animateTo(
+        estimatedOffset,
+        duration: const Duration(milliseconds: 500),
+        curve: Curves.easeInOut,
+      );
+      _highlightMessage(id);
+    }
   }
 
   /// Highlight temporaire d'un message (2 secondes).
