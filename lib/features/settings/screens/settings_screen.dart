@@ -57,19 +57,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _toggleBiometric(bool value) async {
     if (value) {
       if (!_biometricAvailable) {
-        _snack("Biométrie non disponible. Configurez l'empreinte ou le visage dans les paramètres de votre appareil.");
+        _snack("Biométrie non disponible sur cet appareil");
         return;
       }
-      final ok = await BiometricService.authenticate(
-        reason: 'Activer le verrouillage biométrique',
-      );
-      if (!ok || !mounted) {
-        if (mounted) _snack("Authentification annulée");
-        return;
+      try {
+        final ok = await BiometricService.authenticate(
+          reason: 'Activer le verrouillage biométrique',
+        );
+        if (!mounted) return;
+        if (ok) {
+          await BiometricService.setEnabled(true);
+          setState(() => _biometricEnabled = true);
+          _snack("Verrouillage biométrique activé");
+        } else {
+          _snack("Authentification annulée ou échouée");
+        }
+      } catch (e) {
+        if (mounted) {
+          showDialog(
+            context: context,
+            builder: (_) => AlertDialog(
+              title: const Text("Erreur biométrie"),
+              content: Text("Détail: $e"),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text("OK")),
+              ],
+            ),
+          );
+        }
       }
-      await BiometricService.setEnabled(true);
-      setState(() => _biometricEnabled = true);
-      _snack("Verrouillage biométrique activé ($_biometricType)");
     } else {
       await BiometricService.setEnabled(false);
       setState(() => _biometricEnabled = false);
