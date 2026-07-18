@@ -60,10 +60,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _snack("Biométrie non disponible sur cet appareil");
         return;
       }
+
+      // Affiche un dialog d'attente AVANT de lancer l'auth
+      // pour que l'utilisateur sache qu'un dialogue biométrique va apparaître
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const Center(
+          child: Card(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text("Vérification biométrique..."),
+                  SizedBox(height: 8),
+                  Text(
+                    "Placez votre doigt sur le capteur",
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
       try {
+        // Petit délai pour que le dialog s'affiche
+        await Future.delayed(const Duration(milliseconds: 500));
+
         final ok = await BiometricService.authenticate(
           reason: 'Activer le verrouillage biométrique',
         );
+
+        // Ferme le dialog d'attente
+        if (mounted) Navigator.pop(context);
+
         if (!mounted) return;
         if (ok) {
           await BiometricService.setEnabled(true);
@@ -73,6 +108,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _snack("Authentification annulée ou échouée");
         }
       } catch (e) {
+        // Ferme le dialog d'attente
+        if (mounted) Navigator.pop(context);
         if (mounted) {
           showDialog(
             context: context,
