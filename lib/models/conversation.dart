@@ -69,6 +69,8 @@ class Conversation {
   final LastMessage? lastMessage;
   final int unread;
   final DateTime updatedAt;
+  final bool isPinned;
+  final bool isArchived;
 
   Conversation({
     required this.id,
@@ -79,6 +81,8 @@ class Conversation {
     required this.lastMessage,
     required this.unread,
     required this.updatedAt,
+    this.isPinned = false,
+    this.isArchived = false,
   });
 
   Map<String, String> get memberNames => {
@@ -98,5 +102,7 @@ class Conversation {
             : LastMessage.fromJson(j["lastMessage"] as Map<String, dynamic>),
         unread: (j["unread"] as num?)?.toInt() ?? 0,
         updatedAt: DateTime.parse(j["updatedAt"] as String),
+        isPinned: (j["isPinned"] as bool?) ?? false,
+        isArchived: (j["isArchived"] as bool?) ?? false,
       );
 }

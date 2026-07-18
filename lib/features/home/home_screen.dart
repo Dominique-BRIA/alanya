@@ -533,7 +533,20 @@ class _ConversationsTabState extends State<_ConversationsTab>
                   radius: 22,
                   backgroundColor: AlanyaColors.gold,
                 )),
-      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(title,
+                style: const TextStyle(fontWeight: FontWeight.w600)),
+          ),
+          // F8 : badge épinglé
+          if (c.isPinned)
+            Padding(
+              padding: const EdgeInsets.only(left: 4),
+              child: Icon(Icons.push_pin, size: 14, color: AlanyaColors.grey400),
+            ),
+        ],
+      ),
       subtitle: Text(
         c.isGroup && c.members.isNotEmpty
             ? "${c.members.length} membres · $preview"
@@ -551,7 +564,9 @@ class _ConversationsTabState extends State<_ConversationsTab>
                       style: const TextStyle(color: Colors.white, fontSize: 12)),
                 )
               : null),
-      onLongPress: () => startSelecting(c.id),
+      onLongPress: isSelecting
+          ? null
+          : () => _showConversationOptions(c),
       onTap: () async {
         if (isSelecting) {
           toggleSelect(c.id);
@@ -574,6 +589,75 @@ class _ConversationsTabState extends State<_ConversationsTab>
         );
         _refresh();
       },
+    );
+  }
+
+  /// Menu contextuel d'une conversation (long press).
+  void _showConversationOptions(Conversation c) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(c.title ?? "Conversation",
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: Icon(
+                c.isPinned ? Icons.push_pin_outlined : Icons.push_pin,
+                color: AlanyaColors.terracotta,
+              ),
+              title: Text(c.isPinned ? "Désépingler" : "Épingler"),
+              onTap: () async {
+                Navigator.pop(ctx);
+                await context.read<ChatRepository>().pinConversation(c.id, !c.isPinned);
+                _load();
+              },
+            ),
+            ListTile(
+              leading: Icon(
+                c.isArchived ? Icons.unarchive : Icons.archive_outlined,
+                color: AlanyaColors.chocolate,
+              ),
+              title: Text(c.isArchived ? "Désarchiver" : "Archiver"),
+              onTap: () async {
+                Navigator.pop(ctx);
+                await context.read<ChatRepository>().archiveConversation(c.id, !c.isArchived);
+                _load();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: Colors.red),
+              title: const Text("Supprimer", style: TextStyle(color: Colors.red)),
+              onTap: () async {
+                Navigator.pop(ctx);
+                final ok = await showDialog<bool>(
+                  context: context,
+                  builder: (_) => AlertDialog(
+                    title: const Text("Supprimer cette conversation ?"),
+                    content: const Text("Cette action est irréversible."),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Annuler")),
+                      TextButton(onPressed: () => Navigator.pop(context, true), child: const Text("Supprimer", style: TextStyle(color: Colors.red))),
+                    ],
+                  ),
+                );
+                if (ok == true) {
+                  await context.read<ChatRepository>().deleteConversation(c.id);
+                  _load();
+                }
+              },
+            ),
+          ],
+        ),
+      ),
     );
   }
 

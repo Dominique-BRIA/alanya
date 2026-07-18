@@ -64,6 +64,16 @@ class ChatRepository {
     await _api.delete("/api/conversations/$convId/delete");
   }
 
+  /// F8 : Épingler/désépingler une conversation.
+  Future<void> pinConversation(String convId, bool pinned) async {
+    await _api.patch("/api/conversations/$convId/pin", {"pinned": pinned});
+  }
+
+  /// F9 : Archiver/désarchiver une conversation.
+  Future<void> archiveConversation(String convId, bool archived) async {
+    await _api.patch("/api/conversations/$convId/archive", {"archived": archived});
+  }
+
   /// Supprime un message : scope "me" (masque pour moi) ou "everyone" (efface pour tous).
   Future<void> deleteMessage(String convId, String messageId, {String scope = "me"}) async {
     await _api.delete("/api/conversations/$convId/messages/$messageId?scope=$scope");
