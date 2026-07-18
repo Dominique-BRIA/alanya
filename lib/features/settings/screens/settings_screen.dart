@@ -112,30 +112,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // SÉCURITÉ
           // ================================================================
           _sectionHeader("Sécurité"),
-          // Biométrie — toggle fonctionnel
-          _tile(
+          // Biométrie — bouton tactile simple
+          _settingsTile(
             icon: _biometricEnabled ? Icons.fingerprint : Icons.fingerprint_outlined,
             iconColor: _biometricEnabled
                 ? AlanyaColors.forest
-                : AlanyaColors.terracotta,
+                : AlanyaColors.grey400,
             title: "Verrouillage biométrique",
             subtitle: _loadingBiometric
                 ? "Chargement..."
                 : (!_biometricAvailable
                     ? "Non disponible sur cet appareil"
                     : (_biometricEnabled
-                        ? "Activé ($_biometricType)"
-                        : "Désactivé — $_biometricType disponible")),
+                        ? "Activé — $_biometricType (appuyer pour désactiver)"
+                        : "Désactivé (appuyer pour activer)")),
             trailing: _loadingBiometric
                 ? const SizedBox(
                     width: 20,
                     height: 20,
                     child: CircularProgressIndicator(strokeWidth: 2))
-                : Switch.adaptive(
-                    value: _biometricEnabled,
-                    onChanged: _biometricAvailable ? _toggleBiometric : null,
-                    activeColor: AlanyaColors.forest,
+                : Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: _biometricEnabled
+                          ? AlanyaColors.forest.withValues(alpha: 0.1)
+                          : AlanyaColors.grey200,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      _biometricEnabled ? "ON" : "OFF",
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: _biometricEnabled
+                            ? AlanyaColors.forest
+                            : AlanyaColors.grey500,
+                      ),
+                    ),
                   ),
+            onTap: _loadingBiometric
+                ? null
+                : () => _toggleBiometric(!_biometricEnabled),
           ),
           // Utilisateurs bloqués
           _tile(
