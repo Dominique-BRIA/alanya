@@ -10,6 +10,7 @@ import '../../../core/server_config.dart';
 import '../../../core/token_storage.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../../core/locale_controller.dart';
 import '../../../widgets/auth_network_image.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../../../widgets/motif_background.dart';
