@@ -143,6 +143,7 @@ class AuthGate extends StatelessWidget {
       			child: CallListener(child: const HomeScreen()),
     			),
  	 );
+ 	 
       case AuthStatus.unauthenticated:
         return const WelcomeScreen();
     }

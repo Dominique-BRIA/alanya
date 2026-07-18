@@ -113,7 +113,7 @@ class _HomeScreenState extends State<HomeScreen> {
               onSelected: (v) {
                 if (v == "settings") {
                   Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const ProfileScreen()),
+                    MaterialPageRoute(builder: (_) => const SettingsScreen()),
                   );
                 } else if (v == "logout") {
                   context.read<AuthController>().logout();
