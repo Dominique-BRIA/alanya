@@ -10,7 +10,6 @@ import '../../../core/server_config.dart';
 import '../../../core/token_storage.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../theme/alanya_theme.dart';
-import '../../../core/locale_controller.dart';
 import '../../../widgets/auth_network_image.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../../../widgets/motif_background.dart';
@@ -251,46 +250,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(children: [
-                      const Icon(Icons.language, color: AlanyaColors.forest),
-                      const SizedBox(width: 10),
-                      Text(
-                        tr(context, 'language_settings'),
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w700, fontSize: 15),
-                      ),
-                    ]),
-                    const SizedBox(height: 8),
-                    Text(
-                      tr(context, 'language_description'),
-                      style: const TextStyle(color: Colors.black54, fontSize: 13),
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      value: LocaleController.supported
-                              .any((l) => l.code == localeCtrl.languageCode)
-                          ? localeCtrl.languageCode
-                          : 'fr',
-                      decoration: InputDecoration(
-                        border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12)),
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
-                      ),
-                      items: LocaleController.supported.map((l) {
-                        return DropdownMenuItem(
-                          value: l.code,
-                          child: Text('${l.flag}  ${l.nativeName}'),
-                        );
-                      }).toList(),
-                      onChanged: (code) {
-                        if (code != null) localeCtrl.setLocale(code);
-                      },
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 24),
-              
               OutlinedButton.icon(
                 onPressed: () => context.read<AuthController>().logout(),
                 icon: const Icon(Icons.logout),

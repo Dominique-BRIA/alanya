@@ -11,7 +11,7 @@ import '../../auth/auth_controller.dart';
 import '../../account/screens/profile_screen.dart';
 import '../../blocked/screens/blocked_users_screen.dart';
 
-/// Écran Paramètres complet — profil, biométrie, langue, sécurité, déconnexion.
+/// Écran Paramètres complet.
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -22,6 +22,7 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _biometricEnabled = false;
   bool _biometricAvailable = false;
+  String _biometricType = "Chargement...";
   bool _loadingBiometric = true;
 
   @override
@@ -33,37 +34,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _loadBiometric() async {
     final enabled = await BiometricService.isEnabled();
     final available = await BiometricService.isAvailable();
+    final desc = await BiometricService.getBiometricDescription();
     if (mounted) {
       setState(() {
         _biometricEnabled = enabled;
         _biometricAvailable = available;
+        _biometricType = desc;
         _loadingBiometric = false;
       });
     }
   }
 
   Future<void> _toggleBiometric(bool value) async {
-    if (value && !_biometricAvailable) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Biométrie non disponible sur cet appareil")),
-      );
-      return;
-    }
-
     if (value) {
-      final ok = await BiometricService.authenticate();
-      if (!ok || !mounted) return;
-    }
-
-    await BiometricService.setEnabled(value);
-    if (mounted) {
-      setState(() => _biometricEnabled = value);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(value ? "Biométrie activée" : "Biométrie désactivée"),
-        ),
+      // Active : teste l'auth d'abord
+      if (!_biometricAvailable) {
+        _snack("Biométrie non disponible sur cet appareil");
+        return;
+      }
+      final ok = await BiometricService.authenticate(
+        reason: 'Activer le verrouillage biométrique',
       );
+      if (!ok || !mounted) return;
+      await BiometricService.setEnabled(true);
+      setState(() => _biometricEnabled = true);
+      _snack("Verrouillage biométrique activé ($_biometricType)");
+    } else {
+      // Désactive
+      await BiometricService.setEnabled(false);
+      setState(() => _biometricEnabled = false);
+      _snack("Verrouillage biométrique désactivé");
     }
+  }
+
+  void _snack(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   @override
@@ -76,10 +81,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         children: [
           // ================================================================
-          // SECTION : PROFIL
+          // PROFIL
           // ================================================================
           _sectionHeader("Profil"),
-          _settingsCard(
+          _card(
             child: ListTile(
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -104,32 +109,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
 
           // ================================================================
-          // SECTION : SÉCURITÉ
+          // SÉCURITÉ
           // ================================================================
           _sectionHeader("Sécurité"),
-          _settingsTile(
-            icon: Icons.fingerprint,
-            iconColor: AlanyaColors.terracotta,
+          // Biométrie — toggle fonctionnel
+          _tile(
+            icon: _biometricEnabled ? Icons.fingerprint : Icons.fingerprint_outlined,
+            iconColor: _biometricEnabled
+                ? AlanyaColors.forest
+                : AlanyaColors.terracotta,
             title: "Verrouillage biométrique",
             subtitle: _loadingBiometric
                 ? "Chargement..."
                 : (!_biometricAvailable
                     ? "Non disponible sur cet appareil"
                     : (_biometricEnabled
-                        ? "Activé"
-                        : "Désactivé")),
+                        ? "Activé ($_biometricType)"
+                        : "Désactivé — $_biometricType disponible")),
             trailing: _loadingBiometric
                 ? const SizedBox(
                     width: 20,
                     height: 20,
                     child: CircularProgressIndicator(strokeWidth: 2))
-                : Switch(
+                : Switch.adaptive(
                     value: _biometricEnabled,
                     onChanged: _biometricAvailable ? _toggleBiometric : null,
-                    activeColor: AlanyaColors.terracotta,
+                    activeColor: AlanyaColors.forest,
                   ),
           ),
-          _settingsTile(
+          // Utilisateurs bloqués
+          _tile(
             icon: Icons.block,
             iconColor: Colors.red.shade400,
             title: "Utilisateurs bloqués",
@@ -141,10 +150,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
 
           // ================================================================
-          // SECTION : PRÉFÉRENCES
+          // PRÉFÉRENCES
           // ================================================================
           _sectionHeader("Préférences"),
-          _settingsTile(
+          // Langue — dropdown fonctionnel
+          _tile(
             icon: Icons.language,
             iconColor: AlanyaColors.forest,
             title: tr(context, 'language'),
@@ -155,7 +165,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         .any((l) => l.code == localeCtrl.languageCode)
                     ? localeCtrl.languageCode
                     : 'fr',
-                icon: Icon(Icons.chevron_right,
+                icon: Icon(Icons.expand_more,
                     color: AlanyaColors.grey400, size: 20),
                 items: LocaleController.supported.map((l) {
                   return DropdownMenuItem(
@@ -172,10 +182,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
 
           // ================================================================
-          // SECTION : COMPTE
+          // COMPTE
           // ================================================================
           _sectionHeader("Compte"),
-          _settingsTile(
+          _tile(
             icon: Icons.info_outline,
             iconColor: AlanyaColors.grey500,
             title: "À propos d'Alanya",
@@ -184,7 +194,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onTap: () => _showAbout(),
           ),
           const SizedBox(height: 24),
-          // Bouton déconnexion
+          // Déconnexion
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: OutlinedButton.icon(
@@ -233,19 +243,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget _sectionHeader(String title) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
-      child: Text(
-        title.toUpperCase(),
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w700,
-          color: AlanyaColors.grey500,
-          letterSpacing: 1.2,
-        ),
-      ),
+      child: Text(title.toUpperCase(),
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: AlanyaColors.grey500,
+            letterSpacing: 1.2,
+          )),
     );
   }
 
-  Widget _settingsCard({required Widget child}) {
+  Widget _card({required Widget child}) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       decoration: BoxDecoration(
@@ -257,7 +265,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _settingsTile({
+  Widget _tile({
     required IconData icon,
     required Color iconColor,
     required String title,
@@ -303,7 +311,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Logo de l'app (même que l'icône)
             Image.asset(
               "assets/images/app_icon.png",
               width: 72,
@@ -332,15 +339,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
             Text("Version 1.0.0",
                 style: TextStyle(color: AlanyaColors.grey500)),
             const SizedBox(height: 8),
-            Text(
-              "Application de messagerie instantanée",
-              style: TextStyle(color: AlanyaColors.grey500, fontSize: 13),
-            ),
+            Text("Application de messagerie instantanée",
+                style: TextStyle(color: AlanyaColors.grey500, fontSize: 13)),
             const SizedBox(height: 16),
-            Text(
-              "© 2026 Dominique BRIA",
-              style: TextStyle(color: AlanyaColors.grey400, fontSize: 11),
-            ),
+            Text("© 2026 Dominique BRIA",
+                style: TextStyle(color: AlanyaColors.grey400, fontSize: 11)),
           ],
         ),
         actions: [

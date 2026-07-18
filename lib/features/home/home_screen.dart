@@ -180,6 +180,7 @@ class _ConversationsTab extends StatefulWidget {
 class _ConversationsTabState extends State<_ConversationsTab>
     with MultiSelectMixin<_ConversationsTab> {
   List<Conversation>? _convs;
+  List<Conversation>? _archivedConvs;
   bool _error = false;
   Timer? _pollTimer;
   StreamSubscription<Map<String, dynamic>>? _rtSub;
@@ -307,6 +308,12 @@ class _ConversationsTabState extends State<_ConversationsTab>
       if (mounted) setState(() => _convs = convs);
       await ConversationCache.putAll(convs);
       if (mounted) context.read<ConnectivityService>().markHttpSucceeded();
+
+      // Charge les archivées en arrière-plan
+      try {
+        final archived = await context.read<ChatRepository>().listArchived();
+        if (mounted) setState(() => _archivedConvs = archived);
+      } catch (_) {}
     } catch (_) {
       if (mounted) context.read<ConnectivityService>().markHttpFailed();
     }
@@ -493,10 +500,46 @@ class _ConversationsTabState extends State<_ConversationsTab>
       ]);
     }
 
-    return ListView.separated(
-      itemCount: convs.length,
-      separatorBuilder: (_, __) => const Divider(height: 1),
-      itemBuilder: (_, i) => _tile(convs[i]),
+    // WhatsApp-style : section archivées en haut si présentes
+    final archivedCount = _archivedConvs?.length ?? 0;
+
+    return ListView(
+      children: [
+        // Bouton "Conversations archivées" style WhatsApp
+        if (archivedCount > 0 && _searchQuery.isEmpty)
+          ListTile(
+            leading: Icon(Icons.archive_outlined,
+                color: AlanyaColors.grey500, size: 24),
+            title: Text(
+              "Conversations archivées",
+              style: TextStyle(
+                fontWeight: FontWeight.w500,
+                color: AlanyaColors.grey500,
+                fontSize: 15,
+              ),
+            ),
+            trailing: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: AlanyaColors.terracotta.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                "$archivedCount",
+                style: TextStyle(
+                  color: AlanyaColors.terracotta,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+            onTap: _showArchived,
+          ),
+        if (archivedCount > 0 && _searchQuery.isEmpty)
+          const Divider(height: 1),
+        // Liste des conversations
+        ...convs.map((c) => _tile(c)),
+      ],
     );
   }
 
@@ -655,6 +698,89 @@ class _ConversationsTabState extends State<_ConversationsTab>
                   _load();
                 }
               },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Affiche les conversations archivées dans un bottom sheet.
+  Future<void> _showArchived() async {
+    if (_archivedConvs == null || _archivedConvs!.isEmpty) return;
+
+    final repo = context.read<ChatRepository>();
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        minChildSize: 0.3,
+        maxChildSize: 0.85,
+        expand: false,
+        builder: (_, scrollCtrl) => Column(
+          children: [
+            Container(
+              margin: const EdgeInsets.only(top: 12, bottom: 8),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AlanyaColors.grey300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  const Text("Conversations archivées",
+                      style:
+                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const Spacer(),
+                  Text("${_archivedConvs!.length}",
+                      style: TextStyle(color: AlanyaColors.grey500)),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: ListView.builder(
+                controller: scrollCtrl,
+                itemCount: _archivedConvs!.length,
+                itemBuilder: (_, i) {
+                  final c = _archivedConvs![i];
+                  final title = c.title ?? "Discussion";
+                  return ListTile(
+                    leading: AvatarCircle(
+                      name: title,
+                      avatarUrl: c.avatarUrl,
+                      radius: 20,
+                      backgroundColor: AlanyaColors.gold,
+                    ),
+                    title: Text(title,
+                        style: const TextStyle(fontWeight: FontWeight.w500)),
+                    subtitle: Text(
+                      c.lastMessage?.content ?? "—",
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 12, color: AlanyaColors.grey500),
+                    ),
+                    trailing: TextButton(
+                      onPressed: () async {
+                        await repo.archiveConversation(c.id, false);
+                        Navigator.pop(ctx);
+                        _load();
+                      },
+                      child: const Text("Désarchiver"),
+                    ),
+                  );
+                },
+              ),
             ),
           ],
         ),

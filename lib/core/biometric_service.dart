@@ -1,5 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
+import 'package:local_auth/error_codes.dart' as auth_error;
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Service biométrie local — gère l'authentification par empreinte/visage.
@@ -16,11 +17,22 @@ class BiometricService {
     }
   }
 
-  /// Vérifie si la biométrie est disponible.
+  /// Vérifie si la biométrie est disponible (empreinte ou visage configuré).
   static Future<bool> canCheckBiometrics() async {
     try {
       final available = await _auth.getAvailableBiometrics();
       return available.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Vérifie si l'appareil peut utiliser la biométrie (supporté + configuré).
+  static Future<bool> isAvailable() async {
+    try {
+      final supported = await isDeviceSupported();
+      final canCheck = await canCheckBiometrics();
+      return supported || canCheck;
     } catch (_) {
       return false;
     }
@@ -43,34 +55,46 @@ class BiometricService {
   }
 
   /// Demande l'authentification biométrique.
-  static Future<bool> authenticate() async {
+  /// Retourne `true` si l'utilisateur s'est authentifié avec succès.
+  static Future<bool> authenticate({String reason = 'Déverrouiller Alanya'}) async {
     try {
-      final canCheck = await canCheckBiometrics();
-      if (!canCheck) return false;
-
       return await _auth.authenticate(
-        localizedReason: 'Déverrouiller Alanya',
+        localizedReason: reason,
         options: const AuthenticationOptions(
           stickyAuth: true,
-          biometricOnly: false, // autorise le PIN en fallback
+          biometricOnly: false, // autorise le PIN/schéma en fallback
           useErrorDialogs: true,
+          sensitiveTransaction: false,
         ),
       );
-    } on PlatformException catch (_) {
+    } on PlatformException catch (e) {
+      // Erreur spécifique : biométrie désactivée ou verrouillée
+      if (e.code == auth_error.notAvailable) return false;
+      if (e.code == auth_error.notEnrolled) return false;
+      if (e.code == auth_error.lockedOut) return false;
+      if (e.code == auth_error.permanentlyLockedOut) return false;
       return false;
     } catch (_) {
       return false;
     }
   }
 
-  /// Vérifie si l'appareil peut utiliser la biométrie (supporté + configuré).
-  static Future<bool> isAvailable() async {
+  /// Liste les types de biométrie disponibles sur l'appareil.
+  static Future<List<BiometricType>> getAvailableBiometrics() async {
     try {
-      final supported = await isDeviceSupported();
-      final canCheck = await canCheckBiometrics();
-      return supported || canCheck;
+      return await _auth.getAvailableBiometrics();
     } catch (_) {
-      return false;
+      return [];
     }
+  }
+
+  /// Description textuelle des types de biométrie disponibles.
+  static Future<String> getBiometricDescription() async {
+    final types = await getAvailableBiometrics();
+    if (types.isEmpty) return "Non disponible";
+    if (types.contains(BiometricType.face)) return "Reconnaissance faciale";
+    if (types.contains(BiometricType.fingerprint)) return "Empreinte digitale";
+    if (types.contains(BiometricType.iris)) return "Reconnaissance irienne";
+    return "Biométrie";
   }
 }
