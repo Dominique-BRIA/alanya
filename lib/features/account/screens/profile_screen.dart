@@ -80,8 +80,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  /// Ouvre le sélecteur d'image, upload le fichier via MediaRepository,
-  /// puis met à jour le profil avec la nouvelle avatarUrl.
   Future<void> _pickAvatar() async {
     if (_uploadingAvatar) return;
 
@@ -101,8 +99,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final bytes = file.bytes;
     if (bytes == null) return;
 
-    // Limite douce à 5 Mo côté client pour éviter un aller-retour inutile
-    // (le backend limitera aussi, cf. env.media.maxSizeMb).
     if (bytes.length > 5 * 1024 * 1024) {
       _snack("Image trop lourde (max 5 Mo)");
       return;
@@ -114,17 +110,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final auth = context.read<AuthController>();
 
     try {
-      // Détecte le MIME à partir des bytes eux-mêmes (magic number) plutôt
-      // que du nom de fichier. Le picker Android peut renvoyer un nom sans
-      // extension ou avec une extension trompeuse selon l'appli source.
       final mime = _mimeFromBytes(bytes) ?? _mimeFromName(file.name);
-      debugPrint("[avatar] upload mime=$mime filename=${file.name} size=${bytes.length}o");
-
       final uploaded = await mediaRepo.upload(bytes, file.name, mime);
-      debugPrint("[avatar] uploaded id=${uploaded.id} url=${uploaded.url}");
-
-      // Envoie l'URL relative (/api/media/<id>). Le backend accepte
-      // désormais ce format (cf. updateProfileSchema).
       final res = await account.updateProfile(avatarUrl: uploaded.url);
       auth.applyProfile(
         pseudo: res.pseudo,
@@ -133,39 +120,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
       );
       _snack("Photo de profil mise à jour");
     } on ApiException catch (e) {
-      // Message détaillé avec code HTTP pour faciliter le diagnostic.
-      debugPrint("[avatar] ❌ ApiException status=${e.statusCode} message=${e.message}");
       _snack("Erreur ${e.statusCode} : ${e.message}");
-    } catch (e, st) {
-      debugPrint("[avatar] ❌ exception: $e\n$st");
+    } catch (e) {
       _snack("Échec de l'envoi de la photo : $e");
     } finally {
       if (mounted) setState(() => _uploadingAvatar = false);
     }
   }
 
-  /// Détecte le type MIME à partir des premiers octets du fichier (magic number).
-  /// Beaucoup plus fiable que l'extension du nom, surtout sur Android où le
-  /// picker peut renvoyer "image" ou "IMG_1234" sans extension.
   String? _mimeFromBytes(Uint8List bytes) {
     if (bytes.length < 12) return null;
-    // JPEG : FF D8 FF
     if (bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) return "image/jpeg";
-    // PNG : 89 50 4E 47
     if (bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47) return "image/png";
-    // GIF : "GIF8"
     if (bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x38) return "image/gif";
-    // WebP : "RIFF" ... "WEBP"
     if (bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46 &&
         bytes[8] == 0x57 && bytes[9] == 0x45 && bytes[10] == 0x42 && bytes[11] == 0x50) {
       return "image/webp";
-    }
-    // HEIC/HEIF : "ftyp" à l'offset 4, puis brand "heic"/"heix"/"mif1"...
-    if (bytes[4] == 0x66 && bytes[5] == 0x74 && bytes[6] == 0x79 && bytes[7] == 0x70) {
-      final brand = String.fromCharCodes(bytes.sublist(8, 12));
-      if (brand == "heic" || brand == "heix" || brand == "hevc" || brand == "mif1") {
-        return "image/heic";
-      }
     }
     return null;
   }
@@ -175,7 +145,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (n.endsWith(".png")) return "image/png";
     if (n.endsWith(".webp")) return "image/webp";
     if (n.endsWith(".gif")) return "image/gif";
-    if (n.endsWith(".heic") || n.endsWith(".heif")) return "image/heic";
     return "image/jpeg";
   }
 
@@ -185,7 +154,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final user = context.watch<AuthController>().user;
-    final localeCtrl = context.watch<LocaleController>();
     return Scaffold(
       appBar: backAppBar(context, tr(context, 'my_profile')),
       body: MotifBackground(
@@ -239,17 +207,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 label: Text(tr(context, 'save')),
               ),
               const SizedBox(height: 24),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AlanyaColors.sand),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(children: [
               OutlinedButton.icon(
                 onPressed: () => context.read<AuthController>().logout(),
                 icon: const Icon(Icons.logout),
@@ -268,7 +225,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AlanyaColors.sand),
+        border: Border.all(color: AlanyaColors.grey200, width: 0.5),
       ),
       child: Column(children: [
         Row(children: [
@@ -290,12 +247,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 }
 
-/// Avatar circulaire cliquable pour éditer la photo de profil.
-/// Affiche :
-///  - Une photo réelle si `avatarUrl` est présent (chargée via token JWT).
-///  - Sinon l'initiale du pseudo sur fond terracotta.
-///  - Un badge caméra en overlay pour indiquer que c'est cliquable.
-///  - Un spinner pendant l'upload.
 class _AvatarWithEdit extends StatelessWidget {
   const _AvatarWithEdit({
     required this.pseudo,
@@ -313,10 +264,8 @@ class _AvatarWithEdit extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final initial =
-        (pseudo?.isNotEmpty ?? false) ? pseudo![0].toUpperCase() : "?";
+    final initial = (pseudo?.isNotEmpty ?? false) ? pseudo![0].toUpperCase() : "?";
 
-    // Reconstruit l'URL absolue si avatarUrl est un chemin relatif.
     String? fullUrl;
     if (avatarUrl != null && avatarUrl!.isNotEmpty) {
       fullUrl = avatarUrl!.startsWith("http")
@@ -338,7 +287,7 @@ class _AvatarWithEdit extends StatelessWidget {
               border: Border.all(color: Colors.white, width: 3),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.15),
+                  color: Colors.black.withValues(alpha: 0.15),
                   blurRadius: 8,
                   offset: const Offset(0, 3),
                 ),
@@ -365,7 +314,6 @@ class _AvatarWithEdit extends StatelessWidget {
                     ),
             ),
           ),
-          // Badge caméra en bas à droite
           Positioned(
             bottom: 0,
             right: 0,
