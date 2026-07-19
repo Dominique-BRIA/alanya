@@ -7,6 +7,7 @@ import '../../../widgets/avatar_circle.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../../auth/auth_controller.dart';
 import '../../chat/chat_repository.dart';
+import '../../../widgets/contact_picker_sheet.dart';
 
 /// Écran d'infos d'un groupe — style WhatsApp.
 ///
@@ -94,12 +95,16 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   }
 
   Future<void> _addMembers() async {
-    final result = await Navigator.of(context).push<List<String>>(
-      MaterialPageRoute(
-        builder: (_) => AddContactScreen(
-          onContactsSelected: (numbers) => Navigator.pop(context, numbers),
-        ),
-      ),
+    // Numéros déjà membres → à exclure du sélecteur
+    final existingNumbers = _members
+        .map((m) => (m['publicNumber'] as String?) ?? '')
+        .where((n) => n.isNotEmpty)
+        .toList();
+    final result = await ContactPickerSheet.show(
+      context,
+      title: "Ajouter des membres",
+      confirmLabel: "Ajouter",
+      excludeNumbers: existingNumbers,
     );
     if (result != null && result.isNotEmpty) {
       try {
