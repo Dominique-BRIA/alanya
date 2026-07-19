@@ -5,6 +5,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_local_notifications/src/platform_specifics/android/notification_sound.dart';
 
 import '../core/api_client.dart';
 import '../core/token_storage.dart';
@@ -135,6 +136,7 @@ class PushService {
         importance: Importance.high,
         enableVibration: true,
         playSound: true,
+        sound: RawResourceAndroidNotificationSound("notification"),
       );
       await _localPlugin
           .resolvePlatformSpecificImplementation<
@@ -172,6 +174,8 @@ class PushService {
           importance: Importance.high,
           priority: Priority.high,
           icon: '@mipmap/ic_launcher',
+          sound: RawResourceAndroidNotificationSound("notification"),
+          playSound: true,
         ),
         iOS: DarwinNotificationDetails(),
       ),
@@ -217,6 +221,8 @@ class PushService {
           importance: Importance.high,
           priority: Priority.high,
           icon: '@mipmap/ic_launcher',
+          sound: RawResourceAndroidNotificationSound("notification"),
+          playSound: true,
         ),
         iOS: DarwinNotificationDetails(),
       ),
