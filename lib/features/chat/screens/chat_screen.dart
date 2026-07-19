@@ -32,6 +32,7 @@ import '../../auth/auth_controller.dart';
 import '../../calls/call_controller.dart';
 import '../../calls/screens/active_call_screen.dart';
 import '../../contacts/screens/contact_info_screen.dart';
+import '../../group/screens/group_info_screen.dart';
 import '../../media/media_repository.dart';
 import '../chat_repository.dart';
 import 'image_viewer_screen.dart';
@@ -1245,7 +1246,7 @@ class _ChatScreenState extends State<ChatScreen> {
       leadingWidth: 40,
       titleSpacing: 0,
       title: InkWell(
-        onTap: widget.isGroup ? null : _openContactInfo,
+        onTap: widget.isGroup ? _openGroupInfo : _openContactInfo,
         child: Row(
           children: [
             GestureDetector(
@@ -1322,6 +1323,29 @@ class _ChatScreenState extends State<ChatScreen> {
         builder: (_) => AvatarViewerScreen(
           name: widget.title,
           avatarUrl: widget.avatarUrl,
+        ),
+      ),
+    );
+  }
+
+  void _openGroupInfo() {
+    if (!widget.isGroup) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => GroupInfoScreen(
+          convId: widget.convId,
+          title: widget.title,
+          avatarUrl: widget.avatarUrl,
+          members: widget.memberNames.entries
+              .map((e) => {
+                    'id': e.key,
+                    'pseudo': e.value,
+                    'publicNumber': '',
+                    'avatarUrl': null,
+                    'isOnline': 0,
+                    'role': 'MEMBER',
+                  })
+              .toList(),
         ),
       ),
     );
