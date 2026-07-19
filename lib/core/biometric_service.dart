@@ -27,12 +27,16 @@ class BiometricService {
     await prefs.setBool(_prefKey, enabled);
   }
 
-  /// Empreinte/visage uniquement
+  /// Empreinte/visage uniquement (biometricOnly: true)
   static Future<bool> authenticate() async {
     try {
-      return await _auth.authenticateWithBiometrics(
+      return await _auth.authenticate(
         localizedReason: 'Déverrouiller Alanya',
-        options: const AuthenticationOptions(stickyAuth: true, useErrorDialogs: true),
+        options: const AuthenticationOptions(
+          stickyAuth: true,
+          biometricOnly: true,
+          useErrorDialogs: true,
+        ),
       );
     } catch (e) {
       debugPrint('[Biometric] Error: $e');
@@ -40,12 +44,16 @@ class BiometricService {
     }
   }
 
-  /// Avec fallback PIN/pattern
+  /// Avec fallback PIN/pattern (biometricOnly: false)
   static Future<bool> authenticateWithFallback() async {
     try {
       return await _auth.authenticate(
         localizedReason: 'Déverrouiller Alanya',
-        options: const AuthenticationOptions(stickyAuth: true, biometricOnly: false, useErrorDialogs: true),
+        options: const AuthenticationOptions(
+          stickyAuth: true,
+          biometricOnly: false,
+          useErrorDialogs: true,
+        ),
       );
     } catch (e) {
       debugPrint('[Biometric] Error: $e');
