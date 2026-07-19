@@ -48,11 +48,15 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
 
   /// Vérifie si l'utilisateur connecté est admin dans CE groupe.
   bool get _amAdmin {
+    if (_members.isEmpty) return false;
     final me = _members.firstWhere(
       (m) => m['id'] == _myId,
       orElse: () => {},
     );
-    return (me['role'] as String?) == 'ADMIN';
+    if ((me['role'] as String?) == 'ADMIN') return true;
+    final hasAnyAdmin = _members.any((m) => (m['role'] as String?) == 'ADMIN');
+    if (!hasAnyAdmin && _members.first['id'] == _myId) return true;
+    return false;
   }
 
   Future<void> _refreshMembers() async {
@@ -388,8 +392,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                if (_amAdmin)
-                  _actionButton(Icons.person_add, "Ajouter", _addMembers),
+                _actionButton(Icons.person_add, "Ajouter", _addMembers),
                 _actionButton(Icons.exit_to_app, "Quitter", _leaveGroup,
                     color: Colors.red),
               ],
