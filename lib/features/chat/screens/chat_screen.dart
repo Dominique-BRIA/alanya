@@ -1303,16 +1303,18 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       ),
       actions: [
-        IconButton(
-          tooltip: widget.isGroup ? "Appel groupe vidéo" : "Appel vidéo",
-          icon: const Icon(Icons.videocam),
-          onPressed: () => _startCall("VIDEO"),
-        ),
-        IconButton(
-          tooltip: widget.isGroup ? "Appel groupe audio" : "Appel audio",
-          icon: const Icon(Icons.call),
-          onPressed: () => _startCall("AUDIO"),
-        ),
+        if (!widget.isGroup) ...[
+          IconButton(
+            tooltip: "Appel vidéo",
+            icon: const Icon(Icons.videocam),
+            onPressed: () => _startCall("VIDEO"),
+          ),
+          IconButton(
+            tooltip: "Appel audio",
+            icon: const Icon(Icons.call),
+            onPressed: () => _startCall("AUDIO"),
+          ),
+        ],
       ],
     );
   }

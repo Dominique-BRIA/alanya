@@ -1,3 +1,6 @@
+import 'dart:typed_data';
+import 'package:file_picker/file_picker.dart';
+import '../../media/media_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -42,6 +45,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     _members = List.from(widget.members);
     _title = widget.title;
     _avatarUrl = widget.avatarUrl;
+    _refreshMembers();
   }
 
   String get _myId => context.read<AuthController>().user?.id ?? '';
@@ -121,60 +125,71 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
       );
       return;
     }
-    final ctrl = TextEditingController(text: _avatarUrl ?? '');
-    final newUrl = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Photo du groupe"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Aperçu actuel
-            if (_avatarUrl != null && _avatarUrl!.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 16),
-                child: AvatarCircle(
-                  name: _title,
-                  avatarUrl: _avatarUrl,
-                  radius: 40,
-                  backgroundColor: AlanyaColors.forest,
-                ),
-              ),
-            TextField(
-              controller: ctrl,
-              decoration: const InputDecoration(
-                hintText: "URL de l'image",
-                prefixIcon: Icon(Icons.link),
-              ),
-              autofocus: true,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Annuler")),
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-              child: const Text("Enregistrer")),
-        ],
-      ),
-    );
-    if (newUrl != null) {
-      try {
-        await context.read<ChatRepository>().updateGroup(widget.convId, avatarUrl: newUrl);
-        setState(() => _avatarUrl = newUrl.isEmpty ? null : newUrl);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Photo du groupe mise à jour")),
-          );
-        }
-      } catch (_) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Erreur lors de la mise à jour")),
-          );
-        }
+
+    FilePickerResult? result;
+    try {
+      result = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        withData: true,
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Impossible d'ouvrir la galerie")),
+        );
+      }
+      return;
+    }
+    if (result == null || result.files.isEmpty) return;
+
+    final file = result.files.first;
+    final bytes = file.bytes;
+    if (bytes == null) return;
+
+    if (bytes.length > 5 * 1024 * 1024) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Image trop lourde (max 5 Mo)")),
+        );
+      }
+      return;
+    }
+
+    try {
+      final mediaRepo = context.read<MediaRepository>();
+      final mime = _mimeFromBytes(bytes) ?? _mimeFromName(file.name);
+      final uploaded = await mediaRepo.upload(bytes, file.name, mime);
+
+      await context.read<ChatRepository>().updateGroup(widget.convId, avatarUrl: uploaded.url);
+      setState(() => _avatarUrl = uploaded.url);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Photo du groupe mise à jour")),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Erreur lors de la mise à jour de l'avatar: $e")),
+        );
       }
     }
+  }
+
+  String? _mimeFromBytes(Uint8List bytes) {
+    if (bytes.length < 12) return null;
+    if (bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) return "image/jpeg";
+    if (bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47) return "image/png";
+    if (bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x38) return "image/gif";
+    return "image/jpeg";
+  }
+
+  String _mimeFromName(String name) {
+    final n = name.toLowerCase();
+    if (n.endsWith(".png")) return "image/png";
+    if (n.endsWith(".webp")) return "image/webp";
+    if (n.endsWith(".gif")) return "image/gif";
+    return "image/jpeg";
   }
 
   // ===================== AJOUTER DES MEMBRES =====================
