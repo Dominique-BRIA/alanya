@@ -8,6 +8,7 @@ import '../../../widgets/back_app_bar.dart';
 import '../../auth/auth_controller.dart';
 import '../../chat/chat_repository.dart';
 import '../../../widgets/contact_picker_sheet.dart';
+import '../../chat/screens/chat_screen.dart';
 
 /// Écran d'infos d'un groupe — style WhatsApp.
 ///
@@ -24,7 +25,7 @@ class GroupInfoScreen extends StatefulWidget {
   final String convId;
   final String title;
   final String? avatarUrl;
-  final List<Map<String, dynamic>> members; // [{id, pseudo, publicNumber, avatarUrl, isOnline}]
+  final List<Map<String, dynamic>> members; // [{id, pseudo, publicNumber, avatarUrl, isOnline, role}]
 
   @override
   State<GroupInfoScreen> createState() => _GroupInfoScreenState();
@@ -33,20 +34,25 @@ class GroupInfoScreen extends StatefulWidget {
 class _GroupInfoScreenState extends State<GroupInfoScreen> {
   late List<Map<String, dynamic>> _members;
   late String _title;
-  bool _loading = false;
+  late String? _avatarUrl;
 
   @override
   void initState() {
     super.initState();
     _members = List.from(widget.members);
     _title = widget.title;
+    _avatarUrl = widget.avatarUrl;
   }
 
   String get _myId => context.read<AuthController>().user?.id ?? '';
 
+  /// Vérifie si l'utilisateur connecté est admin dans CE groupe.
   bool get _amAdmin {
-    // TODO: vérifier le rôle depuis l'API membres
-    return true; // pour l'instant, tout le monde peut modifier
+    final me = _members.firstWhere(
+      (m) => m['id'] == _myId,
+      orElse: () => {},
+    );
+    return (me['role'] as String?) == 'ADMIN';
   }
 
   Future<void> _refreshMembers() async {
@@ -56,7 +62,15 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     } catch (_) {}
   }
 
+  // ===================== MODIFIER LE NOM =====================
+
   Future<void> _editName() async {
+    if (!_amAdmin) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Seul un admin peut modifier le nom du groupe")),
+      );
+      return;
+    }
     final ctrl = TextEditingController(text: _title);
     final newName = await showDialog<String>(
       context: context,
@@ -94,8 +108,80 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     }
   }
 
+  // ===================== MODIFIER L'AVATAR =====================
+
+  Future<void> _editAvatar() async {
+    if (!_amAdmin) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Seul un admin peut modifier l'avatar du groupe")),
+      );
+      return;
+    }
+    final ctrl = TextEditingController(text: _avatarUrl ?? '');
+    final newUrl = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Photo du groupe"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Aperçu actuel
+            if (_avatarUrl != null && _avatarUrl!.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: AvatarCircle(
+                  name: _title,
+                  avatarUrl: _avatarUrl,
+                  radius: 40,
+                  backgroundColor: AlanyaColors.forest,
+                ),
+              ),
+            TextField(
+              controller: ctrl,
+              decoration: const InputDecoration(
+                hintText: "URL de l'image",
+                prefixIcon: Icon(Icons.link),
+              ),
+              autofocus: true,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Annuler")),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+              child: const Text("Enregistrer")),
+        ],
+      ),
+    );
+    if (newUrl != null) {
+      try {
+        await context.read<ChatRepository>().updateGroup(widget.convId, avatarUrl: newUrl);
+        setState(() => _avatarUrl = newUrl.isEmpty ? null : newUrl);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Photo du groupe mise à jour")),
+          );
+        }
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Erreur lors de la mise à jour")),
+          );
+        }
+      }
+    }
+  }
+
+  // ===================== AJOUTER DES MEMBRES =====================
+
   Future<void> _addMembers() async {
-    // Numéros déjà membres → à exclure du sélecteur
+    if (!_amAdmin) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Seul un admin peut ajouter des membres")),
+      );
+      return;
+    }
     final existingNumbers = _members
         .map((m) => (m['publicNumber'] as String?) ?? '')
         .where((n) => n.isNotEmpty)
@@ -115,15 +201,16 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
             SnackBar(content: Text("${result.length} membre(s) ajouté(s)")),
           );
         }
-      } catch (_) {
+      } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Erreur lors de l'ajout")),
-          );
+          final msg = (e is ApiException) ? e.message : "Erreur lors de l'ajout";
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
         }
       }
     }
   }
+
+  // ===================== RETIRER UN MEMBRE =====================
 
   Future<void> _removeMember(Map<String, dynamic> member) async {
     final name = member['pseudo'] ?? member['publicNumber'] ?? 'Membre';
@@ -152,15 +239,16 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
             SnackBar(content: Text("$name retiré du groupe")),
           );
         }
-      } catch (_) {
+      } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Erreur lors du retrait")),
-          );
+          final msg = (e is ApiException) ? e.message : "Erreur lors du retrait";
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
         }
       }
     }
   }
+
+  // ===================== QUITTER LE GROUPE =====================
 
   Future<void> _leaveGroup() async {
     final ok = await showDialog<bool>(
@@ -196,6 +284,39 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     }
   }
 
+  // ===================== ENVOYER UN MESSAGE (DM) =====================
+
+  Future<void> _sendMessageTo(Map<String, dynamic> member) async {
+    final targetId = member['id'] as String;
+    final name = member['pseudo'] ?? member['publicNumber'] ?? 'Membre';
+    final avatarUrl = member['avatarUrl'] as String?;
+
+    try {
+      // Cherche ou crée une conversation 1-to-1 avec ce membre
+      final convData = await context.read<ChatRepository>().getOrCreateDirectConversation(targetId);
+      if (!mounted) return;
+
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ChatScreen(
+            conversationId: convData['id'] as String,
+            title: name,
+            avatarUrl: avatarUrl,
+            isGroup: false,
+          ),
+        ),
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Impossible d'ouvrir la conversation")),
+        );
+      }
+    }
+  }
+
+  // ===================== BUILD =====================
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -207,11 +328,32 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
             padding: const EdgeInsets.all(24),
             child: Column(
               children: [
-                AvatarCircle(
-                  name: _title,
-                  avatarUrl: widget.avatarUrl,
-                  radius: 40,
-                  backgroundColor: AlanyaColors.forest,
+                GestureDetector(
+                  onTap: _amAdmin ? _editAvatar : null,
+                  child: Stack(
+                    children: [
+                      AvatarCircle(
+                        name: _title,
+                        avatarUrl: _avatarUrl,
+                        radius: 40,
+                        backgroundColor: AlanyaColors.forest,
+                      ),
+                      if (_amAdmin)
+                        Positioned(
+                          bottom: 0,
+                          right: 0,
+                          child: Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: AlanyaColors.terracotta,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 2),
+                            ),
+                            child: const Icon(Icons.camera_alt, size: 16, color: Colors.white),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 12),
                 Row(
@@ -222,10 +364,11 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                           style: const TextStyle(
                               fontSize: 22, fontWeight: FontWeight.bold)),
                     ),
-                    IconButton(
-                      icon: Icon(Icons.edit, size: 20, color: AlanyaColors.grey500),
-                      onPressed: _editName,
-                    ),
+                    if (_amAdmin)
+                      IconButton(
+                        icon: Icon(Icons.edit, size: 20, color: AlanyaColors.grey500),
+                        onPressed: _editName,
+                      ),
                   ],
                 ),
                 Text("${_members.length} membres",
@@ -245,7 +388,8 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                _actionButton(Icons.person_add, "Ajouter", _addMembers),
+                if (_amAdmin)
+                  _actionButton(Icons.person_add, "Ajouter", _addMembers),
                 _actionButton(Icons.exit_to_app, "Quitter", _leaveGroup,
                     color: Colors.red),
               ],
@@ -268,6 +412,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
             final isMe = m['id'] == _myId;
             final name = m['pseudo'] ?? m['publicNumber'] ?? 'Membre';
             final online = (m['isOnline'] as int?) == 1;
+            final isAdmin = (m['role'] as String?) == 'ADMIN';
 
             return ListTile(
               leading: AvatarCircle(
@@ -282,7 +427,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                     child: Text(name,
                         style: const TextStyle(fontWeight: FontWeight.w500)),
                   ),
-                  if (m['role'] == 'ADMIN')
+                  if (isAdmin)
                     Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 6, vertical: 2),
@@ -306,7 +451,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                     fontSize: 12,
                     color: online ? AlanyaColors.forest : AlanyaColors.grey500),
               ),
-              trailing: (!isMe && _amAdmin)
+              trailing: (!isMe)
                   ? IconButton(
                       icon: const Icon(Icons.more_vert, size: 20),
                       onPressed: () => _showMemberOptions(m),
@@ -368,18 +513,19 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                 title: const Text("Envoyer un message"),
                 onTap: () {
                   Navigator.pop(ctx);
-                  // TODO: ouvrir une conversation directe avec ce membre
+                  _sendMessageTo(member);
                 },
               ),
-              ListTile(
-                leading: const Icon(Icons.remove_circle_outline, color: Colors.red),
-                title: const Text("Retirer du groupe",
-                    style: TextStyle(color: Colors.red)),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _removeMember(member);
-                },
-              ),
+              if (_amAdmin)
+                ListTile(
+                  leading: const Icon(Icons.remove_circle_outline, color: Colors.red),
+                  title: const Text("Retirer du groupe",
+                      style: TextStyle(color: Colors.red)),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _removeMember(member);
+                  },
+                ),
             ],
             if (isMe)
               ListTile(
