@@ -7,7 +7,6 @@ import '../../../widgets/avatar_circle.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../../auth/auth_controller.dart';
 import '../../chat/chat_repository.dart';
-import '../../contacts/screens/add_contact_screen.dart';
 
 /// Écran d'infos d'un groupe — style WhatsApp.
 ///
