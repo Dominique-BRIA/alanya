@@ -299,7 +299,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => ChatScreen(
-            conversationId: convData['id'] as String,
+            convId: convData['id'] as String,
             title: name,
             avatarUrl: avatarUrl,
             isGroup: false,

@@ -125,4 +125,13 @@ class ChatRepository {
     return (data["members"] as List).map((m) => Map<String, dynamic>.from(m as Map)).toList();
   }
   
+
+  /// Cherche ou crée une conversation 1-to-1 avec un utilisateur.
+  Future<Map<String, dynamic>> getOrCreateDirectConversation(String targetUserId) async {
+    final data = await _api.post("/api/conversations/direct", {
+      "targetUserId": targetUserId,
+    });
+    return Map<String, dynamic>.from(data as Map);
+  }
+
 }
