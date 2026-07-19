@@ -60,71 +60,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _snack("Biométrie non disponible sur cet appareil");
         return;
       }
-
-      // Affiche un dialog d'attente AVANT de lancer l'auth
-      // pour que l'utilisateur sache qu'un dialogue biométrique va apparaître
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => const Center(
-          child: Card(
-            child: Padding(
-              padding: EdgeInsets.all(24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 16),
-                  Text("Vérification biométrique..."),
-                  SizedBox(height: 8),
-                  Text(
-                    "Placez votre doigt sur le capteur",
-                    style: TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
-
-      try {
-        // Petit délai pour que le dialog s'affiche
-        await Future.delayed(const Duration(milliseconds: 500));
-
-        final ok = await BiometricService.authenticate(
-          reason: 'Activer le verrouillage biométrique',
-        );
-
-        // Ferme le dialog d'attente
-        if (mounted) Navigator.pop(context);
-
-        if (!mounted) return;
-        if (ok) {
-          await BiometricService.setEnabled(true);
-          setState(() => _biometricEnabled = true);
-          _snack("Verrouillage biométrique activé");
-        } else {
-          _snack("Authentification annulée ou échouée");
-        }
-      } catch (e) {
-        // Ferme le dialog d'attente
-        if (mounted) Navigator.pop(context);
-        if (mounted) {
-          showDialog(
-            context: context,
-            builder: (_) => AlertDialog(
-              title: const Text("Erreur biométrie"),
-              content: Text("Détail: $e"),
-              actions: [
-                TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text("OK")),
-              ],
-            ),
-          );
-        }
-      }
+      // Active directement sans vérifier (comme WhatsApp)
+      await BiometricService.setEnabled(true);
+      setState(() => _biometricEnabled = true);
+      _snack("Verrouillage biométrique activé. L'app se verrouillera à la prochaine ouverture.");
     } else {
       await BiometricService.setEnabled(false);
       setState(() => _biometricEnabled = false);
