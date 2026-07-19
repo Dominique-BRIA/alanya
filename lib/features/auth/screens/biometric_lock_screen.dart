@@ -1,13 +1,9 @@
 import 'package:flutter/material.dart';
-
 import '../../../core/biometric_service.dart';
 import '../../../theme/alanya_theme.dart';
 
-/// Écran de verrouillage biométrique — affiché au lancement de l'app
-/// si l'utilisateur a activé la biométrie.
 class BiometricLockScreen extends StatefulWidget {
   const BiometricLockScreen({super.key, required this.onUnlocked});
-
   final VoidCallback onUnlocked;
 
   @override
@@ -16,31 +12,37 @@ class BiometricLockScreen extends StatefulWidget {
 
 class _BiometricLockScreenState extends State<BiometricLockScreen> {
   bool _authenticating = false;
-  String? _error;
 
   @override
   void initState() {
     super.initState();
-    // Lance automatiquement l'authentification biométrique au chargement.
+    // Lance l'auth automatiquement
     WidgetsBinding.instance.addPostFrameCallback((_) => _authenticate());
   }
 
   Future<void> _authenticate() async {
     if (_authenticating) return;
-    setState(() {
-      _authenticating = true;
-      _error = null;
-    });
+    setState(() => _authenticating = true);
 
     final ok = await BiometricService.authenticate();
-
     if (!mounted) return;
     setState(() => _authenticating = false);
 
     if (ok) {
       widget.onUnlocked();
-    } else {
-      setState(() => _error = "Authentification échouée. Réessaie.");
+    }
+  }
+
+  Future<void> _authenticateWithPin() async {
+    if (_authenticating) return;
+    setState(() => _authenticating = true);
+
+    final ok = await BiometricService.authenticateWithFallback();
+    if (!mounted) return;
+    setState(() => _authenticating = false);
+
+    if (ok) {
+      widget.onUnlocked();
     }
   }
 
@@ -57,59 +59,38 @@ class _BiometricLockScreenState extends State<BiometricLockScreen> {
               children: [
                 // Logo
                 Container(
-                  width: 100,
-                  height: 100,
+                  width: 80,
+                  height: 80,
                   decoration: BoxDecoration(
                     gradient: const LinearGradient(
                       colors: [AlanyaColors.terracotta, AlanyaColors.terracottaDark],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
                     ),
-                    borderRadius: BorderRadius.circular(24),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AlanyaColors.terracotta.withValues(alpha: 0.3),
-                        blurRadius: 20,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
+                    borderRadius: BorderRadius.circular(20),
                   ),
                   child: const Center(
-                    child: Icon(Icons.lock_outline, size: 44, color: Colors.white),
+                    child: Text("A",
+                        style: TextStyle(
+                            fontSize: 36,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white)),
                   ),
                 ),
-                const SizedBox(height: 24),
-                const Text(
-                  "ALANYA",
-                  style: TextStyle(
-                    fontFamily: 'Inter',
-                    fontSize: 28,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 6,
-                    color: AlanyaColors.ink,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  "Déverrouille pour continuer",
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: AlanyaColors.grey500,
-                  ),
-                ),
+                const SizedBox(height: 20),
+                const Text("ALANYA",
+                    style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 6)),
                 const SizedBox(height: 40),
 
-                // Bouton biométrie
+                // Bouton empreinte
                 GestureDetector(
                   onTap: _authenticating ? null : _authenticate,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 300),
+                  child: Container(
                     width: 72,
                     height: 72,
                     decoration: BoxDecoration(
-                      color: _authenticating
-                          ? AlanyaColors.terracotta.withValues(alpha: 0.1)
-                          : AlanyaColors.terracotta.withValues(alpha: 0.08),
+                      color: AlanyaColors.terracotta.withValues(alpha: 0.08),
                       shape: BoxShape.circle,
                       border: Border.all(
                         color: AlanyaColors.terracotta.withValues(alpha: 0.3),
@@ -120,30 +101,45 @@ class _BiometricLockScreenState extends State<BiometricLockScreen> {
                         ? const Padding(
                             padding: EdgeInsets.all(18),
                             child: CircularProgressIndicator(
-                              strokeWidth: 2.5,
-                              color: AlanyaColors.terracotta,
-                            ),
+                                strokeWidth: 2.5,
+                                color: AlanyaColors.terracotta),
                           )
-                        : const Icon(
-                            Icons.fingerprint,
-                            size: 38,
-                            color: AlanyaColors.terracotta,
-                          ),
+                        : const Icon(Icons.fingerprint,
+                            size: 36, color: AlanyaColors.terracotta),
                   ),
                 ),
-                const SizedBox(height: 16),
-                if (_error != null)
-                  Text(
-                    _error!,
-                    style: const TextStyle(color: Colors.red, fontSize: 13),
-                    textAlign: TextAlign.center,
-                  ),
+                const SizedBox(height: 12),
+                Text(
+                  _authenticating
+                      ? "Vérification..."
+                      : "Appuyez pour déverrouiller",
+                  style: TextStyle(
+                      fontSize: 13, color: AlanyaColors.grey500),
+                ),
+                const SizedBox(height: 32),
+
+                // Fallback : code de l'appareil
+                TextButton.icon(
+                  onPressed: _authenticating ? null : _authenticateWithPin,
+                  icon: Icon(Icons.lock_outline,
+                      size: 18, color: AlanyaColors.grey500),
+                  label: Text("Utiliser le code de l'appareil",
+                      style: TextStyle(color: AlanyaColors.grey500)),
+                ),
                 const SizedBox(height: 8),
+
+                // Désactiver la biométrie
                 TextButton(
-                  onPressed: _authenticating ? null : _authenticate,
+                  onPressed: _authenticating
+                      ? null
+                      : () async {
+                          await BiometricService.setEnabled(false);
+                          widget.onUnlocked();
+                        },
                   child: Text(
-                    "Réessayer",
-                    style: TextStyle(color: AlanyaColors.grey500),
+                    "Désactiver le verrouillage",
+                    style: TextStyle(
+                        fontSize: 12, color: AlanyaColors.grey400),
                   ),
                 ),
               ],
