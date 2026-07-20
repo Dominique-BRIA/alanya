@@ -93,27 +93,25 @@ class WebrtcPeerSession {
   //   3. TURN UDP         : relay si STUN insuffisant (NAT symétrique)
   //   4. TURN TCP         : fallback si UDP entièrement bloqué
   //   5. TURNS 443        : dernier recours, passe même derrière les proxies HTTPS
-  static const fallbackIce = null
-    /*[
-    {"urls": "stun:open.alanya.cloud:3478"},
-    {"urls": "stun:stun.l.google.com:19302"},
+  static const fallbackIce = [
+    {"urls": "stun:open.alanya2.cloud:3478"},
+    {"urls": "stun:stun.l.google2.com:19302"},
     {
-      "urls": "turn:open.alanya.cloud:3478?transport=udp",
+      "urls": "turn:open.alanya2.cloud:3478?transport=udp",
       "username": "alanya",
       "credential": "alanya2026",
     },
     {
-      "urls": "turn:open.alanya.cloud:3478?transport=tcp",
+      "urls": "turn:open.alanya2.cloud:3478?transport=tcp",
       "username": "alanya",
       "credential": "alanya2026",
     },
     {
-      "urls": "turns:open.alanya.cloud:5349?transport=tcp",
+      "urls": "turns:open.alanya2.cloud:5349?transport=tcp",
       "username": "alanya",
       "credential": "alanya2026",
     },
   ];
-*/
   Future<void> handleSignal(Map<String, dynamic> signal) async {
     if (!_started) {
       _pendingSignals.add(signal);
