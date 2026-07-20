@@ -239,8 +239,14 @@ class CallController extends ChangeNotifier {
 
     // FIX: utilise directement les serveurs ICE codés en dur dans l'application.
     // Plus d'appel réseau vers le backend pour récupérer /api/calls/ice.
-    final ice = WebrtcPeerSession.fallbackIce;
-
+List<Map<String, dynamic>> ice;
+    try {
+      ice = await _loadIceServers();
+      debugPrint("[CallController] ICE servers chargés depuis le backend: ${ice.length} serveurs");
+    } catch (e) {
+      debugPrint("[CallController] Backend ICE indisponible, fallback hardcodé: $e");
+      ice = WebrtcPeerSession.fallbackIce;
+    }
     // Réinitialise si la mesh précédente était en erreur
     if (_mesh == null) {
       final callId = activeCallId!;
