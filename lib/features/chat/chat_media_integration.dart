@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import '../../core/media_helper.dart';
 import '../../theme/alanya_theme.dart';
-import 'link_bubble.dart';
-import 'reply_media_preview.dart';
-import 'media_grid.dart';
+import '../../widgets/media/link_bubble.dart';
+import '../../widgets/media/reply_media_preview.dart';
+import '../../widgets/media/media_grid.dart';
+import 'link_preview_integration.dart';
+import '../../models/message.dart';
 
 /// Mixin pour les previews média dans chat_screen.dart
 mixin ChatMediaIntegrationMixin {
@@ -30,9 +32,8 @@ mixin ChatMediaIntegrationMixin {
   }
 
   /// Décide quoi afficher pour un message média :
-  /// - 1 média → bulle individuelle (image, vidéo, doc, audio)
+  /// - 1 média → bulle individuelle (retourne null, le _bubble gère)
   /// - 2+ médias → grille WhatsApp
-  /// Retourne null si c'est du texte (pas de média).
   Widget? buildMediaContent(
     Message m, {
     required String baseUrl,
@@ -76,7 +77,7 @@ mixin ChatMediaIntegrationMixin {
       );
     }
 
-    // 1 seul média → pas de grille (retourne null, le _bubble gère)
+    // 1 seul média → pas de grille
     return null;
   }
 }
