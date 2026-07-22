@@ -2,16 +2,22 @@ import 'package:flutter/material.dart';
 import '../../core/media_helper.dart';
 import '../../theme/alanya_theme.dart';
 
-/// Bulle de preview de lien — style WhatsApp/Telegram.
-/// Affiche : image OG, titre, description, nom du site.
+/// Bulle lien style WhatsApp :
+/// - Image OG en haut (pleine largeur) si disponible
+/// - Ligne site (icône globe + nom du site)
+/// - Titre en gras
+/// - Description (1-2 lignes)
+/// - URL en bas (couleur terracotta)
+/// - Bordure subtile, coins arrondis
 class LinkBubble extends StatelessWidget {
   const LinkBubble({
     super.key,
     required this.url,
     this.meta,
-    required this.isMe,
+    this.isMe = false,
     this.maxWidth = 260,
     this.onTap,
+    this.onLongPress,
   });
 
   final String url;
@@ -19,24 +25,26 @@ class LinkBubble extends StatelessWidget {
   final bool isMe;
   final double maxWidth;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
     final hasMeta = meta != null;
     final siteName = meta?.siteName ?? _extractDomain(url);
+    final onText = isMe ? Colors.white : AlanyaColors.ink;
+    final onSub = isMe ? Colors.white60 : Colors.black54;
 
     return GestureDetector(
       onTap: onTap,
+      onLongPress: onLongPress,
       child: Container(
         constraints: BoxConstraints(maxWidth: maxWidth),
         decoration: BoxDecoration(
-          color: isMe
-              ? AlanyaColors.terracotta.withValues(alpha: 0.06)
-              : Colors.white,
-          borderRadius: BorderRadius.circular(12),
+          color: isMe ? Colors.white.withValues(alpha: 0.08) : Colors.white,
+          borderRadius: BorderRadius.circular(10),
           border: Border.all(
             color: isMe
-                ? AlanyaColors.terracotta.withValues(alpha: 0.2)
+                ? Colors.white.withValues(alpha: 0.15)
                 : AlanyaColors.grey200,
             width: 0.5,
           ),
@@ -45,26 +53,26 @@ class LinkBubble extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Image OG
+            // Image OG (pleine largeur)
             if (hasMeta && meta!.imageUrl != null)
               Image.network(
                 meta!.imageUrl!,
                 width: double.infinity,
-                height: 140,
+                height: 130,
                 fit: BoxFit.cover,
                 errorBuilder: (_, __, ___) => const SizedBox.shrink(),
               ),
 
             // Contenu texte
             Padding(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Nom du site
+                  // Nom du site (icône globe + nom)
                   Row(
                     children: [
-                      Icon(Icons.language, size: 14, color: AlanyaColors.grey500),
+                      Icon(Icons.language, size: 13, color: onSub),
                       const SizedBox(width: 4),
                       Expanded(
                         child: Text(
@@ -73,38 +81,47 @@ class LinkBubble extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontSize: 11,
-                            color: AlanyaColors.grey500,
+                            color: onSub,
                             fontWeight: FontWeight.w500,
+                            letterSpacing: 0.2,
                           ),
                         ),
                       ),
                     ],
                   ),
+
+                  // Titre
                   if (hasMeta && meta!.title != null) ...[
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 5),
                     Text(
                       meta!.title!,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
+                        color: onText,
+                        height: 1.3,
                       ),
                     ),
                   ],
+
+                  // Description
                   if (hasMeta && meta!.description != null) ...[
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 3),
                     Text(
                       meta!.description!,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 12,
-                        color: AlanyaColors.grey600,
+                        color: onSub,
+                        height: 1.3,
                       ),
                     ),
                   ],
-                  // URL cliquable
+
+                  // URL
                   const SizedBox(height: 6),
                   Text(
                     url,
@@ -112,7 +129,7 @@ class LinkBubble extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 11,
-                      color: AlanyaColors.terracotta,
+                      color: isMe ? Colors.white54 : AlanyaColors.terracotta,
                     ),
                   ),
                 ],

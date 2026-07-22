@@ -4,7 +4,6 @@ import 'package:file_picker/file_picker.dart';
 import '../../core/media_helper.dart';
 import '../../theme/alanya_theme.dart';
 
-/// Résultat de la sélection de médias.
 class MediaPickResult {
   final Uint8List bytes;
   final String fileName;
@@ -19,12 +18,10 @@ class MediaPickResult {
   });
 }
 
-/// Bottom sheet pour sélectionner des médias à envoyer.
-/// Utilise file_picker uniquement (déjà dans pubspec.yaml).
+/// Bottom sheet pour sélectionner des médias — style WhatsApp.
 class MediaPickerSheet extends StatelessWidget {
   const MediaPickerSheet({super.key});
 
-  /// Affiche le sélecteur et retourne la liste de fichiers sélectionnés.
   static Future<List<MediaPickResult>?> show(BuildContext context) {
     return showModalBottomSheet<List<MediaPickResult>>(
       context: context,
@@ -43,7 +40,6 @@ class MediaPickerSheet extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Poignée
             Container(
               width: 40,
               height: 4,
@@ -58,16 +54,14 @@ class MediaPickerSheet extends StatelessWidget {
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
-            _option(
-              context,
+            _option(context,
               icon: Icons.photo_library,
               label: "Photos et vidéos",
               subtitle: "Galerie",
               color: AlanyaColors.forest,
               onTap: () => _pickImages(context),
             ),
-            _option(
-              context,
+            _option(context,
               icon: Icons.insert_drive_file,
               label: "Document",
               subtitle: "PDF, Word, Excel, PowerPoint",
@@ -81,8 +75,7 @@ class MediaPickerSheet extends StatelessWidget {
     );
   }
 
-  Widget _option(
-    BuildContext context, {
+  Widget _option(BuildContext context, {
     required IconData icon,
     required String label,
     required String subtitle,
@@ -112,7 +105,6 @@ class MediaPickerSheet extends StatelessWidget {
       withData: true,
     );
     if (result == null || result.files.isEmpty || !context.mounted) return;
-
     final results = <MediaPickResult>[];
     for (final file in result.files) {
       if (file.bytes == null) continue;
@@ -133,7 +125,6 @@ class MediaPickerSheet extends StatelessWidget {
       withData: true,
     );
     if (result == null || result.files.isEmpty || !context.mounted) return;
-
     final results = <MediaPickResult>[];
     for (final file in result.files) {
       if (file.bytes == null) continue;
@@ -149,35 +140,20 @@ class MediaPickerSheet extends StatelessWidget {
   String _guessMime(String fileName) {
     final ext = fileName.split('.').last.toLowerCase();
     switch (ext) {
-      case 'jpg':
-      case 'jpeg':
-        return 'image/jpeg';
-      case 'png':
-        return 'image/png';
-      case 'gif':
-        return 'image/gif';
-      case 'webp':
-        return 'image/webp';
-      case 'mp4':
-        return 'video/mp4';
-      case 'mov':
-        return 'video/quicktime';
-      case 'pdf':
-        return 'application/pdf';
-      case 'doc':
-        return 'application/msword';
-      case 'docx':
-        return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-      case 'xls':
-        return 'application/vnd.ms-excel';
-      case 'xlsx':
-        return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-      case 'ppt':
-        return 'application/vnd.ms-powerpoint';
-      case 'pptx':
-        return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
-      default:
-        return 'application/octet-stream';
+      case 'jpg': case 'jpeg': return 'image/jpeg';
+      case 'png': return 'image/png';
+      case 'gif': return 'image/gif';
+      case 'webp': return 'image/webp';
+      case 'mp4': return 'video/mp4';
+      case 'mov': return 'video/quicktime';
+      case 'pdf': return 'application/pdf';
+      case 'doc': return 'application/msword';
+      case 'docx': return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      case 'xls': return 'application/vnd.ms-excel';
+      case 'xlsx': return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      case 'ppt': return 'application/vnd.ms-powerpoint';
+      case 'pptx': return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+      default: return 'application/octet-stream';
     }
   }
 }
