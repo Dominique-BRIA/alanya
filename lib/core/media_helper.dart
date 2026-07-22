@@ -83,8 +83,9 @@ class MediaHelper {
 
   /// Détecte si un texte contient une URL.
   static String? extractUrl(String text) {
+    // Regex sans raw string pour éviter le problème d'échappement du quote
     final urlRegex = RegExp(
-      r'https?://[^\s<>"\')\]]+',
+      'https?://[^\\s<>"\')\\]]+',
       caseSensitive: false,
     );
     final match = urlRegex.firstMatch(text);

@@ -1,6 +1,5 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import '../../core/media_helper.dart';
 import '../../theme/alanya_theme.dart';
@@ -21,7 +20,7 @@ class MediaPickResult {
 }
 
 /// Bottom sheet pour sélectionner des médias à envoyer.
-/// Supporte : images, vidéos, documents (PDF, Word, Excel, PPT).
+/// Utilise file_picker uniquement (déjà dans pubspec.yaml).
 class MediaPickerSheet extends StatelessWidget {
   const MediaPickerSheet({super.key});
 
@@ -59,22 +58,13 @@ class MediaPickerSheet extends StatelessWidget {
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
-            // Options
             _option(
               context,
               icon: Icons.photo_library,
               label: "Photos et vidéos",
               subtitle: "Galerie",
               color: AlanyaColors.forest,
-              onTap: () => _pickGallery(context),
-            ),
-            _option(
-              context,
-              icon: Icons.camera_alt,
-              label: "Appareil photo",
-              subtitle: "Prendre une photo",
-              color: AlanyaColors.terracotta,
-              onTap: () => _pickCamera(context),
+              onTap: () => _pickImages(context),
             ),
             _option(
               context,
@@ -115,33 +105,24 @@ class MediaPickerSheet extends StatelessWidget {
     );
   }
 
-  Future<void> _pickGallery(BuildContext context) async {
-    final picker = ImagePicker();
-    final files = await picker.pickMultipleMedia(imageQuality: 85);
-    if (files.isEmpty || !context.mounted) return;
+  Future<void> _pickImages(BuildContext context) async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.media,
+      allowMultiple: true,
+      withData: true,
+    );
+    if (result == null || result.files.isEmpty || !context.mounted) return;
 
     final results = <MediaPickResult>[];
-    for (final file in files) {
-      final bytes = await file.readAsBytes();
-      final name = file.name;
-      final mime = _guessMime(name);
-      results.add(MediaPickResult(bytes: bytes, fileName: name, mimeType: mime));
+    for (final file in result.files) {
+      if (file.bytes == null) continue;
+      results.add(MediaPickResult(
+        bytes: file.bytes!,
+        fileName: file.name,
+        mimeType: _guessMime(file.name),
+      ));
     }
     if (context.mounted) Navigator.pop(context, results);
-  }
-
-  Future<void> _pickCamera(BuildContext context) async {
-    final picker = ImagePicker();
-    final file = await picker.pickImage(source: ImageSource.camera, imageQuality: 85);
-    if (file == null || !context.mounted) return;
-
-    final bytes = await file.readAsBytes();
-    final result = MediaPickResult(
-      bytes: bytes,
-      fileName: file.name,
-      mimeType: 'image/jpeg',
-    );
-    if (context.mounted) Navigator.pop(context, [result]);
   }
 
   Future<void> _pickDocument(BuildContext context) async {
