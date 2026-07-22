@@ -16,8 +16,6 @@ dependencies:
   # Réseau / API
   http: ^1.2.2
   http_parser: ^4.0.2
-  url_launcher: ^6.3.0
-  http: ^1.2.0
   # Stockage sécurisé des tokens JWT
   # v10 : corrige le build natif Linux (json.hpp) avec les clang récents.
   flutter_secure_storage: ^10.3.1
