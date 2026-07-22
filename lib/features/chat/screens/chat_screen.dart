@@ -38,6 +38,11 @@ import '../chat_repository.dart';
 import 'image_viewer_screen.dart';
 import 'pdf_viewer_screen.dart';
 import 'video_viewer_screen.dart';
+import '../../../core/media_helper.dart';
+import '../../../widgets/media/link_bubble.dart';
+import '../../../widgets/media/media_picker_sheet.dart';
+import '../../../widgets/media/reply_media_preview.dart';
+import '../chat_media_integration.dart';
 
 class ChatScreen extends StatefulWidget {
   /// ID de la conversation actuellement ouverte (null si aucune).
@@ -77,7 +82,7 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
+class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin {
   final _inputCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
   List<Message> _messages = [];
@@ -250,10 +255,12 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _load() async {
     _myId = context.read<AuthController>().user?.id;
     _baseUrl = context.read<ApiClient>().baseUrl;
+    initMediaIntegration(_baseUrl);
     _token = await context.read<TokenStorage>().accessToken;
 
     // 1) Charge d'abord le cache local (affichage instantané, offline-first).
     final cached = await MessageCache.getConv(widget.convId);
+
     if (cached.isNotEmpty && mounted) {
       setState(() {
         _messages = cached;
@@ -643,52 +650,83 @@ class _ChatScreenState extends State<ChatScreen> {
   /// Utilise le snapshot du backend (m.replyTo) qui contient le contenu du message
   /// original — fonctionne même si le message n'est plus chargé localement.
   /// Cliquable : scroll vers le message original si celui-ci est dans la liste.
-  Widget _replyPreviewHeader(Message m, bool mine) {
+    Widget _replyPreviewHeader(Message m, bool mine) {
     // Résout le snapshot via le cache local (priorité), le serveur, ou la liste live.
     final snapshot = _resolveReply(m);
     final original = _findMessage(m.replyToId);
+
     if (snapshot == null && original == null) return const SizedBox.shrink();
 
-    final onColor = mine ? Colors.white : AlanyaColors.ink;
-    final barColor = mine ? Colors.white70 : AlanyaColors.terracotta;
-    final previewText = _replyPreviewText(original, snapshot);
     final senderName = _replySenderName(original, snapshot);
-    final canScroll = original != null;
+
+    // Si le message cité contient un média → preview média
+    final hasMedia = original != null &&
+        original.media.isNotEmpty &&
+        !original.isDeleted;
 
     return GestureDetector(
-      onTap: canScroll ? () => _scrollToMessage(m.replyToId!) : null,
+      onTap: original != null ? () => _scrollToMessage(m.replyToId!) : null,
       child: Container(
         margin: const EdgeInsets.only(bottom: 6),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        decoration: BoxDecoration(
-          color: mine ? Colors.white.withOpacity(0.15) : AlanyaColors.sand.withOpacity(0.5),
-          borderRadius: BorderRadius.circular(8),
-          border: Border(left: BorderSide(color: barColor, width: 3)),
-        ),
-        constraints: const BoxConstraints(maxWidth: 220),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              senderName,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-                color: barColor,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              previewText,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 12, color: onColor.withOpacity(0.8)),
-            ),
-          ],
-        ),
+        child: hasMedia
+            ? ReplyMediaPreview(
+                replyToContent: original.content,
+                replyToMediaUrl: '$_baseUrl${original.media.first.url}?token=$_token',
+                replyToMimeType: original.media.first.mimeType,
+                replyToFileName: original.media.first.filename,
+                replyToSenderName: senderName,
+                isMe: mine,
+              )
+            : _replyPreviewTextOnly(m, mine, snapshot, original, senderName),
       ),
     );
   }
+
+  /// Fallback texte seul (votre code original pour les messages sans média).
+  Widget _replyPreviewTextOnly(
+    Message m,
+    bool mine,
+    dynamic snapshot,
+    Message? original,
+    String senderName,
+  ) {
+    final onColor = mine ? Colors.white : AlanyaColors.ink;
+    final barColor = mine ? Colors.white70 : AlanyaColors.terracotta;
+    final previewText = _replyPreviewText(original, snapshot);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: mine
+            ? Colors.white.withOpacity(0.15)
+            : AlanyaColors.sand.withOpacity(0.5),
+        borderRadius: BorderRadius.circular(8),
+        border: Border(left: BorderSide(color: barColor, width: 3)),
+      ),
+      constraints: const BoxConstraints(maxWidth: 220),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            senderName,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+              color: barColor,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            previewText,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: onColor.withOpacity(0.8)),
+          ),
+        ],
+      ),
+    );
+  }
+
 
   Future<void> _pickAndSendFile() async {
     if (_uploading) return;
@@ -1853,6 +1891,8 @@ class _ChatScreenState extends State<ChatScreen> {
             m.content ?? "[${m.type}]",
             style: TextStyle(color: onTextColor),
           ),
+          if ((m.content ?? '').isNotEmpty)
+            buildLinkPreview(m.content!, mine),
           if (translated != null) ...[
             const SizedBox(height: 6),
             Container(
