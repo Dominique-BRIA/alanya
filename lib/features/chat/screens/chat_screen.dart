@@ -1,13 +1,4 @@
-// chat_screen.dart — WhatsApp-style previews intégrées
-// Fichier complet — copier/coller directement
-//
-// MODIFICATIONS vs version précédente :
-// 1. Imports ajoutés : image_bubble, video_bubble, document_bubble, audio_bubble
-// 2. _bubble() utilise les widgets WhatsApp au lieu des méthodes inline
-// 3. _imageBubble, _videoBubble, _fileBubble, _audioBubble SUPPRIMÉES
-// 4. _textBubble a le link preview intégré
-// 5. _replyPreviewHeader utilise ReplyMediaPreview
-
+// chat_screen.dart — WhatsApp previews COMPLET (thumbnails vidéo, PDF, waveform, grille)
 import 'dart:async';
 import 'dart:typed_data';
 
@@ -56,13 +47,12 @@ import '../../../widgets/media/document_bubble.dart';
 import '../../../widgets/media/audio_bubble.dart';
 import '../../../widgets/media/link_bubble.dart';
 import '../../../widgets/media/reply_media_preview.dart';
-import '../../../widgets/media/media_picker_sheet.dart';
+import '../../../widgets/media/media_grid.dart';
 import '../../../core/media_helper.dart';
 import '../chat_media_integration.dart';
 
 class ChatScreen extends StatefulWidget {
   static String? activeConvId;
-
   const ChatScreen({
     super.key,
     required this.convId,
@@ -78,7 +68,6 @@ class ChatScreen extends StatefulWidget {
     this.otherIsOnline = 0,
     this.otherLastSeen,
   });
-
   final String convId;
   final String title;
   final bool isGroup;
@@ -91,12 +80,10 @@ class ChatScreen extends StatefulWidget {
   final bool isBlocked;
   final int otherIsOnline;
   final DateTime? otherLastSeen;
-
   @override
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-// ── CHATSCREENSTATE AVEC MIXIN ──
 class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin {
   final _inputCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
@@ -116,12 +103,10 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
   Duration _recordDuration = Duration.zero;
   Timer? _recordTimer;
   bool _voiceActive = false;
-
   Message? _replyTo;
   String? _highlightedMessageId;
   final Map<String, GlobalKey> _messageKeys = {};
   final Map<String, ReplyPreview> _replySnapshots = {};
-
   final _translateService = TranslateService();
   final Map<String, String> _translations = {};
   final Set<String> _translating = {};
@@ -151,7 +136,9 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
     super.dispose();
   }
 
-  // ── REALTIME EVENTS ──
+  // ══════════════════════════════════════════════
+  // REALTIME
+  // ══════════════════════════════════════════════
   void _onRealtimeEvent(Map<String, dynamic> e) {
     if (!mounted) return;
     final type = e["type"];
@@ -163,11 +150,8 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
       final tempId = e["tempId"] as String?;
       setState(() {
         final idx = tempId != null ? _messages.indexWhere((m) => m.id == tempId) : -1;
-        if (idx >= 0) {
-          _messages[idx] = msg;
-        } else if (!_messages.any((m) => m.id == msg.id)) {
-          _messages = [..._messages, msg];
-        }
+        if (idx >= 0) { _messages[idx] = msg; }
+        else if (!_messages.any((m) => m.id == msg.id)) { _messages = [..._messages, msg]; }
       });
       if (msg.senderId != _myId) _markReadRemote();
       _scrollToBottom();
@@ -192,39 +176,31 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
       final scope = e["scope"] as String? ?? "me";
       if (messageId == null || e["convId"] != widget.convId) return;
       setState(() {
-        if (scope == "me") {
-          _messages = _messages.where((m) => m.id != messageId).toList();
-        } else {
-          _messages = _messages.map((m) => m.id == messageId
-              ? Message(id: m.id, convId: m.convId, senderId: m.senderId, content: null, type: m.type, status: m.status, replyToId: m.replyToId, replyTo: m.replyTo, deletedAt: DateTime.now(), media: const [], createdAt: m.createdAt)
-              : m).toList();
-        }
+        if (scope == "me") { _messages = _messages.where((m) => m.id != messageId).toList(); }
+        else { _messages = _messages.map((m) => m.id == messageId
+            ? Message(id: m.id, convId: m.convId, senderId: m.senderId, content: null, type: m.type, status: m.status, replyToId: m.replyToId, replyTo: m.replyTo, deletedAt: DateTime.now(), media: const [], createdAt: m.createdAt)
+            : m).toList(); }
       });
     }
   }
 
   void _markReadRemote() {
     final rt = context.read<RealtimeClient>();
-    if (rt.connected) {
-      rt.markRead(widget.convId);
-    } else {
-      context.read<ChatRepository>().markRead(widget.convId);
-    }
+    if (rt.connected) { rt.markRead(widget.convId); }
+    else { context.read<ChatRepository>().markRead(widget.convId); }
   }
 
   Future<void> _load() async {
     _myId = context.read<AuthController>().user?.id;
     _baseUrl = context.read<ApiClient>().baseUrl;
-    initMediaIntegration(_baseUrl); // ← INITIALISE LE MIXIN
+    initMediaIntegration(_baseUrl);
     _token = await context.read<TokenStorage>().accessToken;
-
     final cached = await MessageCache.getConv(widget.convId);
     if (cached.isNotEmpty && mounted) {
       setState(() { _messages = cached; _loading = false; });
       for (final m in _messages) { _cacheMsg(m); }
       _scrollToBottom();
     }
-
     try {
       final repo = context.read<ChatRepository>();
       final msgs = await repo.getMessages(widget.convId);
@@ -235,9 +211,7 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
       for (final m in _messages) { _cacheMsg(m); }
       _markReadRemote();
       _scrollToBottom();
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
-    }
+    } catch (_) { if (mounted) setState(() => _loading = false); }
   }
 
   Future<void> _poll() async {
@@ -259,7 +233,9 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
 
   String _signature(List<Message> msgs) => msgs.map((m) => "${m.id}:${m.status}").join("|");
 
-  // ── SEND ──
+  // ══════════════════════════════════════════════
+  // SEND
+  // ══════════════════════════════════════════════
   Future<void> _send() async {
     final text = _inputCtrl.text.trim();
     if (text.isEmpty || _sending) return;
@@ -291,17 +267,14 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
       setState(() { _messages = [..._messages, optimistic]; _replyTo = null; });
       _scrollToBottom();
       await context.read<Outbox>().enqueue(tempId: tempId, convId: widget.convId, content: text, replyToId: replyId);
-    } finally {
-      if (mounted) setState(() => _sending = false);
-    }
+    } finally { if (mounted) setState(() => _sending = false); }
   }
 
-  void _setReplyTo(Message m) {
-    setState(() => _replyTo = m);
-    FocusScope.of(context).requestFocus(FocusNode());
-  }
+  void _setReplyTo(Message m) { setState(() => _replyTo = m); FocusScope.of(context).requestFocus(FocusNode()); }
 
-  // ── HELPERS ──
+  // ══════════════════════════════════════════════
+  // HELPERS
+  // ══════════════════════════════════════════════
   Widget _statusTicks(String status, Color baseColor) {
     if (status == "PENDING") return Icon(Icons.access_time, size: 13, color: baseColor);
     if (status == "READ") return const Icon(Icons.done_all, size: 15, color: AlanyaColors.tickRead);
@@ -309,9 +282,7 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
     return Icon(Icons.done, size: 15, color: baseColor);
   }
 
-  int _statusRank(String s) {
-    switch (s) { case "READ": return 2; case "DELIVERED": return 1; default: return 0; }
-  }
+  int _statusRank(String s) { switch (s) { case "READ": return 2; case "DELIVERED": return 1; default: return 0; } }
 
   Widget _timestampRow(Message m, bool mine, Color color) {
     return Row(mainAxisSize: MainAxisSize.min, children: [
@@ -389,9 +360,7 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
 
   void _highlightMessage(String id) {
     setState(() => _highlightedMessageId = id);
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted && _highlightedMessageId == id) setState(() => _highlightedMessageId = null);
-    });
+    Future.delayed(const Duration(seconds: 2), () { if (mounted && _highlightedMessageId == id) setState(() => _highlightedMessageId = null); });
   }
 
   String _replyPreviewText(Message? original, ReplyPreview? snapshot) {
@@ -408,13 +377,7 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
   }
 
   String _typeLabel(String type) {
-    switch (type) {
-      case 'IMAGE': return 'Photo';
-      case 'AUDIO': return 'Message vocal';
-      case 'VIDEO': return 'Vidéo';
-      case 'FILE': return 'Fichier';
-      default: return '[$type]';
-    }
+    switch (type) { case 'IMAGE': return 'Photo'; case 'AUDIO': return 'Message vocal'; case 'VIDEO': return 'Vidéo'; case 'FILE': return 'Fichier'; default: return '[$type]'; }
   }
 
   String _replySenderName(Message? original, ReplyPreview? snapshot) {
@@ -424,14 +387,15 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
     return widget.memberNames[senderId] ?? tr(context, 'reply_to');
   }
 
-  // ── REPLY PREVIEW HEADER (WhatsApp style) ──
+  // ══════════════════════════════════════════════
+  // REPLY PREVIEW HEADER (WhatsApp style)
+  // ══════════════════════════════════════════════
   Widget _replyPreviewHeader(Message m, bool mine) {
     final snapshot = _resolveReply(m);
     final original = _findMessage(m.replyToId);
     if (snapshot == null && original == null) return const SizedBox.shrink();
     final senderName = _replySenderName(original, snapshot);
     final hasMedia = original != null && original.media.isNotEmpty && !original.isDeleted;
-
     return GestureDetector(
       onTap: original != null ? () => _scrollToMessage(m.replyToId!) : null,
       child: Container(
@@ -470,16 +434,14 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
     );
   }
 
-  // ── FILE PICKER (existant) ──
+  // ══════════════════════════════════════════════
+  // FILE PICKER + UPLOAD
+  // ══════════════════════════════════════════════
   Future<void> _pickAndSendFile() async {
     if (_uploading) return;
     FilePickerResult? result;
-    try {
-      result = await FilePicker.platform.pickFiles(type: FileType.any, withData: true);
-    } catch (_) {
-      if (mounted) _showError("Sélection de fichier indisponible");
-      return;
-    }
+    try { result = await FilePicker.platform.pickFiles(type: FileType.any, withData: true); }
+    catch (_) { if (mounted) _showError("Sélection de fichier indisponible"); return; }
     if (result == null || result.files.isEmpty) return;
     final file = result.files.first;
     final bytes = file.bytes;
@@ -499,37 +461,23 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
     final rt = context.read<RealtimeClient>();
     try {
       final uploaded = await media.upload(Uint8List.fromList(bytes), filename, mime, durationMs: durationMs);
-      if (rt.connected) {
-        rt.sendMedia(widget.convId, uploaded.id, msgType, "tmp-${DateTime.now().microsecondsSinceEpoch}", replyToId: replyId);
-      } else {
-        final msg = await context.read<ChatRepository>().sendMedia(widget.convId, uploaded.id, msgType, replyToId: replyId);
-        if (mounted) setState(() => _messages = [..._messages, msg]);
-      }
+      if (rt.connected) { rt.sendMedia(widget.convId, uploaded.id, msgType, "tmp-${DateTime.now().microsecondsSinceEpoch}", replyToId: replyId); }
+      else { final msg = await context.read<ChatRepository>().sendMedia(widget.convId, uploaded.id, msgType, replyToId: replyId); if (mounted) setState(() => _messages = [..._messages, msg]); }
       _scrollToBottom();
-    } on ApiException catch (e) { _showError(e.message); } catch (_) {
-      _showError(tr(context, 'send_failed'));
-    } finally {
-      if (mounted) setState(() => _uploading = false);
-    }
+    } on ApiException catch (e) { _showError(e.message); } catch (_) { _showError(tr(context, 'send_failed')); }
+    finally { if (mounted) setState(() => _uploading = false); }
   }
 
-  // ── VOICE RECORDING ──
+  // ══════════════════════════════════════════════
+  // VOICE RECORDING
+  // ══════════════════════════════════════════════
   void _startRecordTimer() {
     _recordTimer?.cancel();
     _recordDuration = Duration.zero;
-    _recordTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted) return;
-      setState(() { _recordDuration = DateTime.now().difference(_recordStarted ?? DateTime.now()); });
-    });
+    _recordTimer = Timer.periodic(const Duration(seconds: 1), (_) { if (!mounted) return; setState(() { _recordDuration = DateTime.now().difference(_recordStarted ?? DateTime.now()); }); });
   }
-
   void _stopRecordTimer() { _recordTimer?.cancel(); _recordTimer = null; }
-
-  String _formatDuration(Duration d) {
-    final m = d.inMinutes.remainder(60);
-    final s = d.inSeconds.remainder(60);
-    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
-  }
+  String _formatDuration(Duration d) { final m = d.inMinutes.remainder(60); final s = d.inSeconds.remainder(60); return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}'; }
 
   Future<void> _startVoiceRecord() async {
     if (_uploading || _recording || _voiceActive) return;
@@ -556,29 +504,16 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
   }
 
   String _ext(String name) { final i = name.lastIndexOf("."); return i >= 0 ? name.substring(i + 1).toLowerCase() : ""; }
-
   String _mimeFromName(String name) {
     switch (_ext(name)) {
-      case "png": return "image/png";
-      case "gif": return "image/gif";
-      case "webp": return "image/webp";
-      case "jpg": case "jpeg": return "image/jpeg";
-      case "pdf": return "application/pdf";
-      case "doc": return "application/msword";
-      case "docx": return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-      case "xls": return "application/vnd.ms-excel";
-      case "xlsx": return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-      case "ppt": case "pptx": return "application/vnd.ms-powerpoint";
-      case "txt": return "text/plain";
-      case "csv": return "text/csv";
-      case "zip": return "application/zip";
-      case "rar": return "application/vnd.rar";
-      case "7z": return "application/x-7z-compressed";
-      case "mp3": return "audio/mpeg";
-      case "wav": return "audio/wav";
-      case "mp4": return "video/mp4";
-      case "mov": return "video/quicktime";
-      default: return "application/octet-stream";
+      case "png": return "image/png"; case "gif": return "image/gif"; case "webp": return "image/webp";
+      case "jpg": case "jpeg": return "image/jpeg"; case "pdf": return "application/pdf";
+      case "doc": return "application/msword"; case "docx": return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+      case "xls": return "application/vnd.ms-excel"; case "xlsx": return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+      case "ppt": case "pptx": return "application/vnd.ms-powerpoint"; case "txt": return "text/plain";
+      case "csv": return "text/csv"; case "zip": return "application/zip"; case "rar": return "application/vnd.rar";
+      case "7z": return "application/x-7z-compressed"; case "mp3": return "audio/mpeg"; case "wav": return "audio/wav";
+      case "mp4": return "video/mp4"; case "mov": return "video/quicktime"; default: return "application/octet-stream";
     }
   }
 
@@ -598,36 +533,33 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
   Future<void> _openImageViewer(Message m) async {
     final token = await _freshToken();
     final media = m.media.first;
-    final name = media.filename ?? "image-${media.id}";
     if (!mounted) return;
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => ImageViewerScreen(imageUrl: "$_baseUrl${media.url}?token=$token", downloadUrl: "$_baseUrl${media.url}?download=1&token=$token", filename: name)));
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => ImageViewerScreen(imageUrl: "$_baseUrl${media.url}?token=$token", downloadUrl: "$_baseUrl${media.url}?download=1&token=$token", filename: media.filename ?? "image-${media.id}")));
   }
 
   Future<void> _openVideoViewer(Message m) async {
     final token = await _freshToken();
     final media = m.media.first;
-    final name = media.filename ?? "video-${media.id}";
     if (!mounted) return;
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => VideoViewerScreen(videoUrl: "$_baseUrl${media.url}?token=$token", downloadUrl: "$_baseUrl${media.url}?download=1&token=$token", filename: name)));
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => VideoViewerScreen(videoUrl: "$_baseUrl${media.url}?token=$token", downloadUrl: "$_baseUrl${media.url}?download=1&token=$token", filename: media.filename ?? "video-${media.id}")));
   }
 
   Future<void> _openPdfViewer(Message m) async {
     final token = await _freshToken();
     final media = m.media.first;
-    final name = media.filename ?? "document-${media.id}.pdf";
     if (!mounted) return;
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => PdfViewerScreen(pdfUrl: "$_baseUrl${media.url}?token=$token", downloadUrl: "$_baseUrl${media.url}?download=1&token=$token", filename: name)));
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => PdfViewerScreen(pdfUrl: "$_baseUrl${media.url}?token=$token", downloadUrl: "$_baseUrl${media.url}?download=1&token=$token", filename: media.filename ?? "document-${media.id}.pdf")));
   }
 
   void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollCtrl.hasClients) _scrollCtrl.animateTo(_scrollCtrl.position.maxScrollExtent, duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
-    });
+    WidgetsBinding.instance.addPostFrameCallback((_) { if (_scrollCtrl.hasClients) _scrollCtrl.animateTo(_scrollCtrl.position.maxScrollExtent, duration: const Duration(milliseconds: 250), curve: Curves.easeOut); });
   }
 
   void _showError(String m) => showAppSnackBar(m);
 
-  // ── DELETE ──
+  // ══════════════════════════════════════════════
+  // DELETE / FORWARD / OPTIONS
+  // ══════════════════════════════════════════════
   Future<void> _deleteMessage(Message m) async {
     final canDeleteForAll = m.senderId == _myId && !m.isDeleted;
     final scope = await _showDeleteDialog(canDeleteForAll);
@@ -650,7 +582,6 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
     ])));
   }
 
-  // ── FORWARD ──
   Future<void> _forwardMessage(Message m) async {
     final conversations = await context.read<ChatRepository>().listConversations();
     if (!mounted) return;
@@ -689,13 +620,12 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
     }
   }
 
-  // ── APPBAR ──
+  // ══════════════════════════════════════════════
+  // APPBAR
+  // ══════════════════════════════════════════════
   PreferredSizeWidget _whatsappAppBar() {
     return AppBar(
-      backgroundColor: AlanyaColors.terracotta,
-      foregroundColor: Colors.white,
-      leadingWidth: 40,
-      titleSpacing: 0,
+      backgroundColor: AlanyaColors.terracotta, foregroundColor: Colors.white, leadingWidth: 40, titleSpacing: 0,
       title: InkWell(
         onTap: widget.isGroup ? _openGroupInfo : _openContactInfo,
         child: Row(children: [
@@ -720,12 +650,10 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
   }
 
   void _openAvatarViewer() { Navigator.of(context).push(MaterialPageRoute(builder: (_) => AvatarViewerScreen(name: widget.title, avatarUrl: widget.avatarUrl))); }
-
   void _openGroupInfo() {
     if (!widget.isGroup) return;
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => GroupInfoScreen(convId: widget.convId, title: widget.title, avatarUrl: widget.avatarUrl, members: widget.memberNames.entries.map((e) => {'id': e.key, 'pseudo': e.value, 'publicNumber': '', 'avatarUrl': null, 'isOnline': 0, 'role': 'MEMBER'}).toList())));
   }
-
   void _openContactInfo() {
     if (widget.isGroup) return;
     final otherId = widget.otherUserId;
@@ -761,15 +689,18 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
   }
 
   // ══════════════════════════════════════════════
-  // BUBBLE — utilise les widgets WhatsApp
+  // BUBBLE — WhatsApp previews + grille multi-médias
   // ══════════════════════════════════════════════
   Widget _bubble(Message m, bool mine) {
-    final isImage = m.type == "IMAGE" && m.media.isNotEmpty;
-    final isVideo = m.type == "VIDEO" && m.media.isNotEmpty;
-    final isFile = m.type == "FILE" && m.media.isNotEmpty;
-    final isAudio = m.type == "AUDIO" && m.media.isNotEmpty;
+    final hasMedia = m.media.isNotEmpty;
+    final isMultiMedia = hasMedia && m.media.length > 1;
+    final isImage = !isMultiMedia && m.type == "IMAGE" && hasMedia;
+    final isVideo = !isMultiMedia && m.type == "VIDEO" && hasMedia;
+    final isFile = !isMultiMedia && m.type == "FILE" && hasMedia;
+    final isAudio = !isMultiMedia && m.type == "AUDIO" && hasMedia;
     final senderLabel = widget.isGroup && !mine ? (widget.memberNames[m.senderId] ?? "Membre") : null;
     final isHighlighted = _highlightedMessageId == m.id;
+    final isGrid = isMultiMedia; // 2+ médias → grille
 
     return Align(
       key: _messageKeys.putIfAbsent(m.id, () => GlobalKey()),
@@ -783,7 +714,7 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 400),
               margin: const EdgeInsets.symmetric(vertical: 4),
-              padding: isImage || isVideo ? const EdgeInsets.all(3) : const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              padding: (isImage || isVideo || isGrid) ? const EdgeInsets.all(3) : const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               constraints: const BoxConstraints(maxWidth: 280),
               decoration: BoxDecoration(
                 color: isHighlighted ? AlanyaColors.gold.withValues(alpha: 0.3) : (mine ? AlanyaColors.terracotta : Colors.white),
@@ -794,52 +725,70 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
                 if (m.replyToId != null && !m.isDeleted) _replyPreviewHeader(m, mine),
                 m.isDeleted
                     ? _deletedBubble(m, mine)
-                    : isImage
-                        ? ImageBubble(
-                            imageUrl: '$_baseUrl${m.media.first.url}',
-                            token: _token,
-                            onTap: () => _openImageViewer(m),
-                            onLongPress: () => _showMessageOptions(m),
+                    : isGrid
+                        // ══ GRILLE MULTI-MÉDIAS (WhatsApp style) ══
+                        ? MediaGrid(
+                            items: m.media.map((media) => MediaGridItem(
+                              url: media.url, mimeType: media.mimeType, fileName: media.filename,
+                              sizeBytes: media.sizeBytes, durationMs: media.durationMs,
+                            )).toList(),
+                            baseUrl: _baseUrl, token: _token,
+                            onItemTap: (i) {
+                              final media = m.media[i];
+                              final type = MediaHelper.detectType(media.mimeType, media.filename);
+                              if (type == AlanyaMediaType.image) _openImageViewer(m);
+                              else if (type == AlanyaMediaType.video) _openVideoViewer(m);
+                              else if (type == AlanyaMediaType.audio) InlineAudioPlayer.toggle(_mediaUrl(media));
+                              else _download(media);
+                            },
                             timestamp: _time(m.createdAt),
                             statusWidget: mine ? _statusTicks(m.status, Colors.white) : null,
                             isMe: mine,
                           )
-                        : isVideo
-                            ? VideoBubble(
-                                videoUrl: '$_baseUrl${m.media.first.url}',
-                                token: _token,
-                                duration: m.media.first.durationMs,
-                                onTap: () => _openVideoViewer(m),
-                                onLongPress: () => _showMessageOptions(m),
+                        : isImage
+                            ? ImageBubble(
+                                imageUrl: '$_baseUrl${m.media.first.url}', token: _token,
+                                onTap: () => _openImageViewer(m), onLongPress: () => _showMessageOptions(m),
                                 timestamp: _time(m.createdAt),
                                 statusWidget: mine ? _statusTicks(m.status, Colors.white) : null,
                                 isMe: mine,
                               )
-                            : isFile
-                                ? DocumentBubble(
-                                    fileName: m.media.first.filename ?? tr(context, 'file'),
-                                    fileSize: m.media.first.sizeBytes,
-                                    mimeType: m.media.first.mimeType,
-                                    onTap: () {
-                                      final media = m.media.first;
-                                      final isPdf = media.mimeType == "application/pdf" || _ext(media.filename ?? "").toLowerCase() == "pdf";
-                                      isPdf ? _openPdfViewer(m) : _download(media);
-                                    },
-                                    onLongPress: () => _showMessageOptions(m),
+                            : isVideo
+                                ? VideoBubble(
+                                    videoUrl: '$_baseUrl${m.media.first.url}', token: _token,
+                                    duration: m.media.first.durationMs,
+                                    onTap: () => _openVideoViewer(m), onLongPress: () => _showMessageOptions(m),
                                     timestamp: _time(m.createdAt),
-                                    statusWidget: mine ? _statusTicks(m.status, mine ? Colors.white70 : Colors.black45) : null,
+                                    statusWidget: mine ? _statusTicks(m.status, Colors.white) : null,
                                     isMe: mine,
                                   )
-                                : isAudio
-                                    ? AudioBubble(
-                                        url: _mediaUrl(m.media.first),
-                                        duration: m.media.first.durationMs,
-                                        onTap: () => InlineAudioPlayer.toggle(_mediaUrl(m.media.first), totalDuration: m.media.first.durationMs != null ? Duration(milliseconds: m.media.first.durationMs!) : null),
+                                : isFile
+                                    ? DocumentBubble(
+                                        fileName: m.media.first.filename ?? tr(context, 'file'),
+                                        fileSize: m.media.first.sizeBytes,
+                                        mimeType: m.media.first.mimeType,
+                                        pdfUrl: '$_baseUrl${m.media.first.url}',
+                                        token: _token,
+                                        onTap: () {
+                                          final media = m.media.first;
+                                          final isPdf = media.mimeType == "application/pdf" || _ext(media.filename ?? "").toLowerCase() == "pdf";
+                                          isPdf ? _openPdfViewer(m) : _download(media);
+                                        },
+                                        onLongPress: () => _showMessageOptions(m),
                                         timestamp: _time(m.createdAt),
                                         statusWidget: mine ? _statusTicks(m.status, mine ? Colors.white70 : Colors.black45) : null,
                                         isMe: mine,
                                       )
-                                    : _textBubble(m, mine),
+                                    : isAudio
+                                        ? AudioBubble(
+                                            url: _mediaUrl(m.media.first),
+                                            duration: m.media.first.durationMs,
+                                            onTap: () => InlineAudioPlayer.toggle(_mediaUrl(m.media.first), totalDuration: m.media.first.durationMs != null ? Duration(milliseconds: m.media.first.durationMs!) : null),
+                                            timestamp: _time(m.createdAt),
+                                            statusWidget: mine ? _statusTicks(m.status, mine ? Colors.white70 : Colors.black45) : null,
+                                            isMe: mine,
+                                          )
+                                        : _textBubble(m, mine),
               ]),
             ),
           ),
@@ -861,30 +810,24 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
     ]);
   }
 
-  // ── TEXT BUBBLE AVEC LINK PREVIEW ──
+  // ══ TEXT BUBBLE AVEC LINK PREVIEW ══
   Widget _textBubble(Message m, bool mine) {
     final translated = _translations[m.id];
     final isTranslating = _translating.contains(m.id);
     final onTextColor = mine ? Colors.white : AlanyaColors.ink;
     final onSubColor = mine ? Colors.white70 : Colors.black45;
-
     return GestureDetector(
       onTap: m.type == 'TEXT' && (m.content ?? '').isNotEmpty ? () => _translateMessage(m) : null,
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(m.content ?? "[${m.type}]", style: TextStyle(color: onTextColor)),
-        // ── LINK PREVIEW ──
         if ((m.content ?? '').isNotEmpty) buildLinkPreview(m.content!, mine),
         if (translated != null) ...[
           const SizedBox(height: 6),
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(color: mine ? Colors.white.withOpacity(0.15) : AlanyaColors.sand.withOpacity(0.7), borderRadius: BorderRadius.circular(8)),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.translate, size: 12, color: onSubColor), const SizedBox(width: 4), Text(tr(context, 'translated'), style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: onSubColor))]),
-              const SizedBox(height: 2),
-              Text(translated, style: TextStyle(fontSize: 13, color: onTextColor, fontStyle: FontStyle.italic)),
-            ]),
-          ),
+          Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: mine ? Colors.white.withOpacity(0.15) : AlanyaColors.sand.withOpacity(0.7), borderRadius: BorderRadius.circular(8)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.translate, size: 12, color: onSubColor), const SizedBox(width: 4), Text(tr(context, 'translated'), style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: onSubColor))]),
+            const SizedBox(height: 2),
+            Text(translated, style: TextStyle(fontSize: 13, color: onTextColor, fontStyle: FontStyle.italic)),
+          ])),
         ],
         if (isTranslating) ...[
           const SizedBox(height: 4),
@@ -909,16 +852,12 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
       final translated = await _translateService.translate(text: text, target: locale, source: 'auto');
       if (!mounted) return;
       setState(() => _translations[m.id] = translated);
-    } catch (_) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr(context, 'translation_failed'))));
-    } finally {
-      if (mounted) setState(() => _translating.remove(m.id));
-    }
+    } catch (_) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr(context, 'translation_failed')))); }
+    finally { if (mounted) setState(() => _translating.remove(m.id)); }
   }
 
-  // ── TIME / DATE ──
+  // ══ TIME / DATE ══
   String _time(DateTime d) { final l = d.toLocal(); return "${l.hour.toString().padLeft(2, '0')}:${l.minute.toString().padLeft(2, '0')}"; }
-
   String _lastSeenLabel(DateTime d) {
     final diff = DateTime.now().difference(d);
     if (diff.inMinutes < 1) return "vu à l'instant";
@@ -926,33 +865,24 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
     if (diff.inHours < 24) return "vu il y a ${diff.inHours}h";
     return "vu il y a ${diff.inDays}j";
   }
-
   Widget _dateChip(String label) {
     return Center(child: Container(margin: const EdgeInsets.symmetric(vertical: 10), padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6), decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(10)), child: Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: AlanyaColors.grey600))));
   }
-
   String _dateLabel(DateTime d) {
-    final l = d.toLocal();
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final msgDay = DateTime(l.year, l.month, l.day);
-    final diff = today.difference(msgDay).inDays;
-    if (diff == 0) return "Aujourd'hui";
-    if (diff == 1) return "Hier";
+    final l = d.toLocal(); final now = DateTime.now(); final today = DateTime(now.year, now.month, now.day); final msgDay = DateTime(l.year, l.month, l.day); final diff = today.difference(msgDay).inDays;
+    if (diff == 0) return "Aujourd'hui"; if (diff == 1) return "Hier";
     if (diff < 7) { const days = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche']; return days[l.weekday - 1]; }
     const months = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
     return "${l.day} ${months[l.month - 1]} ${l.year}";
   }
-
   bool _needsDateSeparator(int index) {
     if (index == 0) return true;
-    final prev = _messages[index - 1].createdAt.toLocal();
-    final curr = _messages[index].createdAt.toLocal();
+    final prev = _messages[index - 1].createdAt.toLocal(); final curr = _messages[index].createdAt.toLocal();
     return prev.year != curr.year || prev.month != curr.month || prev.day != curr.day;
   }
 
   // ══════════════════════════════════════════════
-  // COMPOSER (inchangé — déjà fonctionnel)
+  // COMPOSER (inchangé)
   // ══════════════════════════════════════════════
   Widget _composer() {
     if (_recordLocked) {
@@ -960,19 +890,15 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
         GestureDetector(onTap: () => _stopVoiceRecord(cancel: true), child: CircleAvatar(backgroundColor: Colors.red.shade400, child: const Icon(Icons.delete_outline, color: Colors.white))),
         const SizedBox(width: 8),
         Expanded(child: Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(24)), child: Row(children: [
-          const Icon(Icons.fiber_manual_record, color: Colors.red, size: 14),
-          const SizedBox(width: 8),
+          const Icon(Icons.fiber_manual_record, color: Colors.red, size: 14), const SizedBox(width: 8),
           Text(_formatDuration(_recordDuration), style: TextStyle(fontWeight: FontWeight.w600, color: Colors.red.shade700, fontSize: 15)),
-          const Spacer(),
-          Icon(Icons.lock, color: Colors.red.shade400, size: 18),
-          const SizedBox(width: 4),
+          const Spacer(), Icon(Icons.lock, color: Colors.red.shade400, size: 18), const SizedBox(width: 4),
           Text(tr(context, 'recording_locked'), style: const TextStyle(fontSize: 13, color: Colors.black54)),
         ]))),
         const SizedBox(width: 8),
         GestureDetector(onTap: _uploading ? null : () => _stopVoiceRecord(), child: CircleAvatar(backgroundColor: AlanyaColors.terracotta, child: const Icon(Icons.send, color: Colors.white))),
       ])));
     }
-
     return SafeArea(top: false, child: Column(mainAxisSize: MainAxisSize.min, children: [
       if (_replyTo != null) Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6), color: AlanyaColors.cream, child: Row(children: [
         Container(width: 3, height: 32, decoration: BoxDecoration(color: AlanyaColors.terracotta, borderRadius: BorderRadius.circular(2))),
@@ -995,8 +921,7 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
 
   Widget _recordingBar() {
     return Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(24)), child: Row(children: [
-      const Icon(Icons.fiber_manual_record, color: Colors.red, size: 14),
-      const SizedBox(width: 8),
+      const Icon(Icons.fiber_manual_record, color: Colors.red, size: 14), const SizedBox(width: 8),
       Text(_formatDuration(_recordDuration), style: TextStyle(fontWeight: FontWeight.w600, color: Colors.red.shade700, fontSize: 15)),
       const SizedBox(width: 12),
       Expanded(child: Text(tr(context, 'slide_up_to_lock'), style: const TextStyle(fontSize: 13, color: Colors.black54), textAlign: TextAlign.center)),
@@ -1019,7 +944,9 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
   }
 }
 
-// ── SWIPE TO REPLY ──
+// ══════════════════════════════════════════════
+// SWIPE TO REPLY
+// ══════════════════════════════════════════════
 class _SwipeToReply extends StatefulWidget {
   final Widget child;
   final VoidCallback onReply;
@@ -1027,23 +954,14 @@ class _SwipeToReply extends StatefulWidget {
   @override
   State<_SwipeToReply> createState() => _SwipeToReplyState();
 }
-
 class _SwipeToReplyState extends State<_SwipeToReply> with SingleTickerProviderStateMixin {
   late AnimationController _ctrl;
   double _dragExtent = 0;
   static const _threshold = 50.0;
-
   @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 200));
-    _ctrl.addStatusListener((status) { if (status == AnimationStatus.completed) { _dragExtent = 0; _ctrl.value = 0; } });
-    _ctrl.addListener(() => setState(() {}));
-  }
-
+  void initState() { super.initState(); _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 200)); _ctrl.addStatusListener((status) { if (status == AnimationStatus.completed) { _dragExtent = 0; _ctrl.value = 0; } }); _ctrl.addListener(() => setState(() {})); }
   @override
   void dispose() { _ctrl.dispose(); super.dispose(); }
-
   @override
   Widget build(BuildContext context) {
     final offset = _ctrl.isAnimating ? _dragExtent * (1 - _ctrl.value) : _dragExtent;
@@ -1059,7 +977,9 @@ class _SwipeToReplyState extends State<_SwipeToReply> with SingleTickerProviderS
   }
 }
 
-// ── FORWARD PICKER ──
+// ══════════════════════════════════════════════
+// FORWARD PICKER
+// ══════════════════════════════════════════════
 class _ForwardPicker extends StatefulWidget {
   const _ForwardPicker({required this.conversations, required this.title});
   final List<Conversation> conversations;
@@ -1067,25 +987,21 @@ class _ForwardPicker extends StatefulWidget {
   @override
   State<_ForwardPicker> createState() => _ForwardPickerState();
 }
-
 class _ForwardPickerState extends State<_ForwardPicker> {
   final Set<String> _selected = {};
   @override
   Widget build(BuildContext context) {
     return SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
       Container(padding: const EdgeInsets.all(16), child: Row(children: [
-        Text(widget.title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-        const Spacer(),
+        Text(widget.title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)), const Spacer(),
         TextButton(onPressed: _selected.isEmpty ? null : () => Navigator.pop(context, _selected), child: Text(_selected.isEmpty ? '' : '${_selected.length}', style: TextStyle(color: _selected.isEmpty ? Colors.grey : AlanyaColors.terracotta, fontWeight: FontWeight.bold))),
       ])),
       const Divider(height: 1),
       SizedBox(height: MediaQuery.of(context).size.height * 0.5, child: ListView.builder(shrinkWrap: true, itemCount: widget.conversations.length, itemBuilder: (_, i) {
-        final conv = widget.conversations[i];
-        final isSelected = _selected.contains(conv.id);
+        final conv = widget.conversations[i]; final isSelected = _selected.contains(conv.id);
         return ListTile(
           leading: CircleAvatar(backgroundColor: isSelected ? AlanyaColors.terracotta : AlanyaColors.sand, child: Icon(isSelected ? Icons.check : (conv.isGroup ? Icons.group : Icons.person), color: isSelected ? Colors.white : AlanyaColors.chocolate)),
-          title: Text(conv.title ?? 'Conversation'),
-          subtitle: conv.isGroup ? const Text('Groupe') : null,
+          title: Text(conv.title ?? 'Conversation'), subtitle: conv.isGroup ? const Text('Groupe') : null,
           onTap: () { setState(() { if (isSelected) { _selected.remove(conv.id); } else { _selected.add(conv.id); } }); },
         );
       })),

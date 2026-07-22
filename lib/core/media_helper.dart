@@ -40,10 +40,7 @@ class MediaHelper {
   }
 
   static String? extractUrl(String text) {
-    final urlRegex = RegExp(
-      'https?://[^\\s<>"\')\\]]+',
-      caseSensitive: false,
-    );
+    final urlRegex = RegExp('https?://[^\\s<>"\')\\]]+', caseSensitive: false);
     final match = urlRegex.firstMatch(text);
     return match?.group(0);
   }
