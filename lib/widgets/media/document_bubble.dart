@@ -1,14 +1,14 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:pdfx/pdfx.dart';
 import '../../core/media_helper.dart';
 import '../../theme/alanya_theme.dart';
 
 /// Bulle document style WhatsApp :
-/// - PDF : aperçu de la 1ère page en miniature
+/// - PDF : aperçu 1ère page en miniature
 /// - Autres docs : icône colorée avec extension
-/// - Nom du fichier + taille + type
-/// - Timestamp + coches
+/// - Nom + taille + type
 class DocumentBubble extends StatefulWidget {
   const DocumentBubble({
     super.key,
@@ -42,6 +42,7 @@ class DocumentBubble extends StatefulWidget {
 class _DocumentBubbleState extends State<DocumentBubble> {
   Uint8List? _pdfThumbnail;
   bool _generating = false;
+  bool _failed = false;
 
   @override
   void initState() {
@@ -52,7 +53,11 @@ class _DocumentBubbleState extends State<DocumentBubble> {
   @override
   void didUpdateWidget(DocumentBubble oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.pdfUrl != widget.pdfUrl) _generatePdfThumbnail();
+    if (oldWidget.pdfUrl != widget.pdfUrl) {
+      _pdfThumbnail = null;
+      _failed = false;
+      _generatePdfThumbnail();
+    }
   }
 
   bool get _isPdf {
@@ -62,15 +67,22 @@ class _DocumentBubbleState extends State<DocumentBubble> {
   }
 
   Future<void> _generatePdfThumbnail() async {
-    if (!_isPdf || widget.pdfUrl == null || _generating) return;
+    if (!_isPdf || widget.pdfUrl == null || _generating || _failed) return;
     setState(() => _generating = true);
     try {
       final url = widget.token != null
           ? '${widget.pdfUrl}?token=${widget.token}'
           : widget.pdfUrl!;
-      final doc = await PdfDocument.openData(
-        await _fetchBytes(url),
-      );
+
+      // Télécharge le PDF via http
+      final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
+      if (response.statusCode != 200) {
+        if (mounted) setState(() { _failed = true; _generating = false; });
+        return;
+      }
+
+      // Ouvre le PDF et rend la première page
+      final doc = await PdfDocument.openData(response.bodyBytes);
       final page = await doc.getPage(1);
       final render = await page.render(
         width: 200,
@@ -79,19 +91,17 @@ class _DocumentBubbleState extends State<DocumentBubble> {
       );
       await page.close();
       await doc.close();
+
       if (mounted && render != null) {
         setState(() => _pdfThumbnail = render.bytes);
+      } else {
+        if (mounted) setState(() => _failed = true);
       }
-    } catch (_) {} finally {
+    } catch (_) {
+      if (mounted) setState(() => _failed = true);
+    } finally {
       if (mounted) setState(() => _generating = false);
     }
-  }
-
-  Future<Uint8List> _fetchBytes(String url) async {
-    // Utilise http pour télécharger le PDF
-    final response = await Uri.parse(url).data;
-    // Fallback : retourne des bytes vides si échec
-    return Uint8List(0);
   }
 
   @override
@@ -110,9 +120,11 @@ class _DocumentBubbleState extends State<DocumentBubble> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // PDF : aperçu 1ère page OU icône
+          // PDF avec aperçu OU doc classique
           if (_isPdf && _pdfThumbnail != null)
             _buildPdfPreview(onText, onSub, ext, size)
+          else if (_isPdf && _generating)
+            _buildPdfLoading(onText, onSub, ext, size)
           else
             _buildDocRow(icon, color, ext, size, onText, onSub),
 
@@ -138,7 +150,7 @@ class _DocumentBubbleState extends State<DocumentBubble> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Miniature PDF (arrondie)
+        // Miniature PDF
         ClipRRect(
           borderRadius: BorderRadius.circular(8),
           child: Image.memory(
@@ -149,7 +161,7 @@ class _DocumentBubbleState extends State<DocumentBubble> {
           ),
         ),
         const SizedBox(height: 8),
-        // Nom + taille
+        // Badge PDF + nom + taille
         Row(children: [
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
@@ -174,6 +186,28 @@ class _DocumentBubbleState extends State<DocumentBubble> {
           Text(size, style: TextStyle(fontSize: 11, color: onSub)),
         ],
       ],
+    );
+  }
+
+  /// Loading pendant la génération du thumbnail PDF.
+  Widget _buildPdfLoading(Color onText, Color onSub, String ext, String size) {
+    return Container(
+      width: 240,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: widget.isMe ? Colors.white.withValues(alpha: 0.08) : AlanyaColors.grey100,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(children: [
+        const SizedBox(
+          width: 32, height: 32,
+          child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFE53935)),
+        ),
+        const SizedBox(height: 8),
+        Text(widget.fileName, maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: onText)),
+        if (size.isNotEmpty) Text(size, style: TextStyle(fontSize: 10, color: onSub)),
+      ]),
     );
   }
 

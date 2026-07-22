@@ -3,11 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 import '../../theme/alanya_theme.dart';
 
-/// Bulle vidéo style WhatsApp :
-/// - Vraie thumbnail générée depuis l'URL vidéo (si pas de thumbnail serveur)
-/// - Bouton play central (cercle blanc + triangle)
-/// - Durée badge en bas à gauche
-/// - Timestamp + coches en bas à droite
+/// Bulle vidéo style WhatsApp — thumbnail auto-générée + fallback visible.
 class VideoBubble extends StatefulWidget {
   const VideoBubble({
     super.key,
@@ -43,6 +39,7 @@ class VideoBubble extends StatefulWidget {
 class _VideoBubbleState extends State<VideoBubble> {
   Uint8List? _thumbnailBytes;
   bool _generating = false;
+  bool _failed = false;
 
   @override
   void initState() {
@@ -53,12 +50,17 @@ class _VideoBubbleState extends State<VideoBubble> {
   @override
   void didUpdateWidget(VideoBubble oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.videoUrl != widget.videoUrl) _generateThumbnail();
+    if (oldWidget.videoUrl != widget.videoUrl) {
+      _thumbnailBytes = null;
+      _failed = false;
+      _generateThumbnail();
+    }
   }
 
   Future<void> _generateThumbnail() async {
+    // Si on a déjà une thumbnail serveur, pas besoin de générer
     if (widget.thumbnailUrl != null && widget.thumbnailUrl!.isNotEmpty) return;
-    if (_generating) return;
+    if (_generating || _failed) return;
     setState(() => _generating = true);
     try {
       final url = widget.token != null
@@ -70,8 +72,14 @@ class _VideoBubbleState extends State<VideoBubble> {
         maxWidth: 400,
         quality: 75,
       );
-      if (mounted && thumb != null) setState(() => _thumbnailBytes = thumb);
-    } catch (_) {} finally {
+      if (mounted && thumb != null) {
+        setState(() => _thumbnailBytes = thumb);
+      } else {
+        if (mounted) setState(() => _failed = true);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _failed = true);
+    } finally {
       if (mounted) setState(() => _generating = false);
     }
   }
@@ -102,6 +110,7 @@ class _VideoBubbleState extends State<VideoBubble> {
           child: Stack(
             fit: StackFit.expand,
             children: [
+              // Thumbnail : serveur > générée > placeholder visible
               if (hasThumbUrl)
                 Image.network(thumbUrl!, fit: BoxFit.cover,
                     errorBuilder: (_, __, ___) => _placeholder())
@@ -110,6 +119,7 @@ class _VideoBubbleState extends State<VideoBubble> {
               else
                 _placeholder(),
 
+              // Overlay sombre
               Container(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
@@ -120,6 +130,7 @@ class _VideoBubbleState extends State<VideoBubble> {
                 ),
               ),
 
+              // Bouton play central (WhatsApp style)
               Center(
                 child: Container(
                   width: 48, height: 48,
@@ -131,6 +142,7 @@ class _VideoBubbleState extends State<VideoBubble> {
                 ),
               ),
 
+              // Durée badge en bas à gauche
               if (widget.duration != null && widget.duration! > 0)
                 Positioned(
                   left: 8, bottom: 8,
@@ -149,6 +161,20 @@ class _VideoBubbleState extends State<VideoBubble> {
                   ),
                 ),
 
+              // Icône vidéo en haut à gauche (visible même sans thumbnail)
+              Positioned(
+                top: 8, left: 8,
+                child: Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Icon(Icons.videocam, color: Colors.white, size: 16),
+                ),
+              ),
+
+              // Timestamp + coches en bas à droite
               if (widget.timestamp != null)
                 Positioned(
                   right: 6, bottom: 6,
@@ -176,8 +202,19 @@ class _VideoBubbleState extends State<VideoBubble> {
 
   Widget _placeholder() {
     return Container(
-      color: const Color(0xFF2A2A2A),
-      child: const Center(child: Icon(Icons.movie_creation_outlined, color: Colors.white24, size: 48)),
+      color: const Color(0xFF1A1A2E),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.movie_creation_outlined, color: Colors.white30, size: 48),
+          const SizedBox(height: 8),
+          if (_generating)
+            const SizedBox(
+              width: 16, height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white30),
+            ),
+        ],
+      ),
     );
   }
 }
