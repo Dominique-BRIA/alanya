@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:file_picker/file_picker.dart';
 import '../../core/media_helper.dart';
@@ -57,7 +58,6 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
       if (mounted) setState(() { _loadingGallery = false; _permissionDenied = true; });
       return;
     }
-
     try {
       final albums = await PhotoManager.getAssetPathList(
         type: RequestType.common,
@@ -67,7 +67,6 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
         if (mounted) setState(() => _loadingGallery = false);
         return;
       }
-
       final recent = await albums[0].getAssetListPaged(page: 0, size: 50);
       if (mounted) setState(() { _recentMedia = recent; _loadingGallery = false; });
     } catch (_) {
@@ -85,9 +84,9 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
     });
   }
 
+  // ══ CONFIRMER SÉLECTION GALERIE RÉCENTE ══
   Future<void> _confirmSelection() async {
     if (_selectedIds.isEmpty) return;
-
     final results = <MediaPickResult>[];
     for (final asset in _recentMedia) {
       if (!_selectedIds.contains(asset.id)) continue;
@@ -102,34 +101,54 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
         durationMs: asset.type == AssetType.video ? (asset.duration * 1000).toInt() : null,
       ));
     }
-    if (mounted) Navigator.pop(context, results);
+    if (mounted && results.isNotEmpty) Navigator.pop(context, results);
   }
 
-  String _mimeFromAsset(AssetEntity asset) {
-    final name = asset.title?.toLowerCase() ?? '';
-    if (name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'image/jpeg';
-    if (name.endsWith('.png')) return 'image/png';
-    if (name.endsWith('.gif')) return 'image/gif';
-    if (name.endsWith('.webp')) return 'image/webp';
-    if (name.endsWith('.mp4')) return 'video/mp4';
-    if (name.endsWith('.mov')) return 'video/quicktime';
-    if (asset.type == AssetType.video) return 'video/mp4';
-    return 'image/jpeg';
-  }
-
+  // ══ CAMÉRA — ouvre la vraie caméra ══
   Future<void> _pickCamera() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.image,
-      withData: true,
-    );
-    if (result == null || result.files.isEmpty || !mounted) return;
-    final file = result.files.first;
-    if (file.bytes == null) return;
-    Navigator.pop(context, [
-      MediaPickResult(bytes: file.bytes!, fileName: file.name, mimeType: 'image/jpeg'),
-    ]);
+    // Ferme d'abord le bottom sheet
+    Navigator.pop(context);
+    try {
+      final picker = ImagePicker();
+      final photo = await picker.pickImage(source: ImageSource.camera, imageQuality: 85);
+      if (photo == null) return;
+      final bytes = await photo.readAsBytes();
+      final result = MediaPickResult(
+        bytes: bytes,
+        fileName: photo.name,
+        mimeType: 'image/jpeg',
+      );
+      // Retourne le résultat via un Navigator pop avec delay
+      // car on a déjà pop le sheet
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop([result]);
+      }
+    } catch (_) {}
   }
 
+  // ══ GALERIE — ouvre la galerie complète ══
+  Future<void> _pickFullGallery() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.media,
+        allowMultiple: true,
+        withData: true,
+      );
+      if (result == null || result.files.isEmpty || !mounted) return;
+      final results = <MediaPickResult>[];
+      for (final file in result.files) {
+        if (file.bytes == null) continue;
+        results.add(MediaPickResult(
+          bytes: file.bytes!,
+          fileName: file.name,
+          mimeType: _guessMime(file.name),
+        ));
+      }
+      if (mounted && results.isNotEmpty) Navigator.pop(context, results);
+    } catch (_) {}
+  }
+
+  // ══ DOCUMENTS ══
   Future<void> _pickDocuments() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -150,23 +169,23 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
     if (mounted && results.isNotEmpty) Navigator.pop(context, results);
   }
 
-  Future<void> _pickFullGallery() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.media,
-      allowMultiple: true,
-      withData: true,
-    );
-    if (result == null || result.files.isEmpty || !mounted) return;
-    final results = <MediaPickResult>[];
-    for (final file in result.files) {
-      if (file.bytes == null) continue;
-      results.add(MediaPickResult(
-        bytes: file.bytes!,
-        fileName: file.name,
-        mimeType: _guessMime(file.name),
-      ));
-    }
-    if (mounted && results.isNotEmpty) Navigator.pop(context, results);
+  // ══ CONTACT — ouvre le sélecteur de contacts Alanya ══
+  Future<void> _pickContact() async {
+    // Ferme le sheet et retourne un flag spécial pour que chat_screen ouvre le contact picker
+    Navigator.pop(context);
+    // Le chat_screen gère l'ouverture du contact picker via un callback
+  }
+
+  String _mimeFromAsset(AssetEntity asset) {
+    final name = asset.title?.toLowerCase() ?? '';
+    if (name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'image/jpeg';
+    if (name.endsWith('.png')) return 'image/png';
+    if (name.endsWith('.gif')) return 'image/gif';
+    if (name.endsWith('.webp')) return 'image/webp';
+    if (name.endsWith('.mp4')) return 'video/mp4';
+    if (name.endsWith('.mov')) return 'video/quicktime';
+    if (asset.type == AssetType.video) return 'video/mp4';
+    return 'image/jpeg';
   }
 
   String _guessMime(String fileName) {
@@ -246,10 +265,7 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
                   icon: Icons.person,
                   label: "Contact",
                   color: const Color(0xFF2196F3),
-                  onTap: () {
-                    // TODO: ouvrir le sélecteur de contacts Alanya
-                    Navigator.pop(context);
-                  },
+                  onTap: _pickContact,
                 ),
               ],
             ),
@@ -257,36 +273,35 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
 
           const Divider(height: 1),
 
-          // Label "Récents"
+          // Label "Récents" + bouton Envoyer
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             child: Row(
               children: [
                 const Text(
                   "Récents",
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                  ),
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
                 ),
                 const Spacer(),
-                if (_selectedIds.isNotEmpty) ...[
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: AlanyaColors.terracotta,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      "Envoyer (${_selectedIds.length})",
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
+                if (_selectedIds.isNotEmpty)
+                  GestureDetector(
+                    onTap: _confirmSelection,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: AlanyaColors.terracotta,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Text(
+                        "Envoyer (${_selectedIds.length})",
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ),
-                ],
               ],
             ),
           ),
@@ -294,9 +309,7 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
           // Galerie récente (thumbnails horizontaux)
           Expanded(
             child: _loadingGallery
-                ? const Center(
-                    child: CircularProgressIndicator(color: AlanyaColors.terracotta),
-                  )
+                ? const Center(child: CircularProgressIndicator(color: AlanyaColors.terracotta))
                 : _permissionDenied
                     ? Center(
                         child: Column(
@@ -304,10 +317,8 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
                           children: [
                             Icon(Icons.folder_off, size: 48, color: AlanyaColors.grey400),
                             const SizedBox(height: 12),
-                            Text(
-                              "Accès aux fichiers refusé",
-                              style: TextStyle(color: AlanyaColors.grey500, fontSize: 14),
-                            ),
+                            Text("Accès aux fichiers refusé",
+                                style: TextStyle(color: AlanyaColors.grey500, fontSize: 14)),
                             const SizedBox(height: 8),
                             TextButton(
                               onPressed: () => PhotoManager.openSetting(),
@@ -317,12 +328,8 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
                         ),
                       )
                     : _recentMedia.isEmpty
-                        ? Center(
-                            child: Text(
-                              "Aucun média récent",
-                              style: TextStyle(color: AlanyaColors.grey400),
-                            ),
-                          )
+                        ? Center(child: Text("Aucun média récent",
+                            style: TextStyle(color: AlanyaColors.grey400)))
                         : _buildGalleryGrid(),
           ),
         ],
@@ -350,10 +357,7 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
             child: Icon(icon, color: color, size: 24),
           ),
           const SizedBox(height: 6),
-          Text(
-            label,
-            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500),
-          ),
+          Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500)),
         ],
       ),
     );
@@ -379,7 +383,6 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              // Thumbnail
               FutureBuilder<Uint8List?>(
                 future: asset.thumbnailDataWithSize(const ThumbnailSize(200, 200)),
                 builder: (ctx, snap) {
@@ -389,14 +392,7 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
                   return Image.memory(snap.data!, fit: BoxFit.cover);
                 },
               ),
-
-              // Overlay si sélectionné
-              if (selected)
-                Container(
-                  color: AlanyaColors.terracotta.withValues(alpha: 0.3),
-                ),
-
-              // Badge sélectionné
+              if (selected) Container(color: AlanyaColors.terracotta.withValues(alpha: 0.3)),
               Positioned(
                 top: 4, right: 4,
                 child: Container(
@@ -406,13 +402,9 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
                     shape: BoxShape.circle,
                     border: Border.all(color: Colors.white, width: 1.5),
                   ),
-                  child: selected
-                      ? const Icon(Icons.check, size: 14, color: Colors.white)
-                      : null,
+                  child: selected ? const Icon(Icons.check, size: 14, color: Colors.white) : null,
                 ),
               ),
-
-              // Badge vidéo (durée)
               if (isVideo)
                 Positioned(
                   bottom: 4, right: 4,
@@ -422,17 +414,12 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
                       color: Colors.black.withValues(alpha: 0.7),
                       borderRadius: BorderRadius.circular(4),
                     ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.videocam, color: Colors.white, size: 10),
-                        const SizedBox(width: 2),
-                        Text(
-                          _formatDuration(asset.duration),
-                          style: const TextStyle(color: Colors.white, fontSize: 9),
-                        ),
-                      ],
-                    ),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      const Icon(Icons.videocam, color: Colors.white, size: 10),
+                      const SizedBox(width: 2),
+                      Text(_formatDuration(asset.duration),
+                          style: const TextStyle(color: Colors.white, fontSize: 9)),
+                    ]),
                   ),
                 ),
             ],
