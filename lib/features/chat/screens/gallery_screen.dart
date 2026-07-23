@@ -1,8 +1,8 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
-import '../../core/media_helper.dart';
-import '../../theme/alanya_theme.dart';
+import '../../../core/media_helper.dart';
+import '../../../theme/alanya_theme.dart';
 
 /// Écran galerie pour afficher tous les médias d'un message.
 /// Style WhatsApp : PageView avec swipe, zoom sur images, play sur vidéos.
