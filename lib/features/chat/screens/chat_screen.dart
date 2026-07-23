@@ -50,6 +50,7 @@ import '../../../widgets/media/reply_media_preview.dart';
 import '../../../widgets/media/media_grid.dart';
 import '../../../core/media_helper.dart';
 import '../chat_media_integration.dart';
+import '../../../widgets/media/media_picker_sheet.dart';
 
 class ChatScreen extends StatefulWidget {
   static String? activeConvId;
@@ -438,17 +439,15 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
   // FILE PICKER + UPLOAD
   // ══════════════════════════════════════════════
   Future<void> _pickAndSendFile() async {
-    if (_uploading) return;
-    FilePickerResult? result;
-    try { result = await FilePicker.platform.pickFiles(type: FileType.any, withData: true); }
-    catch (_) { if (mounted) _showError("Sélection de fichier indisponible"); return; }
-    if (result == null || result.files.isEmpty) return;
-    final file = result.files.first;
-    final bytes = file.bytes;
-    if (bytes == null) return;
-    final mime = _mimeFromName(file.name);
-    final msgType = mime.startsWith("image/") ? "IMAGE" : mime.startsWith("video/") ? "VIDEO" : mime.startsWith("audio/") ? "AUDIO" : "FILE";
-    await _uploadAndSend(bytes, file.name, mime, msgType);
+    final files = await MediaPickerSheet.show(context);
+       if (files == null || files.isEmpty) return;
+       for (final f in files) {
+         final msgType = f.mimeType.startsWith('image/') ? 'IMAGE'
+             : f.mimeType.startsWith('video/') ? 'VIDEO'
+             : f.mimeType.startsWith('audio/') ? 'AUDIO'
+             : 'FILE';
+         await _uploadAndSend(f.bytes, f.fileName, f.mimeType, msgType, durationMs: f.durationMs);
+       }
   }
 
   Future<void> _uploadAndSend(List<int> bytes, String filename, String mime, String msgType, {int? durationMs}) async {
