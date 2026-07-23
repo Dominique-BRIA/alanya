@@ -3,13 +3,16 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:pdfx/pdfx.dart';
 import 'package:microsoft_viewer/microsoft_viewer.dart';
+import 'package:open_filex/open_filex.dart';
+import 'package:path_provider/path_provider.dart';
+import 'dart:io';
 import '../../core/media_helper.dart';
 import '../../theme/alanya_theme.dart';
 
 /// Bulle document style WhatsApp :
-/// - PDF : aperçu 1ère page via pdfx
-/// - Word/Excel/PPT : aperçu via microsoft_viewer
-/// - Autres : icône colorée + nom + taille
+/// - PDF : aperçu 1ère page via pdfx → au clic ouvre PdfViewerScreen
+/// - Word/Excel/PPT : aperçu via microsoft_viewer → au clic ouvre app externe
+/// - Autres : icône colorée → au clic ouvre app externe
 class DocumentBubble extends StatefulWidget {
   const DocumentBubble({
     super.key,
@@ -74,7 +77,6 @@ class _DocumentBubbleState extends State<DocumentBubble> {
 
   Future<void> _generatePreview() async {
     if (widget.pdfUrl == null || _loading || _failed) return;
-    // Génère un aperçu pour PDF ET documents Microsoft
     if (!_isPdf && !_isMicrosoft) return;
 
     setState(() => _loading = true);
@@ -82,7 +84,6 @@ class _DocumentBubbleState extends State<DocumentBubble> {
       final url = widget.token != null
           ? '${widget.pdfUrl}?token=${widget.token}'
           : widget.pdfUrl!;
-
       final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
       if (response.statusCode != 200) {
         if (mounted) setState(() { _failed = true; _loading = false; });
@@ -90,14 +91,9 @@ class _DocumentBubbleState extends State<DocumentBubble> {
       }
 
       if (_isPdf) {
-        // PDF : rend la première page
         final doc = await PdfDocument.openData(response.bodyBytes);
         final page = await doc.getPage(1);
-        final render = await page.render(
-          width: 200,
-          height: 280,
-          format: PdfPageImageFormat.jpeg,
-        );
+        final render = await page.render(width: 200, height: 280, format: PdfPageImageFormat.jpeg);
         await page.close();
         await doc.close();
         if (mounted && render != null) {
@@ -106,11 +102,36 @@ class _DocumentBubbleState extends State<DocumentBubble> {
           if (mounted) setState(() { _failed = true; _loading = false; });
         }
       } else if (_isMicrosoft) {
-        // Microsoft : on a les bytes pour MicrosoftViewer
         if (mounted) setState(() { _previewBytes = response.bodyBytes; _loading = false; });
       }
     } catch (_) {
       if (mounted) setState(() { _failed = true; _loading = false; });
+    }
+  }
+
+  /// Ouvre le document avec l'app externe via open_filex
+  Future<void> _openWithExternalApp() async {
+    if (widget.pdfUrl == null) return;
+    try {
+      final url = widget.token != null
+          ? '${widget.pdfUrl}?token=${widget.token}'
+          : widget.pdfUrl!;
+      final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) return;
+
+      // Sauvegarde temporaire
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/${widget.fileName}');
+      await file.writeAsBytes(response.bodyBytes);
+
+      // Ouvre avec l'app système
+      await OpenFilex.open(file.path);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Impossible d'ouvrir le document")),
+        );
+      }
     }
   }
 
@@ -125,25 +146,20 @@ class _DocumentBubbleState extends State<DocumentBubble> {
     final onSub = widget.isMe ? Colors.white70 : Colors.black45;
 
     return GestureDetector(
-      onTap: widget.onTap,
+      onTap: widget.onTap ?? _openWithExternalApp,
       onLongPress: widget.onLongPress,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // PDF avec aperçu 1ère page
           if (_isPdf && _previewBytes != null)
             _buildPdfPreview(onText, onSub, ext, size)
-          // Microsoft avec aperçu via MicrosoftViewer
           else if (_isMicrosoft && _previewBytes != null)
             _buildMicrosoftPreview(onText, onSub, ext, size)
-          // Loading
           else if (_loading)
             _buildLoading(onText, onSub, ext, size)
-          // Fallback icône
           else
             _buildDocRow(icon, color, ext, size, onText, onSub),
 
-          // Timestamp + coches
           if (widget.timestamp != null) ...[
             const SizedBox(height: 4),
             Row(mainAxisSize: MainAxisSize.min, children: [
@@ -160,74 +176,49 @@ class _DocumentBubbleState extends State<DocumentBubble> {
     );
   }
 
-  /// Aperçu PDF — miniature de la 1ère page.
   Widget _buildPdfPreview(Color onText, Color onSub, String ext, String size) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: Image.memory(
-            _previewBytes!,
-            width: 240,
-            height: 180,
-            fit: BoxFit.cover,
-          ),
-        ),
-        const SizedBox(height: 8),
-        _buildFileInfo(const Color(0xFFE53935), Icons.picture_as_pdf, 'PDF', onText, onSub, size),
-      ],
-    );
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.memory(_previewBytes!, width: 240, height: 180, fit: BoxFit.cover),
+      ),
+      const SizedBox(height: 8),
+      _buildFileInfo(const Color(0xFFE53935), Icons.picture_as_pdf, 'PDF', onText, onSub, size),
+    ]);
   }
 
-  /// Aperçu Word/Excel/PPT — via MicrosoftViewer.
   Widget _buildMicrosoftPreview(Color onText, Color onSub, String ext, String size) {
-    final color = MediaHelper.colorForType(
-      MediaHelper.detectType(widget.mimeType, widget.fileName),
-    );
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Aperçu du document via MicrosoftViewer
-        ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: Container(
-            width: 240,
-            height: 180,
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: AlanyaColors.grey200, width: 0.5),
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: MicrosoftViewer(_previewBytes!, true),
-            ),
+    final color = MediaHelper.colorForType(MediaHelper.detectType(widget.mimeType, widget.fileName));
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          width: 240, height: 180,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AlanyaColors.grey200, width: 0.5),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: MicrosoftViewer(_previewBytes!, true),
           ),
         ),
-        const SizedBox(height: 8),
-        _buildFileInfo(color, MediaHelper.iconForType(
-          MediaHelper.detectType(widget.mimeType, widget.fileName),
-        ), ext, onText, onSub, size),
-      ],
-    );
+      ),
+      const SizedBox(height: 8),
+      _buildFileInfo(color, MediaHelper.iconForType(MediaHelper.detectType(widget.mimeType, widget.fileName)), ext, onText, onSub, size),
+    ]);
   }
 
-  /// Loading pendant la génération.
   Widget _buildLoading(Color onText, Color onSub, String ext, String size) {
     return Container(
-      width: 240,
-      padding: const EdgeInsets.all(16),
+      width: 240, padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: widget.isMe ? Colors.white.withValues(alpha: 0.08) : AlanyaColors.grey100,
         borderRadius: BorderRadius.circular(8),
       ),
       child: Column(children: [
-        const SizedBox(
-          width: 32, height: 32,
-          child: CircularProgressIndicator(strokeWidth: 2, color: AlanyaColors.terracotta),
-        ),
+        const SizedBox(width: 32, height: 32, child: CircularProgressIndicator(strokeWidth: 2, color: AlanyaColors.terracotta)),
         const SizedBox(height: 8),
         Text(widget.fileName, maxLines: 1, overflow: TextOverflow.ellipsis,
             style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: onText)),
@@ -236,7 +227,6 @@ class _DocumentBubbleState extends State<DocumentBubble> {
     );
   }
 
-  /// Ligne classique pour les fichiers sans aperçu.
   Widget _buildDocRow(IconData icon, Color color, String ext, String size, Color onText, Color onSub) {
     return Row(mainAxisSize: MainAxisSize.min, children: [
       Container(
@@ -271,15 +261,11 @@ class _DocumentBubbleState extends State<DocumentBubble> {
     ]);
   }
 
-  /// Ligne info fichier (icône + nom + taille).
   Widget _buildFileInfo(Color color, IconData icon, String ext, Color onText, Color onSub, String size) {
     return Row(children: [
       Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(4),
-        ),
+        decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(4)),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(icon, size: 14, color: color),
           const SizedBox(width: 3),

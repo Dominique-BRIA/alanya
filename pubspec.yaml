@@ -18,6 +18,7 @@ dependencies:
   image_picker: ^1.1.2
   microsoft_viewer: ^0.0.8
   any_link_preview: ^3.0.3
+  open_filex: ^4.7.0
   pdfx: ^2.7.0
   # Réseau / API
   http: ^1.2.2
