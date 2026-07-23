@@ -2,13 +2,14 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:pdfx/pdfx.dart';
+import 'package:microsoft_viewer/microsoft_viewer.dart';
 import '../../core/media_helper.dart';
 import '../../theme/alanya_theme.dart';
 
 /// Bulle document style WhatsApp :
-/// - PDF : aperçu 1ère page en miniature
-/// - Autres docs : icône colorée avec extension
-/// - Nom + taille + type
+/// - PDF : aperçu 1ère page via pdfx
+/// - Word/Excel/PPT : aperçu via microsoft_viewer
+/// - Autres : icône colorée + nom + taille
 class DocumentBubble extends StatefulWidget {
   const DocumentBubble({
     super.key,
@@ -40,23 +41,23 @@ class DocumentBubble extends StatefulWidget {
 }
 
 class _DocumentBubbleState extends State<DocumentBubble> {
-  Uint8List? _pdfThumbnail;
-  bool _generating = false;
+  Uint8List? _previewBytes;
+  bool _loading = false;
   bool _failed = false;
 
   @override
   void initState() {
     super.initState();
-    _generatePdfThumbnail();
+    _generatePreview();
   }
 
   @override
   void didUpdateWidget(DocumentBubble oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.pdfUrl != widget.pdfUrl) {
-      _pdfThumbnail = null;
+      _previewBytes = null;
       _failed = false;
-      _generatePdfThumbnail();
+      _generatePreview();
     }
   }
 
@@ -66,41 +67,50 @@ class _DocumentBubbleState extends State<DocumentBubble> {
     return mime == 'application/pdf' || ext == '.pdf';
   }
 
-  Future<void> _generatePdfThumbnail() async {
-    if (!_isPdf || widget.pdfUrl == null || _generating || _failed) return;
-    setState(() => _generating = true);
+  bool get _isMicrosoft {
+    final ext = MediaHelper.extension(widget.fileName).toLowerCase();
+    return ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx'].contains(ext);
+  }
+
+  Future<void> _generatePreview() async {
+    if (widget.pdfUrl == null || _loading || _failed) return;
+    // Génère un aperçu pour PDF ET documents Microsoft
+    if (!_isPdf && !_isMicrosoft) return;
+
+    setState(() => _loading = true);
     try {
       final url = widget.token != null
           ? '${widget.pdfUrl}?token=${widget.token}'
           : widget.pdfUrl!;
 
-      // Télécharge le PDF via http
       final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
       if (response.statusCode != 200) {
-        if (mounted) setState(() { _failed = true; _generating = false; });
+        if (mounted) setState(() { _failed = true; _loading = false; });
         return;
       }
 
-      // Ouvre le PDF et rend la première page
-      final doc = await PdfDocument.openData(response.bodyBytes);
-      final page = await doc.getPage(1);
-      final render = await page.render(
-        width: 200,
-        height: 280,
-        format: PdfPageImageFormat.jpeg,
-      );
-      await page.close();
-      await doc.close();
-
-      if (mounted && render != null) {
-        setState(() => _pdfThumbnail = render.bytes);
-      } else {
-        if (mounted) setState(() => _failed = true);
+      if (_isPdf) {
+        // PDF : rend la première page
+        final doc = await PdfDocument.openData(response.bodyBytes);
+        final page = await doc.getPage(1);
+        final render = await page.render(
+          width: 200,
+          height: 280,
+          format: PdfPageImageFormat.jpeg,
+        );
+        await page.close();
+        await doc.close();
+        if (mounted && render != null) {
+          setState(() { _previewBytes = render.bytes; _loading = false; });
+        } else {
+          if (mounted) setState(() { _failed = true; _loading = false; });
+        }
+      } else if (_isMicrosoft) {
+        // Microsoft : on a les bytes pour MicrosoftViewer
+        if (mounted) setState(() { _previewBytes = response.bodyBytes; _loading = false; });
       }
     } catch (_) {
-      if (mounted) setState(() => _failed = true);
-    } finally {
-      if (mounted) setState(() => _generating = false);
+      if (mounted) setState(() { _failed = true; _loading = false; });
     }
   }
 
@@ -120,11 +130,16 @@ class _DocumentBubbleState extends State<DocumentBubble> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // PDF avec aperçu OU doc classique
-          if (_isPdf && _pdfThumbnail != null)
+          // PDF avec aperçu 1ère page
+          if (_isPdf && _previewBytes != null)
             _buildPdfPreview(onText, onSub, ext, size)
-          else if (_isPdf && _generating)
-            _buildPdfLoading(onText, onSub, ext, size)
+          // Microsoft avec aperçu via MicrosoftViewer
+          else if (_isMicrosoft && _previewBytes != null)
+            _buildMicrosoftPreview(onText, onSub, ext, size)
+          // Loading
+          else if (_loading)
+            _buildLoading(onText, onSub, ext, size)
+          // Fallback icône
           else
             _buildDocRow(icon, color, ext, size, onText, onSub),
 
@@ -145,52 +160,62 @@ class _DocumentBubbleState extends State<DocumentBubble> {
     );
   }
 
-  /// Aperçu PDF avec miniature de la 1ère page.
+  /// Aperçu PDF — miniature de la 1ère page.
   Widget _buildPdfPreview(Color onText, Color onSub, String ext, String size) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Miniature PDF
         ClipRRect(
           borderRadius: BorderRadius.circular(8),
           child: Image.memory(
-            _pdfThumbnail!,
+            _previewBytes!,
             width: 240,
             height: 180,
             fit: BoxFit.cover,
           ),
         ),
         const SizedBox(height: 8),
-        // Badge PDF + nom + taille
-        Row(children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-            decoration: BoxDecoration(
-              color: const Color(0xFFE53935).withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: const Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.picture_as_pdf, size: 14, color: Color(0xFFE53935)),
-              SizedBox(width: 3),
-              Text('PDF', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Color(0xFFE53935))),
-            ]),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(widget.fileName, maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: onText)),
-          ),
-        ]),
-        if (size.isNotEmpty) ...[
-          const SizedBox(height: 2),
-          Text(size, style: TextStyle(fontSize: 11, color: onSub)),
-        ],
+        _buildFileInfo(const Color(0xFFE53935), Icons.picture_as_pdf, 'PDF', onText, onSub, size),
       ],
     );
   }
 
-  /// Loading pendant la génération du thumbnail PDF.
-  Widget _buildPdfLoading(Color onText, Color onSub, String ext, String size) {
+  /// Aperçu Word/Excel/PPT — via MicrosoftViewer.
+  Widget _buildMicrosoftPreview(Color onText, Color onSub, String ext, String size) {
+    final color = MediaHelper.colorForType(
+      MediaHelper.detectType(widget.mimeType, widget.fileName),
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Aperçu du document via MicrosoftViewer
+        ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            width: 240,
+            height: 180,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AlanyaColors.grey200, width: 0.5),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: MicrosoftViewer(_previewBytes!, true),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        _buildFileInfo(color, MediaHelper.iconForType(
+          MediaHelper.detectType(widget.mimeType, widget.fileName),
+        ), ext, onText, onSub, size),
+      ],
+    );
+  }
+
+  /// Loading pendant la génération.
+  Widget _buildLoading(Color onText, Color onSub, String ext, String size) {
     return Container(
       width: 240,
       padding: const EdgeInsets.all(16),
@@ -201,7 +226,7 @@ class _DocumentBubbleState extends State<DocumentBubble> {
       child: Column(children: [
         const SizedBox(
           width: 32, height: 32,
-          child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFE53935)),
+          child: CircularProgressIndicator(strokeWidth: 2, color: AlanyaColors.terracotta),
         ),
         const SizedBox(height: 8),
         Text(widget.fileName, maxLines: 1, overflow: TextOverflow.ellipsis,
@@ -211,7 +236,7 @@ class _DocumentBubbleState extends State<DocumentBubble> {
     );
   }
 
-  /// Ligne classique pour les non-PDF.
+  /// Ligne classique pour les fichiers sans aperçu.
   Widget _buildDocRow(IconData icon, Color color, String ext, String size, Color onText, Color onSub) {
     return Row(mainAxisSize: MainAxisSize.min, children: [
       Container(
@@ -243,6 +268,29 @@ class _DocumentBubbleState extends State<DocumentBubble> {
       ),
       const SizedBox(width: 8),
       Icon(Icons.file_download_outlined, color: widget.isMe ? Colors.white60 : AlanyaColors.grey500, size: 22),
+    ]);
+  }
+
+  /// Ligne info fichier (icône + nom + taille).
+  Widget _buildFileInfo(Color color, IconData icon, String ext, Color onText, Color onSub, String size) {
+    return Row(children: [
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 3),
+          Text(ext, style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: color)),
+        ]),
+      ),
+      const SizedBox(width: 8),
+      Expanded(
+        child: Text(widget.fileName, maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: onText)),
+      ),
     ]);
   }
 }
