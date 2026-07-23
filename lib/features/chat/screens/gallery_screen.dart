@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 import 'dart:typed_data';
-import '../../core/media_helper.dart';
-import '../../theme/alanya_theme.dart';
+import '../../../core/media_helper.dart';
+import '../../../theme/alanya_theme.dart';
 import 'image_viewer_screen.dart';
 import 'video_viewer_screen.dart';
 import 'pdf_viewer_screen.dart';
