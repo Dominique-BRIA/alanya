@@ -134,4 +134,11 @@ class ChatRepository {
     return Map<String, dynamic>.from(data as Map);
   }
 
+    Future<Message> sendMultiMedia(String convId, List<String> mediaIds, String msgType, {String? replyToId}) async {
+    final data = await _api.post("/api/conversations/$convId/messages", {
+      "type": msgType, "mediaIds": mediaIds,
+      if (replyToId != null) "replyToId": replyToId,
+    });
+    return Message.fromJson(data as Map<String, dynamic>);
+  }
 }

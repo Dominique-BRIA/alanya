@@ -438,16 +438,37 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
   // ══════════════════════════════════════════════
   // FILE PICKER + UPLOAD
   // ══════════════════════════════════════════════
-  Future<void> _pickAndSendFile() async {
+    Future<void> _pickAndSendFile() async {
     final files = await MediaPickerSheet.show(context);
-       if (files == null || files.isEmpty) return;
-       for (final f in files) {
-         final msgType = f.mimeType.startsWith('image/') ? 'IMAGE'
-             : f.mimeType.startsWith('video/') ? 'VIDEO'
-             : f.mimeType.startsWith('audio/') ? 'AUDIO'
-             : 'FILE';
-         await _uploadAndSend(f.bytes, f.fileName, f.mimeType, msgType, durationMs: f.durationMs);
-       }
+    if (files == null || files.isEmpty) return;
+    setState(() => _uploading = true);
+    final replyId = _replyTo?.id;
+    final replyMsg = _replyTo;
+    final replySnapshot = replyMsg != null
+        ? ReplyPreview(id: replyMsg.id, senderId: replyMsg.senderId, type: replyMsg.type, content: replyMsg.isDeleted ? null : replyMsg.content, isDeleted: replyMsg.isDeleted)
+        : null;
+    if (mounted) setState(() => _replyTo = null);
+    final mediaRepo = context.read<MediaRepository>();
+    final rt = context.read<RealtimeClient>();
+    try {
+      final uploadedIds = <String>[];
+      String? firstMime;
+      for (final f in files) {
+        final uploaded = await mediaRepo.upload(Uint8List.fromList(f.bytes), f.fileName, f.mimeType, durationMs: f.durationMs);
+        uploadedIds.add(uploaded.id);
+        firstMime ??= f.mimeType;
+      }
+      final msgType = firstMime!.startsWith('image/') ? 'IMAGE' : firstMime.startsWith('video/') ? 'VIDEO' : firstMime.startsWith('audio/') ? 'AUDIO' : 'FILE';
+      if (rt.connected) {
+        rt.sendMultiMedia(widget.convId, uploadedIds, msgType, "tmp-${DateTime.now().microsecondsSinceEpoch}", replyToId: replyId);
+      } else {
+        final repo = context.read<ChatRepository>();
+        final msg = await repo.sendMultiMedia(widget.convId, uploadedIds, msgType, replyToId: replyId);
+        if (mounted) setState(() => _messages = [..._messages, msg]);
+      }
+      _scrollToBottom();
+    } on ApiException catch (e) { _showError(e.message); } catch (_) { _showError(tr(context, 'send_failed')); }
+    finally { if (mounted) setState(() => _uploading = false); }
   }
 
   Future<void> _uploadAndSend(List<int> bytes, String filename, String mime, String msgType, {int? durationMs}) async {

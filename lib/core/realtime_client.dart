@@ -243,4 +243,8 @@ class RealtimeClient extends ChangeNotifier {
     _controller.close();
     super.dispose();
   }
+
+    void sendMultiMedia(String convId, List<String> mediaIds, String msgType, String tempId, {String? replyToId}) =>
+      _send({"type": "send", "convId": convId, "mediaIds": mediaIds, "msgType": msgType, "tempId": tempId, if (replyToId != null) "replyToId": replyToId});
+      
 }
