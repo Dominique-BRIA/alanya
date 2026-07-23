@@ -1,16 +1,19 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:video_thumbnail/video_thumbnail.dart';
 import '../../core/media_helper.dart';
 import '../../theme/alanya_theme.dart';
 
 /// Grille de médias multiples dans un seul message — style WhatsApp.
-/// 2 images = 2 colonnes, 3+ = grille, max 6 avec "+N" overlay.
-class MediaGrid extends StatelessWidget {
+/// 2 images = 2 colonnes, 3+ = grille, max 6 avec "+N" overlay cliquable.
+class MediaGrid extends StatefulWidget {
   const MediaGrid({
     super.key,
     required this.items,
     required this.baseUrl,
     this.token,
     this.onItemTap,
+    this.onMoreTap,
     this.timestamp,
     this.statusWidget,
     this.isMe = false,
@@ -20,17 +23,26 @@ class MediaGrid extends StatelessWidget {
   final String baseUrl;
   final String? token;
   final void Function(int index)? onItemTap;
+  final VoidCallback? onMoreTap; // appelé quand on clique sur "+N"
   final String? timestamp;
   final Widget? statusWidget;
   final bool isMe;
 
   @override
-  Widget build(BuildContext context) {
-    if (items.isEmpty) return const SizedBox.shrink();
-    if (items.length == 1) return _buildSingle(context, 0);
+  State<MediaGrid> createState() => _MediaGridState();
+}
 
-    final cols = items.length == 2 ? 2 : (items.length <= 4 ? 2 : 3);
-    final displayCount = items.length > 6 ? 6 : items.length;
+class _MediaGridState extends State<MediaGrid> {
+  // Cache des thumbnails vidéo générées
+  final Map<String, Uint8List> _thumbCache = {};
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.items.isEmpty) return const SizedBox.shrink();
+    if (widget.items.length == 1) return _buildSingle(context, 0);
+
+    final cols = widget.items.length == 2 ? 2 : (widget.items.length <= 4 ? 2 : 3);
+    final displayCount = widget.items.length > 6 ? 6 : widget.items.length;
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(11),
@@ -48,12 +60,14 @@ class MediaGrid extends StatelessWidget {
               ),
               itemCount: displayCount,
               itemBuilder: (ctx, i) {
-                if (i == 5 && items.length > 6) return _buildMoreOverlay(items.length - 5);
+                if (i == 5 && widget.items.length > 6) {
+                  return _buildMoreOverlay(widget.items.length - 5);
+                }
                 return _buildGridItem(ctx, i);
               },
             ),
             // Timestamp en bas
-            if (timestamp != null)
+            if (widget.timestamp != null)
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.only(left: 8, right: 8, top: 4, bottom: 4),
@@ -62,10 +76,11 @@ class MediaGrid extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    Text(timestamp!, style: TextStyle(fontSize: 11, color: isMe ? Colors.white70 : Colors.black45)),
-                    if (statusWidget != null) ...[
+                    Text(widget.timestamp!,
+                        style: TextStyle(fontSize: 11, color: widget.isMe ? Colors.white70 : Colors.black45)),
+                    if (widget.statusWidget != null) ...[
                       const SizedBox(width: 3),
-                      statusWidget!,
+                      widget.statusWidget!,
                     ],
                   ],
                 ),
@@ -77,48 +92,60 @@ class MediaGrid extends StatelessWidget {
   }
 
   Widget _buildSingle(BuildContext context, int index) {
-    final item = items[index];
+    final item = widget.items[index];
     final type = MediaHelper.detectType(item.mimeType, item.fileName);
-    final url = '$baseUrl${item.url}?token=$token';
+    final url = '${widget.baseUrl}${item.url}?token=${widget.token}';
 
     if (type == AlanyaMediaType.image) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(11),
-        child: Stack(children: [
-          Image.network(url, width: 274, fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => _placeholder(type)),
-          if (timestamp != null)
-            Positioned(right: 6, bottom: 6, child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-              decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.45), borderRadius: BorderRadius.circular(8)),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Text(timestamp!, style: const TextStyle(fontSize: 11, color: Colors.white)),
-                if (statusWidget != null) ...[const SizedBox(width: 3), statusWidget!],
-              ]),
-            )),
-        ]),
+      return GestureDetector(
+        onTap: () => widget.onItemTap?.call(index),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(11),
+          child: Stack(children: [
+            Image.network(url, width: 274, fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => _placeholder(type)),
+            if (widget.timestamp != null)
+              Positioned(right: 6, bottom: 6, child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.45), borderRadius: BorderRadius.circular(8)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Text(widget.timestamp!, style: const TextStyle(fontSize: 11, color: Colors.white)),
+                  if (widget.statusWidget != null) ...[const SizedBox(width: 3), widget.statusWidget!],
+                ]),
+              )),
+          ]),
+        ),
       );
     }
-    return _placeholder(type);
+    return GestureDetector(
+      onTap: () => widget.onItemTap?.call(index),
+      child: _placeholder(type),
+    );
   }
 
   Widget _buildGridItem(BuildContext context, int index) {
-    final item = items[index];
+    final item = widget.items[index];
     final type = MediaHelper.detectType(item.mimeType, item.fileName);
-    final url = '$baseUrl${item.url}?token=$token';
+    final url = '${widget.baseUrl}${item.url}?token=${widget.token}';
+    final thumbKey = item.url;
 
     return GestureDetector(
-      onTap: () => onItemTap?.call(index),
+      onTap: () => widget.onItemTap?.call(index),
       child: Stack(fit: StackFit.expand, children: [
+        // Image ou thumbnail vidéo
         if (type == AlanyaMediaType.image)
           Image.network(url, fit: BoxFit.cover,
               errorBuilder: (_, __, ___) => _placeholder(type))
+        else if (type == AlanyaMediaType.video)
+          _buildVideoThumbnail(thumbKey, url)
         else
           _placeholder(type),
 
+        // Play icon pour vidéos
         if (type == AlanyaMediaType.video)
           const Center(child: Icon(Icons.play_circle_fill, color: Colors.white70, size: 28)),
 
+        // Badge extension pour documents
         if (type != AlanyaMediaType.image && type != AlanyaMediaType.video)
           Positioned(
             bottom: 4, left: 4,
@@ -131,23 +158,83 @@ class MediaGrid extends StatelessWidget {
               ),
             ),
           ),
+
+        // Badge durée pour vidéos
+        if (type == AlanyaMediaType.video && item.durationMs != null && item.durationMs! > 0)
+          Positioned(
+            bottom: 4, right: 4,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(4)),
+              child: Text(
+                MediaHelper.formatDuration(item.durationMs),
+                style: const TextStyle(color: Colors.white, fontSize: 8),
+              ),
+            ),
+          ),
       ]),
     );
   }
 
-  Widget _buildMoreOverlay(int remaining) {
+  /// Génère et affiche la thumbnail d'une vidéo.
+  Widget _buildVideoThumbnail(String thumbKey, String videoUrl) {
+    // Cache hit
+    if (_thumbCache.containsKey(thumbKey)) {
+      return Image.memory(_thumbCache[thumbKey]!, fit: BoxFit.cover);
+    }
+
+    // Génère la thumbnail en async
+    _generateThumbnail(thumbKey, videoUrl);
+
+    // Placeholder pendant la génération
     return Container(
-      color: Colors.black54,
-      child: Center(
-        child: Text('+$remaining',
-            style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+      color: const Color(0xFF1A1A2E),
+      child: const Center(
+        child: SizedBox(
+          width: 16, height: 16,
+          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white30),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _generateThumbnail(String key, String videoUrl) async {
+    try {
+      final thumb = await VideoThumbnail.thumbnailData(
+        video: videoUrl,
+        imageFormat: ImageFormat.JPEG,
+        maxWidth: 200,
+        quality: 60,
+      );
+      if (mounted && thumb != null) {
+        setState(() => _thumbCache[key] = thumb);
+      }
+    } catch (_) {}
+  }
+
+  Widget _buildMoreOverlay(int remaining) {
+    return GestureDetector(
+      onTap: widget.onMoreTap, // ← FIX: ouvre la galerie
+      child: Container(
+        color: Colors.black54,
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text('+$remaining',
+                  style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              const Icon(Icons.grid_view, color: Colors.white70, size: 16),
+            ],
+          ),
+        ),
       ),
     );
   }
 
   Widget _placeholder(AlanyaMediaType type) {
     return Container(
-      color: isMe ? AlanyaColors.terracotta.withValues(alpha: 0.15) : AlanyaColors.grey200,
+      color: widget.isMe ? AlanyaColors.terracotta.withValues(alpha: 0.15) : AlanyaColors.grey200,
       child: Center(child: Icon(MediaHelper.iconForType(type), color: AlanyaColors.grey400, size: 28)),
     );
   }

@@ -51,6 +51,7 @@ import '../../../widgets/media/media_grid.dart';
 import '../../../core/media_helper.dart';
 import '../chat_media_integration.dart';
 import '../../../widgets/media/media_picker_sheet.dart';
+import 'gallery_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   static String? activeConvId;
@@ -746,7 +747,6 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
                 m.isDeleted
                     ? _deletedBubble(m, mine)
                     : isGrid
-                        // ══ GRILLE MULTI-MÉDIAS (WhatsApp style) ══
                         ? MediaGrid(
                             items: m.media.map((media) => MediaGridItem(
                               url: media.url, mimeType: media.mimeType, fileName: media.filename,
@@ -754,12 +754,30 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
                             )).toList(),
                             baseUrl: _baseUrl, token: _token,
                             onItemTap: (i) {
-                              final media = m.media[i];
-                              final type = MediaHelper.detectType(media.mimeType, media.filename);
-                              if (type == AlanyaMediaType.image) _openImageViewer(m);
-                              else if (type == AlanyaMediaType.video) _openVideoViewer(m);
-                              else if (type == AlanyaMediaType.audio) InlineAudioPlayer.toggle(_mediaUrl(media));
-                              else _download(media);
+                              // Ouvre la galerie à l'index cliqué
+                              Navigator.of(context).push(MaterialPageRoute(
+                                builder: (_) => GalleryScreen(
+                                  items: m.media.map((media) => GalleryItem(
+                                    url: media.url, mimeType: media.mimeType, fileName: media.filename,
+                                    sizeBytes: media.sizeBytes, durationMs: media.durationMs,
+                                  )).toList(),
+                                  baseUrl: _baseUrl, token: _token,
+                                  initialIndex: i,
+                                ),
+                              ));
+                            },
+                            onMoreTap: () {
+                              // Ouvre la galerie au début pour les "+N"
+                              Navigator.of(context).push(MaterialPageRoute(
+                                builder: (_) => GalleryScreen(
+                                  items: m.media.map((media) => GalleryItem(
+                                    url: media.url, mimeType: media.mimeType, fileName: media.filename,
+                                    sizeBytes: media.sizeBytes, durationMs: media.durationMs,
+                                  )).toList(),
+                                  baseUrl: _baseUrl, token: _token,
+                                  initialIndex: 0,
+                                ),
+                              ));
                             },
                             timestamp: _time(m.createdAt),
                             statusWidget: mine ? _statusTicks(m.status, Colors.white) : null,
