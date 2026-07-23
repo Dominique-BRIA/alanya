@@ -447,7 +447,7 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
     final bytes = file.bytes;
     if (bytes == null) return;
     final mime = _mimeFromName(file.name);
-    final msgType = mime.startsWith("image/") ? "IMAGE" : mime.startsWith("audio/") ? "AUDIO" : "FILE";
+    final msgType = mime.startsWith("image/") ? "IMAGE" : mime.startsWith("video/") ? "VIDEO" : mime.startsWith("audio/") ? "AUDIO" : "FILE";
     await _uploadAndSend(bytes, file.name, mime, msgType);
   }
 
