@@ -50,6 +50,7 @@ import '../../../widgets/media/reply_media_preview.dart';
 import '../../../widgets/media/media_grid.dart';
 import '../../../core/media_helper.dart';
 import '../chat_media_integration.dart';
+import 'media_gallery_viewer.dart';
 import '../../../widgets/media/media_picker_sheet.dart';
 import 'gallery_screen.dart';
 
@@ -639,19 +640,44 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
     }
   }
 
-  Future<void> _openImageViewer(Message m) async {
+  // Collecte tous les médias image/vidéo de la conversation (ordre du fil) pour
+  // la galerie navigable (swipe entre médias).
+  Future<List<ConvMediaItem>> _galleryItems() async {
     final token = await _freshToken();
-    final media = m.media.first;
-    if (!mounted) return;
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => ImageViewerScreen(imageUrl: "$_baseUrl${media.url}?token=$token", downloadUrl: "$_baseUrl${media.url}?download=1&token=$token", filename: media.filename ?? "image-${media.id}")));
+    final items = <ConvMediaItem>[];
+    for (final msg in _messages) {
+      for (final media in msg.media) {
+        final t = MediaHelper.detectType(media.mimeType, media.filename);
+        if (t == AlanyaMediaType.image || t == AlanyaMediaType.video) {
+          items.add(ConvMediaItem(
+            id: media.id,
+            url: "$_baseUrl${media.url}?token=$token",
+            downloadUrl: "$_baseUrl${media.url}?download=1&token=$token",
+            filename: media.filename ?? "",
+            isVideo: t == AlanyaMediaType.video,
+          ));
+        }
+      }
+    }
+    return items;
   }
 
-  Future<void> _openVideoViewer(Message m) async {
-    final token = await _freshToken();
-    final media = m.media.first;
-    if (!mounted) return;
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => VideoViewerScreen(videoUrl: "$_baseUrl${media.url}?token=$token", downloadUrl: "$_baseUrl${media.url}?download=1&token=$token", filename: media.filename ?? "video-${media.id}")));
+  // Ouvre la visionneuse navigable positionnée sur le média [mediaId].
+  Future<void> _openGallery(String mediaId) async {
+    final items = await _galleryItems();
+    if (!mounted || items.isEmpty) return;
+    var idx = items.indexWhere((it) => it.id == mediaId);
+    if (idx < 0) idx = 0;
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => MediaGalleryViewer(items: items, initialIndex: idx),
+    ));
   }
+
+  Future<void> _openImageViewer(Message m) async =>
+      _openGallery(m.media.first.id);
+
+  Future<void> _openVideoViewer(Message m) async =>
+      _openGallery(m.media.first.id);
 
   Future<void> _openPdfViewer(Message m) async {
     final token = await _freshToken();
@@ -845,17 +871,11 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
                             )).toList(),
                             baseUrl: _baseUrl, token: _token,
                             onItemTap: (i) {
-                              // Ouvre la galerie à l'index cliqué
-                              Navigator.of(context).push(MaterialPageRoute(
-                                builder: (_) => GalleryScreen(
-                                  items: m.media.map((media) => GalleryItem(
-                                    url: media.url, mimeType: media.mimeType, fileName: media.filename,
-                                    sizeBytes: media.sizeBytes, durationMs: media.durationMs,
-                                  )).toList(),
-                                  baseUrl: _baseUrl, token: _token,
-                                  initialIndex: i,
-                                ),
-                              ));
+                              // Ouvre la visionneuse navigable (swipe) sur tous
+                              // les médias de la conversation, au média touché.
+                              if (i >= 0 && i < m.media.length) {
+                                _openGallery(m.media[i].id);
+                              }
                             },
                             onMoreTap: () {
                               // Ouvre la galerie au début pour les "+N"
