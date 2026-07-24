@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../../../core/app_snackbar.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../chat/screens/chat_screen.dart';
 import '../call_controller.dart';
 
 class ActiveCallScreen extends StatefulWidget {
@@ -67,6 +68,10 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     // Lot 2 : prévient l'appelant que l'écran d'appel est affiché ici
     // (→ « En train de sonner… » chez lui).
     if (widget.incoming) _calls!.notifyRingingDisplayed();
+    // Lot 2b : l'écran plein-écran est visible → masque le bandeau global.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _calls?.setCallScreenVisible(true);
+    });
   }
 
   void _onCallChanged() {
@@ -175,6 +180,8 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
   void dispose() {
     _timer?.cancel();
     _connectTimeout?.cancel();
+    // Lot 2b : l'écran n'est plus affiché → le bandeau reprend si l'appel continue.
+    _calls?.setCallScreenVisible(false);
     _calls?.removeListener(_onCallChanged);
     _localRenderer.dispose();
     for (final r in _remoteRenderers.values) {
@@ -573,6 +580,12 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
               label: "Haut-parleur",
               onPressed: () => cc.toggleSpeaker(),
             ),
+            _controlBtn(
+              icon: Icons.chat_bubble_outline,
+              active: false,
+              label: "Message",
+              onPressed: () => _openChatDuringCall(cc),
+            ),
             if (isVideo)
               _controlBtn(
                 icon: cc.isVideoEnabled ? Icons.videocam : Icons.videocam_off,
@@ -597,6 +610,26 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
           onPressed: () => _hangUp(cc),
         ),
       ],
+    );
+  }
+
+  /// Ouvre la conversation pendant l'appel : minimise l'écran d'appel (le
+  /// bandeau global prend le relais) puis pousse le chat. L'appel continue
+  /// (le CallController est global, le média n'est pas coupé).
+  void _openChatDuringCall(CallController cc) {
+    final convId = cc.activeConvId;
+    if (convId == null) {
+      showAppSnackBar("Conversation indisponible");
+      return;
+    }
+    final title = cc.activePeerName ?? cc.incoming?.displayTitle ?? "Conversation";
+    final isGroup = cc.isGroupCall;
+    final nav = Navigator.of(context, rootNavigator: true);
+    if (nav.canPop()) nav.pop();
+    nav.push(
+      MaterialPageRoute(
+        builder: (_) => ChatScreen(convId: convId, title: title, isGroup: isGroup),
+      ),
     );
   }
 

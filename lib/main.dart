@@ -17,6 +17,7 @@ import 'features/auth/auth_repository.dart';
 import 'features/auth/screens/welcome_screen.dart';
 import 'features/account/account_repository.dart';
 import 'features/ai/ai_repository.dart';
+import 'features/calls/call_banner.dart';
 import 'features/calls/call_controller.dart';
 import 'features/calls/call_listener.dart';
 import 'features/calls/calls_repository.dart';
@@ -121,6 +122,18 @@ class AlanyaApp extends StatelessWidget {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
+      // Bandeau global « appel en cours » superposé à toutes les pages (Lot 2b).
+      builder: (context, child) {
+        return Directionality(
+          textDirection: TextDirection.ltr,
+          child: Stack(
+            children: [
+              if (child != null) Positioned.fill(child: child),
+              const CallBanner(),
+            ],
+          ),
+        );
+      },
       home: const AuthGate(),
     );
   }

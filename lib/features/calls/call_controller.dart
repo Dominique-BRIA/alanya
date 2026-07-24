@@ -51,6 +51,18 @@ class CallController extends ChangeNotifier {
   // Passe à true quand l'écran d'appel s'affiche chez le correspondant (Lot 2).
   bool remoteRinging = false;
 
+  // Lot 2b — minimisation : l'écran plein-écran d'appel est-il affiché ?
+  // Quand false pendant un appel actif, on montre le bandeau global.
+  bool callScreenVisible = false;
+  // Début de la connexion média (source unique pour le minuteur, écran + bandeau).
+  DateTime? connectedSince;
+
+  void setCallScreenVisible(bool v) {
+    if (callScreenVisible == v) return;
+    callScreenVisible = v;
+    notifyListeners();
+  }
+
   MediaStream? get localStream => _mesh?.localStream;
   Map<String, MediaStream> get remoteStreams => _mesh?.remoteStreams ?? {};
   int get connectedPeerCount => _mesh?.connectedCount ?? 0;
@@ -226,6 +238,16 @@ class CallController extends ChangeNotifier {
     joinedParticipantIds.clear();
     remoteRinging = false;
     isSpeakerOn = false;
+    connectedSince = null;
+    callScreenVisible = false;
+    notifyListeners();
+  }
+
+  // Démarre le minuteur dès que le média est réellement connecté.
+  void _onMeshUpdated() {
+    if (mediaConnected && connectedSince == null) {
+      connectedSince = DateTime.now();
+    }
     notifyListeners();
   }
 
@@ -298,7 +320,7 @@ List<Map<String, dynamic>> ice;
         isVideo: isVideo,
         iceServers: ice,
         onSendSignal: (peerId, sig) => _rt.callSignal(callId, peerId, sig),
-        onUpdated: notifyListeners,
+        onUpdated: _onMeshUpdated,
       );
     }
 
