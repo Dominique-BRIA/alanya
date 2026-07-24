@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../../../core/app_snackbar.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../../widgets/contact_picker_sheet.dart';
 import '../../chat/screens/chat_screen.dart';
 import '../call_controller.dart';
 
@@ -565,8 +566,10 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        Wrap(
+          alignment: WrapAlignment.center,
+          spacing: 10,
+          runSpacing: 12,
           children: [
             _controlBtn(
               icon: cc.isMuted ? Icons.mic_off : Icons.mic,
@@ -579,12 +582,6 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
               active: cc.isSpeakerOn,
               label: "Haut-parleur",
               onPressed: () => cc.toggleSpeaker(),
-            ),
-            _controlBtn(
-              icon: Icons.chat_bubble_outline,
-              active: false,
-              label: "Message",
-              onPressed: () => _openChatDuringCall(cc),
             ),
             if (isVideo)
               _controlBtn(
@@ -600,6 +597,18 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                 label: "Caméra",
                 onPressed: () => cc.switchCamera(),
               ),
+            _controlBtn(
+              icon: Icons.chat_bubble_outline,
+              active: false,
+              label: "Message",
+              onPressed: () => _openChatDuringCall(cc),
+            ),
+            _controlBtn(
+              icon: Icons.phone_forwarded,
+              active: cc.isTransferring,
+              label: cc.isTransferring ? "Transfert…" : "Transférer",
+              onPressed: cc.isTransferring ? () {} : () => _transfer(cc),
+            ),
           ],
         ),
         const SizedBox(height: 24),
@@ -611,6 +620,19 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
         ),
       ],
     );
+  }
+
+  /// Transfert supervisé : choisit un contact, l'invite dans l'appel, puis
+  /// l'appelant quittera automatiquement quand l'invité décroche.
+  Future<void> _transfer(CallController cc) async {
+    final numbers = await ContactPickerSheet.show(
+      context,
+      title: "Transférer l'appel à…",
+      confirmLabel: "Transférer",
+    );
+    if (numbers == null || numbers.isEmpty || !mounted) return;
+    cc.transferCall(numbers.first);
+    showAppSnackBar("Transfert en cours… l'appel basculera quand le contact décroche.");
   }
 
   /// Ouvre la conversation pendant l'appel : minimise l'écran d'appel (le

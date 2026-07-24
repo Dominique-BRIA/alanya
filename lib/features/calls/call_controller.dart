@@ -57,6 +57,12 @@ class CallController extends ChangeNotifier {
   // Début de la connexion média (source unique pour le minuteur, écran + bandeau).
   DateTime? connectedSince;
 
+  // Lot 4 — transfert supervisé : on a invité une cible et on attend qu'elle
+  // rejoigne pour quitter automatiquement.
+  bool _pendingTransfer = false;
+  String? _transferTargetId;
+  bool get isTransferring => _pendingTransfer;
+
   void setCallScreenVisible(bool v) {
     if (callScreenVisible == v) return;
     callScreenVisible = v;
@@ -240,6 +246,8 @@ class CallController extends ChangeNotifier {
     isSpeakerOn = false;
     connectedSince = null;
     callScreenVisible = false;
+    _pendingTransfer = false;
+    _transferTargetId = null;
     notifyListeners();
   }
 
@@ -283,6 +291,32 @@ class CallController extends ChangeNotifier {
   void notifyRingingDisplayed() {
     final id = incoming?.callId;
     if (id != null) _rt.callState(id, "ringing", userId: myUserId);
+  }
+
+  // --- Lot 4 : transfert d'appel supervisé ---
+  /// Invite `publicNumber` dans l'appel puis, dès qu'il rejoint, quitte
+  /// automatiquement (l'appel continue entre le correspondant et l'invité).
+  void transferCall(String publicNumber) {
+    final id = activeCallId;
+    if (id == null) return;
+    _pendingTransfer = true;
+    _transferTargetId = null;
+    lastError = null;
+    _rt.callInvite(id, publicNumber);
+    notifyListeners();
+  }
+
+  /// L'initiateur quitte SANS terminer l'appel pour les autres (transfert).
+  Future<void> _completeTransfer(String callId) async {
+    _pendingTransfer = false;
+    _transferTargetId = null;
+    activeCallId = null; // bloque les échos pendant le nettoyage
+    try {
+      await _calls.leave(callId);
+    } catch (_) {}
+    _rt.callState(callId, "left", userId: myUserId, displayName: myDisplayName);
+    await _stopMesh();
+    _clear();
   }
 
   Future<void> _ensureMesh() async {
@@ -343,6 +377,15 @@ List<Map<String, dynamic>> ice;
       participantNames[userId] = displayName;
     }
     joinedParticipantIds.add(userId);
+    // Transfert supervisé : la cible vient de rejoindre → l'initiateur quitte
+    // automatiquement (l'appel continue entre le correspondant et l'invité).
+    if (_pendingTransfer && userId == _transferTargetId) {
+      final id = activeCallId;
+      if (id != null) {
+        await _completeTransfer(id);
+        return;
+      }
+    }
     if (activeRole == ActiveCallRole.outgoing) {
       activeRole = ActiveCallRole.ongoing;
       // Le destinataire a décroché : arrête la sonnerie sortante.
@@ -441,9 +484,25 @@ List<Map<String, dynamic>> ice;
           remoteRinging = true;
           notifyListeners();
         }
+      } else if (state == "inviting") {
+        // Un participant invite quelqu'un : l'inviteur mémorise l'identité de
+        // l'invité (pour le transfert supervisé).
+        if (_pendingTransfer && userId != null && userId != myUserId) {
+          _transferTargetId = userId;
+        }
       } else if (state == "left" || state == "declined") {
         // Ignore notre propre départ (on le gère en local dans hangUp)
         if (userId == myUserId) return;
+        // Cible du transfert qui refuse : on annule et on reste dans l'appel.
+        if (state == "declined" &&
+            _pendingTransfer &&
+            userId == _transferTargetId) {
+          _pendingTransfer = false;
+          _transferTargetId = null;
+          lastError = "Transfert refusé";
+          notifyListeners();
+          return;
+        }
         if (callId == activeCallId && userId != null) {
           _onPeerLeft(userId);
         }

@@ -210,6 +210,13 @@ class RealtimeClient extends ChangeNotifier {
         if (userId != null) "userId": userId,
         if (displayName != null) "displayName": displayName,
       });
+
+  /// Invite un utilisateur (par son numéro public) dans un appel en cours.
+  void callInvite(String callId, String publicNumber) => _send({
+        "type": "call_invite",
+        "callId": callId,
+        "publicNumber": publicNumber,
+      });
       
   void meetingJoin(int meetingId) =>
       _send({"type": "meeting_join", "meetingId": meetingId});
