@@ -4,14 +4,17 @@ import 'package:provider/provider.dart';
 
 import '../../../core/api_client.dart';
 import '../../../core/app_snackbar.dart';
+import '../../../core/token_storage.dart';
 import '../../../models/contact.dart';
 import '../../../models/message.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
+import '../../../widgets/media/cached_media.dart';
 import '../../../widgets/motif_background.dart';
 import '../../account/screens/avatar_viewer_screen.dart';
 import '../../calls/call_controller.dart';
 import '../../chat/chat_repository.dart';
+import '../../chat/screens/shared_content_screen.dart';
 import '../contacts_repository.dart';
 
 /// Écran "Détails du contact" façon WhatsApp.
@@ -57,6 +60,8 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
   late bool _isBlocked = widget.isBlocked;
   List<Message>? _sharedMedia;
   bool _loadingMedia = false;
+  String _baseUrl = "";
+  String? _token;
 
   @override
   void initState() {
@@ -68,6 +73,8 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
     final convId = widget.convId;
     if (convId == null) return;
     setState(() => _loadingMedia = true);
+    _baseUrl = context.read<ApiClient>().baseUrl;
+    _token = await context.read<TokenStorage>().accessToken;
     try {
       final msgs = await context.read<ChatRepository>().getMessages(convId);
       if (!mounted) return;
@@ -284,34 +291,82 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
   }
 
   Widget _sharedMediaCard() {
-    return _card(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.perm_media_outlined, color: AlanyaColors.forest),
-              const SizedBox(width: 10),
-              const Expanded(
-                child: Text("Médias, liens et docs",
-                    style: TextStyle(fontWeight: FontWeight.w600)),
-              ),
-              if (_loadingMedia)
-                const SizedBox(
-                    width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
-              else
-                Text("${_sharedMedia?.length ?? 0}",
-                    style: const TextStyle(color: Colors.black54)),
-              const Icon(Icons.chevron_right, color: Colors.black38),
-            ],
-          ),
-          if (_sharedMedia != null && _sharedMedia!.isEmpty)
-            const Padding(
-              padding: EdgeInsets.only(top: 8),
-              child: Text("Aucun média partagé",
-                  style: TextStyle(color: Colors.black54, fontSize: 13)),
+    final hasConv = widget.convId != null;
+    final recent = (_sharedMedia ?? const <Message>[]).take(5).toList();
+    return GestureDetector(
+      onTap: hasConv
+          ? () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => SharedContentScreen(
+                    convId: widget.convId!, title: widget.name),
+              ))
+          : null,
+      child: _card(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.perm_media_outlined,
+                    color: AlanyaColors.forest),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text("Médias, liens et docs",
+                      style: TextStyle(fontWeight: FontWeight.w600)),
+                ),
+                if (_loadingMedia)
+                  const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                else
+                  Text("${_sharedMedia?.length ?? 0}",
+                      style: const TextStyle(color: Colors.black54)),
+                const Icon(Icons.chevron_right, color: Colors.black38),
+              ],
             ),
-        ],
+            if (recent.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: SizedBox(
+                  height: 60,
+                  child: Row(
+                    children: recent.map((m) {
+                      final media = m.media.first;
+                      final isVideo = m.type == "VIDEO";
+                      final url = '$_baseUrl${media.url}?token=$_token';
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: SizedBox(
+                            width: 60,
+                            height: 60,
+                            child: isVideo
+                                ? const ColoredBox(
+                                    color: Color(0xFF1A1A2E),
+                                    child: Icon(Icons.play_circle_fill,
+                                        color: Colors.white70),
+                                  )
+                                : CachedMedia(
+                                    url: url,
+                                    width: 60,
+                                    height: 60,
+                                    fit: BoxFit.cover),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ),
+            if (_sharedMedia != null && _sharedMedia!.isEmpty)
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Text("Aucun média partagé",
+                    style: TextStyle(color: Colors.black54, fontSize: 13)),
+              ),
+          ],
+        ),
       ),
     );
   }
