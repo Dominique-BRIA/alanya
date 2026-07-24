@@ -623,6 +623,22 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
     if (path != null) { showAppSnackBar("Enregistré dans Alanya/ : $name"); } else { showAppSnackBar("Échec du téléchargement"); }
   }
 
+  /// Ouvre un document / type sans lecteur intégré : télécharge dans le cache
+  /// app (chemin réel, une seule fois) puis passe la main à l'OS (OpenFilex).
+  Future<void> _openDocument(MessageMedia m) async {
+    final token = await _freshToken();
+    final url = "$_baseUrl${m.url}?download=1&token=$token";
+    final name = m.filename ?? "fichier-${m.id}";
+    showAppSnackBar("Ouverture…");
+    final path = await downloadToCache(url, name);
+    if (!mounted) return;
+    if (path != null) {
+      await openLocalFile(path);
+    } else {
+      showAppSnackBar("Impossible d'ouvrir le fichier");
+    }
+  }
+
   Future<void> _openImageViewer(Message m) async {
     final token = await _freshToken();
     final media = m.media.first;
@@ -885,7 +901,7 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
                                         onTap: () {
                                           final media = m.media.first;
                                           final isPdf = media.mimeType == "application/pdf" || _ext(media.filename ?? "").toLowerCase() == "pdf";
-                                          isPdf ? _openPdfViewer(m) : _download(media);
+                                          isPdf ? _openPdfViewer(m) : _openDocument(media);
                                         },
                                         onLongPress: () => _showMessageOptions(m),
                                         timestamp: _time(m.createdAt),

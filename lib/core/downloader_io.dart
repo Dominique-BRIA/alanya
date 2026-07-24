@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:media_store_plus/media_store_plus.dart';
+import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -215,15 +216,23 @@ Future<String> _uniquePath(String dirPath, String filename) async {
 
 Future<void> _openFile(String pathOrUri) async {
   try {
-    // Sur Android post-MediaStore, on récupère un content:// URI, pas un path.
-    // url_launcher gère les 2 types.
-    final uri = pathOrUri.startsWith('content://') || pathOrUri.startsWith('file://')
-        ? Uri.parse(pathOrUri)
-        : Uri.file(pathOrUri);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } else {
-      debugPrint('[Alanya] Aucune app pour ouvrir : $pathOrUri');
+    // content:// (MediaStore) ou http(s):// → url_launcher.
+    if (pathOrUri.startsWith('content://') || pathOrUri.startsWith('http')) {
+      final uri = Uri.parse(pathOrUri);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+        return;
+      }
+    }
+    // Chemin de fichier réel → OpenFilex (Intent ACTION_VIEW via FileProvider),
+    // fiable sur Android moderne où les URI file:// sont bloquées. C'est le
+    // « passage de main à l'OS » pour les types sans lecteur intégré.
+    final path = pathOrUri.startsWith('file://')
+        ? Uri.parse(pathOrUri).toFilePath()
+        : pathOrUri;
+    final res = await OpenFilex.open(path);
+    if (res.type != ResultType.done) {
+      debugPrint('[Alanya] OpenFilex: ${res.type} ${res.message}');
     }
   } catch (e) {
     debugPrint('[Alanya] Erreur ouverture : $e');

@@ -143,21 +143,32 @@ class _VideoViewerScreenState extends State<VideoViewerScreen> {
           : null,
       body: GestureDetector(
         onTap: () => setState(() => _showControls = !_showControls),
-        child: Center(
-          child: _hasError
-              ? _errorWidget()
-              : _initialized && _ctrl != null
-                  ? Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        AspectRatio(
+        child: _hasError
+            ? Center(child: _errorWidget())
+            : _initialized && _ctrl != null
+                ? Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Center(
+                        child: AspectRatio(
                           aspectRatio: _ctrl!.value.aspectRatio,
                           child: VideoPlayer(_ctrl!),
                         ),
-                        if (_showControls) _controlsBar(),
-                      ],
-                    )
-                  : const Column(
+                      ),
+                      // Play/pause au centre.
+                      if (_showControls) Center(child: _playPauseButton()),
+                      // Barre de progression EN BAS (scrim sombre pour lisibilité).
+                      if (_showControls)
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          child: _bottomBar(),
+                        ),
+                    ],
+                  )
+                : const Center(
+                    child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         CircularProgressIndicator(color: Colors.white),
@@ -168,7 +179,7 @@ class _VideoViewerScreenState extends State<VideoViewerScreen> {
                         ),
                       ],
                     ),
-        ),
+                  ),
       ),
     );
   }
@@ -200,48 +211,60 @@ class _VideoViewerScreenState extends State<VideoViewerScreen> {
     );
   }
 
-  Widget _controlsBar() {
+  Widget _playPauseButton() {
+    return IconButton(
+      icon: Icon(
+        _ctrl!.value.isPlaying
+            ? Icons.pause_circle_filled
+            : Icons.play_circle_filled,
+        color: Colors.white,
+        size: 64,
+      ),
+      onPressed: () {
+        setState(() {
+          _ctrl!.value.isPlaying ? _ctrl!.pause() : _ctrl!.play();
+        });
+      },
+    );
+  }
+
+  Widget _bottomBar() {
     final position = _ctrl!.value.position;
     final duration = _ctrl!.value.duration;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        IconButton(
-          icon: Icon(
-            _ctrl!.value.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
-            color: Colors.white,
-            size: 56,
-          ),
-          onPressed: () {
-            setState(() {
-              _ctrl!.value.isPlaying ? _ctrl!.pause() : _ctrl!.play();
-            });
-          },
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 32, 16, 20),
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.bottomCenter,
+          end: Alignment.topCenter,
+          colors: [Colors.black87, Colors.transparent],
         ),
-        const SizedBox(height: 8),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Row(
-            children: [
-              Text(_fmtDuration(position),
-                  style: const TextStyle(color: Colors.white, fontSize: 12)),
-              Expanded(
-                child: VideoProgressIndicator(
-                  _ctrl!,
-                  allowScrubbing: true,
-                  colors: VideoProgressColors(
-                    playedColor: AlanyaColors.terracotta,
-                    bufferedColor: Colors.white24,
-                    backgroundColor: Colors.white12,
-                  ),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Row(
+          children: [
+            Text(_fmtDuration(position),
+                style: const TextStyle(color: Colors.white, fontSize: 12)),
+            const SizedBox(width: 10),
+            Expanded(
+              child: VideoProgressIndicator(
+                _ctrl!,
+                allowScrubbing: true,
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                colors: VideoProgressColors(
+                  playedColor: AlanyaColors.terracotta,
+                  bufferedColor: Colors.white24,
+                  backgroundColor: Colors.white24,
                 ),
               ),
-              Text(_fmtDuration(duration),
-                  style: const TextStyle(color: Colors.white, fontSize: 12)),
-            ],
-          ),
+            ),
+            const SizedBox(width: 10),
+            Text(_fmtDuration(duration),
+                style: const TextStyle(color: Colors.white, fontSize: 12)),
+          ],
         ),
-      ],
+      ),
     );
   }
 
