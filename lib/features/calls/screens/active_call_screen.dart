@@ -64,6 +64,9 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     _calls?.removeListener(_onCallChanged);
     _calls = cc;
     _calls!.addListener(_onCallChanged);
+    // Lot 2 : prévient l'appelant que l'écran d'appel est affiché ici
+    // (→ « En train de sonner… » chez lui).
+    if (widget.incoming) _calls!.notifyRingingDisplayed();
   }
 
   void _onCallChanged() {
@@ -193,7 +196,8 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
       return "Appel entrant…";
     }
     if (cc.activeRole == ActiveCallRole.outgoing) {
-      return cc.isGroupCall ? "Sonnerie du groupe…" : "Sonnerie…";
+      if (cc.isGroupCall) return "Sonnerie du groupe…";
+      return cc.remoteRinging ? "En train de sonner…" : "Sonnerie…";
     }
     if (cc.activeRole == ActiveCallRole.ongoing) {
       if (cc.mediaConnected) return _formatElapsed();

@@ -256,6 +256,13 @@ class CallController extends ChangeNotifier {
     await _mesh?.switchCamera();
   }
 
+  /// Émis par l'appelé quand son écran d'appel s'affiche : informe l'appelant
+  /// que « ça sonne » réellement chez lui (état « En train de sonner »).
+  void notifyRingingDisplayed() {
+    final id = incoming?.callId;
+    if (id != null) _rt.callState(id, "ringing", userId: myUserId);
+  }
+
   Future<void> _ensureMesh() async {
     if (myUserId == null || activeCallId == null) return;
 
@@ -404,6 +411,13 @@ List<Map<String, dynamic>> ice;
               }
             }
           }
+        }
+      } else if (state == "ringing") {
+        // L'appelé signale que son écran d'appel est affiché → « En train de sonner ».
+        if (userId == myUserId) return;
+        if (callId == activeCallId && activeRole == ActiveCallRole.outgoing) {
+          remoteRinging = true;
+          notifyListeners();
         }
       } else if (state == "left" || state == "declined") {
         // Ignore notre propre départ (on le gère en local dans hangUp)
