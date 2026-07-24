@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/biometric_service.dart';
+import '../../../core/data_saver_service.dart';
 import '../../../core/locale_controller.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../theme/alanya_theme.dart';
@@ -19,6 +20,7 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _biometricEnabled = false;
+  bool _dataSaverEnabled = DataSaverService.instance.isOn;
   bool _biometricAvailable = false;
   String _biometricType = "Chargement...";
   bool _loadingBiometric = true;
@@ -153,6 +155,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           // PREFERENCES
           _sectionHeader("Préférences"),
+          _settingsTile(
+            icon: _dataSaverEnabled ? Icons.data_saver_on : Icons.data_saver_off,
+            iconColor:
+                _dataSaverEnabled ? AlanyaColors.forest : AlanyaColors.grey400,
+            title: "Économie de données",
+            subtitle: _dataSaverEnabled
+                ? "Activé — les médias ne se téléchargent pas automatiquement"
+                : "Désactivé (appuyer pour activer)",
+            trailing: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: _dataSaverEnabled
+                    ? AlanyaColors.forest.withValues(alpha: 0.1)
+                    : AlanyaColors.grey200,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                _dataSaverEnabled ? "ON" : "OFF",
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: _dataSaverEnabled
+                      ? AlanyaColors.forest
+                      : AlanyaColors.grey500,
+                ),
+              ),
+            ),
+            onTap: () async {
+              final v = !_dataSaverEnabled;
+              await DataSaverService.instance.setEnabled(v);
+              if (mounted) setState(() => _dataSaverEnabled = v);
+            },
+          ),
           _settingsTile(
             icon: Icons.language,
             iconColor: AlanyaColors.forest,

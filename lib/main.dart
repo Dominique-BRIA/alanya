@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'core/api_client.dart';
 import 'core/authed_api.dart';
 import 'core/connectivity_service.dart';
+import 'core/data_saver_service.dart';
 import 'core/locale_controller.dart';
 import 'core/outbox.dart';
 import 'core/push_service.dart';
@@ -49,6 +50,7 @@ void main() async {
   final realtime = RealtimeClient(storage);
 
   await PushService.instance.tryInitialize(api: api, storage: storage);
+  await DataSaverService.instance.load();
 
   runApp(
     MultiProvider(

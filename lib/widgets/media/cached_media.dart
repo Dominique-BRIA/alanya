@@ -4,8 +4,37 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import '../../core/data_saver_service.dart';
 import '../../core/media_cache.dart';
 import '../../theme/alanya_theme.dart';
+
+/// GET avec retry (réseau faible) : ré-essaie sur erreur réseau ou 5xx, avec un
+/// petit backoff. Les erreurs 4xx (auth, introuvable) ne sont pas ré-essayées.
+Future<http.Response> httpGetWithRetry(
+  Uri uri,
+  Map<String, String> headers, {
+  int maxRetries = 2,
+}) async {
+  int attempt = 0;
+  while (true) {
+    try {
+      final res = await http.get(uri, headers: headers);
+      if (res.statusCode >= 500 && attempt < maxRetries) {
+        attempt++;
+        await Future.delayed(Duration(milliseconds: 400 * attempt));
+        continue;
+      }
+      return res;
+    } catch (_) {
+      if (attempt < maxRetries) {
+        attempt++;
+        await Future.delayed(Duration(milliseconds: 400 * attempt));
+        continue;
+      }
+      rethrow;
+    }
+  }
+}
 
 /// Affiche une image de `/api/media/{id}` en la mettant en **cache disque
 /// persistant** (via [MediaCache]) : un média déjà téléchargé n'est JAMAIS
@@ -59,6 +88,7 @@ class CachedMedia extends StatefulWidget {
 class _CachedMediaState extends State<CachedMedia> {
   String? _path;
   bool _error = false;
+  bool _needsManual = false; // mode éco : en attente d'un tap pour télécharger
 
   @override
   void initState() {
@@ -76,10 +106,35 @@ class _CachedMediaState extends State<CachedMedia> {
     }
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool force = false}) async {
+    final key = CachedMedia.cacheKey(widget.url);
+    // 1. Déjà en cache disque ? → affichage immédiat (gratuit, même en mode éco).
+    try {
+      final cached = await MediaCache.get(key, 'dat');
+      if (cached != null) {
+        if (mounted) {
+          setState(() {
+            _path = cached;
+            _needsManual = false;
+          });
+        }
+        return;
+      }
+    } catch (_) {}
+    if (!mounted) return;
+    // 2. Mode éco activé et média absent du cache → téléchargement manuel.
+    if (!force && DataSaverService.instance.isOn) {
+      setState(() => _needsManual = true);
+      return;
+    }
+    // 3. Télécharge (avec retry) puis met en cache.
+    setState(() {
+      _needsManual = false;
+      _error = false;
+    });
     try {
       final path = await MediaCache.getOrFetch(
-        mediaId: CachedMedia.cacheKey(widget.url),
+        mediaId: key,
         ext: 'dat',
         fetchNetwork: () async {
           final headers = <String, String>{};
@@ -87,7 +142,7 @@ class _CachedMediaState extends State<CachedMedia> {
           if (token != null && token.isNotEmpty) {
             headers['Authorization'] = 'Bearer $token';
           }
-          final res = await http.get(Uri.parse(widget.url), headers: headers);
+          final res = await httpGetWithRetry(Uri.parse(widget.url), headers);
           if (res.statusCode != 200) {
             throw Exception('HTTP ${res.statusCode}');
           }
@@ -125,8 +180,30 @@ class _CachedMediaState extends State<CachedMedia> {
         );
   }
 
+  Widget _manualPlaceholder() {
+    return GestureDetector(
+      onTap: () => _load(force: true),
+      child: Container(
+        width: widget.width,
+        height: widget.height ?? 200,
+        color: AlanyaColors.sand,
+        alignment: Alignment.center,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.download_rounded, color: AlanyaColors.terracotta, size: 30),
+            const SizedBox(height: 4),
+            Text('Toucher pour télécharger',
+                style: TextStyle(fontSize: 11, color: AlanyaColors.grey500)),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (_needsManual) return _wrap(_manualPlaceholder());
     if (_error) {
       return _wrap(widget.errorWidget ??
           Container(
@@ -170,7 +247,7 @@ Future<Uint8List?> loadCachedMediaBytes(String url, String? token) async {
         if (token != null && token.isNotEmpty) {
           headers['Authorization'] = 'Bearer $token';
         }
-        final res = await http.get(Uri.parse(url), headers: headers);
+        final res = await httpGetWithRetry(Uri.parse(url), headers);
         if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
         return res.bodyBytes;
       },
