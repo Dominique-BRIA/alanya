@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import '../../core/data_saver_service.dart';
 import '../../core/media_cache.dart';
 import '../../theme/alanya_theme.dart';
+import 'shimmer_box.dart';
 
 /// GET avec retry (réseau faible) : ré-essaie sur erreur réseau ou 5xx, avec un
 /// petit backoff. Les erreurs 4xx (auth, introuvable) ne sont pas ré-essayées.
@@ -89,6 +90,7 @@ class _CachedMediaState extends State<CachedMedia> {
   String? _path;
   bool _error = false;
   bool _needsManual = false; // mode éco : en attente d'un tap pour télécharger
+  double? _progress; // progression du téléchargement (0..1), null = indéterminé
 
   @override
   void initState() {
@@ -127,7 +129,7 @@ class _CachedMediaState extends State<CachedMedia> {
       setState(() => _needsManual = true);
       return;
     }
-    // 3. Télécharge (avec retry) puis met en cache.
+    // 3. Télécharge (streaming + progression + retry) puis met en cache.
     setState(() {
       _needsManual = false;
       _error = false;
@@ -136,22 +138,62 @@ class _CachedMediaState extends State<CachedMedia> {
       final path = await MediaCache.getOrFetch(
         mediaId: key,
         ext: 'dat',
-        fetchNetwork: () async {
-          final headers = <String, String>{};
-          final token = widget.token;
-          if (token != null && token.isNotEmpty) {
-            headers['Authorization'] = 'Bearer $token';
-          }
-          final res = await httpGetWithRetry(Uri.parse(widget.url), headers);
-          if (res.statusCode != 200) {
-            throw Exception('HTTP ${res.statusCode}');
-          }
-          return res.bodyBytes;
-        },
+        fetchNetwork: _downloadWithProgress,
       );
-      if (mounted) setState(() => _path = path);
+      if (mounted) {
+        setState(() {
+          _path = path;
+          _progress = null;
+        });
+      }
     } catch (_) {
-      if (mounted) setState(() => _error = true);
+      if (mounted) {
+        setState(() {
+          _error = true;
+          _progress = null;
+        });
+      }
+    }
+  }
+
+  /// Télécharge en flux (pour une barre de progression) avec retry réseau.
+  Future<List<int>> _downloadWithProgress() async {
+    final headers = <String, String>{};
+    final token = widget.token;
+    if (token != null && token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
+    }
+    int attempt = 0;
+    while (true) {
+      final client = http.Client();
+      try {
+        final req = http.Request('GET', Uri.parse(widget.url))
+          ..headers.addAll(headers);
+        final resp = await client.send(req);
+        if (resp.statusCode != 200) {
+          throw Exception('HTTP ${resp.statusCode}');
+        }
+        final total = resp.contentLength ?? 0;
+        final bytes = <int>[];
+        int received = 0;
+        await for (final chunk in resp.stream) {
+          bytes.addAll(chunk);
+          received += chunk.length;
+          if (total > 0 && mounted) {
+            setState(() => _progress = received / total);
+          }
+        }
+        return bytes;
+      } catch (_) {
+        if (attempt < 2) {
+          attempt++;
+          await Future.delayed(Duration(milliseconds: 400 * attempt));
+          continue;
+        }
+        rethrow;
+      } finally {
+        client.close();
+      }
     }
   }
 
@@ -164,19 +206,21 @@ class _CachedMediaState extends State<CachedMedia> {
 
   Widget _skeleton() {
     return widget.placeholder ??
+        ShimmerBox(
+          width: widget.width,
+          height: widget.height,
+          progress: _progress,
+        );
+  }
+
+  Widget _errorBox() {
+    return widget.errorWidget ??
         Container(
           width: widget.width,
           height: widget.height ?? 200,
           color: AlanyaColors.sand,
           alignment: Alignment.center,
-          child: const SizedBox(
-            width: 22,
-            height: 22,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              color: AlanyaColors.terracotta,
-            ),
-          ),
+          child: Icon(Icons.broken_image, color: AlanyaColors.grey400),
         );
   }
 
@@ -203,34 +247,31 @@ class _CachedMediaState extends State<CachedMedia> {
 
   @override
   Widget build(BuildContext context) {
-    if (_needsManual) return _wrap(_manualPlaceholder());
-    if (_error) {
-      return _wrap(widget.errorWidget ??
-          Container(
-            width: widget.width,
-            height: widget.height ?? 200,
-            color: AlanyaColors.sand,
-            alignment: Alignment.center,
-            child: Icon(Icons.broken_image, color: AlanyaColors.grey400),
-          ));
+    Widget child;
+    if (_needsManual) {
+      child = KeyedSubtree(
+        key: const ValueKey('manual'),
+        child: _manualPlaceholder(),
+      );
+    } else if (_error) {
+      child = KeyedSubtree(key: const ValueKey('error'), child: _errorBox());
+    } else if (_path == null) {
+      child = KeyedSubtree(key: const ValueKey('skeleton'), child: _skeleton());
+    } else {
+      child = Image.file(
+        File(_path!),
+        key: ValueKey('img_${_path!}'),
+        width: widget.width,
+        height: widget.height,
+        fit: widget.fit,
+        // Si le fichier est corrompu, on retombe sur l'icône d'erreur.
+        errorBuilder: (_, __, ___) => _errorBox(),
+      );
     }
-    final path = _path;
-    if (path == null) return _wrap(_skeleton());
-    return _wrap(Image.file(
-      File(path),
-      width: widget.width,
-      height: widget.height,
-      fit: widget.fit,
-      // Si le fichier est corrompu, on retombe sur l'icône d'erreur.
-      errorBuilder: (_, __, ___) =>
-          widget.errorWidget ??
-          Container(
-            width: widget.width,
-            height: widget.height ?? 200,
-            color: AlanyaColors.sand,
-            alignment: Alignment.center,
-            child: Icon(Icons.broken_image, color: AlanyaColors.grey400),
-          ),
+    // Fondu doux entre skeleton → image (transition fluide, façon WhatsApp).
+    return _wrap(AnimatedSwitcher(
+      duration: const Duration(milliseconds: 300),
+      child: child,
     ));
   }
 }
