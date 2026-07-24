@@ -293,6 +293,18 @@ class CallController extends ChangeNotifier {
     if (id != null) _rt.callState(id, "ringing", userId: myUserId);
   }
 
+  // --- Lot 5 : inviter dans l'appel (appel de groupe dynamique) ---
+  /// Invite `publicNumber` dans l'appel en cours SANS quitter (contrairement au
+  /// transfert). L'appel devient multi-partie ; le mesh connectera l'invité à
+  /// tous les participants dès qu'il décroche.
+  void inviteToCall(String publicNumber) {
+    final id = activeCallId;
+    if (id == null) return;
+    isGroupCall = true; // devient un appel de groupe
+    _rt.callInvite(id, publicNumber);
+    notifyListeners();
+  }
+
   // --- Lot 4 : transfert d'appel supervisé ---
   /// Invite `publicNumber` dans l'appel puis, dès qu'il rejoint, quitte
   /// automatiquement (l'appel continue entre le correspondant et l'invité).
@@ -385,6 +397,11 @@ List<Map<String, dynamic>> ice;
         await _completeTransfer(id);
         return;
       }
+    }
+    // Dès qu'il y a plus d'un autre participant, c'est un appel de groupe
+    // (invitation dynamique) → UI grille + liste des participants.
+    if (joinedParticipantIds.where((id) => id != myUserId).length > 1) {
+      isGroupCall = true;
     }
     if (activeRole == ActiveCallRole.outgoing) {
       activeRole = ActiveCallRole.ongoing;

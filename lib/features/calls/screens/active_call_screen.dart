@@ -244,8 +244,11 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
 
     // Lot 3 : appel vidéo 1-1 actif → plein écran dynamique (principal + PiP).
     // Les appels de groupe gardent la grille ; l'audio garde l'avatar.
-    final useDynamic =
-        isVideo && showActive && !cc.isGroupCall && cc.localStream != null;
+    final useDynamic = isVideo &&
+        showActive &&
+        !cc.isGroupCall &&
+        remotes.length <= 1 &&
+        cc.localStream != null;
     RTCVideoRenderer? dynMain;
     bool dynMainMirror = false;
     RTCVideoRenderer? dynPip;
@@ -604,6 +607,12 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
               onPressed: () => _openChatDuringCall(cc),
             ),
             _controlBtn(
+              icon: Icons.person_add_alt_1,
+              active: false,
+              label: "Inviter",
+              onPressed: () => _invite(cc),
+            ),
+            _controlBtn(
               icon: Icons.phone_forwarded,
               active: cc.isTransferring,
               label: cc.isTransferring ? "Transfert…" : "Transférer",
@@ -620,6 +629,23 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
         ),
       ],
     );
+  }
+
+  /// Invite un ou plusieurs contacts dans l'appel (appel de groupe dynamique).
+  /// L'appelant reste dans l'appel ; chaque invité rejoint quand il décroche.
+  Future<void> _invite(CallController cc) async {
+    final numbers = await ContactPickerSheet.show(
+      context,
+      title: "Inviter dans l'appel",
+      confirmLabel: "Inviter",
+    );
+    if (numbers == null || numbers.isEmpty || !mounted) return;
+    for (final n in numbers) {
+      cc.inviteToCall(n);
+    }
+    showAppSnackBar(numbers.length == 1
+        ? "Invitation envoyée"
+        : "${numbers.length} invitations envoyées");
   }
 
   /// Transfert supervisé : choisit un contact, l'invite dans l'appel, puis
