@@ -5,6 +5,7 @@ import 'package:photo_manager/photo_manager.dart';
 import 'package:file_picker/file_picker.dart';
 import '../../core/media_helper.dart';
 import '../../theme/alanya_theme.dart';
+import '../contact_picker_sheet.dart';
 
 /// Résultat de la sélection de médias.
 class MediaPickResult {
@@ -21,14 +22,20 @@ class MediaPickResult {
   });
 }
 
+/// Résultat de la sélection de contact.
+class ContactPickResult {
+  final List<String> publicNumbers;
+  const ContactPickResult({required this.publicNumbers});
+}
+
 /// Bottom sheet style WhatsApp pour envoyer des médias :
 /// - 4 options : Galerie, Caméra, Document, Contact
 /// - Galerie récente en bas (thumbnails horizontaux, multi-sélection)
 class MediaPickerSheet extends StatefulWidget {
   const MediaPickerSheet({super.key});
 
-  static Future<List<MediaPickResult>?> show(BuildContext context) {
-    return showModalBottomSheet<List<MediaPickResult>>(
+  static Future<dynamic> show(BuildContext context) {
+    return showModalBottomSheet<dynamic>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -104,9 +111,8 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
     if (mounted && results.isNotEmpty) Navigator.pop(context, results);
   }
 
-  // ══ CAMÉRA — ouvre la vraie caméra ══
+  // ══ CAMÉRA ══
   Future<void> _pickCamera() async {
-    // Ferme d'abord le bottom sheet
     Navigator.pop(context);
     try {
       final picker = ImagePicker();
@@ -118,15 +124,13 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
         fileName: photo.name,
         mimeType: 'image/jpeg',
       );
-      // Retourne le résultat via un Navigator pop avec delay
-      // car on a déjà pop le sheet
       if (Navigator.of(context).canPop()) {
         Navigator.of(context).pop([result]);
       }
     } catch (_) {}
   }
 
-  // ══ GALERIE — ouvre la galerie complète ══
+  // ══ GALERIE ══
   Future<void> _pickFullGallery() async {
     try {
       final result = await FilePicker.platform.pickFiles(
@@ -169,11 +173,27 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
     if (mounted && results.isNotEmpty) Navigator.pop(context, results);
   }
 
-  // ══ CONTACT — ouvre le sélecteur de contacts Alanya ══
+  // ══ CONTACT — ouvre le ContactPickerSheet existant ══
   Future<void> _pickContact() async {
-    // Ferme le sheet et retourne un flag spécial pour que chat_screen ouvre le contact picker
+    // Ferme le media picker d'abord
     Navigator.pop(context);
-    // Le chat_screen gère l'ouverture du contact picker via un callback
+
+    // Petit délai pour que la fermeture soit terminée
+    await Future.delayed(const Duration(milliseconds: 200));
+
+    if (!mounted) return;
+
+    // Ouvre le ContactPickerSheet existant
+    final numbers = await ContactPickerSheet.show(
+      context,
+      title: "Envoyer un contact",
+      confirmLabel: "Envoyer",
+    );
+
+    if (numbers != null && numbers.isNotEmpty && mounted) {
+      // Retourne un ContactPickResult via Navigator.pop
+      Navigator.pop(context, ContactPickResult(publicNumbers: numbers));
+    }
   }
 
   String _mimeFromAsset(AssetEntity asset) {
@@ -306,7 +326,7 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
             ),
           ),
 
-          // Galerie récente (thumbnails horizontaux)
+          // Galerie récente
           Expanded(
             child: _loadingGallery
                 ? const Center(child: CircularProgressIndicator(color: AlanyaColors.terracotta))
