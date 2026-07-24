@@ -1,6 +1,8 @@
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
+import '../../core/media_cache.dart';
 import '../../core/media_helper.dart';
 import '../../theme/alanya_theme.dart';
 import 'cached_media.dart';
@@ -201,6 +203,15 @@ class _MediaGridState extends State<MediaGrid> {
 
   Future<void> _generateThumbnail(String key, String videoUrl) async {
     try {
+      final diskKey = 'vthumb_${CachedMedia.cacheKey(videoUrl)}';
+      // Disque d'abord : générée une seule fois (plus de re-téléchargement de
+      // la vidéo pour régénérer la vignette).
+      final cachedPath = await MediaCache.get(diskKey, 'jpg');
+      if (cachedPath != null) {
+        final bytes = await File(cachedPath).readAsBytes();
+        if (mounted) setState(() => _thumbCache[key] = bytes);
+        return;
+      }
       final thumb = await VideoThumbnail.thumbnailData(
         video: videoUrl,
         imageFormat: ImageFormat.JPEG,
@@ -208,6 +219,7 @@ class _MediaGridState extends State<MediaGrid> {
         quality: 60,
       );
       if (mounted && thumb != null) {
+        await MediaCache.put(diskKey, 'jpg', thumb);
         setState(() => _thumbCache[key] = thumb);
       }
     } catch (_) {}

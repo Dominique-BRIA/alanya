@@ -1,6 +1,8 @@
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
+import '../../core/media_cache.dart';
 import '../../theme/alanya_theme.dart';
 import 'cached_media.dart';
 
@@ -64,6 +66,16 @@ class _VideoBubbleState extends State<VideoBubble> {
     if (_generating || _failed) return;
     setState(() => _generating = true);
     try {
+      final key = 'vthumb_${CachedMedia.cacheKey(widget.videoUrl)}';
+      // 1. Vignette déjà générée et en cache disque ? → lecture locale (0 data,
+      //    pas de re-téléchargement de la vidéo pour régénérer).
+      final cachedPath = await MediaCache.get(key, 'jpg');
+      if (cachedPath != null) {
+        final bytes = await File(cachedPath).readAsBytes();
+        if (mounted) setState(() => _thumbnailBytes = bytes);
+        return;
+      }
+      // 2. Génère (télécharge une portion de la vidéo) puis met en cache.
       final url = widget.token != null
           ? '${widget.videoUrl}?token=${widget.token}'
           : widget.videoUrl;
@@ -74,6 +86,7 @@ class _VideoBubbleState extends State<VideoBubble> {
         quality: 75,
       );
       if (mounted && thumb != null) {
+        await MediaCache.put(key, 'jpg', thumb);
         setState(() => _thumbnailBytes = thumb);
       } else {
         if (mounted) setState(() => _failed = true);
