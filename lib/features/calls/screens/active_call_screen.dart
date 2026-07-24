@@ -232,9 +232,9 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     }
     if (cc.activeRole == ActiveCallRole.ongoing) {
       if (cc.mediaConnected) return _formatElapsed();
-      return "Connexion…";
+      return "Connexion en cours…";
     }
-    return "Connexion…";
+    return "Connexion en cours…";
   }
 
   String _mediaHint(CallController cc) {
@@ -245,7 +245,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     if (cc.mediaConnected) {
       return cc.activeType == "VIDEO" ? "Vidéo connectée" : "Audio connectée";
     }
-    return "Établissement du lien WebRTC…";
+    return "";
   }
 
   @override

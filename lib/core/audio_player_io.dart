@@ -3,8 +3,10 @@ import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 
 import 'audio_state.dart';
+import 'media_cache.dart';
 
 /// Lecteur audio réactif (mobile/desktop).
 ///
@@ -75,7 +77,16 @@ class InlineAudioPlayer {
         _stopInternal();
       });
 
-      await _player!.play(UrlSource(url));
+      // Cache-first : un audio distant est téléchargé UNE fois puis lu en local
+      // (les notes vocales rejouées ne re-consomment plus de données).
+      Source source;
+      if (url.startsWith('http')) {
+        final cached = await _cachedAudioPath(url);
+        source = cached != null ? DeviceFileSource(cached) : UrlSource(url);
+      } else {
+        source = UrlSource(url); // chemin local (enregistrement) — inchangé
+      }
+      await _player!.play(source);
     } else {
       // Desktop : lecteur système externe (pas de suivi d'état réactif).
       state.value = state.value.copyWith(isPlaying: true);
@@ -88,6 +99,34 @@ class InlineAudioPlayer {
           await Process.run('cmd', ['/c', 'start', '', url]);
         }
       } catch (_) {}
+    }
+  }
+
+  static String _idFromUrl(String url) {
+    try {
+      final u = Uri.parse(url);
+      if (u.pathSegments.isNotEmpty && u.pathSegments.last.isNotEmpty) {
+        return u.pathSegments.last;
+      }
+    } catch (_) {}
+    return url.split('?').first.hashCode.toRadixString(16);
+  }
+
+  /// Télécharge l'audio en cache disque (une seule fois) et renvoie le chemin
+  /// local, ou null en cas d'échec (on retombe alors sur le streaming).
+  static Future<String?> _cachedAudioPath(String url) async {
+    try {
+      return await MediaCache.getOrFetch(
+        mediaId: _idFromUrl(url),
+        ext: 'dat',
+        fetchNetwork: () async {
+          final res = await http.get(Uri.parse(url));
+          if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
+          return res.bodyBytes;
+        },
+      );
+    } catch (_) {
+      return null;
     }
   }
 

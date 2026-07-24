@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
@@ -38,8 +40,31 @@ class _VideoViewerScreenState extends State<VideoViewerScreen> {
     _initPlayer();
   }
 
-  void _initPlayer() {
-    _ctrl = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl));
+  String get _cacheName => 'vid_${_idFromUrl(widget.videoUrl)}';
+
+  static String _idFromUrl(String url) {
+    try {
+      final u = Uri.parse(url);
+      if (u.pathSegments.isNotEmpty && u.pathSegments.last.isNotEmpty) {
+        return u.pathSegments.last;
+      }
+    } catch (_) {}
+    return url.split('?').first.hashCode.toRadixString(16);
+  }
+
+  Future<void> _initPlayer() async {
+    // Cache-first : déjà dans le cache app-privé → lecture locale (0 data).
+    // Sinon on la télécharge UNE fois dans le cache (dédupliqué) puis on lit en
+    // local → jamais re-téléchargée. Fallback streaming si le cache échoue.
+    String? localPath;
+    try {
+      localPath = await getCachedFile(_cacheName);
+      localPath ??= await downloadToCache(widget.videoUrl, _cacheName);
+    } catch (_) {}
+    if (!mounted) return;
+    _ctrl = localPath != null
+        ? VideoPlayerController.file(File(localPath))
+        : VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl));
     _ctrl!.initialize().then((_) {
       if (mounted && !_hasError) {
         setState(() => _initialized = true);
