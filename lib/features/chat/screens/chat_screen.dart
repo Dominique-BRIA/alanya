@@ -123,11 +123,17 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
   final Map<String, String> _translations = {};
   final Set<String> _translating = {};
 
+  // Lot D — scroll infini (chargement des messages plus anciens).
+  bool _loadingOlder = false;
+  bool _hasMoreOlder = true;
+  bool _loadedOlder = false;
+
   @override
   void initState() {
     super.initState();
     ChatScreen.activeConvId = widget.convId;
     _load();
+    _scrollCtrl.addListener(_onScroll);
     final rt = context.read<RealtimeClient>();
     rt.connect();
     _rtSub = rt.events.listen(_onRealtimeEvent);
@@ -226,8 +232,52 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
     } catch (_) { if (mounted) setState(() => _loading = false); }
   }
 
+  // Scroll infini : proche du haut → charge les messages plus anciens.
+  void _onScroll() {
+    if (!_scrollCtrl.hasClients) return;
+    if (_scrollCtrl.position.pixels <= 240 && !_loadingOlder && _hasMoreOlder) {
+      _loadOlder();
+    }
+  }
+
+  Future<void> _loadOlder() async {
+    if (_loadingOlder || !_hasMoreOlder || _messages.isEmpty) return;
+    setState(() => _loadingOlder = true);
+    final cursor = _messages.first.id;
+    try {
+      final older = await context
+          .read<ChatRepository>()
+          .getMessages(widget.convId, cursor: cursor);
+      if (!mounted) return;
+      if (older.isEmpty) {
+        _hasMoreOlder = false;
+      } else {
+        final newMsgs = older.reversed.toList();
+        final before =
+            _scrollCtrl.hasClients ? _scrollCtrl.position.maxScrollExtent : 0.0;
+        _loadedOlder = true;
+        setState(() => _messages = [...newMsgs, ..._messages]);
+        for (final m in newMsgs) {
+          _cacheMsg(m);
+          MessageCache.upsert(m, widget.convId);
+        }
+        // Préserve la position visuelle après l'ajout en tête (pas de saut).
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!_scrollCtrl.hasClients) return;
+          final after = _scrollCtrl.position.maxScrollExtent;
+          _scrollCtrl.jumpTo(_scrollCtrl.position.pixels + (after - before));
+        });
+      }
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _loadingOlder = false);
+    }
+  }
+
   Future<void> _poll() async {
     if (!mounted || _loading) return;
+    // Ne pas écraser l'historique chargé via le scroll infini.
+    if (_loadingOlder || _loadedOlder) return;
     if (context.read<RealtimeClient>().connected) return;
     try {
       final repo = context.read<ChatRepository>();
