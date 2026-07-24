@@ -27,6 +27,11 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
   bool _popping = false;
   bool _actionBusy = false;
 
+  // Lot 3 — UI vidéo dynamique (1-1) : quel flux est en plein écran, et
+  // position du cadre flottant (PiP) déplaçable.
+  bool _localIsMain = false;
+  Offset? _pipPos;
+
   Timer? _connectTimeout;
 
   @override
@@ -225,6 +230,32 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     final showIncoming = widget.incoming && cc.incoming != null;
     final showActive = cc.activeCallId != null && cc.activeRole != null;
 
+    // Lot 3 : appel vidéo 1-1 actif → plein écran dynamique (principal + PiP).
+    // Les appels de groupe gardent la grille ; l'audio garde l'avatar.
+    final useDynamic =
+        isVideo && showActive && !cc.isGroupCall && cc.localStream != null;
+    RTCVideoRenderer? dynMain;
+    bool dynMainMirror = false;
+    RTCVideoRenderer? dynPip;
+    bool dynPipMirror = false;
+    if (useDynamic) {
+      final remoteId = remotes.keys.isNotEmpty ? remotes.keys.first : null;
+      final remoteR = remoteId != null ? _remoteRenderers[remoteId] : null;
+      if (remoteR == null) {
+        // Pas encore de flux distant : on affiche sa propre caméra en grand.
+        dynMain = _localRenderer;
+        dynMainMirror = true;
+      } else if (_localIsMain) {
+        dynMain = _localRenderer;
+        dynMainMirror = true;
+        dynPip = remoteR;
+      } else {
+        dynMain = remoteR;
+        dynPip = _localRenderer;
+        dynPipMirror = true;
+      }
+    }
+
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) async {
@@ -242,7 +273,16 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
         body: SafeArea(
           child: Stack(
             children: [
-              if (showVideo) _remoteGrid(cc, remotes),
+              if (useDynamic && dynMain != null)
+                Positioned.fill(
+                  child: RTCVideoView(
+                    dynMain!,
+                    mirror: dynMainMirror,
+                    objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                  ),
+                )
+              else if (showVideo)
+                _remoteGrid(cc, remotes),
               Column(
                 children: [
                   Align(
@@ -262,7 +302,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  if (!showVideo)
+                  if (!showVideo && !useDynamic)
                     CircleAvatar(
                       radius: 52,
                       backgroundColor: AlanyaColors.terracotta,
@@ -321,10 +361,9 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                   const SizedBox(height: 40),
                 ],
               ),
-              // Auto-vue locale : dès que la caméra est active sur un appel vidéo,
-              // indépendamment de l'arrivée du flux distant (sinon on ne voit pas
-              // son propre visage tant que l'autre n'est pas connecté).
-              if (isVideo && showActive && cc.localStream != null)
+              // Auto-vue locale (mode NON dynamique : groupe). En 1-1 vidéo, le
+              // PiP est géré par _draggablePip ci-dessous.
+              if (!useDynamic && isVideo && showActive && cc.localStream != null)
                 Positioned(
                   top: 12,
                   right: 12,
@@ -339,7 +378,55 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                     ),
                   ),
                 ),
+              // Lot 3 : cadre flottant (PiP) déplaçable, tap pour inverser.
+              if (useDynamic && dynPip != null)
+                _draggablePip(dynPip!, dynPipMirror),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Cadre flottant (Picture-in-Picture) : déplaçable au doigt, tap pour
+  /// permuter le flux principal et le flux secondaire.
+  Widget _draggablePip(RTCVideoRenderer renderer, bool mirror) {
+    const pipW = 112.0, pipH = 160.0, margin = 12.0;
+    final size = MediaQuery.of(context).size;
+    _pipPos ??= Offset(size.width - pipW - margin, 56);
+    final pos = _pipPos!;
+    return Positioned(
+      left: pos.dx,
+      top: pos.dy,
+      child: GestureDetector(
+        onTap: () => setState(() => _localIsMain = !_localIsMain),
+        onPanUpdate: (d) {
+          setState(() {
+            final cur = _pipPos!;
+            final nx = (cur.dx + d.delta.dx)
+                .clamp(margin, size.width - pipW - margin)
+                .toDouble();
+            final ny = (cur.dy + d.delta.dy)
+                .clamp(40.0, size.height - pipH - margin)
+                .toDouble();
+            _pipPos = Offset(nx, ny);
+          });
+        },
+        child: Container(
+          width: pipW,
+          height: pipH,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.white30, width: 2),
+            boxShadow: const [BoxShadow(blurRadius: 8, color: Colors.black54)],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: RTCVideoView(
+              renderer,
+              mirror: mirror,
+              objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+            ),
           ),
         ),
       ),
