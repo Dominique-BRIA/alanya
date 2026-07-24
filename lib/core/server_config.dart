@@ -5,8 +5,7 @@ class ServerConfig {
   // On force l'URL de production même en Debug pour pouvoir tester sur des vrais téléphones.
   static const String apiBase = String.fromEnvironment(
     'API_URL',
-    defaultValue: "https://alanyavox.com",
-    // defaultValue: "https://alanyavox.com",
+    defaultValue: "https://backend-alanya.vercel.app",
   );
 
   // URL du serveur WebSocket.
@@ -24,8 +23,6 @@ class ServerConfig {
   // Si tu veux revenir à Render en direct (test), passe --dart-define=WS_URL=wss://alanya-ws.onrender.com
   static const String wsBase = String.fromEnvironment(
     'WS_URL',
-    defaultValue: "wss://alanyavox.com/ws",
-    // defaultValue: "wss://alanyavox.com/ws",
+    defaultValue: "wss://alanya-ws.d-bria00.workers.dev",
   );
 }
-
