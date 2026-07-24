@@ -1,15 +1,12 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:video_thumbnail/video_thumbnail.dart';
 import '../../core/media_helper.dart';
 import '../../theme/alanya_theme.dart';
 
-/// Preview miniature d'un message cité (reply) — style WhatsApp :
-/// - Barre colorée à gauche
-/// - Nom de l'expéditeur en gras
-/// - Pour les images : miniature thumbnail
-/// - Pour les vidéos : miniature + icône play
-/// - Pour les documents : icône type + nom
-/// - Pour le texte : aperçu du texte
-class ReplyMediaPreview extends StatelessWidget {
+/// Preview miniature d'un message cité (reply) — style WhatsApp.
+/// Pour les vidéos : génère une thumbnail via video_thumbnail.
+class ReplyMediaPreview extends StatefulWidget {
   const ReplyMediaPreview({
     super.key,
     required this.replyToContent,
@@ -17,7 +14,6 @@ class ReplyMediaPreview extends StatelessWidget {
     this.replyToMimeType,
     this.replyToFileName,
     this.replyToSenderName,
-    this.replyToThumbnailUrl,
     this.isMe = false,
     this.onTap,
   });
@@ -27,27 +23,61 @@ class ReplyMediaPreview extends StatelessWidget {
   final String? replyToMimeType;
   final String? replyToFileName;
   final String? replyToSenderName;
-  final String? replyToThumbnailUrl;
   final bool isMe;
   final VoidCallback? onTap;
 
   @override
+  State<ReplyMediaPreview> createState() => _ReplyMediaPreviewState();
+}
+
+class _ReplyMediaPreviewState extends State<ReplyMediaPreview> {
+  Uint8List? _videoThumb;
+
+  @override
+  void initState() {
+    super.initState();
+    _generateVideoThumb();
+  }
+
+  bool get _isVideo {
+    final mime = widget.replyToMimeType ?? '';
+    return mime.startsWith('video/');
+  }
+
+  bool get _isImage {
+    final mime = widget.replyToMimeType ?? '';
+    return mime.startsWith('image/');
+  }
+
+  Future<void> _generateVideoThumb() async {
+    if (!_isVideo || widget.replyToMediaUrl == null) return;
+    try {
+      final thumb = await VideoThumbnail.thumbnailData(
+        video: widget.replyToMediaUrl!,
+        imageFormat: ImageFormat.JPEG,
+        maxWidth: 100,
+        quality: 60,
+      );
+      if (mounted && thumb != null) setState(() => _videoThumb = thumb);
+    } catch (_) {}
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final hasMedia = replyToMediaUrl != null && replyToMediaUrl!.isNotEmpty;
+    final hasMedia = widget.replyToMediaUrl != null && widget.replyToMediaUrl!.isNotEmpty;
     final type = hasMedia
-        ? MediaHelper.detectType(replyToMimeType, replyToFileName)
+        ? MediaHelper.detectType(widget.replyToMimeType, widget.replyToFileName)
         : null;
-    final barColor = isMe ? Colors.white70 : AlanyaColors.terracotta;
-    final onColor = isMe ? Colors.white : AlanyaColors.ink;
-    final onSub = isMe ? Colors.white60 : Colors.black54;
+    final barColor = widget.isMe ? Colors.white70 : AlanyaColors.terracotta;
+    final onSub = widget.isMe ? Colors.white60 : Colors.black54;
 
     return GestureDetector(
-      onTap: onTap,
+      onTap: widget.onTap,
       child: Container(
         constraints: const BoxConstraints(maxWidth: 240),
         padding: const EdgeInsets.all(6),
         decoration: BoxDecoration(
-          color: isMe
+          color: widget.isMe
               ? Colors.white.withValues(alpha: 0.1)
               : AlanyaColors.sand.withValues(alpha: 0.5),
           borderRadius: BorderRadius.circular(6),
@@ -57,25 +87,24 @@ class ReplyMediaPreview extends StatelessWidget {
         ),
         child: Row(
           children: [
-            // Miniature média (si image/vidéo)
-            if (hasMedia && type == AlanyaMediaType.image)
+            // Miniature
+            if (hasMedia && _isImage)
               _buildImageThumbnail()
-            else if (hasMedia && type == AlanyaMediaType.video)
+            else if (hasMedia && _isVideo)
               _buildVideoThumbnail()
             else if (hasMedia)
               _buildDocIcon(type!),
 
             if (hasMedia) const SizedBox(width: 8),
 
-            // Contenu texte
+            // Texte
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Nom expéditeur
-                  if (replyToSenderName != null)
+                  if (widget.replyToSenderName != null)
                     Text(
-                      replyToSenderName!,
+                      widget.replyToSenderName!,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -84,15 +113,11 @@ class ReplyMediaPreview extends StatelessWidget {
                         color: barColor,
                       ),
                     ),
-                  // Texte preview
                   Text(
                     _previewText(type),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: onSub,
-                    ),
+                    style: TextStyle(fontSize: 12, color: onSub),
                   ),
                 ],
               ),
@@ -108,7 +133,7 @@ class ReplyMediaPreview extends StatelessWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(4),
       child: Image.network(
-        replyToMediaUrl!,
+        widget.replyToMediaUrl!,
         width: 40,
         height: 40,
         fit: BoxFit.cover,
@@ -117,20 +142,18 @@ class ReplyMediaPreview extends StatelessWidget {
     );
   }
 
-  /// Miniature vidéo (40x40 avec play overlay).
+  /// Miniature vidéo (40x40 avec play overlay) — utilise video_thumbnail
   Widget _buildVideoThumbnail() {
-    final thumb = replyToThumbnailUrl;
     return ClipRRect(
       borderRadius: BorderRadius.circular(4),
       child: Stack(
         children: [
-          if (thumb != null)
-            Image.network(
-              thumb,
+          if (_videoThumb != null)
+            Image.memory(
+              _videoThumb!,
               width: 40,
               height: 40,
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => _miniIcon(AlanyaMediaType.video),
             )
           else
             Container(
@@ -158,7 +181,6 @@ class ReplyMediaPreview extends StatelessWidget {
     );
   }
 
-  /// Icône document (40x40).
   Widget _buildDocIcon(AlanyaMediaType type) {
     return _miniIcon(type);
   }
@@ -180,7 +202,7 @@ class ReplyMediaPreview extends StatelessWidget {
             color: MediaHelper.colorForType(type),
           ),
           Text(
-            MediaHelper.extension(replyToFileName).toUpperCase().replaceAll('.', ''),
+            MediaHelper.extension(widget.replyToFileName).toUpperCase().replaceAll('.', ''),
             style: TextStyle(
               fontSize: 6,
               fontWeight: FontWeight.w800,
@@ -196,21 +218,21 @@ class ReplyMediaPreview extends StatelessWidget {
     if (type != null) {
       switch (type) {
         case AlanyaMediaType.image:
-          return replyToContent ?? 'Photo';
+          return widget.replyToContent ?? 'Photo';
         case AlanyaMediaType.video:
-          return replyToContent ?? 'Vidéo';
+          return widget.replyToContent ?? 'Vidéo';
         case AlanyaMediaType.audio:
           return 'Message vocal';
         case AlanyaMediaType.pdf:
-          return replyToFileName ?? 'Document';
+          return widget.replyToFileName ?? 'Document';
         case AlanyaMediaType.word:
         case AlanyaMediaType.excel:
         case AlanyaMediaType.powerpoint:
-          return replyToFileName ?? 'Document';
+          return widget.replyToFileName ?? 'Document';
         default:
-          return replyToContent ?? 'Fichier';
+          return widget.replyToContent ?? 'Fichier';
       }
     }
-    return replyToContent ?? '';
+    return widget.replyToContent ?? '';
   }
 }
