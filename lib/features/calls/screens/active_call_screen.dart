@@ -34,6 +34,26 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
   bool _localIsMain = false;
   Offset? _pipPos;
 
+  // Lot 6 — polish : auto-masquage des contrôles (vidéo) + drag animé du PiP.
+  bool _controlsVisible = true;
+  bool _autoHideArmed = false;
+  Timer? _hideTimer;
+  bool _pipDragging = false;
+
+  void _scheduleAutoHide() {
+    _hideTimer?.cancel();
+    _hideTimer = Timer(const Duration(seconds: 4), () {
+      if (mounted) setState(() => _controlsVisible = false);
+    });
+  }
+
+  void _onTapScreen(bool autoHideActive) {
+    if (!autoHideActive)
+      return; // audio / sonnerie : contrôles toujours visibles
+    setState(() => _controlsVisible = !_controlsVisible);
+    if (_controlsVisible) _scheduleAutoHide();
+  }
+
   Timer? _connectTimeout;
 
   @override
@@ -51,7 +71,9 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     _connectTimeout = Timer(const Duration(seconds: 30), () {
       if (!mounted) return;
       final cc = _calls;
-      if (cc != null && cc.activeRole == ActiveCallRole.ongoing && !cc.mediaConnected) {
+      if (cc != null &&
+          cc.activeRole == ActiveCallRole.ongoing &&
+          !cc.mediaConnected) {
         showAppSnackBar("Connexion impossible. Vérifie ta connexion réseau.");
         _hangUp(cc);
       }
@@ -116,7 +138,8 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
         r.srcObject = remotes[id];
       }
     }
-    final stale = _remoteRenderers.keys.where((k) => !remotes.containsKey(k)).toList();
+    final stale =
+        _remoteRenderers.keys.where((k) => !remotes.containsKey(k)).toList();
     for (final id in stale) {
       await _remoteRenderers.remove(id)?.dispose();
     }
@@ -181,6 +204,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
   void dispose() {
     _timer?.cancel();
     _connectTimeout?.cancel();
+    _hideTimer?.cancel();
     // Lot 2b : l'écran n'est plus affiché → le bandeau reprend si l'appel continue.
     _calls?.setCallScreenVisible(false);
     _calls?.removeListener(_onCallChanged);
@@ -238,7 +262,9 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     // retombe sur activeType une fois l'appel actif.
     final isVideo = (cc.incoming?.callType ?? cc.activeType) == "VIDEO";
     final remotes = cc.remoteStreams;
-    final showVideo = isVideo && cc.activeRole == ActiveCallRole.ongoing && remotes.isNotEmpty;
+    final showVideo = isVideo &&
+        cc.activeRole == ActiveCallRole.ongoing &&
+        remotes.isNotEmpty;
     final showIncoming = widget.incoming && cc.incoming != null;
     final showActive = cc.activeCallId != null && cc.activeRole != null;
 
@@ -271,6 +297,16 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
       }
     }
 
+    // Lot 6 : auto-masquage des contrôles pendant un appel vidéo actif.
+    final autoHideActive = isVideo && cc.activeRole == ActiveCallRole.ongoing;
+    final showControls = !autoHideActive || _controlsVisible;
+    if (autoHideActive && !_autoHideArmed) {
+      _autoHideArmed = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _scheduleAutoHide();
+      });
+    }
+
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) async {
@@ -298,87 +334,113 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                 )
               else if (showVideo)
                 _remoteGrid(cc, remotes),
-              Column(
-                children: [
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: IconButton(
-                      icon: const Icon(Icons.close, color: Colors.white70),
-                      tooltip: "Fermer",
-                      onPressed: () async {
-                        if (showIncoming) {
-                          await _reject(cc);
-                        } else if (showActive) {
-                          await _hangUp(cc);
-                        } else {
-                          _popScreen();
-                        }
-                      },
-                    ),
+              // Lot 6 : couche de tap plein écran (toggle des contrôles en vidéo).
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onTap: () => _onTapScreen(autoHideActive),
+                  child: const SizedBox.expand(),
+                ),
+              ),
+              // Lot 6 : dégradés sombres haut/bas pour la lisibilité en vidéo.
+              if (isVideo && (showVideo || useDynamic)) _scrims(showControls),
+              AnimatedOpacity(
+                opacity: showControls ? 1 : 0,
+                duration: const Duration(milliseconds: 250),
+                child: IgnorePointer(
+                  ignoring: !showControls,
+                  child: Column(
+                    children: [
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: IconButton(
+                          icon: const Icon(Icons.close, color: Colors.white70),
+                          tooltip: "Fermer",
+                          onPressed: () async {
+                            if (showIncoming) {
+                              await _reject(cc);
+                            } else if (showActive) {
+                              await _hangUp(cc);
+                            } else {
+                              _popScreen();
+                            }
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      if (!showVideo && !useDynamic)
+                        CircleAvatar(
+                          radius: 52,
+                          backgroundColor: AlanyaColors.terracotta,
+                          child: Icon(
+                            cc.isGroupCall
+                                ? Icons.groups
+                                : (isVideo ? Icons.videocam : Icons.person),
+                            size: 52,
+                            color: Colors.white,
+                          ),
+                        ),
+                      if (!showVideo) const SizedBox(height: 20),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Text(
+                          name,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(_statusText(cc),
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 16)),
+                      if (cc.activeRole == ActiveCallRole.ongoing) ...[
+                        const SizedBox(height: 10),
+                        Text(_mediaHint(cc),
+                            style: const TextStyle(
+                                color: Colors.white54, fontSize: 13)),
+                      ],
+                      if (cc.lastError != null) ...[
+                        const SizedBox(height: 10),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 24),
+                          child: Text(
+                            cc.lastError!,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                                color: Colors.orangeAccent, fontSize: 13),
+                          ),
+                        ),
+                      ],
+                      if (cc.isGroupCall &&
+                          cc.activeRole == ActiveCallRole.ongoing)
+                        _participantList(cc),
+                      const Spacer(),
+                      if (showIncoming)
+                        _incomingActions(cc)
+                      else if (showActive)
+                        _activeActions(cc)
+                      else
+                        _roundBtn(
+                          icon: Icons.close,
+                          color: Colors.grey,
+                          label: "Fermer",
+                          onPressed: () => _popScreen(),
+                        ),
+                      const SizedBox(height: 40),
+                    ],
                   ),
-                  const SizedBox(height: 8),
-                  if (!showVideo && !useDynamic)
-                    CircleAvatar(
-                      radius: 52,
-                      backgroundColor: AlanyaColors.terracotta,
-                      child: Icon(
-                        cc.isGroupCall
-                            ? Icons.groups
-                            : (isVideo ? Icons.videocam : Icons.person),
-                        size: 52,
-                        color: Colors.white,
-                      ),
-                    ),
-                  if (!showVideo) const SizedBox(height: 20),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24),
-                    child: Text(
-                      name,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(_statusText(cc), style: const TextStyle(color: Colors.white70, fontSize: 16)),
-                  if (cc.activeRole == ActiveCallRole.ongoing) ...[
-                    const SizedBox(height: 10),
-                    Text(_mediaHint(cc), style: const TextStyle(color: Colors.white54, fontSize: 13)),
-                  ],
-                  if (cc.lastError != null) ...[
-                    const SizedBox(height: 10),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: Text(
-                        cc.lastError!,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: Colors.orangeAccent, fontSize: 13),
-                      ),
-                    ),
-                  ],
-                  if (cc.isGroupCall && cc.activeRole == ActiveCallRole.ongoing)
-                    _participantList(cc),
-                  const Spacer(),
-                  if (showIncoming)
-                    _incomingActions(cc)
-                  else if (showActive)
-                    _activeActions(cc)
-                  else
-                    _roundBtn(
-                      icon: Icons.close,
-                      color: Colors.grey,
-                      label: "Fermer",
-                      onPressed: () => _popScreen(),
-                    ),
-                  const SizedBox(height: 40),
-                ],
+                ),
               ),
               // Auto-vue locale (mode NON dynamique : groupe). En 1-1 vidéo, le
               // PiP est géré par _draggablePip ci-dessous.
-              if (!useDynamic && isVideo && showActive && cc.localStream != null)
+              if (!useDynamic &&
+                  isVideo &&
+                  showActive &&
+                  cc.localStream != null)
                 Positioned(
                   top: 12,
                   right: 12,
@@ -389,7 +451,8 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                     child: RTCVideoView(
                       _localRenderer,
                       mirror: true,
-                      objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                      objectFit:
+                          RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
                     ),
                   ),
                 ),
@@ -403,18 +466,61 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     );
   }
 
-  /// Cadre flottant (Picture-in-Picture) : déplaçable au doigt, tap pour
-  /// permuter le flux principal et le flux secondaire.
+  /// Dégradés sombres haut/bas : lisibilité du nom, du minuteur et des contrôles
+  /// par-dessus la vidéo. S'estompe avec les contrôles.
+  Widget _scrims(bool visible) {
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: AnimatedOpacity(
+          opacity: visible ? 1 : 0,
+          duration: const Duration(milliseconds: 250),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                height: 150,
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Colors.black54, Colors.transparent],
+                  ),
+                ),
+              ),
+              const Spacer(),
+              Container(
+                height: 220,
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.bottomCenter,
+                    end: Alignment.topCenter,
+                    colors: [Colors.black54, Colors.transparent],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Cadre flottant (Picture-in-Picture) : déplaçable au doigt (aimanté au coin
+  /// le plus proche au relâchement), tap pour permuter principal/secondaire.
   Widget _draggablePip(RTCVideoRenderer renderer, bool mirror) {
     const pipW = 112.0, pipH = 160.0, margin = 12.0;
+    const topAnchor = 56.0;
     final size = MediaQuery.of(context).size;
-    _pipPos ??= Offset(size.width - pipW - margin, 56);
+    _pipPos ??= Offset(size.width - pipW - margin, topAnchor);
     final pos = _pipPos!;
-    return Positioned(
+    return AnimatedPositioned(
+      duration: Duration(milliseconds: _pipDragging ? 0 : 250),
+      curve: Curves.easeOut,
       left: pos.dx,
       top: pos.dy,
       child: GestureDetector(
         onTap: () => setState(() => _localIsMain = !_localIsMain),
+        onPanStart: (_) => setState(() => _pipDragging = true),
         onPanUpdate: (d) {
           setState(() {
             final cur = _pipPos!;
@@ -425,6 +531,19 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                 .clamp(40.0, size.height - pipH - margin)
                 .toDouble();
             _pipPos = Offset(nx, ny);
+          });
+        },
+        onPanEnd: (_) {
+          setState(() {
+            _pipDragging = false;
+            // Aimante au coin le plus proche (animé par AnimatedPositioned).
+            final cur = _pipPos!;
+            final toLeft = cur.dx < (size.width - pipW) / 2;
+            final toTop = cur.dy < (size.height - pipH) / 2;
+            _pipPos = Offset(
+              toLeft ? margin : size.width - pipW - margin,
+              toTop ? topAnchor : size.height - pipH - margin,
+            );
           });
         },
         child: Container(
@@ -473,7 +592,8 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                   if (r != null)
                     RTCVideoView(
                       r,
-                      objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                      objectFit:
+                          RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
                     )
                   else
                     const ColoredBox(color: AlanyaColors.gold),
@@ -499,7 +619,8 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
   }
 
   Widget _participantList(CallController cc) {
-    final ids = cc.joinedParticipantIds.where((id) => id != cc.myUserId).toList();
+    final ids =
+        cc.joinedParticipantIds.where((id) => id != cc.myUserId).toList();
     if (ids.isEmpty) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
@@ -512,7 +633,8 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
           final connected = cc.remoteStreams.containsKey(id);
           return Chip(
             avatar: CircleAvatar(
-              backgroundColor: connected ? AlanyaColors.forest : AlanyaColors.gold,
+              backgroundColor:
+                  connected ? AlanyaColors.forest : AlanyaColors.gold,
               child: Text(label.isNotEmpty ? label[0].toUpperCase() : "?",
                   style: const TextStyle(color: Colors.white, fontSize: 12)),
             ),
@@ -624,7 +746,8 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
         _roundBtn(
           icon: Icons.call_end,
           color: Colors.red,
-          label: cc.isGroupCall && !cc.isCallInitiator ? "Quitter" : "Raccrocher",
+          label:
+              cc.isGroupCall && !cc.isCallInitiator ? "Quitter" : "Raccrocher",
           onPressed: () => _hangUp(cc),
         ),
       ],
@@ -658,7 +781,8 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     );
     if (numbers == null || numbers.isEmpty || !mounted) return;
     cc.transferCall(numbers.first);
-    showAppSnackBar("Transfert en cours… l'appel basculera quand le contact décroche.");
+    showAppSnackBar(
+        "Transfert en cours… l'appel basculera quand le contact décroche.");
   }
 
   /// Ouvre la conversation pendant l'appel : minimise l'écran d'appel (le
@@ -670,13 +794,15 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
       showAppSnackBar("Conversation indisponible");
       return;
     }
-    final title = cc.activePeerName ?? cc.incoming?.displayTitle ?? "Conversation";
+    final title =
+        cc.activePeerName ?? cc.incoming?.displayTitle ?? "Conversation";
     final isGroup = cc.isGroupCall;
     final nav = Navigator.of(context, rootNavigator: true);
     if (nav.canPop()) nav.pop();
     nav.push(
       MaterialPageRoute(
-        builder: (_) => ChatScreen(convId: convId, title: title, isGroup: isGroup),
+        builder: (_) =>
+            ChatScreen(convId: convId, title: title, isGroup: isGroup),
       ),
     );
   }
@@ -701,12 +827,14 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
               width: 56,
               height: 56,
               child: Icon(icon,
-                  color: active ? AlanyaColors.chocolate : Colors.white, size: 26),
+                  color: active ? AlanyaColors.chocolate : Colors.white,
+                  size: 26),
             ),
           ),
         ),
         const SizedBox(height: 6),
-        Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+        Text(label,
+            style: const TextStyle(color: Colors.white70, fontSize: 12)),
       ],
     );
   }
