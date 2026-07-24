@@ -214,7 +214,12 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     final name = widget.incoming
         ? (cc.incoming?.displayTitle ?? "Appel")
         : (cc.activePeerName ?? "Contact");
-    final isVideo = (widget.incoming ? cc.incoming?.callType : cc.activeType) == "VIDEO";
+    // Après acceptation d'un appel entrant, cc.incoming repasse à null alors que
+    // widget.incoming reste true : l'ancien code lisait donc cc.incoming?.callType
+    // == null → isVideo=false → l'UI masquait la vidéo (distante ET auto-vue) même
+    // pour un appel vidéo. On lit incoming.callType pendant la sonnerie, puis on
+    // retombe sur activeType une fois l'appel actif.
+    final isVideo = (cc.incoming?.callType ?? cc.activeType) == "VIDEO";
     final remotes = cc.remoteStreams;
     final showVideo = isVideo && cc.activeRole == ActiveCallRole.ongoing && remotes.isNotEmpty;
     final showIncoming = widget.incoming && cc.incoming != null;
@@ -316,7 +321,10 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                   const SizedBox(height: 40),
                 ],
               ),
-              if (showVideo && cc.localStream != null)
+              // Auto-vue locale : dès que la caméra est active sur un appel vidéo,
+              // indépendamment de l'arrivée du flux distant (sinon on ne voit pas
+              // son propre visage tant que l'autre n'est pas connecté).
+              if (isVideo && showActive && cc.localStream != null)
                 Positioned(
                   top: 12,
                   right: 12,
