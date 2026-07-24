@@ -94,7 +94,17 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
   bool _sending = false;
   Timer? _pollTimer;
   StreamSubscription<Map<String, dynamic>>? _rtSub;
-  String? _myId;
+  // _myId reflète TOUJOURS l'utilisateur courant. Un getter (au lieu d'un champ
+  // figé au chargement) évite un état périmé/null : si l'auth se charge en
+  // différé, l'ancien code laissait _myId = null, ce qui inversait l'alignement
+  // des bulles (nos propres messages affichés côté « reçu »).
+  String? get _myId {
+    try {
+      return context.read<AuthController>().user?.id;
+    } catch (_) {
+      return null;
+    }
+  }
   String? _token;
   String _baseUrl = "";
   bool _uploading = false;
@@ -193,7 +203,7 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
   }
 
   Future<void> _load() async {
-    _myId = context.read<AuthController>().user?.id;
+    // _myId est désormais un getter (toujours à jour) — plus besoin de le figer ici.
     _baseUrl = context.read<ApiClient>().baseUrl;
     initMediaIntegration(_baseUrl);
     _token = await context.read<TokenStorage>().accessToken;
@@ -699,7 +709,10 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
   // ══════════════════════════════════════════════
   @override
   Widget build(BuildContext context) {
-    final myId = context.read<AuthController>().user?.id;
+    // watch (et non read) : reconstruit la vue dès que l'utilisateur est chargé,
+    // garantissant le bon alignement des bulles même si l'auth arrive après
+    // l'ouverture de la conversation. Fallback sur _myId par sécurité.
+    final myId = context.watch<AuthController>().user?.id ?? _myId;
     return Scaffold(
       appBar: _whatsappAppBar(),
       body: MotifBackground(
