@@ -44,55 +44,113 @@ class _MediaGridState extends State<MediaGrid> {
     if (widget.items.isEmpty) return const SizedBox.shrink();
     if (widget.items.length == 1) return _buildSingle(context, 0);
 
-    final cols = widget.items.length == 2 ? 2 : (widget.items.length <= 4 ? 2 : 3);
-    final displayCount = widget.items.length > 6 ? 6 : widget.items.length;
+    // Dispositions façon WhatsApp selon le nombre de médias.
+    const w = 260.0;
+    const gap = 3.0;
+    final n = widget.items.length;
+    Widget grid;
+    if (n == 2) {
+      grid = SizedBox(
+        width: w,
+        height: (w - gap) / 2,
+        child: Row(children: [
+          Expanded(child: _cell(0)),
+          const SizedBox(width: gap),
+          Expanded(child: _cell(1)),
+        ]),
+      );
+    } else if (n == 3) {
+      grid = SizedBox(
+        width: w,
+        height: w,
+        child: Row(children: [
+          Expanded(child: _cell(0)),
+          const SizedBox(width: gap),
+          Expanded(
+            child: Column(children: [
+              Expanded(child: _cell(1)),
+              const SizedBox(height: gap),
+              Expanded(child: _cell(2)),
+            ]),
+          ),
+        ]),
+      );
+    } else {
+      final more = n > 4 ? n - 4 : 0;
+      grid = SizedBox(
+        width: w,
+        height: w,
+        child: Column(children: [
+          Expanded(
+            child: Row(children: [
+              Expanded(child: _cell(0)),
+              const SizedBox(width: gap),
+              Expanded(child: _cell(1)),
+            ]),
+          ),
+          const SizedBox(height: gap),
+          Expanded(
+            child: Row(children: [
+              Expanded(child: _cell(2)),
+              const SizedBox(width: gap),
+              Expanded(child: more > 0 ? _moreCell(3, more) : _cell(3)),
+            ]),
+          ),
+        ]),
+      );
+    }
 
     return ClipRRect(
-      borderRadius: BorderRadius.circular(11),
-      child: SizedBox(
-        width: 274,
-        child: Column(
-          children: [
-            GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: cols,
-                crossAxisSpacing: 2,
-                mainAxisSpacing: 2,
-              ),
-              itemCount: displayCount,
-              itemBuilder: (ctx, i) {
-                if (i == 5 && widget.items.length > 6) {
-                  return _buildMoreOverlay(widget.items.length - 5);
-                }
-                return _buildGridItem(ctx, i);
-              },
-            ),
-            // Timestamp en bas
-            if (widget.timestamp != null)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.only(left: 8, right: 8, top: 4, bottom: 4),
-                color: Colors.transparent,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    Text(widget.timestamp!,
-                        style: TextStyle(fontSize: 11, color: widget.isMe ? Colors.white70 : Colors.black45)),
-                    if (widget.statusWidget != null) ...[
-                      const SizedBox(width: 3),
-                      widget.statusWidget!,
-                    ],
-                  ],
-                ),
-              ),
-          ],
-        ),
+      borderRadius: BorderRadius.circular(12),
+      child: Stack(
+        children: [
+          grid,
+          if (widget.timestamp != null)
+            Positioned(right: 6, bottom: 6, child: _timeBadge()),
+        ],
       ),
     );
   }
+
+  Widget _cell(int index) => GestureDetector(
+        onTap: () => widget.onItemTap?.call(index),
+        child: _cellStack(index),
+      );
+
+  Widget _moreCell(int index, int more) => GestureDetector(
+        onTap: widget.onMoreTap,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            _cellStack(index),
+            Container(
+              color: Colors.black.withValues(alpha: 0.5),
+              alignment: Alignment.center,
+              child: Text('+$more',
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w700)),
+            ),
+          ],
+        ),
+      );
+
+  Widget _timeBadge() => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.45),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Text(widget.timestamp!,
+              style: const TextStyle(fontSize: 11, color: Colors.white)),
+          if (widget.statusWidget != null) ...[
+            const SizedBox(width: 3),
+            widget.statusWidget!,
+          ],
+        ]),
+      );
 
   Widget _buildSingle(BuildContext context, int index) {
     final item = widget.items[index];
@@ -126,15 +184,13 @@ class _MediaGridState extends State<MediaGrid> {
     );
   }
 
-  Widget _buildGridItem(BuildContext context, int index) {
+  Widget _cellStack(int index) {
     final item = widget.items[index];
     final type = MediaHelper.detectType(item.mimeType, item.fileName);
     final url = '${widget.baseUrl}${item.url}?token=${widget.token}';
     final thumbKey = item.url;
 
-    return GestureDetector(
-      onTap: () => widget.onItemTap?.call(index),
-      child: Stack(fit: StackFit.expand, children: [
+    return Stack(fit: StackFit.expand, children: [
         // Image ou thumbnail vidéo
         if (type == AlanyaMediaType.image)
           CachedMedia(url: url, fit: BoxFit.cover,
@@ -175,7 +231,7 @@ class _MediaGridState extends State<MediaGrid> {
               ),
             ),
           ),
-      ]),
+      ],
     );
   }
 
@@ -223,26 +279,6 @@ class _MediaGridState extends State<MediaGrid> {
         setState(() => _thumbCache[key] = thumb);
       }
     } catch (_) {}
-  }
-
-  Widget _buildMoreOverlay(int remaining) {
-    return GestureDetector(
-      onTap: widget.onMoreTap, // ← FIX: ouvre la galerie
-      child: Container(
-        color: Colors.black54,
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text('+$remaining',
-                  style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 4),
-              const Icon(Icons.grid_view, color: Colors.white70, size: 16),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 
   Widget _placeholder(AlanyaMediaType type) {
