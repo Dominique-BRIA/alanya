@@ -440,8 +440,20 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
   // FILE PICKER + UPLOAD
   // ══════════════════════════════════════════════
     Future<void> _pickAndSendFile() async {
-    final files = await MediaPickerSheet.show(context);
-    if (files == null || files.isEmpty) return;
+    final result = await MediaPickerSheet.show(context);
+    if (result == null) return;
+
+    // Contact sélectionné → envoie le numéro comme message texte
+    if (result is ContactPickResult) {
+      final numbers = result.publicNumbers.join(', ');
+      _inputCtrl.text = numbers;
+      _send();
+      return;
+    }
+
+    // Médias sélectionnés
+    final files = result as List<MediaPickResult>;
+    if (files.isEmpty) return;
     setState(() => _uploading = true);
     final replyId = _replyTo?.id;
     final replyMsg = _replyTo;
