@@ -54,7 +54,9 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     if (_controlsVisible) _scheduleAutoHide();
   }
 
-  Timer? _connectTimeout;
+  // Instant où l'appel est passé en "ongoing" (décrochage) — base du garde-fou
+  // de connexion média (voir _timer).
+  DateTime? _ongoingSince;
 
   @override
   void initState() {
@@ -63,17 +65,15 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       final cc = _calls;
-      if (cc != null && cc.activeRole == ActiveCallRole.ongoing) {
+      if (cc == null || cc.activeRole != ActiveCallRole.ongoing) return;
+      // Démarre le chrono de connexion au passage réel en "ongoing" (décrochage),
+      // pas à l'ouverture de l'écran — sinon, chez l'appelant, il expirait pendant
+      // la sonnerie et ne surveillait jamais la vraie phase de connexion.
+      _ongoingSince ??= DateTime.now();
+      if (cc.mediaConnected) {
         setState(() => _elapsed++);
-      }
-    });
-    // Timeout : si la connexion WebRTC n'est pas établie après 30s, raccroche
-    _connectTimeout = Timer(const Duration(seconds: 30), () {
-      if (!mounted) return;
-      final cc = _calls;
-      if (cc != null &&
-          cc.activeRole == ActiveCallRole.ongoing &&
-          !cc.mediaConnected) {
+      } else if (DateTime.now().difference(_ongoingSince!).inSeconds >= 35) {
+        // Le média ne s'est pas connecté 35s après le décrochage → on abandonne.
         showAppSnackBar("Connexion impossible. Vérifie ta connexion réseau.");
         _hangUp(cc);
       }
@@ -203,7 +203,6 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
   @override
   void dispose() {
     _timer?.cancel();
-    _connectTimeout?.cancel();
     _hideTimer?.cancel();
     // Lot 2b : l'écran n'est plus affiché → le bandeau reprend si l'appel continue.
     _calls?.setCallScreenVisible(false);

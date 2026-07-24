@@ -35,7 +35,8 @@ class WebrtcPeerSession {
     if (_started) return;
     _started = true;
 
-    final servers = iceServers.isNotEmpty ? iceServers : WebrtcPeerSession.fallbackIce;
+    final raw = iceServers.isNotEmpty ? iceServers : WebrtcPeerSession.fallbackIce;
+    final servers = normalizeIceServers(raw);
     // Configuration WebRTC :
     //  - iceTransportPolicy: "all"  → essaie d'abord P2P direct, puis relay TURN
     //  - bundlePolicy: "max-bundle" → 1 seul port UDP pour tous les médias
@@ -93,25 +94,58 @@ class WebrtcPeerSession {
   //   3. TURN UDP         : relay si STUN insuffisant (NAT symétrique)
   //   4. TURN TCP         : fallback si UDP entièrement bloqué
   //   5. TURNS 443        : dernier recours, passe même derrière les proxies HTTPS
+  // Fallback utilisé UNIQUEMENT si /api/calls/ice échoue. Domaines corrigés
+  // (les anciens "alanya2.cloud" / "google2.com" n'existaient pas → ENOTFOUND).
+  // NB : les identifiants TURN statiques ci-dessous ne fonctionnent que si le
+  // Coturn accepte aussi une auth statique ; sinon seuls les STUN servent de
+  // secours. Le vrai chemin TURN passe par /api/calls/ice (HMAC).
   static const fallbackIce = [
-    {"urls": "stun:open.alanya2.cloud:3478"},
-    {"urls": "stun:stun.l.google2.com:19302"},
+    {"urls": "stun:stun.l.google.com:19302"},
+    {"urls": "stun:stun1.l.google.com:19302"},
+    {"urls": "stun:open.alanya.cloud:3478"},
     {
-      "urls": "turn:open.alanya2.cloud:3478?transport=udp",
+      "urls": "turn:open.alanya.cloud:3478?transport=udp",
       "username": "alanya",
       "credential": "alanya2026",
     },
     {
-      "urls": "turn:open.alanya2.cloud:3478?transport=tcp",
+      "urls": "turn:open.alanya.cloud:3478?transport=tcp",
       "username": "alanya",
       "credential": "alanya2026",
     },
     {
-      "urls": "turns:open.alanya2.cloud:5349?transport=tcp",
+      "urls": "turns:open.alanya.cloud:5349?transport=tcp",
       "username": "alanya",
       "credential": "alanya2026",
     },
   ];
+  /// Normalise la liste ICE avant de la passer à WebRTC :
+  ///  - éclate un objet à `urls` multiples en une entrée par URL,
+  ///  - ne met les identifiants que sur TURN/TURNS (jamais sur STUN).
+  /// Corrige le format « bundlé » renvoyé par certaines sources (dont l'ancien
+  /// /api/calls/ice) qui casse le TURN sur flutter_webrtc.
+  static List<Map<String, dynamic>> normalizeIceServers(
+    List<Map<String, dynamic>> input,
+  ) {
+    final out = <Map<String, dynamic>>[];
+    for (final s in input) {
+      final urlsRaw = s["urls"];
+      final username = s["username"];
+      final credential = s["credential"];
+      final urls = urlsRaw is List ? urlsRaw : [urlsRaw];
+      for (final u in urls) {
+        if (u == null) continue;
+        final url = u.toString();
+        final isStun = url.startsWith("stun:");
+        final entry = <String, dynamic>{"urls": url};
+        if (!isStun && username != null) entry["username"] = username;
+        if (!isStun && credential != null) entry["credential"] = credential;
+        out.add(entry);
+      }
+    }
+    return out;
+  }
+
   Future<void> handleSignal(Map<String, dynamic> signal) async {
     if (!_started) {
       _pendingSignals.add(signal);
