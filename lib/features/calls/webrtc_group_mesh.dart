@@ -31,6 +31,39 @@ class WebrtcGroupMesh {
   int get connectedCount => remoteStreams.length;
   Set<String> get peerIds => _peers.keys.toSet();
 
+  // --- Contrôles média locaux ---
+  bool _micEnabled = true;
+  bool _cameraEnabled = true;
+  bool get micEnabled => _micEnabled;
+  bool get cameraEnabled => _cameraEnabled;
+
+  /// Active/coupe le micro (mute/unmute) sans renégocier : on désactive juste
+  /// les pistes audio locales.
+  void setMic(bool on) {
+    _micEnabled = on;
+    for (final t in _local?.getAudioTracks() ?? <MediaStreamTrack>[]) {
+      t.enabled = on;
+    }
+    onUpdated();
+  }
+
+  /// Active/coupe la caméra locale (les pistes vidéo restent négociées, on
+  /// bascule juste leur état enabled — le correspondant voit un flux figé/noir).
+  void setCamera(bool on) {
+    _cameraEnabled = on;
+    for (final t in _local?.getVideoTracks() ?? <MediaStreamTrack>[]) {
+      t.enabled = on;
+    }
+    onUpdated();
+  }
+
+  /// Bascule caméra avant/arrière sur la piste vidéo locale.
+  Future<void> switchCamera() async {
+    final tracks = _local?.getVideoTracks() ?? <MediaStreamTrack>[];
+    if (tracks.isEmpty) return;
+    await Helper.switchCamera(tracks.first);
+  }
+
   static bool shouldOffer(String myId, String peerId) => myId.compareTo(peerId) < 0;
 
   Future<void> ensureLocal() async {

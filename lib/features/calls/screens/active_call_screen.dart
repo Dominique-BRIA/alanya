@@ -462,11 +462,80 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
         ],
       );
     }
-    return _roundBtn(
-      icon: Icons.call_end,
-      color: Colors.red,
-      label: cc.isGroupCall && !cc.isCallInitiator ? "Quitter" : "Raccrocher",
-      onPressed: () => _hangUp(cc),
+    // Appel actif (en connexion ou connecté) : barre de contrôles + raccrocher.
+    final isVideo = (cc.incoming?.callType ?? cc.activeType) == "VIDEO";
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            _controlBtn(
+              icon: cc.isMuted ? Icons.mic_off : Icons.mic,
+              active: cc.isMuted,
+              label: cc.isMuted ? "Muet" : "Micro",
+              onPressed: cc.toggleMute,
+            ),
+            _controlBtn(
+              icon: cc.isSpeakerOn ? Icons.volume_up : Icons.hearing,
+              active: cc.isSpeakerOn,
+              label: "Haut-parleur",
+              onPressed: () => cc.toggleSpeaker(),
+            ),
+            if (isVideo)
+              _controlBtn(
+                icon: cc.isVideoEnabled ? Icons.videocam : Icons.videocam_off,
+                active: !cc.isVideoEnabled,
+                label: "Vidéo",
+                onPressed: cc.toggleVideo,
+              ),
+            if (isVideo)
+              _controlBtn(
+                icon: Icons.cameraswitch,
+                active: false,
+                label: "Caméra",
+                onPressed: () => cc.switchCamera(),
+              ),
+          ],
+        ),
+        const SizedBox(height: 24),
+        _roundBtn(
+          icon: Icons.call_end,
+          color: Colors.red,
+          label: cc.isGroupCall && !cc.isCallInitiator ? "Quitter" : "Raccrocher",
+          onPressed: () => _hangUp(cc),
+        ),
+      ],
+    );
+  }
+
+  /// Petit bouton de contrôle en overlay (semi-transparent) : allumé = teinté.
+  Widget _controlBtn({
+    required IconData icon,
+    required bool active,
+    required String label,
+    required VoidCallback onPressed,
+  }) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Material(
+          color: active ? Colors.white : Colors.white24,
+          shape: const CircleBorder(),
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: onPressed,
+            child: SizedBox(
+              width: 56,
+              height: 56,
+              child: Icon(icon,
+                  color: active ? AlanyaColors.chocolate : Colors.white, size: 26),
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+      ],
     );
   }
 

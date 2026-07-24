@@ -44,6 +44,13 @@ class CallController extends ChangeNotifier {
   List<Map<String, dynamic>>? _iceServers;
   String? lastError;
 
+  // --- Contrôles d'appel (Lot 1) ---
+  bool get isMuted => _mesh != null && !_mesh!.micEnabled;
+  bool get isVideoEnabled => _mesh?.cameraEnabled ?? (activeType == "VIDEO");
+  bool isSpeakerOn = false;
+  // Passe à true quand l'écran d'appel s'affiche chez le correspondant (Lot 2).
+  bool remoteRinging = false;
+
   MediaStream? get localStream => _mesh?.localStream;
   Map<String, MediaStream> get remoteStreams => _mesh?.remoteStreams ?? {};
   int get connectedPeerCount => _mesh?.connectedCount ?? 0;
@@ -217,7 +224,36 @@ class CallController extends ChangeNotifier {
     isCallInitiator = false;
     participantNames.clear();
     joinedParticipantIds.clear();
+    remoteRinging = false;
+    isSpeakerOn = false;
     notifyListeners();
+  }
+
+  // --- Contrôles média (Lot 1) ---
+  void toggleMute() {
+    final m = _mesh;
+    if (m == null) return;
+    m.setMic(!m.micEnabled);
+    notifyListeners();
+  }
+
+  Future<void> toggleSpeaker() async {
+    isSpeakerOn = !isSpeakerOn;
+    try {
+      await Helper.setSpeakerphoneOn(isSpeakerOn);
+    } catch (_) {}
+    notifyListeners();
+  }
+
+  void toggleVideo() {
+    final m = _mesh;
+    if (m == null) return;
+    m.setCamera(!m.cameraEnabled);
+    notifyListeners();
+  }
+
+  Future<void> switchCamera() async {
+    await _mesh?.switchCamera();
   }
 
   Future<void> _ensureMesh() async {
