@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 import '../../core/media_helper.dart';
 import '../../theme/alanya_theme.dart';
+import 'cached_media.dart';
 
 /// Preview miniature d'un message cité (reply) — style WhatsApp.
 /// Pour les vidéos : génère une thumbnail via video_thumbnail.
@@ -132,12 +133,12 @@ class _ReplyMediaPreviewState extends State<ReplyMediaPreview> {
   Widget _buildImageThumbnail() {
     return ClipRRect(
       borderRadius: BorderRadius.circular(4),
-      child: Image.network(
-        widget.replyToMediaUrl!,
+      child: CachedMedia(
+        url: widget.replyToMediaUrl!,
         width: 40,
         height: 40,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => _miniIcon(AlanyaMediaType.image),
+        errorWidget: _miniIcon(AlanyaMediaType.image),
       ),
     );
   }

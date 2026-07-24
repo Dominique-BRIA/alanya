@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/downloader.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../../widgets/media/cached_media.dart';
 
 /// Visionneuse plein écran pour une image (style WhatsApp).
 /// - Pinch-to-zoom pour zoomer/dézoomer
@@ -90,20 +91,13 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
             transformationController: _ctrl,
             minScale: 0.5,
             maxScale: 4.0,
-            child: Image.network(
-              widget.imageUrl,
+            child: CachedMedia(
+              url: widget.imageUrl,
               fit: BoxFit.contain,
-              loadingBuilder: (context, child, progress) {
-                if (progress == null) return child;
-                return Center(
-                  child: CircularProgressIndicator(
-                    color: Colors.white,
-                    value: progress.cumulativeBytesLoaded /
-                        (progress.expectedTotalBytes ?? 1),
-                  ),
-                );
-              },
-              errorBuilder: (_, __, ___) => const Column(
+              placeholder: const Center(
+                child: CircularProgressIndicator(color: Colors.white),
+              ),
+              errorWidget: const Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(Icons.broken_image, size: 64, color: Colors.white38),

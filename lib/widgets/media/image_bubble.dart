@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../theme/alanya_theme.dart';
+import 'cached_media.dart';
 
 /// Bulle image style WhatsApp :
 /// - Image plein bulle (pas de bouton download visible)
@@ -32,8 +33,6 @@ class ImageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final url = token != null ? '$imageUrl?token=$token' : imageUrl;
-
     return GestureDetector(
       onTap: onTap,
       onLongPress: onLongPress,
@@ -41,39 +40,18 @@ class ImageBubble extends StatelessWidget {
         borderRadius: BorderRadius.circular(11),
         child: Stack(
           children: [
-            // Image plein bulle
+            // Image plein bulle — cache disque persistant (jamais re-téléchargée).
             ConstrainedBox(
               constraints: BoxConstraints(
                 maxWidth: width,
                 maxHeight: maxHeight,
               ),
-              child: Image.network(
-                url,
+              child: CachedMedia(
+                url: imageUrl,
+                token: token,
                 width: width,
                 fit: BoxFit.cover,
-                loadingBuilder: (ctx, child, progress) {
-                  if (progress == null) return child;
-                  return Container(
-                    width: width,
-                    height: 200,
-                    color: AlanyaColors.sand,
-                    child: Center(
-                      child: SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: AlanyaColors.terracotta,
-                          value: progress.expectedTotalBytes != null
-                              ? progress.cumulativeBytesLoaded /
-                                  progress.expectedTotalBytes!
-                              : null,
-                        ),
-                      ),
-                    ),
-                  );
-                },
-                errorBuilder: (_, __, ___) => Container(
+                errorWidget: Container(
                   width: width,
                   height: 160,
                   color: AlanyaColors.sand,

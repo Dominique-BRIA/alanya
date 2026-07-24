@@ -3,6 +3,7 @@ import 'package:video_thumbnail/video_thumbnail.dart';
 import 'dart:typed_data';
 import '../../../core/media_helper.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../../widgets/media/cached_media.dart';
 import 'image_viewer_screen.dart';
 import 'video_viewer_screen.dart';
 import 'pdf_viewer_screen.dart';
@@ -90,27 +91,12 @@ class _GalleryScreenState extends State<GalleryScreen> {
         borderRadius: BorderRadius.circular(12),
         child: Stack(
           children: [
-            Image.network(
-              url,
+            CachedMedia(
+              url: url,
               width: double.infinity,
               height: 250,
               fit: BoxFit.cover,
-              loadingBuilder: (ctx, child, progress) {
-                if (progress == null) return child;
-                return Container(
-                  width: double.infinity, height: 250,
-                  color: Colors.white10,
-                  child: Center(
-                    child: CircularProgressIndicator(
-                      color: AlanyaColors.terracotta,
-                      value: progress.expectedTotalBytes != null
-                          ? progress.cumulativeBytesLoaded / progress.expectedTotalBytes!
-                          : null,
-                    ),
-                  ),
-                );
-              },
-              errorBuilder: (_, __, ___) => Container(
+              errorWidget: Container(
                 width: double.infinity, height: 250,
                 color: Colors.white10,
                 child: const Icon(Icons.broken_image, color: Colors.white30, size: 48),

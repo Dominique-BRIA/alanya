@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 import '../../core/media_helper.dart';
 import '../../theme/alanya_theme.dart';
+import 'cached_media.dart';
 
 /// Grille de médias multiples dans un seul message — style WhatsApp.
 /// 2 images = 2 colonnes, 3+ = grille, max 6 avec "+N" overlay cliquable.
@@ -102,8 +103,8 @@ class _MediaGridState extends State<MediaGrid> {
         child: ClipRRect(
           borderRadius: BorderRadius.circular(11),
           child: Stack(children: [
-            Image.network(url, width: 274, fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => _placeholder(type)),
+            CachedMedia(url: url, width: 274, fit: BoxFit.cover,
+                errorWidget: _placeholder(type)),
             if (widget.timestamp != null)
               Positioned(right: 6, bottom: 6, child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
@@ -134,8 +135,8 @@ class _MediaGridState extends State<MediaGrid> {
       child: Stack(fit: StackFit.expand, children: [
         // Image ou thumbnail vidéo
         if (type == AlanyaMediaType.image)
-          Image.network(url, fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => _placeholder(type))
+          CachedMedia(url: url, fit: BoxFit.cover,
+              errorWidget: _placeholder(type))
         else if (type == AlanyaMediaType.video)
           _buildVideoThumbnail(thumbKey, url)
         else

@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 import '../../theme/alanya_theme.dart';
+import 'cached_media.dart';
 
 /// Bulle vidéo style WhatsApp — thumbnail auto-générée + fallback visible.
 class VideoBubble extends StatefulWidget {
@@ -112,8 +113,8 @@ class _VideoBubbleState extends State<VideoBubble> {
             children: [
               // Thumbnail : serveur > générée > placeholder visible
               if (hasThumbUrl)
-                Image.network(thumbUrl!, fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => _placeholder())
+                CachedMedia(url: thumbUrl!, fit: BoxFit.cover,
+                    errorWidget: _placeholder())
               else if (_thumbnailBytes != null)
                 Image.memory(_thumbnailBytes!, fit: BoxFit.cover)
               else

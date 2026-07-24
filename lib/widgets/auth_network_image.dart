@@ -1,7 +1,8 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+
+import 'media/cached_media.dart';
 
 /// Charge une image protégée par JWT (Bearer) puis l'affiche en mémoire.
 /// Évite d'exposer le token dans l'URL et gère mieux les erreurs 401.
@@ -85,14 +86,12 @@ class _AuthNetworkImageState extends State<AuthNetworkImage> {
       return;
     }
     try {
-      final res = await http.get(
-        Uri.parse(widget.url),
-        headers: {"Authorization": "Bearer $token"},
-      );
+      // Passe par le cache disque persistant : téléchargé une seule fois.
+      final bytes = await loadCachedMediaBytes(widget.url, token);
       if (!mounted) return;
-      if (res.statusCode == 200 && _looksLikeImage(res.bodyBytes, res.headers["content-type"])) {
+      if (bytes != null && _looksLikeImage(bytes, null)) {
         setState(() {
-          _bytes = res.bodyBytes;
+          _bytes = bytes;
           _error = false;
         });
       } else {
