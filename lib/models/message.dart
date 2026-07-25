@@ -76,6 +76,7 @@ class Message {
   final String? replyToId;
   final ReplyPreview? replyTo; // snapshot du message cité (venant du backend)
   final DateTime? deletedAt; // non-null = message supprimé pour tous
+  final DateTime? editedAt; // non-null = message modifié (affiche « modifié »)
   final List<MessageMedia> media;
   final DateTime createdAt;
   // Réactions emoji — mutable : mises à jour en place à la réception des events
@@ -93,6 +94,7 @@ class Message {
     required this.media,
     required this.createdAt,
     this.deletedAt,
+    this.editedAt,
     this.replyTo,
     this.reactions = const [],
   });
@@ -112,6 +114,7 @@ class Message {
             ? ReplyPreview.fromJson(j["replyTo"] as Map<String, dynamic>)
             : null,
         deletedAt: j["deletedAt"] != null ? DateTime.tryParse(j["deletedAt"] as String) : null,
+        editedAt: j["editedAt"] != null ? DateTime.tryParse(j["editedAt"] as String) : null,
         media: ((j["media"] as List?) ?? [])
             .map((m) => MessageMedia.fromJson(m as Map<String, dynamic>))
             .toList(),

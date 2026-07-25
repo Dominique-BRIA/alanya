@@ -119,6 +119,11 @@ class ChatRepository {
     await _api.patch("/api/conversations/$convId/members", {"userId": userId, "role": role});
   }
 
+  /// Modifier le contenu d'un message texte (repli REST quand le WS est coupé).
+  Future<void> editMessage(String convId, String messageId, String content) async {
+    await _api.patch("/api/conversations/$convId/messages/$messageId", {"content": content});
+  }
+
   /// Quitter un groupe.
   Future<void> leaveGroup(String convId) async {
     await _api.post("/api/conversations/$convId/leave", {});

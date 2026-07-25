@@ -202,6 +202,10 @@ class RealtimeClient extends ChangeNotifier {
   void deleteMessage(String messageId, {String scope = "me"}) =>
       _send({"type": "delete_message", "messageId": messageId, "scope": scope});
 
+  /// Modifier le contenu d'un message texte (seul l'expéditeur, côté serveur).
+  void editMessage(String messageId, String content) =>
+      _send({"type": "edit_message", "messageId": messageId, "content": content});
+
   void forwardMessage(String messageId, List<String> targetConvIds) => _send({
         "type": "forward_message",
         "messageId": messageId,

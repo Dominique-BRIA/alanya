@@ -132,6 +132,7 @@ class _ChatScreenState extends State<ChatScreen>
   Timer? _recordingTimeout;
   DateTime? _lastCueAt;
   Message? _replyTo;
+  Message? _editing; // message en cours d'édition (compose = mode édition)
   String? _highlightedMessageId;
   final Map<String, GlobalKey> _messageKeys = {};
   final Map<String, ReplyPreview> _replySnapshots = {};
@@ -241,7 +242,7 @@ class _ChatScreenState extends State<ChatScreen>
       if (e["convId"] != widget.convId) return;
       setState(() {
         _messages = _messages.map((m) => m.senderId == _myId && m.status != "READ"
-            ? Message(id: m.id, convId: m.convId, senderId: m.senderId, content: m.content, type: m.type, status: "READ", replyToId: m.replyToId, replyTo: m.replyTo, deletedAt: m.deletedAt, media: m.media, createdAt: m.createdAt, reactions: m.reactions)
+            ? Message(id: m.id, convId: m.convId, senderId: m.senderId, content: m.content, type: m.type, status: "READ", replyToId: m.replyToId, replyTo: m.replyTo, deletedAt: m.deletedAt, editedAt: m.editedAt, media: m.media, createdAt: m.createdAt, reactions: m.reactions)
             : m).toList();
       });
     } else if (type == "message_status") {
@@ -250,7 +251,7 @@ class _ChatScreenState extends State<ChatScreen>
       if (messageId == null || newStatus == null) return;
       setState(() {
         _messages = _messages.map((m) => m.id == messageId && _statusRank(newStatus) > _statusRank(m.status)
-            ? Message(id: m.id, convId: m.convId, senderId: m.senderId, content: m.content, type: m.type, status: newStatus, replyToId: m.replyToId, replyTo: m.replyTo, deletedAt: m.deletedAt, media: m.media, createdAt: m.createdAt, reactions: m.reactions)
+            ? Message(id: m.id, convId: m.convId, senderId: m.senderId, content: m.content, type: m.type, status: newStatus, replyToId: m.replyToId, replyTo: m.replyTo, deletedAt: m.deletedAt, editedAt: m.editedAt, media: m.media, createdAt: m.createdAt, reactions: m.reactions)
             : m).toList();
       });
     } else if (type == "message_deleted") {
@@ -285,6 +286,20 @@ class _ChatScreenState extends State<ChatScreen>
           updated.add(MessageReaction(userId: uid, emoji: emoji));
         }
         m.reactions = updated;
+      });
+    } else if (type == "message_edited") {
+      if (e["convId"] != widget.convId) return;
+      final messageId = e["messageId"] as String?;
+      final content = e["content"] as String?;
+      if (messageId == null || content == null) return;
+      final editedAtStr = e["editedAt"] as String?;
+      final editedAt =
+          (editedAtStr != null ? DateTime.tryParse(editedAtStr) : null) ??
+              DateTime.now();
+      final idx = _messages.indexWhere((m) => m.id == messageId);
+      if (idx < 0) return;
+      setState(() {
+        _messages[idx] = _withEdited(_messages[idx], content, editedAt);
       });
     }
   }
@@ -421,6 +436,11 @@ class _ChatScreenState extends State<ChatScreen>
   Future<void> _send() async {
     final text = _inputCtrl.text.trim();
     if (text.isEmpty || _sending) return;
+    // Mode édition : on modifie le message au lieu d'en envoyer un nouveau.
+    if (_editing != null) {
+      _submitEdit(text);
+      return;
+    }
     _typingDebounce?.cancel();
     _emitTyping(false); // on arrête l'indicateur dès l'envoi
     final rt = context.read<RealtimeClient>();
@@ -456,6 +476,44 @@ class _ChatScreenState extends State<ChatScreen>
 
   void _setReplyTo(Message m) { setState(() => _replyTo = m); FocusScope.of(context).requestFocus(FocusNode()); }
 
+  // ── Édition d'un message ──
+  Message _withEdited(Message m, String content, DateTime editedAt) => Message(
+        id: m.id, convId: m.convId, senderId: m.senderId, content: content,
+        type: m.type, status: m.status, replyToId: m.replyToId, replyTo: m.replyTo,
+        deletedAt: m.deletedAt, editedAt: editedAt, media: m.media,
+        createdAt: m.createdAt, reactions: m.reactions);
+
+  void _startEdit(Message m) {
+    setState(() { _editing = m; _replyTo = null; });
+    _inputCtrl.text = m.content ?? '';
+    _inputCtrl.selection = TextSelection.fromPosition(
+        TextPosition(offset: _inputCtrl.text.length));
+  }
+
+  void _cancelEdit() {
+    setState(() => _editing = null);
+    _inputCtrl.clear();
+  }
+
+  void _submitEdit(String text) {
+    final m = _editing;
+    if (m == null) return;
+    final rt = context.read<RealtimeClient>();
+    if (rt.connected) {
+      rt.editMessage(m.id, text);
+    } else {
+      context.read<ChatRepository>()
+          .editMessage(widget.convId, m.id, text)
+          .catchError((_) {});
+    }
+    setState(() {
+      final idx = _messages.indexWhere((x) => x.id == m.id);
+      if (idx >= 0) _messages[idx] = _withEdited(_messages[idx], text, DateTime.now());
+      _editing = null;
+    });
+    _inputCtrl.clear();
+  }
+
   // ══════════════════════════════════════════════
   // HELPERS
   // ══════════════════════════════════════════════
@@ -470,6 +528,10 @@ class _ChatScreenState extends State<ChatScreen>
 
   Widget _timestampRow(Message m, bool mine, Color color) {
     return Row(mainAxisSize: MainAxisSize.min, children: [
+      if (m.editedAt != null) ...[
+        Text("modifié", style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic, color: color)),
+        const SizedBox(width: 4),
+      ],
       Text(_time(m.createdAt), style: TextStyle(fontSize: 10, color: color)),
       if (mine) ...[const SizedBox(width: 4), _statusTicks(m.status, color)],
     ]);
@@ -908,6 +970,8 @@ class _ChatScreenState extends State<ChatScreen>
       if (!m.isDeleted) const Divider(height: 1),
       if (!m.isDeleted) ...[
         ListTile(leading: const Icon(Icons.reply, color: AlanyaColors.terracotta), title: Text(tr(context, 'reply')), onTap: () { Navigator.pop(ctx); _setReplyTo(m); }),
+        if (m.senderId == _myId && m.type == 'TEXT')
+          ListTile(leading: const Icon(Icons.edit_outlined, color: AlanyaColors.forest), title: const Text("Modifier"), onTap: () { Navigator.pop(ctx); _startEdit(m); }),
         ListTile(leading: const Icon(Icons.forward, color: AlanyaColors.forest), title: Text(tr(context, 'forward')), onTap: () { Navigator.pop(ctx); _forwardMessage(m); }),
         ListTile(leading: const Icon(Icons.copy, color: AlanyaColors.chocolate), title: Text(tr(context, 'copy')), onTap: () { Navigator.pop(ctx); if (m.content != null) { Clipboard.setData(ClipboardData(text: m.content!)); showAppSnackBar(tr(context, 'copied')); } }),
       ],
@@ -1289,7 +1353,16 @@ class _ChatScreenState extends State<ChatScreen>
       ])));
     }
     return SafeArea(top: false, child: Column(mainAxisSize: MainAxisSize.min, children: [
-      if (_replyTo != null) Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6), color: AlanyaColors.cream, child: Row(children: [
+      if (_editing != null) Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6), color: AlanyaColors.cream, child: Row(children: [
+        const Icon(Icons.edit_outlined, size: 18, color: AlanyaColors.forest),
+        const SizedBox(width: 8),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text("Modifier le message", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AlanyaColors.forest)),
+          Text(_editing!.content ?? '', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.black54)),
+        ])),
+        GestureDetector(onTap: _cancelEdit, child: const Icon(Icons.close, size: 20, color: Colors.black54)),
+      ])),
+      if (_replyTo != null && _editing == null) Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6), color: AlanyaColors.cream, child: Row(children: [
         Container(width: 3, height: 32, decoration: BoxDecoration(color: AlanyaColors.terracotta, borderRadius: BorderRadius.circular(2))),
         const SizedBox(width: 8),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
