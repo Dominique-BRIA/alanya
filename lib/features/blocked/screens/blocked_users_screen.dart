@@ -116,11 +116,11 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
 
     final list = _blocked ?? [];
     if (list.isEmpty) {
-      return ListView(children: const [
-        SizedBox(height: 100),
+      return ListView(children: [
+        const SizedBox(height: 100),
         Center(
           child: Padding(
-            padding: EdgeInsets.all(24),
+            padding: const EdgeInsets.all(24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
