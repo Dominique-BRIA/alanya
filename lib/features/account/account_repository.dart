@@ -38,4 +38,20 @@ class AccountRepository {
   Future<void> deleteAccount(String password) async {
     await _api.delete("/api/account", body: {"password": password});
   }
+
+  /// Réglages de confidentialité : {readReceipts (1/0), lastSeenVisibility (0/1/2)}.
+  Future<Map<String, int>> getPrivacy() async {
+    final data = await _api.get("/api/account/privacy");
+    return {
+      "readReceipts": (data["readReceipts"] as num?)?.toInt() ?? 1,
+      "lastSeenVisibility": (data["lastSeenVisibility"] as num?)?.toInt() ?? 2,
+    };
+  }
+
+  Future<void> setPrivacy({int? readReceipts, int? lastSeenVisibility}) async {
+    final body = <String, dynamic>{};
+    if (readReceipts != null) body["readReceipts"] = readReceipts;
+    if (lastSeenVisibility != null) body["lastSeenVisibility"] = lastSeenVisibility;
+    await _api.post("/api/account/privacy", body);
+  }
 }
