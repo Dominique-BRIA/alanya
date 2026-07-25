@@ -236,7 +236,8 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
       return "${cc.connectedPeerCount} connecté(s) · ${cc.joinedParticipantIds.length} dans l'appel";
     }
     if (cc.mediaConnected) {
-      return cc.activeType == "VIDEO" ? "Appel en cours" : "Appel en cours";
+      // return cc.activeType == "VIDEO" ? "Vidéo connectée" : "Audio connectée";
+      return "Appel en cours…";
     }
     return "";
   }
