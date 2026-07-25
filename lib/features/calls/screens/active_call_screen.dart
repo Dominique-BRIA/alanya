@@ -244,9 +244,36 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
   @override
   Widget build(BuildContext context) {
     final cc = context.watch<CallController>();
-    final name = widget.incoming
+
+    // --- Interlocuteur affiché : calculé depuis les participants RÉELLEMENT
+    // présents (pas depuis activePeerName figé) → dès qu'une personne quitte
+    // (ex. transfert), son nom disparaît et le nouvel interlocuteur s'affiche.
+    final others =
+        cc.joinedParticipantIds.where((id) => id != cc.myUserId).toList();
+    final invitedOthers =
+        others.where((id) => cc.invitedParticipantIds.contains(id)).toList();
+    // Interlocuteur principal = le correspondant d'origine s'il est encore là,
+    // sinon l'invité restant (cas transfert : l'origine a quitté).
+    String? primaryId;
+    for (final id in others) {
+      if (!cc.invitedParticipantIds.contains(id)) {
+        primaryId = id;
+        break;
+      }
+    }
+    primaryId ??= others.isNotEmpty ? others.first : null;
+    final bool primaryInvited =
+        primaryId != null && cc.invitedParticipantIds.contains(primaryId);
+    // Pastilles « invité » à afficher séparément (invités qui ne sont pas déjà
+    // l'interlocuteur principal mis en évidence).
+    final invitedChipIds =
+        invitedOthers.where((id) => id != primaryId).toList();
+
+    final String name = widget.incoming
         ? (cc.incoming?.displayTitle ?? "Appel")
-        : (cc.activePeerName ?? "Contact");
+        : (primaryId != null
+            ? (cc.participantNames[primaryId] ?? cc.activePeerName ?? "Contact")
+            : (cc.activePeerName ?? "Contact"));
     // Après acceptation d'un appel entrant, cc.incoming repasse à null alors que
     // widget.incoming reste true : l'ancien code lisait donc cc.incoming?.callType
     // == null → isVideo=false → l'UI masquait la vidéo (distante ET auto-vue) même
@@ -373,7 +400,9 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                                 ? const Icon(Icons.groups,
                                     size: 48, color: Colors.white)
                                 : Text(
-                                    name.isNotEmpty ? name[0].toUpperCase() : "?",
+                                    name.isNotEmpty
+                                        ? name[0].toUpperCase()
+                                        : "?",
                                     style: const TextStyle(
                                       fontSize: 44,
                                       color: Colors.white,
@@ -395,6 +424,12 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                           textAlign: TextAlign.center,
                         ),
                       ),
+                      // Interlocuteur actif = un invité (ex. après transfert) :
+                      // badge « invité » mis en évidence pour lever l'ambiguïté.
+                      if (primaryInvited) ...[
+                        const SizedBox(height: 8),
+                        _invitedBadge(),
+                      ],
                       const SizedBox(height: 8),
                       Text(_statusText(cc),
                           style: const TextStyle(
@@ -417,9 +452,9 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                           ),
                         ),
                       ],
-                      if (cc.isGroupCall &&
+                      if (invitedChipIds.isNotEmpty &&
                           cc.activeRole == ActiveCallRole.ongoing)
-                        _participantList(cc),
+                        _invitedChips(cc, invitedChipIds),
                       const Spacer(),
                       if (showIncoming)
                         _incomingActions(cc)
@@ -586,6 +621,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
             final id = ids[i];
             final r = _remoteRenderers[id];
             final label = cc.participantNames[id] ?? "Participant";
+            final invited = cc.invitedParticipantIds.contains(id);
             return ClipRRect(
               borderRadius: BorderRadius.circular(12),
               child: Stack(
@@ -602,12 +638,22 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                   Positioned(
                     left: 8,
                     bottom: 8,
-                    child: Text(
-                      label,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                        shadows: [Shadow(blurRadius: 4, color: Colors.black)],
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: invited
+                            ? AlanyaColors.forest.withValues(alpha: 0.9)
+                            : Colors.black.withValues(alpha: 0.45),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        invited ? "$label (invité)" : label,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12,
+                        ),
                       ),
                     ),
                   ),
@@ -620,28 +666,95 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     );
   }
 
-  Widget _participantList(CallController cc) {
-    final ids =
-        cc.joinedParticipantIds.where((id) => id != cc.myUserId).toList();
-    if (ids.isEmpty) return const SizedBox.shrink();
+  /// Badge « invité » mis en évidence, affiché sous le nom quand l'interlocuteur
+  /// actif est une personne invitée (ex. après un transfert supervisé).
+  Widget _invitedBadge() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+      decoration: BoxDecoration(
+        color: AlanyaColors.forest,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: AlanyaColors.forest.withValues(alpha: 0.45),
+            blurRadius: 12,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.person_add_alt_1_rounded, color: Colors.white, size: 15),
+          SizedBox(width: 6),
+          Text(
+            "Invité",
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
+              fontSize: 12,
+              letterSpacing: 0.3,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Rangée LISIBLE des invités présents (remplace l'ancienne liste blanc sur
+  /// blanc). Chaque invité : pastille accentuée, icône + « Nom (invité) ».
+  Widget _invitedChips(CallController cc, List<String> ids) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
       child: Wrap(
         spacing: 8,
         runSpacing: 8,
         alignment: WrapAlignment.center,
         children: ids.map((id) {
-          final label = cc.participantNames[id] ?? "Membre";
+          final label = cc.participantNames[id] ?? "Invité";
           final connected = cc.remoteStreams.containsKey(id);
-          return Chip(
-            avatar: CircleAvatar(
-              backgroundColor:
-                  connected ? AlanyaColors.forest : AlanyaColors.gold,
-              child: Text(label.isNotEmpty ? label[0].toUpperCase() : "?",
-                  style: const TextStyle(color: Colors.white, fontSize: 12)),
+          return Container(
+            padding: const EdgeInsets.fromLTRB(6, 4, 12, 4),
+            decoration: BoxDecoration(
+              color: AlanyaColors.forest.withValues(alpha: 0.9),
+              borderRadius: BorderRadius.circular(22),
             ),
-            label: Text(label, style: const TextStyle(color: Colors.white70)),
-            backgroundColor: Colors.white12,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircleAvatar(
+                  radius: 12,
+                  backgroundColor: Colors.white.withValues(alpha: 0.25),
+                  child: Text(
+                    label.isNotEmpty ? label[0].toUpperCase() : "?",
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700),
+                  ),
+                ),
+                const SizedBox(width: 7),
+                Text(
+                  "$label (invité)",
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                  ),
+                ),
+                if (!connected) ...[
+                  const SizedBox(width: 6),
+                  const SizedBox(
+                    width: 10,
+                    height: 10,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.6,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white70),
+                    ),
+                  ),
+                ],
+              ],
+            ),
           );
         }).toList(),
       ),
