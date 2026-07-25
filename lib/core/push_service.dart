@@ -142,8 +142,61 @@ class PushService {
           .resolvePlatformSpecificImplementation<
               AndroidFlutterLocalNotificationsPlugin>()
           ?.createNotificationChannel(channel);
+
+      // Canal dédié aux appels entrants (plein écran).
+      await _localPlugin
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>()
+          ?.createNotificationChannel(callChannel);
     }
   }
+
+  /// Canal Android des appels entrants (importance max + full-screen intent).
+  static const callChannel = AndroidNotificationChannel(
+    'calls',
+    'Appels',
+    description: 'Appels entrants',
+    importance: Importance.max,
+    enableVibration: true,
+    playSound: true,
+    sound: RawResourceAndroidNotificationSound("notification"),
+  );
+
+  /// Affiche une notification d'appel entrant PLEIN ÉCRAN (full-screen intent),
+  /// même écran verrouillé / app fermée. À déclencher depuis le handler FCM
+  /// quand `data.type == "incoming_call"`.
+  Future<void> showIncomingCall({
+    required String title,
+    required String body,
+    Map<String, dynamic>? data,
+  }) async {
+    await _localPlugin.show(
+      9911,
+      title,
+      body,
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'calls',
+          'Appels',
+          channelDescription: 'Appels entrants',
+          importance: Importance.max,
+          priority: Priority.max,
+          category: AndroidNotificationCategory.call,
+          fullScreenIntent: true,
+          ongoing: true,
+          autoCancel: false,
+          icon: '@mipmap/ic_launcher',
+          sound: RawResourceAndroidNotificationSound("notification"),
+          playSound: true,
+        ),
+        iOS: DarwinNotificationDetails(),
+      ),
+      payload: null,
+    );
+  }
+
+  /// Retire la notification d'appel (quand répondu / annulé).
+  Future<void> cancelIncomingCall() => _localPlugin.cancel(9911);
 
   /// Demande la permission (Android 13+ POST_NOTIFICATIONS + iOS).
   Future<void> _requestPermission() async {
@@ -158,6 +211,10 @@ class PushService {
   /// Gère les messages reçus quand l'app est en premier plan (foreground).
   void _handleForegroundMessage(RemoteMessage message) {
     debugPrint('[PushService] Message foreground: ${message.notification?.title}');
+
+    // Appel entrant : géré en temps réel par le WebSocket (écran/bandeau
+    // d'appel) → pas de notif FCM en double quand l'app est ouverte.
+    if (message.data['type'] == 'incoming_call') return;
 
     final notification = message.notification;
     if (notification == null) return;
@@ -254,5 +311,48 @@ class PushService {
 @pragma('vm:entry-point')
 Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
-  debugPrint('[PushService] Message background: ${message.notification?.title}');
+  debugPrint('[PushService] Message background: ${message.data['type']}');
+
+  // Appel entrant (app fermée/arrière-plan) → notification PLEIN ÉCRAN.
+  // Ne se déclenche que si le push est data-only (pas de bloc notification).
+  if (message.data['type'] == 'incoming_call') {
+    final plugin = FlutterLocalNotificationsPlugin();
+    await plugin.initialize(const InitializationSettings(
+      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+      iOS: DarwinInitializationSettings(),
+    ));
+    if (Platform.isAndroid) {
+      await plugin
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>()
+          ?.createNotificationChannel(PushService.callChannel);
+    }
+    final data = message.data;
+    final title = data['callerName']?.toString() ?? 'Appel entrant';
+    final body = (data['callType'] == 'VIDEO')
+        ? 'Appel vidéo entrant'
+        : 'Appel audio entrant';
+    await plugin.show(
+      9911,
+      title,
+      body,
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'calls',
+          'Appels',
+          channelDescription: 'Appels entrants',
+          importance: Importance.max,
+          priority: Priority.max,
+          category: AndroidNotificationCategory.call,
+          fullScreenIntent: true,
+          ongoing: true,
+          autoCancel: false,
+          icon: '@mipmap/ic_launcher',
+          sound: RawResourceAndroidNotificationSound("notification"),
+          playSound: true,
+        ),
+        iOS: DarwinNotificationDetails(),
+      ),
+    );
+  }
 }
