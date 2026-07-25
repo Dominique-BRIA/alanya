@@ -24,4 +24,13 @@ class AccountRepository {
       statusMsg: data["statusMsg"] as String?,
     );
   }
+
+  /// Change le mot de passe de l'utilisateur connecté (vérifie l'actuel).
+  /// Lève ApiException avec un message lisible en cas d'échec.
+  Future<void> changePassword(String currentPassword, String newPassword) async {
+    await _api.post("/api/account/password", {
+      "currentPassword": currentPassword,
+      "newPassword": newPassword,
+    });
+  }
 }

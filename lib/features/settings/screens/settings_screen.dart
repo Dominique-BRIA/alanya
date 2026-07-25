@@ -10,6 +10,7 @@ import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../../auth/auth_controller.dart';
+import '../../account/screens/change_password_screen.dart';
 import '../../account/screens/profile_screen.dart';
 import '../../blocked/screens/blocked_users_screen.dart';
 import '../../chat/screens/starred_messages_screen.dart';
@@ -113,6 +114,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           // SECURITE
           _sectionHeader("Sécurité"),
+          _settingsTile(
+            icon: Icons.lock_outline,
+            iconColor: AlanyaColors.terracotta,
+            title: "Changer le mot de passe",
+            subtitle: "Modifier ton mot de passe de connexion",
+            trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const ChangePasswordScreen()),
+            ),
+          ),
           _settingsTile(
             icon: _biometricEnabled ? Icons.fingerprint : Icons.fingerprint_outlined,
             iconColor: _biometricEnabled ? AlanyaColors.forest : AlanyaColors.grey400,
