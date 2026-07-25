@@ -26,12 +26,29 @@ class RingtoneService {
   AudioPlayer? _player;
   String? _currentAsset;
 
+  // Lecteur séparé pour les "cues" courts (indicateur d'activité) afin de ne
+  // jamais perturber la sonnerie d'appel (_player).
+  AudioPlayer? _cuePlayer;
+
   static const _outgoingAsset = "sounds/outgoing_ring.mp3";
   static const _incomingAsset = "sounds/incoming_ring.mp3";
+  static const _cueAsset = "sounds/notification.mp3";
 
   Future<void> startOutgoing() => _play(_outgoingAsset);
 
   Future<void> startIncoming() => _play(_incomingAsset);
+
+  /// Son discret et bref (one-shot, volume bas) — ex. apparition d'un
+  /// indicateur "en train d'écrire". Non bloquant, échec silencieux.
+  Future<void> playCue() async {
+    try {
+      final p = _cuePlayer ??= AudioPlayer();
+      await p.setReleaseMode(ReleaseMode.release);
+      await p.setVolume(0.22);
+      await p.stop();
+      await p.play(AssetSource(_cueAsset));
+    } catch (_) {}
+  }
 
   Future<void> _play(String asset) async {
     // Si on rejoue le même son (ex: 2 events consécutifs), on ne relance pas.

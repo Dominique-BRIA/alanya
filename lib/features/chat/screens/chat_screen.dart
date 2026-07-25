@@ -16,6 +16,7 @@ import '../../../core/app_snackbar.dart';
 import '../../../core/audio_player.dart';
 import '../../../core/downloader.dart';
 import '../../../core/realtime_client.dart';
+import '../../../core/ringtone_service.dart';
 import '../../../core/token_storage.dart';
 import '../../../core/voice_recorder.dart';
 import '../../../core/locale_controller.dart';
@@ -36,6 +37,7 @@ import '../../contacts/screens/contact_info_screen.dart';
 import '../../group/screens/group_info_screen.dart';
 import '../../media/media_repository.dart';
 import '../chat_repository.dart';
+import '../widgets/activity_indicator.dart';
 import 'image_viewer_screen.dart';
 import 'pdf_viewer_screen.dart';
 import 'video_viewer_screen.dart';
@@ -122,6 +124,12 @@ class _ChatScreenState extends State<ChatScreen>
   Timer? _typingDebounce;
   bool _typingSent = false;
   bool _recordingSent = false;
+  // Réception : activité du correspondant.
+  bool _peerTyping = false;
+  bool _peerRecording = false;
+  Timer? _typingTimeout;
+  Timer? _recordingTimeout;
+  DateTime? _lastCueAt;
   Message? _replyTo;
   String? _highlightedMessageId;
   final Map<String, GlobalKey> _messageKeys = {};
@@ -194,6 +202,8 @@ class _ChatScreenState extends State<ChatScreen>
     WidgetsBinding.instance.removeObserver(this);
     // Coupe les indicateurs si on quitte la conversation en pleine saisie/enreg.
     _typingDebounce?.cancel();
+    _typingTimeout?.cancel();
+    _recordingTimeout?.cancel();
     _emitTyping(false);
     _emitRecording(false);
     _pollTimer?.cancel();
@@ -252,7 +262,46 @@ class _ChatScreenState extends State<ChatScreen>
             ? Message(id: m.id, convId: m.convId, senderId: m.senderId, content: null, type: m.type, status: m.status, replyToId: m.replyToId, replyTo: m.replyTo, deletedAt: DateTime.now(), media: const [], createdAt: m.createdAt)
             : m).toList(); }
       });
+    } else if (type == "typing") {
+      if (e["convId"] != widget.convId) return;
+      _onPeerActivity(typing: e["isTyping"] == true, uid: e["userId"] as String?);
+    } else if (type == "recording") {
+      if (e["convId"] != widget.convId) return;
+      _onPeerActivity(recording: e["isRecording"] == true, uid: e["userId"] as String?);
     }
+  }
+
+  // ── Réception : indicateur d'activité du correspondant ──
+  void _onPeerActivity({bool? typing, bool? recording, String? uid}) {
+    if (uid != null && uid == _myId) return; // ignore un éventuel écho de soi
+    final appearing = !_peerTyping && !_peerRecording;
+    if (typing != null) {
+      _typingTimeout?.cancel();
+      if (typing) {
+        // Filet de sécurité : efface l'indicateur si aucun "stop" n'arrive.
+        _typingTimeout = Timer(const Duration(seconds: 6),
+            () { if (mounted) setState(() => _peerTyping = false); });
+      }
+      if (_peerTyping != typing) setState(() => _peerTyping = typing);
+    }
+    if (recording != null) {
+      _recordingTimeout?.cancel();
+      if (recording) {
+        _recordingTimeout = Timer(const Duration(seconds: 12),
+            () { if (mounted) setState(() => _peerRecording = false); });
+      }
+      if (_peerRecording != recording) setState(() => _peerRecording = recording);
+    }
+    // Bonus : son discret à l'apparition (throttlé, non répétitif).
+    if (appearing && (_peerTyping || _peerRecording)) _playActivityCue();
+  }
+
+  void _playActivityCue() {
+    final now = DateTime.now();
+    if (_lastCueAt != null &&
+        now.difference(_lastCueAt!) < const Duration(seconds: 4)) return;
+    _lastCueAt = now;
+    RingtoneService.instance.playCue();
   }
 
   void _markReadRemote() {
@@ -878,6 +927,8 @@ class _ChatScreenState extends State<ChatScreen>
                     widgets.add(_bubble(_messages[i], _messages[i].senderId == myId));
                     return Column(children: widgets);
                   })),
+          if (!widget.isGroup)
+            ActivityIndicatorBar(typing: _peerTyping, recording: _peerRecording),
           _composer(),
         ]),
       ),
