@@ -206,6 +206,10 @@ class RealtimeClient extends ChangeNotifier {
   void editMessage(String messageId, String content) =>
       _send({"type": "edit_message", "messageId": messageId, "content": content});
 
+  /// Épingler (messageId) ou détacher (null) un message dans une conversation.
+  void pinMessage(String convId, String? messageId) => _send(
+      {"type": "pin_message", "convId": convId, "messageId": messageId});
+
   void forwardMessage(String messageId, List<String> targetConvIds) => _send({
         "type": "forward_message",
         "messageId": messageId,

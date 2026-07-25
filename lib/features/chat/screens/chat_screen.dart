@@ -139,6 +139,9 @@ class _ChatScreenState extends State<ChatScreen>
   String? _selectedMessageId;
   OverlayEntry? _actionsOverlay;
 
+  // ── Message épinglé (partagé à la conversation) ──
+  String? _pinnedMessageId;
+
   // ── Recherche dans la conversation ──
   bool _searchMode = false;
   final _searchCtrl = TextEditingController();
@@ -163,6 +166,7 @@ class _ChatScreenState extends State<ChatScreen>
     super.initState();
     ChatScreen.activeConvId = widget.convId;
     _load();
+    _loadPinned();
     _scrollCtrl.addListener(_onScroll);
     final rt = context.read<RealtimeClient>();
     _rt = rt;
@@ -379,6 +383,9 @@ class _ChatScreenState extends State<ChatScreen>
       setState(() {
         _messages[idx] = _withEdited(_messages[idx], content, editedAt);
       });
+    } else if (type == "message_pinned") {
+      if (e["convId"] != widget.convId) return;
+      setState(() => _pinnedMessageId = e["messageId"] as String?);
     }
   }
 
@@ -1067,6 +1074,103 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
+  Future<void> _loadPinned() async {
+    try {
+      final data = await context.read<ChatRepository>().getPinned(widget.convId);
+      if (!mounted) return;
+      setState(() => _pinnedMessageId = data["pinnedMessageId"] as String?);
+    } catch (_) {}
+  }
+
+  // Épingle / détache un message pour toute la conversation.
+  void _togglePin(Message m) {
+    final newPinned = _pinnedMessageId == m.id ? null : m.id;
+    setState(() => _pinnedMessageId = newPinned);
+    final rt = context.read<RealtimeClient>();
+    if (rt.connected) {
+      rt.pinMessage(widget.convId, newPinned);
+    } else {
+      context
+          .read<ChatRepository>()
+          .pinMessage(widget.convId, newPinned)
+          .catchError((_) {});
+    }
+  }
+
+  String _pinnedPreviewText(Message m) {
+    if (m.isDeleted) return "Message supprimé";
+    switch (m.type) {
+      case "IMAGE":
+        return "Photo";
+      case "VIDEO":
+        return "Vidéo";
+      case "AUDIO":
+        return "Message vocal";
+      case "FILE":
+        return "Fichier";
+      default:
+        return m.content ?? "";
+    }
+  }
+
+  Widget _pinnedBanner() {
+    final id = _pinnedMessageId;
+    if (id == null) return const SizedBox.shrink();
+    Message? pm;
+    for (final m in _messages) {
+      if (m.id == id) { pm = m; break; }
+    }
+    final preview = pm == null ? "Appuyez pour voir" : _pinnedPreviewText(pm);
+    return Material(
+      color: AlanyaColors.cream,
+      child: InkWell(
+        onTap: () => _scrollToMessage(id),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+          decoration: const BoxDecoration(
+            border: Border(bottom: BorderSide(color: AlanyaColors.sand)),
+          ),
+          child: Row(children: [
+            const Icon(Icons.push_pin, size: 18, color: AlanyaColors.terracotta),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text("Message épinglé",
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: AlanyaColors.terracotta)),
+                  Text(preview,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 13, color: Colors.black54)),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: "Détacher",
+              icon: const Icon(Icons.close, size: 20, color: Colors.black45),
+              onPressed: () {
+                setState(() => _pinnedMessageId = null);
+                final rt = context.read<RealtimeClient>();
+                if (rt.connected) {
+                  rt.pinMessage(widget.convId, null);
+                } else {
+                  context
+                      .read<ChatRepository>()
+                      .pinMessage(widget.convId, null)
+                      .catchError((_) {});
+                }
+              },
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
   // Bascule le favori (étoile) — optimiste, rollback si l'API échoue.
   void _toggleStar(Message m) {
     final newVal = !m.starred;
@@ -1278,6 +1382,8 @@ class _ChatScreenState extends State<ChatScreen>
               showAppSnackBar(tr(context, 'copied'));
             } else if (v == 'edit') {
               _startEdit(m);
+            } else if (v == 'pin') {
+              _togglePin(m);
             }
           },
           itemBuilder: (_) => [
@@ -1289,6 +1395,18 @@ class _ChatScreenState extends State<ChatScreen>
                     SizedBox(width: 12),
                     Text("Copier"),
                   ])),
+            PopupMenuItem(
+                value: 'pin',
+                child: Row(children: [
+                  Icon(
+                      _pinnedMessageId == m.id
+                          ? Icons.push_pin
+                          : Icons.push_pin_outlined,
+                      size: 20,
+                      color: AlanyaColors.terracotta),
+                  const SizedBox(width: 12),
+                  Text(_pinnedMessageId == m.id ? "Détacher" : "Épingler"),
+                ])),
             if (mine && m.type == 'TEXT')
               const PopupMenuItem(
                   value: 'edit',
@@ -1333,6 +1451,7 @@ class _ChatScreenState extends State<ChatScreen>
       body: MotifBackground(
         overlayOpacity: 0.85,
         child: Column(children: [
+          _pinnedBanner(),
           Expanded(child: _loading
               ? const Center(child: CircularProgressIndicator(color: AlanyaColors.terracotta))
               : _messages.isEmpty

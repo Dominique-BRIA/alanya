@@ -124,6 +124,18 @@ class ChatRepository {
     await _api.patch("/api/conversations/$convId/messages/$messageId", {"content": content});
   }
 
+  /// Message épinglé courant d'une conversation ({pinnedMessageId, message}).
+  Future<Map<String, dynamic>> getPinned(String convId) async {
+    final data = await _api.get("/api/conversations/$convId/pinned");
+    return Map<String, dynamic>.from(data as Map);
+  }
+
+  /// Épingle (messageId) ou détache (null) un message — repli REST.
+  Future<void> pinMessage(String convId, String? messageId) async {
+    await _api.post(
+        "/api/conversations/$convId/pin-message", {"messageId": messageId});
+  }
+
   /// Ajoute/retire un message des favoris (étoile), privé à l'utilisateur.
   Future<void> toggleStar(String convId, String messageId, bool starred) async {
     await _api.post(
