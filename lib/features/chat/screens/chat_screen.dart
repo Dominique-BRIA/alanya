@@ -1787,7 +1787,11 @@ class _ChatScreenState extends State<ChatScreen>
             ),
           ),
         ),
-        if (m.reactions.isNotEmpty) _reactionsChips(m, mine),
+        if (m.reactions.isNotEmpty)
+          Transform.translate(
+            offset: const Offset(0, -14),
+            child: _reactionsChips(m, mine),
+          ),
       ]),
     );
   }
@@ -1820,6 +1824,13 @@ class _ChatScreenState extends State<ChatScreen>
                     color: isMine
                         ? AlanyaColors.terracotta.withValues(alpha: 0.5)
                         : AlanyaColors.sand),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.12),
+                    blurRadius: 4,
+                    offset: const Offset(0, 1),
+                  ),
+                ],
               ),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
                 Text(e.key, style: const TextStyle(fontSize: 13)),
