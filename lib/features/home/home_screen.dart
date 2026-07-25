@@ -8,6 +8,7 @@ import '../../l10n/app_localizations.dart';
 import '../../core/connectivity_service.dart';
 import '../../core/conversation_cache.dart';
 import '../../core/push_service.dart';
+import '../../core/in_app_notifier.dart';
 import '../../core/realtime_client.dart';
 import '../../models/ai_message.dart';
 import '../../models/conversation.dart';
@@ -222,14 +223,15 @@ class _ConversationsTabState extends State<_ConversationsTab>
     final content = msg["content"] as String?;
     final type = msg["type"] as String? ?? "TEXT";
 
-    // Trouve le titre de la conversation (expéditeur)
-    String title = "Nouveau message";
+    // Trouve la conversation (titre + avatar)
+    Conversation? conv;
     for (final c in _convs ?? <Conversation>[]) {
       if (c.id == convId) {
-        title = c.title ?? "Discussion";
+        conv = c;
         break;
       }
     }
+    final title = conv?.title ?? "Nouveau message";
 
     // Aperçu du message selon le type
     String body;
@@ -250,7 +252,24 @@ class _ConversationsTabState extends State<_ConversationsTab>
         body = content ?? "Nouveau message";
     }
 
-    // Affiche la notification locale
+    // Bandeau in-app (heads-up custom) au-dessus de toutes les pages.
+    final conversation = conv;
+    InAppNotifier.instance.showMessage(
+      title: title,
+      body: body,
+      avatarUrl: conversation?.avatarUrl,
+      onTap: () {
+        PushService.navigatorKey.currentState?.push(MaterialPageRoute(
+          builder: (_) => ChatScreen(
+            convId: convId,
+            title: title,
+            isGroup: conversation?.isGroup ?? false,
+          ),
+        ));
+      },
+    );
+
+    // Affiche aussi la notification système.
     PushService.instance.show(
       title: title,
       body: body,
