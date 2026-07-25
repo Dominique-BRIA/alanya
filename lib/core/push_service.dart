@@ -8,6 +8,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_local_notifications/src/platform_specifics/android/notification_sound.dart';
 
 import '../core/api_client.dart';
+import '../core/notification_settings.dart';
 import '../core/token_storage.dart';
 
 /// Service de notifications push complet (FCM + notifications locales).
@@ -227,13 +228,19 @@ class PushService {
     // d'appel) → pas de notif FCM en double quand l'app est ouverte.
     if (message.data['type'] == 'incoming_call') return;
 
+    // Réglage : notifications de messages désactivées → on n'affiche rien.
+    if (!NotificationSettings.instance.messagesOn) return;
+
     final notification = message.notification;
     if (notification == null) return;
+
+    final body =
+        NotificationSettings.instance.previewOn ? (notification.body ?? '') : 'Nouveau message';
 
     _localPlugin.show(
       DateTime.now().millisecondsSinceEpoch.remainder(100000),
       notification.title ?? 'Alanya',
-      notification.body ?? '',
+      body,
       const NotificationDetails(
         android: AndroidNotificationDetails(
           'messages',
@@ -335,6 +342,8 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
   // Appel entrant (app fermée/arrière-plan) → notification PLEIN ÉCRAN.
   // Ne se déclenche que si le push est data-only (pas de bloc notification).
   if (message.data['type'] == 'incoming_call') {
+    // Réglage : notifications d'appels désactivées → on n'affiche rien.
+    if (!await NotificationSettings.callsEnabledFresh()) return;
     final plugin = FlutterLocalNotificationsPlugin();
     await plugin.initialize(const InitializationSettings(
       android: AndroidInitializationSettings('@mipmap/ic_launcher'),

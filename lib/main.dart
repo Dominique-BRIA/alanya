@@ -8,6 +8,7 @@ import 'core/api_client.dart';
 import 'core/authed_api.dart';
 import 'core/connectivity_service.dart';
 import 'core/data_saver_service.dart';
+import 'core/notification_settings.dart';
 import 'core/locale_controller.dart';
 import 'core/outbox.dart';
 import 'core/presence_store.dart';
@@ -53,6 +54,7 @@ void main() async {
 
   await PushService.instance.tryInitialize(api: api, storage: storage);
   await DataSaverService.instance.load();
+  await NotificationSettings.instance.load();
 
   runApp(
     MultiProvider(

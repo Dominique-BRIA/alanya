@@ -9,6 +9,7 @@ import '../../core/connectivity_service.dart';
 import '../../core/conversation_cache.dart';
 import '../../core/push_service.dart';
 import '../../core/in_app_notifier.dart';
+import '../../core/notification_settings.dart';
 import '../../core/realtime_client.dart';
 import '../../models/ai_message.dart';
 import '../../models/conversation.dart';
@@ -216,6 +217,8 @@ class _ConversationsTabState extends State<_ConversationsTab>
 
   /// Affiche une notification locale pour un message entrant.
   void _showMessageNotification(Map<String, dynamic> e) {
+    // Confidentialité/réglages : notifications de messages désactivées → rien.
+    if (!NotificationSettings.instance.messagesOn) return;
     final msg = e["message"] as Map<String, dynamic>?;
     if (msg == null) return;
 
@@ -250,6 +253,11 @@ class _ConversationsTabState extends State<_ConversationsTab>
         break;
       default:
         body = content ?? "Nouveau message";
+    }
+
+    // Aperçu désactivé → texte générique (dans le bandeau ET la notif système).
+    if (!NotificationSettings.instance.previewOn) {
+      body = "Nouveau message";
     }
 
     // Bandeau in-app (heads-up custom glassmorphism) au-dessus de toutes les
