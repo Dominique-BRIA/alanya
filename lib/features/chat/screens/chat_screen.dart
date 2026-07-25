@@ -87,7 +87,8 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin {
+class _ChatScreenState extends State<ChatScreen>
+    with ChatMediaIntegrationMixin, WidgetsBindingObserver {
   final _inputCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
   List<Message> _messages = [];
@@ -116,6 +117,11 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
   Duration _recordDuration = Duration.zero;
   Timer? _recordTimer;
   bool _voiceActive = false;
+  // Indicateurs temps réel (émission) : "en train d'écrire" / "enregistre".
+  late final RealtimeClient _rt;
+  Timer? _typingDebounce;
+  bool _typingSent = false;
+  bool _recordingSent = false;
   Message? _replyTo;
   String? _highlightedMessageId;
   final Map<String, GlobalKey> _messageKeys = {};
@@ -136,14 +142,60 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
     _load();
     _scrollCtrl.addListener(_onScroll);
     final rt = context.read<RealtimeClient>();
+    _rt = rt;
     rt.connect();
     _rtSub = rt.events.listen(_onRealtimeEvent);
     _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) => _poll());
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  // ── Indicateurs temps réel : émission (débounce + cycle de vie) ──
+  void _emitTyping(bool on) {
+    if (on == _typingSent) return;
+    _typingSent = on;
+    _rt.sendTyping(widget.convId, on);
+  }
+
+  void _emitRecording(bool on) {
+    if (on == _recordingSent) return;
+    _recordingSent = on;
+    _rt.sendRecording(widget.convId, on);
+  }
+
+  void _onInputChanged(String text) {
+    // typing_start dès 3 caractères ; typing_stop après ~1,5 s d'inactivité.
+    if (text.trim().length >= 3) {
+      _emitTyping(true);
+      _typingDebounce?.cancel();
+      _typingDebounce =
+          Timer(const Duration(milliseconds: 1500), () => _emitTyping(false));
+    } else {
+      _typingDebounce?.cancel();
+      _emitTyping(false);
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // App en arrière-plan → on coupe les indicateurs (évite un état figé chez
+    // le correspondant). Au retour, on ré-émet si un enregistrement est en cours.
+    if (state != AppLifecycleState.resumed) {
+      _typingDebounce?.cancel();
+      _emitTyping(false);
+      _emitRecording(false);
+    } else if (_recording) {
+      _emitRecording(true);
+    }
   }
 
   @override
   void dispose() {
     ChatScreen.activeConvId = null;
+    WidgetsBinding.instance.removeObserver(this);
+    // Coupe les indicateurs si on quitte la conversation en pleine saisie/enreg.
+    _typingDebounce?.cancel();
+    _emitTyping(false);
+    _emitRecording(false);
     _pollTimer?.cancel();
     _recordTimer?.cancel();
     _rtSub?.cancel();
@@ -302,6 +354,8 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
   Future<void> _send() async {
     final text = _inputCtrl.text.trim();
     if (text.isEmpty || _sending) return;
+    _typingDebounce?.cancel();
+    _emitTyping(false); // on arrête l'indicateur dès l'envoi
     final rt = context.read<RealtimeClient>();
     final replyId = _replyTo?.id;
     if (rt.connected) {
@@ -582,6 +636,9 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
     if (!mounted) return;
     setState(() { _recording = true; _recordLocked = false; _recordStarted = DateTime.now(); });
     _startRecordTimer();
+    _typingDebounce?.cancel();
+    _emitTyping(false); // pas de "écrit" pendant un vocal
+    _emitRecording(true);
   }
 
   Future<void> _stopVoiceRecord({bool cancel = false}) async {
@@ -589,6 +646,7 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
     if (!_recording) return;
     _stopRecordTimer();
     setState(() { _recording = false; _recordLocked = false; _recordDuration = Duration.zero; });
+    _emitRecording(false);
     if (cancel) { _voiceRecorder.cancel(); return; }
     final result = await _voiceRecorder.stop();
     if (result == null || result.bytes.isEmpty) return;
@@ -1060,7 +1118,7 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
       ])),
       Container(padding: const EdgeInsets.all(8), color: AlanyaColors.cream, child: Row(children: [
         Offstage(offstage: _recording, child: IconButton(tooltip: tr(context, 'attach_file'), icon: _uploading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.attach_file, color: AlanyaColors.chocolate), onPressed: _uploading ? null : _pickAndSendFile)),
-        Expanded(child: _recording ? _recordingBar() : TextField(controller: _inputCtrl, minLines: 1, maxLines: 4, textInputAction: TextInputAction.send, onSubmitted: (_) => _send(), decoration: InputDecoration(hintText: tr(context, 'write_message'), contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10)))),
+        Expanded(child: _recording ? _recordingBar() : TextField(controller: _inputCtrl, minLines: 1, maxLines: 4, textInputAction: TextInputAction.send, onChanged: _onInputChanged, onSubmitted: (_) => _send(), decoration: InputDecoration(hintText: tr(context, 'write_message'), contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10)))),
         const SizedBox(width: 4),
         _micButton(),
         Offstage(offstage: _recording, child: Row(mainAxisSize: MainAxisSize.min, children: [const SizedBox(width: 8), CircleAvatar(backgroundColor: AlanyaColors.terracotta, child: IconButton(icon: const Icon(Icons.send, color: Colors.white), onPressed: _sending ? null : _send))])),

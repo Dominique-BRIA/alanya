@@ -12,7 +12,8 @@ import 'token_storage.dart';
 /// Client WebSocket temps réel : connexion authentifiée, reconnexion auto,
 /// flux d'événements diffusé et envoi de messages / accusés / « typing ».
 class RealtimeClient extends ChangeNotifier {
-  RealtimeClient(this._storage, {String? wsUrl}) : _wsUrl = wsUrl ?? _defaultWsUrl;
+  RealtimeClient(this._storage, {String? wsUrl})
+      : _wsUrl = wsUrl ?? _defaultWsUrl;
 
   final TokenStorage _storage;
   final String _wsUrl;
@@ -47,7 +48,8 @@ class RealtimeClient extends ChangeNotifier {
     await _warmupDns();
     try {
       DebugOverlay.log("WS → connexion à $_wsUrl");
-      final channel = WebSocketChannel.connect(Uri.parse("$_wsUrl?token=$token"));
+      final channel =
+          WebSocketChannel.connect(Uri.parse("$_wsUrl?token=$token"));
       await channel.ready; // lève une exception si la connexion échoue
       _channel = channel;
       _connecting = false;
@@ -91,7 +93,8 @@ class RealtimeClient extends ChangeNotifier {
   Future<void> _warmupDns() async {
     try {
       final uri = Uri.parse(_wsUrl.replaceFirst(RegExp(r'^wss?'), 'https'));
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 3);
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 3);
       final req = await client.headUrl(uri).timeout(const Duration(seconds: 3));
       final resp = await req.close().timeout(const Duration(seconds: 3));
       // On draine et ferme, on se moque du statut (426 attendu pour un WS pur).
@@ -146,7 +149,8 @@ class RealtimeClient extends ChangeNotifier {
     final seq = dnsError ? dnsSequence : tcpSequence;
     final delaySec = seq[_reconnectAttempt.clamp(0, seq.length - 1)];
     _reconnectAttempt = (_reconnectAttempt + 1).clamp(0, seq.length - 1);
-    DebugOverlay.log("WS ⏳ reconnexion dans ${delaySec}s ${dnsError ? "(DNS)" : ""}");
+    DebugOverlay.log(
+        "WS ⏳ reconnexion dans ${delaySec}s ${dnsError ? "(DNS)" : ""}");
     _reconnectTimer = Timer(Duration(seconds: delaySec), connect);
   }
 
@@ -162,7 +166,8 @@ class RealtimeClient extends ChangeNotifier {
     ch.sink.add(jsonEncode(payload));
   }
 
-  void sendMessage(String convId, String content, String tempId, {String? replyToId}) =>
+  void sendMessage(String convId, String content, String tempId,
+          {String? replyToId}) =>
       _send({
         "type": "send",
         "convId": convId,
@@ -172,7 +177,9 @@ class RealtimeClient extends ChangeNotifier {
         if (replyToId != null) "replyToId": replyToId,
       });
 
-  void sendMedia(String convId, String mediaId, String msgType, String tempId, {String? replyToId}) => _send({
+  void sendMedia(String convId, String mediaId, String msgType, String tempId,
+          {String? replyToId}) =>
+      _send({
         "type": "send",
         "convId": convId,
         "mediaId": mediaId,
@@ -186,16 +193,29 @@ class RealtimeClient extends ChangeNotifier {
   void deleteMessage(String messageId, {String scope = "me"}) =>
       _send({"type": "delete_message", "messageId": messageId, "scope": scope});
 
-  void forwardMessage(String messageId, List<String> targetConvIds) =>
-      _send({"type": "forward_message", "messageId": messageId, "targetConvIds": targetConvIds});
+  void forwardMessage(String messageId, List<String> targetConvIds) => _send({
+        "type": "forward_message",
+        "messageId": messageId,
+        "targetConvIds": targetConvIds
+      });
 
   void sendTyping(String convId, bool isTyping) =>
       _send({"type": "typing", "convId": convId, "isTyping": isTyping});
 
-  void callRing(String callId) => _send({"type": "call_ring", "callId": callId});
+  void sendRecording(String convId, bool isRecording) => _send(
+      {"type": "recording", "convId": convId, "isRecording": isRecording});
 
-  void callSignal(String callId, String toUserId, Map<String, dynamic> signal) =>
-      _send({"type": "call_signal", "callId": callId, "toUserId": toUserId, "signal": signal});
+  void callRing(String callId) =>
+      _send({"type": "call_ring", "callId": callId});
+
+  void callSignal(
+          String callId, String toUserId, Map<String, dynamic> signal) =>
+      _send({
+        "type": "call_signal",
+        "callId": callId,
+        "toUserId": toUserId,
+        "signal": signal
+      });
 
   void callState(
     String callId,
@@ -217,21 +237,22 @@ class RealtimeClient extends ChangeNotifier {
         "callId": callId,
         "publicNumber": publicNumber,
       });
-      
+
   void meetingJoin(int meetingId) =>
       _send({"type": "meeting_join", "meetingId": meetingId});
 
   void meetingLeave(int meetingId) =>
       _send({"type": "meeting_leave", "meetingId": meetingId});
 
-  void meetingSignal(int meetingId, String toUserId, Map<String, dynamic> signal) =>
+  void meetingSignal(
+          int meetingId, String toUserId, Map<String, dynamic> signal) =>
       _send({
         "type": "meeting_signal",
         "meetingId": meetingId,
         "toUserId": toUserId,
         "signal": signal,
       });
-      
+
   void disconnect() {
     _reconnectTimer?.cancel();
     _pingTimer?.cancel();
@@ -251,7 +272,15 @@ class RealtimeClient extends ChangeNotifier {
     super.dispose();
   }
 
-    void sendMultiMedia(String convId, List<String> mediaIds, String msgType, String tempId, {String? replyToId}) =>
-      _send({"type": "send", "convId": convId, "mediaIds": mediaIds, "msgType": msgType, "tempId": tempId, if (replyToId != null) "replyToId": replyToId});
-      
+  void sendMultiMedia(
+          String convId, List<String> mediaIds, String msgType, String tempId,
+          {String? replyToId}) =>
+      _send({
+        "type": "send",
+        "convId": convId,
+        "mediaIds": mediaIds,
+        "msgType": msgType,
+        "tempId": tempId,
+        if (replyToId != null) "replyToId": replyToId
+      });
 }
