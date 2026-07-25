@@ -93,6 +93,7 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen>
     with ChatMediaIntegrationMixin, WidgetsBindingObserver {
   final _inputCtrl = TextEditingController();
+  final _inputFocus = FocusNode();
   final _scrollCtrl = ScrollController();
   List<Message> _messages = [];
   bool _loading = true;
@@ -227,6 +228,7 @@ class _ChatScreenState extends State<ChatScreen>
     _translateService.dispose();
     InlineAudioPlayer.stop();
     _inputCtrl.dispose();
+    _inputFocus.dispose();
     _scrollCtrl.dispose();
     _searchCtrl.dispose();
     _searchDebounce?.cancel();
@@ -550,7 +552,7 @@ class _ChatScreenState extends State<ChatScreen>
     } finally { if (mounted) setState(() => _sending = false); }
   }
 
-  void _setReplyTo(Message m) { setState(() => _replyTo = m); FocusScope.of(context).requestFocus(FocusNode()); }
+  void _setReplyTo(Message m) { setState(() => _replyTo = m); _inputFocus.requestFocus(); }
 
   // ── Édition d'un message ──
   Message _withEdited(Message m, String content, DateTime editedAt) => Message(
@@ -564,6 +566,10 @@ class _ChatScreenState extends State<ChatScreen>
     _inputCtrl.text = m.content ?? '';
     _inputCtrl.selection = TextSelection.fromPosition(
         TextPosition(offset: _inputCtrl.text.length));
+    // Ouvre le clavier sur le champ (sinon « rien ne se passe » à l'écran).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _inputFocus.requestFocus();
+    });
   }
 
   void _cancelEdit() {
@@ -1636,7 +1642,7 @@ class _ChatScreenState extends State<ChatScreen>
       ])),
       Container(padding: const EdgeInsets.all(8), color: AlanyaColors.cream, child: Row(children: [
         Offstage(offstage: _recording, child: IconButton(tooltip: tr(context, 'attach_file'), icon: _uploading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.attach_file, color: AlanyaColors.chocolate), onPressed: _uploading ? null : _pickAndSendFile)),
-        Expanded(child: _recording ? _recordingBar() : TextField(controller: _inputCtrl, minLines: 1, maxLines: 4, textInputAction: TextInputAction.send, onChanged: _onInputChanged, onSubmitted: (_) => _send(), decoration: InputDecoration(hintText: tr(context, 'write_message'), contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10)))),
+        Expanded(child: _recording ? _recordingBar() : TextField(controller: _inputCtrl, focusNode: _inputFocus, minLines: 1, maxLines: 4, textInputAction: TextInputAction.send, onChanged: _onInputChanged, onSubmitted: (_) => _send(), decoration: InputDecoration(hintText: tr(context, 'write_message'), contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10)))),
         const SizedBox(width: 4),
         _micButton(),
         Offstage(offstage: _recording, child: Row(mainAxisSize: MainAxisSize.min, children: [const SizedBox(width: 8), CircleAvatar(backgroundColor: AlanyaColors.terracotta, child: IconButton(icon: const Icon(Icons.send, color: Colors.white), onPressed: _sending ? null : _send))])),
