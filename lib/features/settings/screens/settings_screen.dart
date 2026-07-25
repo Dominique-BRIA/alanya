@@ -11,6 +11,7 @@ import '../../../widgets/back_app_bar.dart';
 import '../../auth/auth_controller.dart';
 import '../../account/screens/profile_screen.dart';
 import '../../blocked/screens/blocked_users_screen.dart';
+import '../../chat/screens/starred_messages_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -141,6 +142,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
             onTap: _loadingBiometric ? null : () => _toggleBiometric(!_biometricEnabled),
+          ),
+          _settingsTile(
+            icon: Icons.star,
+            iconColor: AlanyaColors.gold,
+            title: "Messages favoris",
+            subtitle: "Retrouver les messages mis en favori",
+            trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const StarredMessagesScreen()),
+            ),
           ),
           _settingsTile(
             icon: Icons.block,

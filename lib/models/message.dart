@@ -82,6 +82,8 @@ class Message {
   // Réactions emoji — mutable : mises à jour en place à la réception des events
   // WS `reaction` (puis setState côté écran). Brutes { userId, emoji }.
   List<MessageReaction> reactions;
+  // Favori (étoile) pour MOI — mutable : basculé en place au tap.
+  bool starred;
 
   Message({
     required this.id,
@@ -97,6 +99,7 @@ class Message {
     this.editedAt,
     this.replyTo,
     this.reactions = const [],
+    this.starred = false,
   });
 
   /// Vrai si le message a été supprimé pour tout le monde.
@@ -122,5 +125,6 @@ class Message {
         reactions: ((j["reactions"] as List?) ?? [])
             .map((r) => MessageReaction.fromJson(r as Map<String, dynamic>))
             .toList(),
+        starred: (j["starred"] as bool?) ?? false,
       );
 }

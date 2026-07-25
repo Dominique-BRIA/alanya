@@ -124,6 +124,20 @@ class ChatRepository {
     await _api.patch("/api/conversations/$convId/messages/$messageId", {"content": content});
   }
 
+  /// Ajoute/retire un message des favoris (étoile), privé à l'utilisateur.
+  Future<void> toggleStar(String convId, String messageId, bool starred) async {
+    await _api.post(
+        "/api/conversations/$convId/messages/$messageId/star", {"starred": starred});
+  }
+
+  /// Liste des messages favoris (toutes conversations), récent → ancien.
+  Future<List<Map<String, dynamic>>> getStarred() async {
+    final data = await _api.get("/api/starred");
+    return ((data["starred"] as List?) ?? [])
+        .map((m) => Map<String, dynamic>.from(m as Map))
+        .toList();
+  }
+
   /// Recherche texte dans tout l'historique d'une conversation.
   /// Renvoie [{id, senderId, content, createdAt}], du plus récent au plus ancien.
   Future<List<Map<String, dynamic>>> searchMessages(String convId, String q) async {

@@ -318,7 +318,7 @@ class _ChatScreenState extends State<ChatScreen>
       if (e["convId"] != widget.convId) return;
       setState(() {
         _messages = _messages.map((m) => m.senderId == _myId && m.status != "READ"
-            ? Message(id: m.id, convId: m.convId, senderId: m.senderId, content: m.content, type: m.type, status: "READ", replyToId: m.replyToId, replyTo: m.replyTo, deletedAt: m.deletedAt, editedAt: m.editedAt, media: m.media, createdAt: m.createdAt, reactions: m.reactions)
+            ? Message(id: m.id, convId: m.convId, senderId: m.senderId, content: m.content, type: m.type, status: "READ", replyToId: m.replyToId, replyTo: m.replyTo, deletedAt: m.deletedAt, editedAt: m.editedAt, media: m.media, createdAt: m.createdAt, reactions: m.reactions, starred: m.starred)
             : m).toList();
       });
     } else if (type == "message_status") {
@@ -327,7 +327,7 @@ class _ChatScreenState extends State<ChatScreen>
       if (messageId == null || newStatus == null) return;
       setState(() {
         _messages = _messages.map((m) => m.id == messageId && _statusRank(newStatus) > _statusRank(m.status)
-            ? Message(id: m.id, convId: m.convId, senderId: m.senderId, content: m.content, type: m.type, status: newStatus, replyToId: m.replyToId, replyTo: m.replyTo, deletedAt: m.deletedAt, editedAt: m.editedAt, media: m.media, createdAt: m.createdAt, reactions: m.reactions)
+            ? Message(id: m.id, convId: m.convId, senderId: m.senderId, content: m.content, type: m.type, status: newStatus, replyToId: m.replyToId, replyTo: m.replyTo, deletedAt: m.deletedAt, editedAt: m.editedAt, media: m.media, createdAt: m.createdAt, reactions: m.reactions, starred: m.starred)
             : m).toList();
       });
     } else if (type == "message_deleted") {
@@ -557,7 +557,7 @@ class _ChatScreenState extends State<ChatScreen>
         id: m.id, convId: m.convId, senderId: m.senderId, content: content,
         type: m.type, status: m.status, replyToId: m.replyToId, replyTo: m.replyTo,
         deletedAt: m.deletedAt, editedAt: editedAt, media: m.media,
-        createdAt: m.createdAt, reactions: m.reactions);
+        createdAt: m.createdAt, reactions: m.reactions, starred: m.starred);
 
   void _startEdit(Message m) {
     setState(() { _editing = m; _replyTo = null; });
@@ -604,6 +604,10 @@ class _ChatScreenState extends State<ChatScreen>
 
   Widget _timestampRow(Message m, bool mine, Color color) {
     return Row(mainAxisSize: MainAxisSize.min, children: [
+      if (m.starred) ...[
+        Icon(Icons.star, size: 12, color: color),
+        const SizedBox(width: 4),
+      ],
       if (m.editedAt != null) ...[
         Text("modifié", style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic, color: color)),
         const SizedBox(width: 4),
@@ -1057,6 +1061,18 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
+  // Bascule le favori (étoile) — optimiste, rollback si l'API échoue.
+  void _toggleStar(Message m) {
+    final newVal = !m.starred;
+    setState(() => m.starred = newVal);
+    context
+        .read<ChatRepository>()
+        .toggleStar(widget.convId, m.id, newVal)
+        .catchError((_) {
+      if (mounted) setState(() => m.starred = !newVal);
+    });
+  }
+
   Widget _reactionPickerRow(Message m, BuildContext ctx) {
     final mine = m.reactions.where((r) => r.userId == _myId).toList();
     final myEmoji = mine.isNotEmpty ? mine.first.emoji : null;
@@ -1234,6 +1250,10 @@ class _ChatScreenState extends State<ChatScreen>
             tooltip: "Répondre",
             icon: const Icon(Icons.reply),
             onPressed: () { _clearSelection(); _setReplyTo(m); }),
+        IconButton(
+            tooltip: m.starred ? "Retirer des favoris" : "Ajouter aux favoris",
+            icon: Icon(m.starred ? Icons.star : Icons.star_border),
+            onPressed: () { _clearSelection(); _toggleStar(m); }),
         IconButton(
             tooltip: "Transférer",
             icon: const Icon(Icons.forward),
