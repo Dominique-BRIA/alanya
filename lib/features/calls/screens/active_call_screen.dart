@@ -9,6 +9,7 @@ import '../../../theme/alanya_theme.dart';
 import '../../../widgets/contact_picker_sheet.dart';
 import '../../chat/screens/chat_screen.dart';
 import '../call_controller.dart';
+import '../widgets/call_avatar_waves.dart';
 
 class ActiveCallScreen extends StatefulWidget {
   const ActiveCallScreen({super.key, this.incoming = false});
@@ -192,14 +193,6 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     }
   }
 
-  Future<void> _closeOutgoing(CallController cc) async {
-    if (cc.activeRole == ActiveCallRole.outgoing) {
-      await _hangUp(cc);
-      return;
-    }
-    _popScreen();
-  }
-
   @override
   void dispose() {
     _timer?.cancel();
@@ -368,15 +361,25 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                       ),
                       const SizedBox(height: 8),
                       if (!showVideo && !useDynamic)
-                        CircleAvatar(
-                          radius: 52,
-                          backgroundColor: AlanyaColors.terracotta,
-                          child: Icon(
-                            cc.isGroupCall
-                                ? Icons.groups
-                                : (isVideo ? Icons.videocam : Icons.person),
-                            size: 52,
-                            color: Colors.white,
+                        CallAvatarWaves(
+                          diameter: 104,
+                          color: AlanyaColors.forest,
+                          active: cc.activeRole == ActiveCallRole.ongoing ||
+                              cc.activeRole == ActiveCallRole.outgoing,
+                          child: CircleAvatar(
+                            radius: 52,
+                            backgroundColor: AlanyaColors.terracotta,
+                            child: cc.isGroupCall
+                                ? const Icon(Icons.groups,
+                                    size: 48, color: Colors.white)
+                                : Text(
+                                    name.isNotEmpty ? name[0].toUpperCase() : "?",
+                                    style: const TextStyle(
+                                      fontSize: 44,
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
                           ),
                         ),
                       if (!showVideo) const SizedBox(height: 20),
@@ -667,22 +670,13 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
 
   Widget _activeActions(CallController cc) {
     if (cc.activeRole == ActiveCallRole.outgoing) {
-      return Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          _roundBtn(
-            icon: Icons.close,
-            color: Colors.grey.shade700,
-            label: "Annuler",
-            onPressed: () => _closeOutgoing(cc),
-          ),
-          _roundBtn(
-            icon: Icons.call_end,
-            color: Colors.red,
-            label: "Raccrocher",
-            onPressed: () => _hangUp(cc),
-          ),
-        ],
+      // Appel sortant : uniquement le bouton rouge Raccrocher (« Annuler »
+      // supprimé — il faisait doublon).
+      return _roundBtn(
+        icon: Icons.call_end,
+        color: Colors.red,
+        label: "Raccrocher",
+        onPressed: () => _hangUp(cc),
       );
     }
     // Appel actif (en connexion ou connecté) : barre de contrôles + raccrocher.
