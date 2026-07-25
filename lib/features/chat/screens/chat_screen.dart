@@ -1566,6 +1566,12 @@ class _ChatScreenState extends State<ChatScreen>
         PopupMenuButton<String>(
           tooltip: "Plus",
           icon: const Icon(Icons.more_vert),
+          // Retire la bulle de réactions (et sa barrière) dès l'ouverture du menu,
+          // sinon la barrière intercepte le tap sur les items → « rien ne se passe ».
+          onOpened: () {
+            _actionsOverlay?.remove();
+            _actionsOverlay = null;
+          },
           onSelected: (v) {
             _clearSelection();
             if (v == 'copy' && m.content != null) {
