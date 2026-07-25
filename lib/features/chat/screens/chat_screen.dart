@@ -15,6 +15,7 @@ import '../../../core/api_client.dart';
 import '../../../core/app_snackbar.dart';
 import '../../../core/audio_player.dart';
 import '../../../core/downloader.dart';
+import '../../../core/presence_store.dart';
 import '../../../core/realtime_client.dart';
 import '../../../core/ringtone_service.dart';
 import '../../../core/token_storage.dart';
@@ -875,10 +876,26 @@ class _ChatScreenState extends State<ChatScreen>
           const SizedBox(width: 10),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
             Text(widget.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-            if (!widget.isGroup && widget.otherIsOnline == 1) const Text("en ligne", maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, color: Colors.white70))
-            else if (!widget.isGroup && widget.otherLastSeen != null) Text(_lastSeenLabel(widget.otherLastSeen!), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, color: Colors.white70))
-            else if (!widget.isGroup && widget.otherStatusMsg?.isNotEmpty == true) Text(widget.otherStatusMsg!, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, color: Colors.white70))
-            else if (widget.isGroup) Text("${widget.memberNames.length} membres", style: const TextStyle(fontSize: 11, color: Colors.white70)),
+            if (widget.isGroup)
+              Text("${widget.memberNames.length} membres", style: const TextStyle(fontSize: 11, color: Colors.white70))
+            else
+              // Présence LIVE : lit le PresenceStore (mis à jour par les events WS
+              // `presence`), avec repli sur les données REST passées au widget.
+              Consumer<PresenceStore>(builder: (ctx, presence, _) {
+                final uid = widget.otherUserId;
+                final online = (uid != null ? presence.isOnline(uid) : null) ?? (widget.otherIsOnline == 1);
+                final ls = (uid != null ? presence.lastSeen(uid) : null) ?? widget.otherLastSeen;
+                String? sub;
+                if (online) {
+                  sub = "en ligne";
+                } else if (ls != null) {
+                  sub = _lastSeenLabel(ls);
+                } else if (widget.otherStatusMsg?.isNotEmpty == true) {
+                  sub = widget.otherStatusMsg;
+                }
+                if (sub == null) return const SizedBox.shrink();
+                return Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, color: Colors.white70));
+              }),
           ])),
         ]),
       ),

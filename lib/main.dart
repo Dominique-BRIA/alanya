@@ -10,6 +10,7 @@ import 'core/connectivity_service.dart';
 import 'core/data_saver_service.dart';
 import 'core/locale_controller.dart';
 import 'core/outbox.dart';
+import 'core/presence_store.dart';
 import 'core/push_service.dart';
 import 'core/realtime_client.dart';
 import 'core/token_storage.dart';
@@ -68,6 +69,9 @@ void main() async {
         Provider<MeetingsRepository>.value(value: MeetingsRepository(authedApi)),
         Provider<BlockedRepository>.value(value: BlockedRepository(authedApi)),
         ChangeNotifierProvider<RealtimeClient>.value(value: realtime),
+        ChangeNotifierProvider<PresenceStore>(
+          create: (ctx) => PresenceStore(ctx.read<RealtimeClient>()),
+        ),
         ChangeNotifierProvider<LocaleController>(
           create: (_) => LocaleController()..load(),
         ),
