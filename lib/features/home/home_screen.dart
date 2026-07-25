@@ -225,6 +225,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
     final convId = msg["convId"] as String? ?? "";
     final content = msg["content"] as String?;
     final type = msg["type"] as String? ?? "TEXT";
+    if (type == "SYSTEM") return; // pas de notif pour les messages système
 
     // Trouve la conversation (titre + avatar)
     Conversation? conv;

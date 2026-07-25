@@ -1681,6 +1681,28 @@ class _ChatScreenState extends State<ChatScreen>
   // BUBBLE — WhatsApp previews + grille multi-médias
   // ══════════════════════════════════════════════
   Widget _bubble(Message m, bool mine) {
+    // Message système (ex. « Messages éphémères activés ») : pastille centrée.
+    if (m.type == "SYSTEM") {
+      return Center(
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 36),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: AlanyaColors.gold.withValues(alpha: 0.18),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.timer_outlined, size: 15, color: AlanyaColors.chocolate),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(m.content ?? '',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 12.5, color: AlanyaColors.chocolate)),
+            ),
+          ]),
+        ),
+      );
+    }
     final hasMedia = m.media.isNotEmpty;
     final isMultiMedia = hasMedia && m.media.length > 1;
     final isImage = !isMultiMedia && m.type == "IMAGE" && hasMedia;
