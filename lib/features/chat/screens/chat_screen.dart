@@ -859,12 +859,14 @@ class _ChatScreenState extends State<ChatScreen>
 
   /// Envoie une réaction et l'applique en optimiste (le serveur rediffuse aussi).
   void _react(Message m, String emoji) {
+    final myId = _myId;
+    if (myId == null || myId.isEmpty) return;
     context.read<RealtimeClient>().sendReaction(widget.convId, m.id, emoji);
     setState(() {
-      final mine = m.reactions.where((r) => r.userId == _myId).toList();
+      final mine = m.reactions.where((r) => r.userId == myId).toList();
       final had = mine.isNotEmpty && mine.first.emoji == emoji;
-      final updated = m.reactions.where((r) => r.userId != _myId).toList();
-      if (!had) updated.add(MessageReaction(userId: _myId, emoji: emoji));
+      final updated = m.reactions.where((r) => r.userId != myId).toList();
+      if (!had) updated.add(MessageReaction(userId: myId, emoji: emoji));
       m.reactions = updated;
     });
   }
