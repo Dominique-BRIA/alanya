@@ -793,7 +793,7 @@ class _ChatScreenState extends State<ChatScreen> with ChatMediaIntegrationMixin 
     if (widget.isGroup) return;
     final otherId = widget.otherUserId;
     if (otherId == null) { _openAvatarViewer(); return; }
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => ContactInfoScreen(userId: otherId, name: widget.title, publicNumber: widget.otherPublicNumber ?? "", avatarUrl: widget.avatarUrl, statusMsg: widget.otherStatusMsg, convId: widget.convId, contactId: widget.contactId, isBlocked: widget.isBlocked)));
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => ContactInfoScreen(userId: otherId, name: widget.title, publicNumber: widget.otherPublicNumber ?? "", avatarUrl: widget.avatarUrl, statusMsg: widget.otherStatusMsg, convId: widget.convId, contactId: widget.contactId, isBlocked: widget.isBlocked, isOnline: widget.otherIsOnline == 1, lastSeen: widget.otherLastSeen)));
   }
 
   // ══════════════════════════════════════════════
