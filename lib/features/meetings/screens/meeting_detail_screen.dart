@@ -101,6 +101,45 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
     }
   }
 
+  Future<void> _decline() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text("Décliner l'invitation ?"),
+        content: const Text("Tu ne rejoindras pas cette réunion."),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text("Annuler")),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text("Décliner",
+                  style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    setState(() => _loading = true);
+    try {
+      await context.read<MeetingsRepository>().declineMeeting(_meeting.idMeeting);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Invitation déclinée")),
+        );
+        Navigator.of(context).pop(true);
+      }
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message)),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final m = _meeting;
@@ -169,6 +208,18 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
                     minimumSize: const Size(double.infinity, 52),
                   ),
                 ),
+              if (!m.isFinished && !_isOrganiser) ...[
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: _loading ? null : _decline,
+                  icon: const Icon(Icons.event_busy_outlined, color: Colors.red),
+                  label: const Text("Décliner l'invitation",
+                      style: TextStyle(color: Colors.red)),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 48),
+                  ),
+                ),
+              ],
               if (!m.isFinished && _isOrganiser) ...[
                 const SizedBox(height: 12),
                 OutlinedButton.icon(

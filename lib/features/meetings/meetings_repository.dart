@@ -61,6 +61,10 @@ class MeetingsRepository {
     await _api.post("/api/meetings/$idMeeting/leave", {});
   }
 
+  Future<void> declineMeeting(int idMeeting) async {
+    await _api.post("/api/meetings/$idMeeting/decline", {});
+  }
+
   /// Terminer une réunion (organisateur uniquement).
   Future<void> endMeeting(int idMeeting) async {
     await _api.post("/api/meetings/$idMeeting/end", {});
