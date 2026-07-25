@@ -124,6 +124,16 @@ class ChatRepository {
     await _api.patch("/api/conversations/$convId/messages/$messageId", {"content": content});
   }
 
+  /// Recherche texte dans tout l'historique d'une conversation.
+  /// Renvoie [{id, senderId, content, createdAt}], du plus récent au plus ancien.
+  Future<List<Map<String, dynamic>>> searchMessages(String convId, String q) async {
+    final data = await _api.get(
+        "/api/conversations/$convId/messages/search?q=${Uri.encodeQueryComponent(q)}");
+    return ((data["results"] as List?) ?? [])
+        .map((m) => Map<String, dynamic>.from(m as Map))
+        .toList();
+  }
+
   /// Quitter un groupe.
   Future<void> leaveGroup(String convId) async {
     await _api.post("/api/conversations/$convId/leave", {});

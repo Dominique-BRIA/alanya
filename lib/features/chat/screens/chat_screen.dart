@@ -133,6 +133,14 @@ class _ChatScreenState extends State<ChatScreen>
   DateTime? _lastCueAt;
   Message? _replyTo;
   Message? _editing; // message en cours d'édition (compose = mode édition)
+
+  // ── Recherche dans la conversation ──
+  bool _searchMode = false;
+  final _searchCtrl = TextEditingController();
+  Timer? _searchDebounce;
+  List<String> _searchResultIds = [];
+  int _searchIndex = 0;
+  bool _searchLoading = false;
   String? _highlightedMessageId;
   final Map<String, GlobalKey> _messageKeys = {};
   final Map<String, ReplyPreview> _replySnapshots = {};
@@ -216,7 +224,70 @@ class _ChatScreenState extends State<ChatScreen>
     InlineAudioPlayer.stop();
     _inputCtrl.dispose();
     _scrollCtrl.dispose();
+    _searchCtrl.dispose();
+    _searchDebounce?.cancel();
     super.dispose();
+  }
+
+  // ══════════════════════════════════════════════
+  // RECHERCHE DANS LA CONVERSATION
+  // ══════════════════════════════════════════════
+  void _openSearch() {
+    setState(() {
+      _searchMode = true;
+      _searchResultIds = [];
+      _searchIndex = 0;
+    });
+  }
+
+  void _closeSearch() {
+    _searchDebounce?.cancel();
+    _searchCtrl.clear();
+    setState(() {
+      _searchMode = false;
+      _searchResultIds = [];
+      _searchLoading = false;
+    });
+  }
+
+  void _onSearchChanged(String q) {
+    _searchDebounce?.cancel();
+    final query = q.trim();
+    if (query.isEmpty) {
+      setState(() { _searchResultIds = []; _searchLoading = false; });
+      return;
+    }
+    setState(() => _searchLoading = true);
+    _searchDebounce = Timer(const Duration(milliseconds: 350), () => _runSearch(query));
+  }
+
+  Future<void> _runSearch(String query) async {
+    try {
+      final results =
+          await context.read<ChatRepository>().searchMessages(widget.convId, query);
+      if (!mounted) return;
+      final ids = results
+          .map((r) => r["id"] as String?)
+          .whereType<String>()
+          .toList();
+      setState(() {
+        _searchResultIds = ids;
+        _searchIndex = 0;
+        _searchLoading = false;
+      });
+      if (ids.isNotEmpty) _scrollToMessage(ids.first);
+    } catch (_) {
+      if (mounted) setState(() => _searchLoading = false);
+    }
+  }
+
+  void _searchNav(int delta) {
+    if (_searchResultIds.isEmpty) return;
+    final next =
+        (_searchIndex + delta).clamp(0, _searchResultIds.length - 1).toInt();
+    if (next == _searchIndex) return;
+    setState(() => _searchIndex = next);
+    _scrollToMessage(_searchResultIds[next]);
   }
 
   // ══════════════════════════════════════════════
@@ -1030,9 +1101,64 @@ class _ChatScreenState extends State<ChatScreen>
         ]),
       ),
       actions: [
+        IconButton(tooltip: "Rechercher", icon: const Icon(Icons.search), onPressed: _openSearch),
         if (!widget.isGroup) ...[
           IconButton(tooltip: "Appel vidéo", icon: const Icon(Icons.videocam), onPressed: () => _startCall("VIDEO")),
           IconButton(tooltip: "Appel audio", icon: const Icon(Icons.call), onPressed: () => _startCall("AUDIO")),
+        ],
+      ],
+    );
+  }
+
+  // AppBar de recherche dans la conversation (loupe → ce mode).
+  PreferredSizeWidget _searchAppBar() {
+    final total = _searchResultIds.length;
+    final pos = total == 0 ? 0 : _searchIndex + 1;
+    final hasQuery = _searchCtrl.text.trim().isNotEmpty;
+    return AppBar(
+      backgroundColor: AlanyaColors.terracotta,
+      foregroundColor: Colors.white,
+      titleSpacing: 0,
+      leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: _closeSearch),
+      title: TextField(
+        controller: _searchCtrl,
+        autofocus: true,
+        style: const TextStyle(color: Colors.white, fontSize: 16),
+        cursorColor: Colors.white,
+        textInputAction: TextInputAction.search,
+        onChanged: _onSearchChanged,
+        decoration: const InputDecoration(
+          hintText: "Rechercher…",
+          hintStyle: TextStyle(color: Colors.white70),
+          border: InputBorder.none,
+        ),
+      ),
+      actions: [
+        if (_searchLoading)
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16),
+            child: Center(
+              child: SizedBox(
+                width: 18, height: 18,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white)),
+              ),
+            ),
+          )
+        else if (hasQuery) ...[
+          Center(
+            child: Text(total == 0 ? "0" : "$pos/$total",
+                style: const TextStyle(color: Colors.white, fontSize: 13)),
+          ),
+          IconButton(
+              tooltip: "Plus ancien",
+              icon: const Icon(Icons.keyboard_arrow_up),
+              onPressed: total == 0 ? null : () => _searchNav(1)),
+          IconButton(
+              tooltip: "Plus récent",
+              icon: const Icon(Icons.keyboard_arrow_down),
+              onPressed: total == 0 ? null : () => _searchNav(-1)),
         ],
       ],
     );
@@ -1060,7 +1186,7 @@ class _ChatScreenState extends State<ChatScreen>
     // l'ouverture de la conversation. Fallback sur _myId par sécurité.
     final myId = context.watch<AuthController>().user?.id ?? _myId;
     return Scaffold(
-      appBar: _whatsappAppBar(),
+      appBar: _searchMode ? _searchAppBar() : _whatsappAppBar(),
       body: MotifBackground(
         overlayOpacity: 0.85,
         child: Column(children: [
