@@ -165,13 +165,18 @@ class PushService {
   /// Affiche une notification d'appel entrant PLEIN ÉCRAN (full-screen intent),
   /// même écran verrouillé / app fermée. À déclencher depuis le handler FCM
   /// quand `data.type == "incoming_call"`.
+  /// Id de notification dérivé du callId (0 = fallback si inconnu) → permet
+  /// d'annuler précisément l'appel concerné, même si plusieurs se suivent.
+  static int callNotifId(String? callId) =>
+      callId == null || callId.isEmpty ? 9911 : (callId.hashCode & 0x7fffffff);
+
   Future<void> showIncomingCall({
     required String title,
     required String body,
-    Map<String, dynamic>? data,
+    String? callId,
   }) async {
     await _localPlugin.show(
-      9911,
+      callNotifId(callId),
       title,
       body,
       const NotificationDetails(
@@ -195,8 +200,10 @@ class PushService {
     );
   }
 
-  /// Retire la notification d'appel (quand répondu / annulé).
-  Future<void> cancelIncomingCall() => _localPlugin.cancel(9911);
+  /// Retire la notification d'appel (quand répondu / annulé). Cible l'appel
+  /// [callId] si fourni, sinon l'id de repli.
+  Future<void> cancelIncomingCall([String? callId]) =>
+      _localPlugin.cancel(callNotifId(callId));
 
   /// Demande la permission (Android 13+ POST_NOTIFICATIONS + iOS).
   Future<void> _requestPermission() async {
@@ -313,6 +320,14 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
   debugPrint('[PushService] Message background: ${message.data['type']}');
 
+  // Appel annulé/terminé par l'appelant → retire la notif d'appel plein écran
+  // (ciblée par le callId partagé WS/FCM).
+  if (message.data['type'] == 'call_cancelled') {
+    final plugin = FlutterLocalNotificationsPlugin();
+    await plugin.cancel(PushService.callNotifId(message.data['callId']?.toString()));
+    return;
+  }
+
   // Appel entrant (app fermée/arrière-plan) → notification PLEIN ÉCRAN.
   // Ne se déclenche que si le push est data-only (pas de bloc notification).
   if (message.data['type'] == 'incoming_call') {
@@ -333,7 +348,7 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
         ? 'Appel vidéo entrant'
         : 'Appel audio entrant';
     await plugin.show(
-      9911,
+      PushService.callNotifId(data['callId']?.toString()),
       title,
       body,
       const NotificationDetails(

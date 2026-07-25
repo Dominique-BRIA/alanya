@@ -5,6 +5,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import '../../core/call_permissions.dart';
 import '../../core/debug_overlay.dart';
+import '../../core/push_service.dart';
 import '../../core/realtime_client.dart';
 import '../../core/ringtone_service.dart';
 import '../../models/call_record.dart';
@@ -150,6 +151,7 @@ class CallController extends ChangeNotifier {
 
     // Coupe la sonnerie entrante dès qu'on accepte.
     await RingtoneService.instance.stop();
+    PushService.instance.cancelIncomingCall(inc.callId); // retire la notif
 
     final result = await _calls.accept(inc.callId);
     isGroupCall = result.isGroup || inc.isGroup;
@@ -189,6 +191,7 @@ class CallController extends ChangeNotifier {
     if (inc == null) return;
     // Coupe la sonnerie entrante dès qu'on rejette.
     await RingtoneService.instance.stop();
+    PushService.instance.cancelIncomingCall(inc.callId); // retire la notif
     await _calls.reject(inc.callId);
     _rt.callState(
       inc.callId,
@@ -233,6 +236,8 @@ class CallController extends ChangeNotifier {
     // Filet de sécurité : coupe toute sonnerie encore en cours.
     // (Doublon sûr des stop() éparpillés — mieux vaut couper 2 fois que 0.)
     RingtoneService.instance.stop();
+    PushService.instance
+        .cancelIncomingCall(activeCallId ?? incoming?.callId); // retire la notif
     incoming = null;
     activeCallId = null;
     activeConvId = null;
