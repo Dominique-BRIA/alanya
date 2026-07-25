@@ -142,6 +142,9 @@ class _ChatScreenState extends State<ChatScreen>
   // ── Message épinglé (partagé à la conversation) ──
   String? _pinnedMessageId;
 
+  // ── Messages éphémères : minuteur de la conversation (0 = désactivé) ──
+  int _disappearingSeconds = 0;
+
   // ── Recherche dans la conversation ──
   bool _searchMode = false;
   final _searchCtrl = TextEditingController();
@@ -167,6 +170,7 @@ class _ChatScreenState extends State<ChatScreen>
     ChatScreen.activeConvId = widget.convId;
     _load();
     _loadPinned();
+    _loadDisappearing();
     _scrollCtrl.addListener(_onScroll);
     final rt = context.read<RealtimeClient>();
     _rt = rt;
@@ -324,7 +328,7 @@ class _ChatScreenState extends State<ChatScreen>
       if (e["convId"] != widget.convId) return;
       setState(() {
         _messages = _messages.map((m) => m.senderId == _myId && m.status != "READ"
-            ? Message(id: m.id, convId: m.convId, senderId: m.senderId, content: m.content, type: m.type, status: "READ", replyToId: m.replyToId, replyTo: m.replyTo, deletedAt: m.deletedAt, editedAt: m.editedAt, media: m.media, createdAt: m.createdAt, reactions: m.reactions, starred: m.starred)
+            ? Message(id: m.id, convId: m.convId, senderId: m.senderId, content: m.content, type: m.type, status: "READ", replyToId: m.replyToId, replyTo: m.replyTo, deletedAt: m.deletedAt, editedAt: m.editedAt, media: m.media, createdAt: m.createdAt, reactions: m.reactions, starred: m.starred, expiresAt: m.expiresAt)
             : m).toList();
       });
     } else if (type == "message_status") {
@@ -333,7 +337,7 @@ class _ChatScreenState extends State<ChatScreen>
       if (messageId == null || newStatus == null) return;
       setState(() {
         _messages = _messages.map((m) => m.id == messageId && _statusRank(newStatus) > _statusRank(m.status)
-            ? Message(id: m.id, convId: m.convId, senderId: m.senderId, content: m.content, type: m.type, status: newStatus, replyToId: m.replyToId, replyTo: m.replyTo, deletedAt: m.deletedAt, editedAt: m.editedAt, media: m.media, createdAt: m.createdAt, reactions: m.reactions, starred: m.starred)
+            ? Message(id: m.id, convId: m.convId, senderId: m.senderId, content: m.content, type: m.type, status: newStatus, replyToId: m.replyToId, replyTo: m.replyTo, deletedAt: m.deletedAt, editedAt: m.editedAt, media: m.media, createdAt: m.createdAt, reactions: m.reactions, starred: m.starred, expiresAt: m.expiresAt)
             : m).toList();
       });
     } else if (type == "message_deleted") {
@@ -386,6 +390,9 @@ class _ChatScreenState extends State<ChatScreen>
     } else if (type == "message_pinned") {
       if (e["convId"] != widget.convId) return;
       setState(() => _pinnedMessageId = e["messageId"] as String?);
+    } else if (type == "disappearing_updated") {
+      if (e["convId"] != widget.convId) return;
+      setState(() => _disappearingSeconds = (e["seconds"] as num?)?.toInt() ?? 0);
     }
   }
 
@@ -566,7 +573,7 @@ class _ChatScreenState extends State<ChatScreen>
         id: m.id, convId: m.convId, senderId: m.senderId, content: content,
         type: m.type, status: m.status, replyToId: m.replyToId, replyTo: m.replyTo,
         deletedAt: m.deletedAt, editedAt: editedAt, media: m.media,
-        createdAt: m.createdAt, reactions: m.reactions, starred: m.starred);
+        createdAt: m.createdAt, reactions: m.reactions, starred: m.starred, expiresAt: m.expiresAt);
 
   void _startEdit(Message m) {
     setState(() { _editing = m; _replyTo = null; });
@@ -617,6 +624,10 @@ class _ChatScreenState extends State<ChatScreen>
 
   Widget _timestampRow(Message m, bool mine, Color color) {
     return Row(mainAxisSize: MainAxisSize.min, children: [
+      if (m.expiresAt != null) ...[
+        Icon(Icons.timer_outlined, size: 12, color: color),
+        const SizedBox(width: 4),
+      ],
       if (m.starred) ...[
         Icon(Icons.star, size: 12, color: color),
         const SizedBox(width: 4),
@@ -1155,6 +1166,79 @@ class _ChatScreenState extends State<ChatScreen>
     return _time(dt.toLocal());
   }
 
+  Future<void> _loadDisappearing() async {
+    try {
+      final s = await context.read<ChatRepository>().getDisappearing(widget.convId);
+      if (mounted) setState(() => _disappearingSeconds = s);
+    } catch (_) {}
+  }
+
+  static const Map<int, String> _disappearingOptions = {
+    0: "Désactivé",
+    86400: "24 heures",
+    604800: "7 jours",
+    7776000: "90 jours",
+  };
+
+  String _disappearingLabel(int s) => _disappearingOptions[s] ?? "Personnalisé";
+
+  void _setDisappearing(int seconds) {
+    setState(() => _disappearingSeconds = seconds);
+    final rt = context.read<RealtimeClient>();
+    if (rt.connected) {
+      rt.setDisappearing(widget.convId, seconds);
+    } else {
+      context
+          .read<ChatRepository>()
+          .setDisappearing(widget.convId, seconds)
+          .catchError((_) {});
+    }
+  }
+
+  void _showDisappearingDialog() {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Padding(
+            padding: EdgeInsets.all(16),
+            child: Row(children: [
+              Icon(Icons.timer_outlined, size: 20),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text("Messages éphémères",
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              ),
+            ]),
+          ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Text(
+              "Les nouveaux messages disparaîtront après la durée choisie, pour tout le monde.",
+              style: TextStyle(fontSize: 13, color: Colors.black54),
+            ),
+          ),
+          const Divider(height: 1),
+          ..._disappearingOptions.entries.map((e) {
+            final selected = e.key == _disappearingSeconds;
+            return ListTile(
+              title: Text(e.value),
+              trailing: selected
+                  ? const Icon(Icons.check, color: AlanyaColors.terracotta)
+                  : null,
+              onTap: () {
+                Navigator.pop(ctx);
+                _setDisappearing(e.key);
+              },
+            );
+          }),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+  }
+
   Future<void> _loadPinned() async {
     try {
       final data = await context.read<ChatRepository>().getPinned(widget.convId);
@@ -1366,6 +1450,32 @@ class _ChatScreenState extends State<ChatScreen>
           IconButton(tooltip: "Appel vidéo", icon: const Icon(Icons.videocam), onPressed: () => _startCall("VIDEO")),
           IconButton(tooltip: "Appel audio", icon: const Icon(Icons.call), onPressed: () => _startCall("AUDIO")),
         ],
+        PopupMenuButton<String>(
+          tooltip: "Plus",
+          icon: const Icon(Icons.more_vert),
+          onSelected: (v) {
+            if (v == 'disappearing') _showDisappearingDialog();
+          },
+          itemBuilder: (_) => [
+            PopupMenuItem(
+              value: 'disappearing',
+              child: Row(children: [
+                Icon(
+                    _disappearingSeconds > 0
+                        ? Icons.timer
+                        : Icons.timer_outlined,
+                    size: 20,
+                    color: AlanyaColors.terracotta),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(_disappearingSeconds > 0
+                      ? "Éphémères · ${_disappearingLabel(_disappearingSeconds)}"
+                      : "Messages éphémères"),
+                ),
+              ]),
+            ),
+          ],
+        ),
       ],
     );
   }

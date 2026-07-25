@@ -210,6 +210,10 @@ class RealtimeClient extends ChangeNotifier {
   void pinMessage(String convId, String? messageId) => _send(
       {"type": "pin_message", "convId": convId, "messageId": messageId});
 
+  /// Règle le minuteur des messages éphémères (secondes, 0 = désactivé).
+  void setDisappearing(String convId, int seconds) => _send(
+      {"type": "set_disappearing", "convId": convId, "seconds": seconds});
+
   void forwardMessage(String messageId, List<String> targetConvIds) => _send({
         "type": "forward_message",
         "messageId": messageId,

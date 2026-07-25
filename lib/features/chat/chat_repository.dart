@@ -131,6 +131,18 @@ class ChatRepository {
     return Map<String, dynamic>.from(data as Map);
   }
 
+  /// Réglage courant des messages éphémères (durée en secondes, 0 = désactivé).
+  Future<int> getDisappearing(String convId) async {
+    final data = await _api.get("/api/conversations/$convId/disappearing");
+    return (data["disappearingSeconds"] as num?)?.toInt() ?? 0;
+  }
+
+  /// Règle le minuteur des messages éphémères — repli REST.
+  Future<void> setDisappearing(String convId, int seconds) async {
+    await _api.post(
+        "/api/conversations/$convId/disappearing", {"seconds": seconds});
+  }
+
   /// Message épinglé courant d'une conversation ({pinnedMessageId, message}).
   Future<Map<String, dynamic>> getPinned(String convId) async {
     final data = await _api.get("/api/conversations/$convId/pinned");
