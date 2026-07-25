@@ -114,6 +114,11 @@ class ChatRepository {
     await _api.delete("/api/conversations/$convId/members?userId=$userId");
   }
 
+  /// Change le rôle d'un membre : "ADMIN" (promouvoir) ou "MEMBER" (rétrograder).
+  Future<void> changeMemberRole(String convId, String userId, String role) async {
+    await _api.patch("/api/conversations/$convId/members", {"userId": userId, "role": role});
+  }
+
   /// Quitter un groupe.
   Future<void> leaveGroup(String convId) async {
     await _api.post("/api/conversations/$convId/leave", {});

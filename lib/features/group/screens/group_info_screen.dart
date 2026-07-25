@@ -267,6 +267,31 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     }
   }
 
+  Future<void> _changeMemberRole(Map<String, dynamic> member, String role) async {
+    final name = member['pseudo'] ?? member['publicNumber'] ?? 'Membre';
+    try {
+      await context
+          .read<ChatRepository>()
+          .changeMemberRole(widget.convId, member['id'] as String, role);
+      await _refreshMembers();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(role == 'ADMIN'
+                ? "$name est maintenant administrateur"
+                : "$name n'est plus administrateur"),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        final msg =
+            (e is ApiException) ? e.message : "Erreur lors du changement de rôle";
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      }
+    }
+  }
+
   // ===================== QUITTER LE GROUPE =====================
 
   Future<void> _leaveGroup() async {
@@ -534,7 +559,27 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                   _sendMessageTo(member);
                 },
               ),
-              if (_amAdmin)
+              if (_amAdmin) ...[
+                if ((member['role'] as String?) == 'ADMIN')
+                  ListTile(
+                    leading: const Icon(Icons.remove_moderator_outlined,
+                        color: AlanyaColors.chocolate),
+                    title: const Text("Retirer le rôle admin"),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _changeMemberRole(member, 'MEMBER');
+                    },
+                  )
+                else
+                  ListTile(
+                    leading: const Icon(Icons.shield_outlined,
+                        color: AlanyaColors.forest),
+                    title: const Text("Nommer administrateur"),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _changeMemberRole(member, 'ADMIN');
+                    },
+                  ),
                 ListTile(
                   leading: const Icon(Icons.remove_circle_outline, color: Colors.red),
                   title: const Text("Retirer du groupe",
@@ -544,6 +589,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                     _removeMember(member);
                   },
                 ),
+              ],
             ],
             if (isMe)
               ListTile(
