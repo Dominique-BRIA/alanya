@@ -27,8 +27,8 @@ class AuthedApi {
   Future<Map<String, dynamic>> patch(String path, Map<String, dynamic> body) =>
       _withAuth((token) => _api.patch(path, body, bearer: token));
 
-  Future<Map<String, dynamic>> delete(String path) =>
-      _withAuth((token) => _api.delete(path, bearer: token));
+  Future<Map<String, dynamic>> delete(String path, {Map<String, dynamic>? body}) =>
+      _withAuth((token) => _api.delete(path, bearer: token, body: body));
 
   Future<Map<String, dynamic>> uploadBytes(
     String path,

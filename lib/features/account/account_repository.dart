@@ -33,4 +33,9 @@ class AccountRepository {
       "newPassword": newPassword,
     });
   }
+
+  /// Supprime définitivement le compte (vérifie le mot de passe).
+  Future<void> deleteAccount(String password) async {
+    await _api.delete("/api/account", body: {"password": password});
+  }
 }
