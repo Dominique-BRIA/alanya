@@ -134,6 +134,10 @@ class _ChatScreenState extends State<ChatScreen>
   Message? _replyTo;
   Message? _editing; // message en cours d'édition (compose = mode édition)
 
+  // ── Sélection d'un message (interaction long-press façon WhatsApp) ──
+  String? _selectedMessageId;
+  OverlayEntry? _actionsOverlay;
+
   // ── Recherche dans la conversation ──
   bool _searchMode = false;
   final _searchCtrl = TextEditingController();
@@ -226,6 +230,7 @@ class _ChatScreenState extends State<ChatScreen>
     _scrollCtrl.dispose();
     _searchCtrl.dispose();
     _searchDebounce?.cancel();
+    _actionsOverlay?.remove();
     super.dispose();
   }
 
@@ -1004,6 +1009,54 @@ class _ChatScreenState extends State<ChatScreen>
     });
   }
 
+  String? _myReactionOn(Message m) {
+    for (final r in m.reactions) {
+      if (r.userId == _myId) return r.emoji;
+    }
+    return null;
+  }
+
+  // Appui long façon WhatsApp : sélectionne le message (header contextuel) et
+  // affiche une bulle de réactions flottante et animée au-dessus du message.
+  void _openMessageActions(Message m) {
+    if (m.isDeleted) {
+      _showMessageOptions(m); // message supprimé → menu minimal (repli)
+      return;
+    }
+    final ctx = _messageKeys[m.id]?.currentContext;
+    final box = ctx?.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) {
+      _showMessageOptions(m); // repli si on ne peut pas positionner la bulle
+      return;
+    }
+    final rect = box.localToGlobal(Offset.zero) & box.size;
+    _clearSelection();
+    setState(() => _selectedMessageId = m.id);
+    final overlay = OverlayEntry(
+      builder: (_) => _ReactionBarrier(
+        anchor: rect,
+        mine: m.senderId == _myId,
+        emojis: _reactionEmojis,
+        myEmoji: _myReactionOn(m),
+        onSelect: (e) {
+          _clearSelection();
+          _react(m, e);
+        },
+        onDismiss: _clearSelection,
+      ),
+    );
+    _actionsOverlay = overlay;
+    Overlay.of(context).insert(overlay);
+  }
+
+  void _clearSelection() {
+    _actionsOverlay?.remove();
+    _actionsOverlay = null;
+    if (mounted && _selectedMessageId != null) {
+      setState(() => _selectedMessageId = null);
+    }
+  }
+
   Widget _reactionPickerRow(Message m, BuildContext ctx) {
     final mine = m.reactions.where((r) => r.userId == _myId).toList();
     final myEmoji = mine.isNotEmpty ? mine.first.emoji : null;
@@ -1164,6 +1217,66 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
+  // Header CONTEXTUEL affiché quand un message est sélectionné (appui long).
+  // Icônes Material propres (jamais d'emoji) : Répondre, Transférer, Supprimer,
+  // + menu 3 points (Copier, Modifier). (Étoile/Épingler/Infos = lot suivant.)
+  PreferredSizeWidget _selectionAppBar(Message m) {
+    final mine = m.senderId == _myId;
+    final hasText = (m.content ?? '').isNotEmpty;
+    return AppBar(
+      backgroundColor: AlanyaColors.terracotta,
+      foregroundColor: Colors.white,
+      leading: IconButton(
+          tooltip: "Annuler", icon: const Icon(Icons.close), onPressed: _clearSelection),
+      title: const SizedBox.shrink(),
+      actions: [
+        IconButton(
+            tooltip: "Répondre",
+            icon: const Icon(Icons.reply),
+            onPressed: () { _clearSelection(); _setReplyTo(m); }),
+        IconButton(
+            tooltip: "Transférer",
+            icon: const Icon(Icons.forward),
+            onPressed: () { _clearSelection(); _forwardMessage(m); }),
+        IconButton(
+            tooltip: "Supprimer",
+            icon: const Icon(Icons.delete_outline),
+            onPressed: () { _clearSelection(); _deleteMessage(m); }),
+        PopupMenuButton<String>(
+          tooltip: "Plus",
+          icon: const Icon(Icons.more_vert),
+          onSelected: (v) {
+            _clearSelection();
+            if (v == 'copy' && m.content != null) {
+              Clipboard.setData(ClipboardData(text: m.content!));
+              showAppSnackBar(tr(context, 'copied'));
+            } else if (v == 'edit') {
+              _startEdit(m);
+            }
+          },
+          itemBuilder: (_) => [
+            if (hasText)
+              const PopupMenuItem(
+                  value: 'copy',
+                  child: Row(children: [
+                    Icon(Icons.copy, size: 20, color: AlanyaColors.chocolate),
+                    SizedBox(width: 12),
+                    Text("Copier"),
+                  ])),
+            if (mine && m.type == 'TEXT')
+              const PopupMenuItem(
+                  value: 'edit',
+                  child: Row(children: [
+                    Icon(Icons.edit_outlined, size: 20, color: AlanyaColors.forest),
+                    SizedBox(width: 12),
+                    Text("Modifier"),
+                  ])),
+          ],
+        ),
+      ],
+    );
+  }
+
   void _openAvatarViewer() { Navigator.of(context).push(MaterialPageRoute(builder: (_) => AvatarViewerScreen(name: widget.title, avatarUrl: widget.avatarUrl))); }
   void _openGroupInfo() {
     if (!widget.isGroup) return;
@@ -1186,7 +1299,11 @@ class _ChatScreenState extends State<ChatScreen>
     // l'ouverture de la conversation. Fallback sur _myId par sécurité.
     final myId = context.watch<AuthController>().user?.id ?? _myId;
     return Scaffold(
-      appBar: _searchMode ? _searchAppBar() : _whatsappAppBar(),
+      appBar: _searchMode
+          ? _searchAppBar()
+          : (_selectedMessageId != null && _findMessage(_selectedMessageId) != null
+              ? _selectionAppBar(_findMessage(_selectedMessageId)!)
+              : _whatsappAppBar()),
       body: MotifBackground(
         overlayOpacity: 0.85,
         child: Column(children: [
@@ -1219,7 +1336,7 @@ class _ChatScreenState extends State<ChatScreen>
     final isFile = !isMultiMedia && m.type == "FILE" && hasMedia;
     final isAudio = !isMultiMedia && m.type == "AUDIO" && hasMedia;
     final senderLabel = widget.isGroup && !mine ? (widget.memberNames[m.senderId] ?? "Membre") : null;
-    final isHighlighted = _highlightedMessageId == m.id;
+    final isHighlighted = _highlightedMessageId == m.id || _selectedMessageId == m.id;
     final isGrid = isMultiMedia; // 2+ médias → grille
 
     return Align(
@@ -1230,7 +1347,7 @@ class _ChatScreenState extends State<ChatScreen>
         _SwipeToReply(
           onReply: () => _setReplyTo(m),
           child: GestureDetector(
-            onLongPress: () => _showMessageOptions(m),
+            onLongPress: () => _openMessageActions(m),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 400),
               margin: const EdgeInsets.symmetric(vertical: 4),
@@ -1279,7 +1396,7 @@ class _ChatScreenState extends State<ChatScreen>
                         : isImage
                             ? ImageBubble(
                                 imageUrl: '$_baseUrl${m.media.first.url}', token: _token,
-                                onTap: () => _openImageViewer(m), onLongPress: () => _showMessageOptions(m),
+                                onTap: () => _openImageViewer(m), onLongPress: () => _openMessageActions(m),
                                 timestamp: _time(m.createdAt),
                                 statusWidget: mine ? _statusTicks(m.status, Colors.white) : null,
                                 isMe: mine,
@@ -1288,7 +1405,7 @@ class _ChatScreenState extends State<ChatScreen>
                                 ? VideoBubble(
                                     videoUrl: '$_baseUrl${m.media.first.url}', token: _token,
                                     duration: m.media.first.durationMs,
-                                    onTap: () => _openVideoViewer(m), onLongPress: () => _showMessageOptions(m),
+                                    onTap: () => _openVideoViewer(m), onLongPress: () => _openMessageActions(m),
                                     timestamp: _time(m.createdAt),
                                     statusWidget: mine ? _statusTicks(m.status, Colors.white) : null,
                                     isMe: mine,
@@ -1305,7 +1422,7 @@ class _ChatScreenState extends State<ChatScreen>
                                           final isPdf = media.mimeType == "application/pdf" || _ext(media.filename ?? "").toLowerCase() == "pdf";
                                           isPdf ? _openPdfViewer(m) : _openDocument(media);
                                         },
-                                        onLongPress: () => _showMessageOptions(m),
+                                        onLongPress: () => _openMessageActions(m),
                                         timestamp: _time(m.createdAt),
                                         statusWidget: mine ? _statusTicks(m.status, mine ? Colors.white70 : Colors.black45) : null,
                                         isMe: mine,
@@ -1595,5 +1712,132 @@ class _ForwardPickerState extends State<_ForwardPicker> {
       })),
       if (_selected.isNotEmpty) Padding(padding: const EdgeInsets.all(12), child: SizedBox(width: double.infinity, child: ElevatedButton.icon(style: ElevatedButton.styleFrom(backgroundColor: AlanyaColors.terracotta, foregroundColor: Colors.white), onPressed: () => Navigator.pop(context, _selected), icon: const Icon(Icons.send), label: Text(tr(context, 'send'))))),
     ]));
+  }
+}
+
+/// Overlay affiché lors de l'appui long sur un message : barrière transparente
+/// (tap = fermer) + bulle de réactions flottante et animée, positionnée
+/// au-dessus (ou au-dessous si le message est trop haut) du message ancré.
+class _ReactionBarrier extends StatefulWidget {
+  const _ReactionBarrier({
+    required this.anchor,
+    required this.mine,
+    required this.emojis,
+    required this.myEmoji,
+    required this.onSelect,
+    required this.onDismiss,
+  });
+
+  final Rect anchor;
+  final bool mine;
+  final List<String> emojis;
+  final String? myEmoji;
+  final void Function(String) onSelect;
+  final VoidCallback onDismiss;
+
+  @override
+  State<_ReactionBarrier> createState() => _ReactionBarrierState();
+}
+
+class _ReactionBarrierState extends State<_ReactionBarrier>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 220),
+  )..forward();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    const pillHeight = 56.0;
+    // Place la bulle au-dessus du message ; si pas de place (message trop haut),
+    // on la place au-dessous.
+    final minTop = media.padding.top + kToolbarHeight + 8;
+    final wantTop = widget.anchor.top - pillHeight - 8;
+    final showAbove = wantTop >= minTop;
+    final top = showAbove ? wantTop : widget.anchor.bottom + 8;
+
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return Stack(
+      children: [
+        // Barrière de fermeture (tap en dehors) — commence SOUS l'AppBar
+        // contextuelle pour ne pas bloquer ses boutons (Répondre, etc.).
+        Positioned(
+          top: media.padding.top + kToolbarHeight,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: widget.onDismiss,
+            child: const SizedBox.expand(),
+          ),
+        ),
+        Positioned(
+          top: top,
+          left: 12,
+          right: 12,
+          child: Align(
+            alignment:
+                widget.mine ? Alignment.centerRight : Alignment.centerLeft,
+            child: ScaleTransition(
+              scale: CurvedAnimation(parent: _c, curve: Curves.easeOutBack),
+              alignment:
+                  widget.mine ? Alignment.centerRight : Alignment.centerLeft,
+              child: FadeTransition(
+                opacity: _c,
+                child: Material(
+                  color: Colors.transparent,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: dark ? const Color(0xFF2A2520) : Colors.white,
+                      borderRadius: BorderRadius.circular(30),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.22),
+                          blurRadius: 16,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: widget.emojis.map((e) {
+                        final selected = e == widget.myEmoji;
+                        return InkWell(
+                          borderRadius: BorderRadius.circular(24),
+                          onTap: () => widget.onSelect(e),
+                          child: Container(
+                            margin:
+                                const EdgeInsets.symmetric(horizontal: 1),
+                            padding: const EdgeInsets.all(7),
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: selected
+                                  ? AlanyaColors.terracotta
+                                      .withValues(alpha: 0.18)
+                                  : Colors.transparent,
+                            ),
+                            child: Text(e, style: const TextStyle(fontSize: 24)),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 }
