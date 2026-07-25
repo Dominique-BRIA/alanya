@@ -31,6 +31,14 @@ class StatusRepository {
     await _api.post("/api/statuses/$statusId/view", {});
   }
 
+  /// Liste des personnes ayant vu mon statut ({userId, name, avatarUrl, viewedAt}).
+  Future<List<Map<String, dynamic>>> getViews(String statusId) async {
+    final data = await _api.get("/api/statuses/$statusId/views");
+    return ((data["views"] as List?) ?? [])
+        .map((v) => Map<String, dynamic>.from(v as Map))
+        .toList();
+  }
+
   Future<void> delete(String statusId) async {
     await _api.delete("/api/statuses/$statusId");
   }

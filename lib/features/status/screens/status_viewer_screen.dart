@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:video_player/video_player.dart';
 
 import '../../../core/api_client.dart';
 import '../../../core/token_storage.dart';
 import '../../../models/status.dart';
 import '../../../widgets/auth_network_image.dart';
+import '../../../widgets/avatar_circle.dart';
 import '../status_repository.dart';
 import 'create_status_screen.dart' show colorFromHex;
 
@@ -182,7 +184,12 @@ class _StatusViewerScreenState extends State<StatusViewerScreen> {
                                       ),
                               )
                             : s.type == "VIDEO" && s.mediaUrl != null
-                                ? _videoPlaceholder(s.mediaUrl!)
+                                ? (_token == null
+                                    ? const CircularProgressIndicator(
+                                        color: Colors.white)
+                                    : _StatusVideoPlayer(
+                                        key: ValueKey(s.id),
+                                        url: _mediaUrl(s.mediaUrl!)))
                                 : const Text(
                                     "[Média non pris en charge]",
                                     style: TextStyle(color: Colors.white70),
@@ -191,16 +198,23 @@ class _StatusViewerScreenState extends State<StatusViewerScreen> {
                 ),
               ),
               if (widget.isMine)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 16),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.visibility, color: Colors.white70, size: 18),
-                      const SizedBox(width: 6),
-                      Text("${s.viewsCount} vue(s)",
-                          style: const TextStyle(color: Colors.white70)),
-                    ],
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => _showViewers(s.id),
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 8, bottom: 16),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.visibility, color: Colors.white70, size: 18),
+                        const SizedBox(width: 6),
+                        Text("${s.viewsCount} vue(s)",
+                            style: const TextStyle(color: Colors.white70)),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.keyboard_arrow_up,
+                            color: Colors.white70, size: 18),
+                      ],
+                    ),
                   ),
                 ),
             ],
@@ -210,21 +224,76 @@ class _StatusViewerScreenState extends State<StatusViewerScreen> {
     );
   }
 
-  /// Placeholder pour la vidéo — l'app ouvre le lecteur système au tap.
-  /// (La lecture vidéo intégrée nécessiterait une dépendance supplémentaire ;
-  /// pour l'instant on propose un bouton de téléchargement/ouverture.)
-  Widget _videoPlaceholder(String mediaUrl) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const Icon(Icons.play_circle_fill, size: 72, color: Colors.white70),
-        const SizedBox(height: 12),
-        const Text(
-          "Vidéo",
-          style: TextStyle(color: Colors.white70, fontSize: 16),
-        ),
-      ],
+  // Feuille « Vu par » : liste des personnes ayant vu mon statut + horodatage.
+  void _showViewers(String statusId) {
+    final repo = context.read<StatusRepository>();
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => FutureBuilder<List<Map<String, dynamic>>>(
+        future: repo.getViews(statusId),
+        builder: (fctx, snap) {
+          if (snap.connectionState != ConnectionState.done) {
+            return const SizedBox(
+                height: 160, child: Center(child: CircularProgressIndicator()));
+          }
+          final views = snap.data ?? const [];
+          return SafeArea(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Padding(
+                padding: const EdgeInsets.all(14),
+                child: Row(children: [
+                  const Icon(Icons.visibility, size: 18),
+                  const SizedBox(width: 8),
+                  Text("Vu par ${views.length}",
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 16)),
+                ]),
+              ),
+              const Divider(height: 1),
+              if (views.isEmpty)
+                const Padding(
+                    padding: EdgeInsets.all(20),
+                    child: Text("Personne n'a encore vu ce statut.")),
+              ...views.map((v) {
+                final viewedStr = v["viewedAt"] as String?;
+                final when = viewedStr != null
+                    ? _viewedLabel(DateTime.tryParse(viewedStr))
+                    : "";
+                return ListTile(
+                  leading: AvatarCircle(
+                      name: v["name"] as String?,
+                      avatarUrl: v["avatarUrl"] as String?,
+                      radius: 18),
+                  title: Text((v["name"] as String?) ?? ""),
+                  trailing: Text(when,
+                      style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                );
+              }),
+              const SizedBox(height: 8),
+            ]),
+          );
+        },
+      ),
     );
+  }
+
+  /// Horodatage de visionnage : « maintenant », « il y a N min », « à 12h50 »
+  /// (aujourd'hui) ou « le JJ/MM à 12h50 ».
+  String _viewedLabel(DateTime? d) {
+    if (d == null) return "";
+    final local = d.toLocal();
+    final now = DateTime.now();
+    final diff = now.difference(local);
+    if (diff.inSeconds < 60) return "maintenant";
+    if (diff.inMinutes < 60) return "il y a ${diff.inMinutes} min";
+    final hh = local.hour.toString().padLeft(2, '0');
+    final mm = local.minute.toString().padLeft(2, '0');
+    final sameDay =
+        now.year == local.year && now.month == local.month && now.day == local.day;
+    if (sameDay) return "à ${hh}h$mm";
+    final dd = local.day.toString().padLeft(2, '0');
+    final mo = local.month.toString().padLeft(2, '0');
+    return "le $dd/$mo à ${hh}h$mm";
   }
 
   String _ago(DateTime d) {
@@ -233,5 +302,59 @@ class _StatusViewerScreenState extends State<StatusViewerScreen> {
     if (diff.inMinutes < 60) return "il y a ${diff.inMinutes} min";
     if (diff.inHours < 24) return "il y a ${diff.inHours} h";
     return "il y a ${diff.inDays} j";
+  }
+}
+
+/// Lecteur vidéo intégré pour les statuts (autoplay en boucle).
+class _StatusVideoPlayer extends StatefulWidget {
+  const _StatusVideoPlayer({super.key, required this.url});
+  final String url;
+
+  @override
+  State<_StatusVideoPlayer> createState() => _StatusVideoPlayerState();
+}
+
+class _StatusVideoPlayerState extends State<_StatusVideoPlayer> {
+  VideoPlayerController? _ctrl;
+  bool _error = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final c = VideoPlayerController.networkUrl(Uri.parse(widget.url));
+    _ctrl = c;
+    c.initialize().then((_) {
+      if (!mounted) return;
+      c.setLooping(true);
+      c.play();
+      setState(() {});
+    }).catchError((_) {
+      if (mounted) setState(() => _error = true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _ctrl?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_error) {
+      return const Text("Vidéo indisponible",
+          style: TextStyle(color: Colors.white70));
+    }
+    final c = _ctrl;
+    if (c == null || !c.value.isInitialized) {
+      return const CircularProgressIndicator(color: Colors.white);
+    }
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: AspectRatio(
+        aspectRatio: c.value.aspectRatio,
+        child: VideoPlayer(c),
+      ),
+    );
   }
 }
