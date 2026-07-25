@@ -96,7 +96,10 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
           : ListView(
               children: [
                 SwitchListTile(
-                  secondary: const Icon(Icons.done_all, color: AlanyaColors.forest),
+                  secondary: Icon(Icons.done_all,
+                      color: themed(context,
+                          light: AlanyaColors.forest,
+                          dark: AlanyaColors.indigoLight)),
                   title: const Text("Confirmations de lecture"),
                   subtitle: const Text(
                       "Si désactivé, tu n'envoies plus les coches bleues (et ne les vois plus non plus). Sans effet dans les groupes."),
@@ -108,19 +111,27 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
                 ),
                 const Divider(height: 1),
                 ListTile(
-                  leading: const Icon(Icons.visibility_outlined,
-                      color: AlanyaColors.terracotta),
+                  leading: Icon(Icons.visibility_outlined,
+                      color: themed(context,
+                          light: AlanyaColors.terracotta,
+                          dark: AlanyaColors.terracottaNuit)),
                   title: const Text("Vu à et en ligne"),
                   subtitle:
                       Text(_visibilityLabels[_lastSeenVisibility] ?? "Tout le monde"),
-                  trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+                  trailing: Icon(Icons.chevron_right,
+                      color: themed(context,
+                          light: Colors.grey, dark: AlanyaColors.craie2)),
                   onTap: _pickVisibility,
                 ),
-                const Padding(
-                  padding: EdgeInsets.all(16),
+                Padding(
+                  padding: const EdgeInsets.all(16),
                   child: Text(
                     "« Personne » masque ta présence à tes interlocuteurs.",
-                    style: TextStyle(fontSize: 12, color: AlanyaColors.grey500),
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: themed(context,
+                            light: AlanyaColors.grey500,
+                            dark: AlanyaColors.craie2)),
                   ),
                 ),
               ],

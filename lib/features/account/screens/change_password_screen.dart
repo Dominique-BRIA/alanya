@@ -96,14 +96,21 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
             onToggle: () => setState(() => _obscureNew = !_obscureNew),
           ),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             "Au moins 8 caractères.",
-            style: TextStyle(fontSize: 12, color: AlanyaColors.grey500),
+            style: TextStyle(
+                fontSize: 12,
+                color: themed(context,
+                    light: AlanyaColors.grey500, dark: AlanyaColors.craie2)),
           ),
           if (_error != null) ...[
             const SizedBox(height: 14),
             Text(_error!,
-                style: const TextStyle(color: AlanyaColors.error, fontSize: 13)),
+                style: TextStyle(
+                    color: themed(context,
+                        light: AlanyaColors.error,
+                        dark: AlanyaColors.erreurNuit),
+                    fontSize: 13)),
           ],
           const SizedBox(height: 28),
           ElevatedButton(

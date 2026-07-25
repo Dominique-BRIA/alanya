@@ -24,8 +24,10 @@ class _NotificationSettingsScreenState
       body: ListView(
         children: [
           SwitchListTile(
-            secondary: const Icon(Icons.chat_bubble_outline,
-                color: AlanyaColors.forest),
+            secondary: Icon(Icons.chat_bubble_outline,
+                color: themed(context,
+                    light: AlanyaColors.forest,
+                    dark: AlanyaColors.indigoLight)),
             title: const Text("Notifications de messages"),
             subtitle: const Text("Bandeau et notification à chaque message reçu"),
             value: _s.messagesOn,
@@ -35,8 +37,10 @@ class _NotificationSettingsScreenState
             },
           ),
           SwitchListTile(
-            secondary: const Icon(Icons.remove_red_eye_outlined,
-                color: AlanyaColors.forest),
+            secondary: Icon(Icons.remove_red_eye_outlined,
+                color: themed(context,
+                    light: AlanyaColors.forest,
+                    dark: AlanyaColors.indigoLight)),
             title: const Text("Aperçu du message"),
             subtitle: const Text(
                 "Afficher le contenu dans la notification (sinon « Nouveau message »)"),
@@ -60,11 +64,14 @@ class _NotificationSettingsScreenState
               setState(() {});
             },
           ),
-          const Padding(
-            padding: EdgeInsets.all(16),
+          Padding(
+            padding: const EdgeInsets.all(16),
             child: Text(
               "Le son et la vibration se règlent dans les paramètres de notification Android d'Alanya.",
-              style: TextStyle(fontSize: 12, color: AlanyaColors.grey500),
+              style: TextStyle(
+                  fontSize: 12,
+                  color: themed(context,
+                      light: AlanyaColors.grey500, dark: AlanyaColors.craie2)),
             ),
           ),
         ],

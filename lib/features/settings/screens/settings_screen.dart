@@ -107,8 +107,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               title: Text(user?.pseudo ?? "Utilisateur",
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               subtitle: Text("Numéro Alanya : ${user?.publicNumber ?? '—'}",
-                  style: TextStyle(fontSize: 13, color: AlanyaColors.grey500)),
-              trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+                  style: TextStyle(fontSize: 13, color: _muted)),
+              trailing: _chevron(),
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const ProfileScreen()),
               ),
@@ -119,27 +119,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _sectionHeader("Sécurité"),
           _settingsTile(
             icon: Icons.shield_outlined,
-            iconColor: AlanyaColors.forest,
+            iconColor: _positive,
             title: "Confidentialité",
             subtitle: "Confirmations de lecture, vu à / en ligne",
-            trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+            trailing: _chevron(),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const PrivacySettingsScreen()),
             ),
           ),
           _settingsTile(
             icon: Icons.lock_outline,
-            iconColor: AlanyaColors.terracotta,
+            iconColor: _accent,
             title: "Changer le mot de passe",
             subtitle: "Modifier ton mot de passe de connexion",
-            trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+            trailing: _chevron(),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const ChangePasswordScreen()),
             ),
           ),
           _settingsTile(
             icon: _biometricEnabled ? Icons.fingerprint : Icons.fingerprint_outlined,
-            iconColor: _biometricEnabled ? AlanyaColors.forest : AlanyaColors.grey400,
+            iconColor: _biometricEnabled ? _positive : _mutedIcon,
             title: "Verrouillage biométrique",
             subtitle: _loadingBiometric
                 ? "Chargement..."
@@ -154,8 +154,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
                       color: _biometricEnabled
-                          ? AlanyaColors.forest.withValues(alpha: 0.1)
-                          : AlanyaColors.grey200,
+                          ? _positive.withValues(alpha: 0.1)
+                          : _chipOffBg,
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
@@ -163,7 +163,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
-                        color: _biometricEnabled ? AlanyaColors.forest : AlanyaColors.grey500,
+                        color: _biometricEnabled ? _positive : _muted,
                       ),
                     ),
                   ),
@@ -174,17 +174,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
             iconColor: AlanyaColors.gold,
             title: "Messages favoris",
             subtitle: "Retrouver les messages mis en favori",
-            trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+            trailing: _chevron(),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const StarredMessagesScreen()),
             ),
           ),
           _settingsTile(
             icon: Icons.block,
-            iconColor: Colors.red.shade400,
+            iconColor:
+                themed(context, light: Colors.red.shade400, dark: AlanyaColors.erreurNuit),
             title: "Utilisateurs bloqués",
             subtitle: "Gérer les personnes bloquées",
-            trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+            trailing: _chevron(),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const BlockedUsersScreen()),
             ),
@@ -194,10 +195,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _sectionHeader("Préférences"),
           _settingsTile(
             icon: Icons.notifications_outlined,
-            iconColor: AlanyaColors.terracotta,
+            iconColor: _accent,
             title: "Notifications",
             subtitle: "Messages, appels, aperçu",
-            trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+            trailing: _chevron(),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const NotificationSettingsScreen()),
             ),
@@ -208,16 +209,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 : themeCtrl.mode == ThemeMode.light
                     ? Icons.light_mode
                     : Icons.brightness_auto,
-            iconColor: AlanyaColors.terracotta,
+            iconColor: _accent,
             title: "Thème",
             subtitle: ThemeController.label(themeCtrl.mode),
-            trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+            trailing: _chevron(),
             onTap: () => _showThemePicker(themeCtrl),
           ),
           _settingsTile(
             icon: _dataSaverEnabled ? Icons.data_saver_on : Icons.data_saver_off,
-            iconColor:
-                _dataSaverEnabled ? AlanyaColors.forest : AlanyaColors.grey400,
+            iconColor: _dataSaverEnabled ? _positive : _mutedIcon,
             title: "Économie de données",
             subtitle: _dataSaverEnabled
                 ? "Activé — les médias ne se téléchargent pas automatiquement"
@@ -226,8 +226,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
                 color: _dataSaverEnabled
-                    ? AlanyaColors.forest.withValues(alpha: 0.1)
-                    : AlanyaColors.grey200,
+                    ? _positive.withValues(alpha: 0.1)
+                    : _chipOffBg,
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(
@@ -235,9 +235,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
-                  color: _dataSaverEnabled
-                      ? AlanyaColors.forest
-                      : AlanyaColors.grey500,
+                  color: _dataSaverEnabled ? _positive : _muted,
                 ),
               ),
             ),
@@ -249,7 +247,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           _settingsTile(
             icon: Icons.language,
-            iconColor: AlanyaColors.forest,
+            iconColor: _positive,
             title: tr(context, 'language'),
             subtitle: _currentLanguageName(localeCtrl),
             trailing: DropdownButtonHideUnderline(
@@ -257,7 +255,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 value: LocaleController.supported.any((l) => l.code == localeCtrl.languageCode)
                     ? localeCtrl.languageCode
                     : 'fr',
-                icon: Icon(Icons.expand_more, color: AlanyaColors.grey400, size: 20),
+                icon: Icon(Icons.expand_more, color: _mutedIcon, size: 20),
                 items: LocaleController.supported.map((l) {
                   return DropdownMenuItem(
                     value: l.code,
@@ -275,18 +273,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _sectionHeader("Compte"),
           _settingsTile(
             icon: Icons.info_outline,
-            iconColor: AlanyaColors.grey500,
+            iconColor: _muted,
             title: "À propos d'Alanya",
             subtitle: "Version 1.0.0",
-            trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+            trailing: _chevron(),
             onTap: () => _showAbout(),
           ),
           _settingsTile(
             icon: Icons.delete_forever_outlined,
-            iconColor: AlanyaColors.error,
+            iconColor:
+                themed(context, light: AlanyaColors.error, dark: AlanyaColors.erreurNuit),
             title: "Supprimer mon compte",
             subtitle: "Effacer définitivement le compte et les données",
-            trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+            trailing: _chevron(),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const DeleteAccountScreen()),
             ),
@@ -308,17 +307,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           Navigator.pop(context);
                           context.read<AuthController>().logout();
                         },
-                        child: const Text("Déconnexion", style: TextStyle(color: Colors.red)),
+                        child: Text("Déconnexion", style: TextStyle(color: _danger)),
                       ),
                     ],
                   ),
                 );
               },
-              icon: const Icon(Icons.logout, color: Colors.red),
-              label: const Text("Se déconnecter", style: TextStyle(color: Colors.red)),
+              icon: Icon(Icons.logout, color: _danger),
+              label: Text("Se déconnecter", style: TextStyle(color: _danger)),
               style: OutlinedButton.styleFrom(
                 minimumSize: const Size(double.infinity, 48),
-                side: BorderSide(color: Colors.red.shade200),
+                side: BorderSide(
+                    color: themed(context,
+                        light: Colors.red.shade200,
+                        dark: AlanyaColors.erreurNuit.withValues(alpha: 0.35))),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
               ),
             ),
@@ -333,7 +335,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
       child: Text(title.toUpperCase(),
-          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AlanyaColors.grey500, letterSpacing: 1.2)),
+          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _muted, letterSpacing: 1.2)),
     );
   }
 
@@ -341,13 +343,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: themed(context, light: Colors.white, dark: AlanyaColors.nuit2),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AlanyaColors.grey200, width: 0.5),
+        border: Border.all(
+            color: themed(context,
+                light: AlanyaColors.grey200, dark: AlanyaColors.ligne),
+            width: 0.5),
       ),
       child: child,
     );
   }
+
+  // --- Couleurs theme-aware (le mode clair reste inchangé) ---
+  Color get _muted =>
+      themed(context, light: AlanyaColors.grey500, dark: AlanyaColors.craie2);
+  Color get _mutedIcon =>
+      themed(context, light: AlanyaColors.grey400, dark: AlanyaColors.craie2);
+  Color get _accent => themed(context,
+      light: AlanyaColors.terracotta, dark: AlanyaColors.terracottaNuit);
+  Color get _positive => themed(context,
+      light: AlanyaColors.forest, dark: AlanyaColors.indigoLight);
+  Color get _danger =>
+      themed(context, light: Colors.red, dark: AlanyaColors.erreurNuit);
+  // Fond de la pastille ON/OFF à l'état éteint.
+  Color get _chipOffBg =>
+      themed(context, light: AlanyaColors.grey200, dark: AlanyaColors.nuit3);
+
+  Widget _chevron() => Icon(Icons.chevron_right,
+      color: themed(context, light: Colors.grey, dark: AlanyaColors.craie2));
 
   Widget _settingsTile({
     required IconData icon,
@@ -371,7 +394,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         title: Text(title, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 15)),
         subtitle: subtitle != null
-            ? Text(subtitle, style: TextStyle(fontSize: 12, color: AlanyaColors.grey500))
+            ? Text(subtitle, style: TextStyle(fontSize: 12, color: _muted))
             : null,
         trailing: trailing,
         onTap: onTap,
@@ -404,12 +427,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     : m == ThemeMode.light
                         ? Icons.light_mode
                         : Icons.brightness_auto,
-                color: AlanyaColors.terracotta,
+                color: _accent,
               ),
               title: Text(ThemeController.label(m)),
-              trailing: selected
-                  ? const Icon(Icons.check, color: AlanyaColors.terracotta)
-                  : null,
+              trailing: selected ? Icon(Icons.check, color: _accent) : null,
               onTap: () {
                 Navigator.pop(ctx);
                 themeCtrl.setMode(m);
@@ -447,11 +468,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 16),
             const Text("ALANYA", style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: 4)),
             const SizedBox(height: 4),
-            Text("Version 1.0.0", style: TextStyle(color: AlanyaColors.grey500)),
+            Text("Version 1.0.0", style: TextStyle(color: _muted)),
             const SizedBox(height: 8),
-            Text("Application de messagerie instantanée", style: TextStyle(color: AlanyaColors.grey500, fontSize: 13)),
+            Text("Application de messagerie instantanée", style: TextStyle(color: _muted, fontSize: 13)),
             const SizedBox(height: 16),
-            Text("© 2026 Dominique BRIA", style: TextStyle(color: AlanyaColors.grey400, fontSize: 11)),
+            Text("© 2026 Dominique BRIA", style: TextStyle(color: _mutedIcon, fontSize: 11)),
           ],
         ),
         actions: [

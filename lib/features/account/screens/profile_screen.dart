@@ -223,16 +223,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: themed(context, light: Colors.white, dark: AlanyaColors.nuit2),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AlanyaColors.grey200, width: 0.5),
+        border: Border.all(
+            color: themed(context,
+                light: AlanyaColors.grey200, dark: AlanyaColors.ligne),
+            width: 0.5),
       ),
       child: Column(children: [
         Row(children: [
-          const Icon(Icons.tag, color: AlanyaColors.terracotta),
+          Icon(Icons.tag,
+              color: themed(context,
+                  light: AlanyaColors.terracotta,
+                  dark: AlanyaColors.terracottaNuit)),
           const SizedBox(width: 10),
           Text(tr(context, 'alanya_number_label'),
-              style: const TextStyle(color: Colors.black54)),
+              style: TextStyle(
+                  color: themed(context,
+                      light: Colors.black54, dark: AlanyaColors.craie2))),
           Text(number, style: const TextStyle(fontWeight: FontWeight.bold)),
         ]),
         const SizedBox(height: 8),
@@ -240,7 +248,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const Icon(Icons.email_outlined, color: AlanyaColors.gold),
           const SizedBox(width: 10),
           Expanded(
-              child: Text(email, style: const TextStyle(color: Colors.black87))),
+              child: Text(email,
+                  style: TextStyle(
+                      color: themed(context,
+                          light: Colors.black87, dark: AlanyaColors.craie)))),
         ]),
       ]),
     );
@@ -283,8 +294,14 @@ class _AvatarWithEdit extends StatelessWidget {
             height: 100,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: AlanyaColors.terracotta,
-              border: Border.all(color: Colors.white, width: 3),
+              color: themed(context,
+                  light: AlanyaColors.terracotta,
+                  dark: AlanyaColors.terracottaNuit),
+              // Le liseré reprend le fond de page (crème en clair, nuit en Nuit).
+              border: Border.all(
+                  color: themed(context,
+                      light: Colors.white, dark: AlanyaColors.nuit),
+                  width: 3),
               boxShadow: [
                 BoxShadow(
                   color: Colors.black.withValues(alpha: 0.15),
@@ -321,8 +338,13 @@ class _AvatarWithEdit extends StatelessWidget {
               padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: AlanyaColors.forest,
-                border: Border.all(color: Colors.white, width: 2),
+                color: themed(context,
+                    light: AlanyaColors.forest,
+                    dark: AlanyaColors.terracottaNuit),
+                border: Border.all(
+                    color: themed(context,
+                        light: Colors.white, dark: AlanyaColors.nuit),
+                    width: 2),
               ),
               child: uploading
                   ? const SizedBox(

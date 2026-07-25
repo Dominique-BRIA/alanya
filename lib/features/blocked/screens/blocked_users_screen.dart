@@ -124,12 +124,14 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.block, size: 64, color: AlanyaColors.gold),
-                SizedBox(height: 12),
+                const Icon(Icons.block, size: 64, color: AlanyaColors.gold),
+                const SizedBox(height: 12),
                 Text(
                   "Aucun utilisateur bloqué.\nLes personnes bloquées ne pourront plus vous envoyer de messages ni vous appeler.",
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.black54),
+                  style: TextStyle(
+                      color: themed(context,
+                          light: Colors.black54, dark: AlanyaColors.craie2)),
                 ),
               ],
             ),
@@ -151,17 +153,24 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
         name: b.displayName,
         avatarUrl: b.avatarUrl,
         radius: 22,
-        backgroundColor: Colors.grey.shade400,
+        backgroundColor: themed(context,
+            light: Colors.grey.shade400, dark: AlanyaColors.nuit3),
       ),
       title: Text(b.displayName,
           style: const TextStyle(fontWeight: FontWeight.w600)),
       subtitle: Text(
         "Bloqué le ${b.dateBlock.day.toString().padLeft(2, '0')}/${b.dateBlock.month.toString().padLeft(2, '0')}/${b.dateBlock.year}",
-        style: const TextStyle(fontSize: 12, color: Colors.black54),
+        style: TextStyle(
+            fontSize: 12,
+            color: themed(context,
+                light: Colors.black54, dark: AlanyaColors.craie2)),
       ),
       trailing: TextButton(
         onPressed: () => _unblock(b),
-        child: const Text("Débloquer", style: TextStyle(color: Colors.red)),
+        child: Text("Débloquer",
+            style: TextStyle(
+                color: themed(context,
+                    light: Colors.red, dark: AlanyaColors.erreurNuit))),
       ),
     );
   }
