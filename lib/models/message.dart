@@ -27,6 +27,19 @@ class MessageMedia {
       );
 }
 
+/// Réaction emoji d'un utilisateur sur un message.
+class MessageReaction {
+  final String userId;
+  final String emoji;
+
+  MessageReaction({required this.userId, required this.emoji});
+
+  factory MessageReaction.fromJson(Map<String, dynamic> j) => MessageReaction(
+        userId: j["userId"] as String,
+        emoji: j["emoji"] as String,
+      );
+}
+
 /// Snapshot d'un message cité (réponse). Permet d'afficher l'aperçu du message
 /// original côté UI sans dépendre du chargement local de l'historique.
 class ReplyPreview {
@@ -65,6 +78,9 @@ class Message {
   final DateTime? deletedAt; // non-null = message supprimé pour tous
   final List<MessageMedia> media;
   final DateTime createdAt;
+  // Réactions emoji — mutable : mises à jour en place à la réception des events
+  // WS `reaction` (puis setState côté écran). Brutes { userId, emoji }.
+  List<MessageReaction> reactions;
 
   Message({
     required this.id,
@@ -78,6 +94,7 @@ class Message {
     required this.createdAt,
     this.deletedAt,
     this.replyTo,
+    this.reactions = const [],
   });
 
   /// Vrai si le message a été supprimé pour tout le monde.
@@ -99,5 +116,8 @@ class Message {
             .map((m) => MessageMedia.fromJson(m as Map<String, dynamic>))
             .toList(),
         createdAt: DateTime.parse(j["createdAt"] as String),
+        reactions: ((j["reactions"] as List?) ?? [])
+            .map((r) => MessageReaction.fromJson(r as Map<String, dynamic>))
+            .toList(),
       );
 }

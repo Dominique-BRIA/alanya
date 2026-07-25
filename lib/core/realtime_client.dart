@@ -190,6 +190,15 @@ class RealtimeClient extends ChangeNotifier {
 
   void markRead(String convId) => _send({"type": "read", "convId": convId});
 
+  /// Réaction emoji sur un message. `emoji` vide = retrait ; renvoyer le même
+  /// emoji que l'actuel = bascule (retrait) côté serveur.
+  void sendReaction(String convId, String messageId, String emoji) => _send({
+        "type": "reaction",
+        "convId": convId,
+        "messageId": messageId,
+        "emoji": emoji,
+      });
+
   void deleteMessage(String messageId, {String scope = "me"}) =>
       _send({"type": "delete_message", "messageId": messageId, "scope": scope});
 

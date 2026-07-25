@@ -241,7 +241,7 @@ class _ChatScreenState extends State<ChatScreen>
       if (e["convId"] != widget.convId) return;
       setState(() {
         _messages = _messages.map((m) => m.senderId == _myId && m.status != "READ"
-            ? Message(id: m.id, convId: m.convId, senderId: m.senderId, content: m.content, type: m.type, status: "READ", replyToId: m.replyToId, replyTo: m.replyTo, deletedAt: m.deletedAt, media: m.media, createdAt: m.createdAt)
+            ? Message(id: m.id, convId: m.convId, senderId: m.senderId, content: m.content, type: m.type, status: "READ", replyToId: m.replyToId, replyTo: m.replyTo, deletedAt: m.deletedAt, media: m.media, createdAt: m.createdAt, reactions: m.reactions)
             : m).toList();
       });
     } else if (type == "message_status") {
@@ -250,7 +250,7 @@ class _ChatScreenState extends State<ChatScreen>
       if (messageId == null || newStatus == null) return;
       setState(() {
         _messages = _messages.map((m) => m.id == messageId && _statusRank(newStatus) > _statusRank(m.status)
-            ? Message(id: m.id, convId: m.convId, senderId: m.senderId, content: m.content, type: m.type, status: newStatus, replyToId: m.replyToId, replyTo: m.replyTo, deletedAt: m.deletedAt, media: m.media, createdAt: m.createdAt)
+            ? Message(id: m.id, convId: m.convId, senderId: m.senderId, content: m.content, type: m.type, status: newStatus, replyToId: m.replyToId, replyTo: m.replyTo, deletedAt: m.deletedAt, media: m.media, createdAt: m.createdAt, reactions: m.reactions)
             : m).toList();
       });
     } else if (type == "message_deleted") {
@@ -269,6 +269,23 @@ class _ChatScreenState extends State<ChatScreen>
     } else if (type == "recording") {
       if (e["convId"] != widget.convId) return;
       _onPeerActivity(recording: e["isRecording"] == true, uid: e["userId"] as String?);
+    } else if (type == "reaction") {
+      if (e["convId"] != widget.convId) return;
+      final messageId = e["messageId"] as String?;
+      final uid = e["userId"] as String?;
+      final emoji = e["emoji"] as String?; // null = retrait
+      if (messageId == null || uid == null) return;
+      final idx = _messages.indexWhere((m) => m.id == messageId);
+      if (idx < 0) return;
+      setState(() {
+        final m = _messages[idx];
+        final updated =
+            m.reactions.where((r) => r.userId != uid).toList();
+        if (emoji != null && emoji.isNotEmpty) {
+          updated.add(MessageReaction(userId: uid, emoji: emoji));
+        }
+        m.reactions = updated;
+      });
     }
   }
 
@@ -838,8 +855,55 @@ class _ChatScreenState extends State<ChatScreen>
     } on ApiException catch (e) { _showError(e.message); } catch (_) { _showError(tr(context, 'send_failed')); }
   }
 
+  static const List<String> _reactionEmojis = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
+
+  /// Envoie une réaction et l'applique en optimiste (le serveur rediffuse aussi).
+  void _react(Message m, String emoji) {
+    context.read<RealtimeClient>().sendReaction(widget.convId, m.id, emoji);
+    setState(() {
+      final mine = m.reactions.where((r) => r.userId == _myId).toList();
+      final had = mine.isNotEmpty && mine.first.emoji == emoji;
+      final updated = m.reactions.where((r) => r.userId != _myId).toList();
+      if (!had) updated.add(MessageReaction(userId: _myId, emoji: emoji));
+      m.reactions = updated;
+    });
+  }
+
+  Widget _reactionPickerRow(Message m, BuildContext ctx) {
+    final mine = m.reactions.where((r) => r.userId == _myId).toList();
+    final myEmoji = mine.isNotEmpty ? mine.first.emoji : null;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: _reactionEmojis.map((e) {
+          final selected = e == myEmoji;
+          return InkWell(
+            borderRadius: BorderRadius.circular(24),
+            onTap: () {
+              Navigator.pop(ctx);
+              _react(m, e);
+            },
+            child: Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: selected
+                    ? AlanyaColors.terracotta.withValues(alpha: 0.18)
+                    : Colors.transparent,
+              ),
+              child: Text(e, style: const TextStyle(fontSize: 26)),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
   void _showMessageOptions(Message m) {
     showModalBottomSheet(context: context, builder: (ctx) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
+      if (!m.isDeleted) _reactionPickerRow(m, ctx),
+      if (!m.isDeleted) const Divider(height: 1),
       if (!m.isDeleted) ...[
         ListTile(leading: const Icon(Icons.reply, color: AlanyaColors.terracotta), title: Text(tr(context, 'reply')), onTap: () { Navigator.pop(ctx); _setReplyTo(m); }),
         ListTile(leading: const Icon(Icons.forward, color: AlanyaColors.forest), title: Text(tr(context, 'forward')), onTap: () { Navigator.pop(ctx); _forwardMessage(m); }),
@@ -1068,7 +1132,55 @@ class _ChatScreenState extends State<ChatScreen>
             ),
           ),
         ),
+        if (m.reactions.isNotEmpty) _reactionsChips(m, mine),
       ]),
+    );
+  }
+
+  /// Pastilles de réactions sous la bulle : agrège par emoji (emoji + compteur),
+  /// met en évidence la mienne. Toucher une pastille bascule ma réaction.
+  Widget _reactionsChips(Message m, bool mine) {
+    final Map<String, int> counts = {};
+    String? myEmoji;
+    for (final r in m.reactions) {
+      counts[r.emoji] = (counts[r.emoji] ?? 0) + 1;
+      if (r.userId == _myId) myEmoji = r.emoji;
+    }
+    return Padding(
+      padding: EdgeInsets.only(top: 1, bottom: 3, left: mine ? 0 : 6, right: mine ? 6 : 0),
+      child: Wrap(
+        spacing: 4,
+        children: counts.entries.map((e) {
+          final isMine = e.key == myEmoji;
+          return GestureDetector(
+            onTap: () => _react(m, e.key),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: isMine
+                    ? AlanyaColors.terracotta.withValues(alpha: 0.15)
+                    : Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                    color: isMine
+                        ? AlanyaColors.terracotta.withValues(alpha: 0.5)
+                        : AlanyaColors.sand),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Text(e.key, style: const TextStyle(fontSize: 13)),
+                if (e.value > 1) ...[
+                  const SizedBox(width: 3),
+                  Text("${e.value}",
+                      style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: AlanyaColors.grey700)),
+                ],
+              ]),
+            ),
+          );
+        }).toList(),
+      ),
     );
   }
 
