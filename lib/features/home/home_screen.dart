@@ -1010,6 +1010,7 @@ class _AiTabState extends State<_AiTab> {
   final _inputCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
   List<AiMessage> _messages = [];
+  String? _threadId; // conversation courante ; null = nouvelle conversation
   bool _loading = true;
   bool _sending = false;
 
@@ -1026,11 +1027,49 @@ class _AiTabState extends State<_AiTab> {
     super.dispose();
   }
 
+  /// Ouvre la conversation la plus récente (ou une nouvelle si aucune).
   Future<void> _load() async {
     try {
-      final msgs = await context.read<AiRepository>().history();
+      final repo = context.read<AiRepository>();
+      final threads = await repo.threads();
+      if (!mounted) return;
+      if (threads.isEmpty) {
+        setState(() {
+          _threadId = null;
+          _messages = [];
+          _loading = false;
+        });
+        return;
+      }
+      final tid = threads.first.id;
+      final msgs = await repo.threadMessages(tid);
       if (!mounted) return;
       setState(() {
+        _threadId = tid;
+        _messages = msgs;
+        _loading = false;
+      });
+      _scrollToBottom();
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  void _newConversation() {
+    setState(() {
+      _threadId = null;
+      _messages = [];
+    });
+    _inputCtrl.clear();
+  }
+
+  Future<void> _openThread(String threadId) async {
+    setState(() => _loading = true);
+    try {
+      final msgs = await context.read<AiRepository>().threadMessages(threadId);
+      if (!mounted) return;
+      setState(() {
+        _threadId = threadId;
         _messages = msgs;
         _loading = false;
       });
@@ -1057,9 +1096,12 @@ class _AiTabState extends State<_AiTab> {
     _inputCtrl.clear();
     _scrollToBottom();
     try {
-      final reply = await repo.send(text);
+      final (tid, reply) = await repo.send(text, threadId: _threadId);
       if (!mounted) return;
-      setState(() => _messages = [..._messages, reply]);
+      setState(() {
+        _threadId = tid;
+        _messages = [..._messages, reply];
+      });
       _scrollToBottom();
     } catch (_) {
       if (mounted) {
@@ -1096,11 +1138,21 @@ class _AiTabState extends State<_AiTab> {
               children: [
                 const Icon(Icons.auto_awesome, color: AlanyaColors.terracotta),
                 const SizedBox(width: 8),
-                Expanded(
+                const Expanded(
                   child: Text(
                     "Assistant Alanya",
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
+                ),
+                IconButton(
+                  tooltip: "Mes conversations",
+                  icon: const Icon(Icons.forum_outlined, color: AlanyaColors.chocolate),
+                  onPressed: _showThreads,
+                ),
+                IconButton(
+                  tooltip: "Nouvelle conversation",
+                  icon: const Icon(Icons.add_comment_outlined, color: AlanyaColors.forest),
+                  onPressed: _newConversation,
                 ),
                 IconButton(
                   tooltip: "Partager la conversation",
@@ -1108,7 +1160,7 @@ class _AiTabState extends State<_AiTab> {
                   onPressed: _messages.isEmpty ? null : _shareConversation,
                 ),
                 IconButton(
-                  tooltip: "Effacer la conversation",
+                  tooltip: "Supprimer cette conversation",
                   icon: const Icon(Icons.delete_outline, color: Colors.red),
                   onPressed: _messages.isEmpty ? null : _clearConversation,
                 ),
@@ -1153,23 +1205,28 @@ class _AiTabState extends State<_AiTab> {
     );
   }
 
-  /// Efface toute la conversation IA (après confirmation).
+  /// Supprime la conversation IA courante (après confirmation).
   Future<void> _clearConversation() async {
+    final tid = _threadId;
+    if (tid == null) {
+      _newConversation();
+      return;
+    }
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text("Effacer la conversation ?"),
-        content: const Text("Tous les échanges avec l'assistant seront supprimés."),
+        title: const Text("Supprimer cette conversation ?"),
+        content: const Text("Les échanges de cette conversation seront supprimés."),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Annuler")),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text("Effacer")),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text("Supprimer")),
         ],
       ),
     );
     if (ok != true) return;
     try {
-      await context.read<AiRepository>().clearHistory();
-      if (mounted) setState(() => _messages = []);
+      await context.read<AiRepository>().deleteThread(tid);
+      if (mounted) _newConversation();
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1177,6 +1234,81 @@ class _AiTabState extends State<_AiTab> {
         );
       }
     }
+  }
+
+  /// Feuille listant les conversations IA (ouvrir / nouvelle / supprimer).
+  void _showThreads() {
+    final repo = context.read<AiRepository>();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.6,
+        maxChildSize: 0.9,
+        builder: (_, scroll) => Column(
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(14),
+              child: Text("Mes conversations",
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: FutureBuilder<List<AiThreadSummary>>(
+                future: repo.threads(),
+                builder: (fctx, snap) {
+                  if (snap.connectionState != ConnectionState.done) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  final threads = snap.data ?? const [];
+                  if (threads.isEmpty) {
+                    return const Center(
+                        child: Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Text("Aucune conversation. Pose une question !"),
+                    ));
+                  }
+                  return ListView.separated(
+                    controller: scroll,
+                    itemCount: threads.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (_, i) {
+                      final t = threads[i];
+                      return ListTile(
+                        leading: const Icon(Icons.chat_bubble_outline,
+                            color: AlanyaColors.terracotta),
+                        title: Text(t.title,
+                            maxLines: 1, overflow: TextOverflow.ellipsis),
+                        subtitle: t.lastMessage != null
+                            ? Text(t.lastMessage!,
+                                maxLines: 1, overflow: TextOverflow.ellipsis)
+                            : null,
+                        trailing: IconButton(
+                          icon: const Icon(Icons.delete_outline,
+                              color: Colors.red, size: 20),
+                          onPressed: () async {
+                            try {
+                              await repo.deleteThread(t.id);
+                            } catch (_) {}
+                            if (ctx.mounted) Navigator.pop(ctx);
+                            if (_threadId == t.id) _newConversation();
+                          },
+                        ),
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _openThread(t.id);
+                        },
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   /// Partage la conversation (copie le texte dans le presse-papier).
