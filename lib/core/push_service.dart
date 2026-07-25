@@ -25,6 +25,11 @@ class PushService {
 
   static final navigatorKey = GlobalKey<NavigatorState>();
 
+  /// Branché par la couche appel (CallListener) : reçoit l'action tapée sur la
+  /// notification d'appel — 'call_accept' | 'call_reject' — avec le callId.
+  /// Passe par un hook pour éviter un import core → features.
+  static void Function(String actionId, String? callId)? onCallAction;
+
   final _localPlugin = FlutterLocalNotificationsPlugin();
   bool _initialized = false;
 
@@ -250,6 +255,7 @@ class PushService {
           importance: Importance.high,
           priority: Priority.high,
           icon: '@mipmap/ic_launcher',
+          color: Color(0xFFB85C38),
           sound: RawResourceAndroidNotificationSound("notification"),
           playSound: true,
         ),
@@ -264,12 +270,19 @@ class PushService {
   }
 
   void _onLocalNotificationTap(NotificationResponse response) {
+    final actionId = response.actionId;
+    Map<String, dynamic>? data;
     if (response.payload != null) {
       try {
-        final data = jsonDecode(response.payload!) as Map<String, dynamic>;
-        _navigateFromPayload(data);
+        data = jsonDecode(response.payload!) as Map<String, dynamic>;
       } catch (_) {}
     }
+    // Boutons Répondre / Refuser d'une notification d'appel.
+    if (actionId == 'call_accept' || actionId == 'call_reject') {
+      onCallAction?.call(actionId!, data?['callId']?.toString());
+      return;
+    }
+    if (data != null) _navigateFromPayload(data);
   }
 
   void _navigateFromPayload(Map<String, dynamic> data) {
@@ -297,6 +310,7 @@ class PushService {
           importance: Importance.high,
           priority: Priority.high,
           icon: '@mipmap/ic_launcher',
+          color: Color(0xFFB85C38),
           sound: RawResourceAndroidNotificationSound("notification"),
           playSound: true,
         ),
@@ -383,9 +397,18 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
           icon: '@mipmap/ic_launcher',
           sound: RawResourceAndroidNotificationSound("notification"),
           playSound: true,
+          actions: <AndroidNotificationAction>[
+            AndroidNotificationAction('call_reject', 'Refuser',
+                titleColor: Color(0xFFC62828), cancelNotification: true),
+            AndroidNotificationAction('call_accept', 'Répondre',
+                titleColor: Color(0xFF2D6A4F),
+                showsUserInterface: true,
+                cancelNotification: true),
+          ],
         ),
         iOS: DarwinNotificationDetails(),
       ),
+      payload: jsonEncode(data),
     );
   }
 }
