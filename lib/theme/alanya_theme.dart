@@ -37,6 +37,18 @@ class AlanyaColors {
   static const Color gold       = Color(0xFFD4A574);
   static const Color goldLight  = Color(0xFFF0D5B8);
 
+  // --- Thème NUIT (mode sombre — système visuel Alanya) ---
+  static const Color nuit        = Color(0xFF0B0B18); // fond page
+  static const Color nuit2       = Color(0xFF14142A); // surface / cartes
+  static const Color nuit3       = Color(0xFF1E1E3D); // surface élevée
+  static const Color indigo      = Color(0xFF3B3B7A); // accent indigo
+  static const Color indigoLight = Color(0xFF7C7CD8);
+  static const Color terracottaNuit      = Color(0xFFC56A42); // accent terre cuite (nuit)
+  static const Color terracottaNuitLight = Color(0xFFE29A74);
+  static const Color braise      = Color(0xFFA33F2E); // rouge braise (destructif/raccrocher)
+  static const Color craie       = Color(0xFFEDE7DF); // texte principal
+  static const Color craie2      = Color(0xFF9A96AC); // texte secondaire
+
   // --- Neutres chauds ---
   static const Color ink        = Color(0xFF1A1210);
   static const Color inkLight   = Color(0xFF3D322C);
@@ -368,32 +380,33 @@ class AlanyaTheme {
   // DARK THEME
   // ---------------------------------------------------------------------------
   static ThemeData get dark {
-    const darkBg = Color(0xFF121010);
-    const darkSurface = Color(0xFF1E1B18);
-    const darkSurfaceHigh = Color(0xFF2A2520);
+    // Système visuel « Nuit » : base indigo-nuit, accents terre cuite + indigo.
+    const darkBg = AlanyaColors.nuit;         // #0B0B18
+    const darkSurface = AlanyaColors.nuit2;    // #14142A
+    const darkSurfaceHigh = AlanyaColors.nuit3; // #1E1E3D
 
     final colorScheme = ColorScheme.dark(
-      primary: AlanyaColors.terracottaLight,
-      onPrimary: AlanyaColors.terracottaDark,
-      primaryContainer: AlanyaColors.terracottaDark,
-      onPrimaryContainer: AlanyaColors.terracottaLight,
-      secondary: AlanyaColors.forestLight,
-      onSecondary: AlanyaColors.forestDark,
-      secondaryContainer: AlanyaColors.forestDark,
-      onSecondaryContainer: AlanyaColors.forestLight,
-      tertiary: AlanyaColors.goldLight,
-      onTertiary: AlanyaColors.ink,
+      primary: AlanyaColors.terracottaNuit,
+      onPrimary: Colors.white,
+      primaryContainer: AlanyaColors.braise,
+      onPrimaryContainer: AlanyaColors.craie,
+      secondary: AlanyaColors.indigoLight,
+      onSecondary: Colors.white,
+      secondaryContainer: AlanyaColors.indigo,
+      onSecondaryContainer: AlanyaColors.craie,
+      tertiary: AlanyaColors.terracottaNuitLight,
+      onTertiary: AlanyaColors.nuit,
       surface: darkSurface,
-      onSurface: const Color(0xFFE8E0D8),
-      onSurfaceVariant: const Color(0xFFB0A090),
-      surfaceContainerLowest: const Color(0xFF0E0C0A),
+      onSurface: AlanyaColors.craie,
+      onSurfaceVariant: AlanyaColors.craie2,
+      surfaceContainerLowest: AlanyaColors.nuit,
       surfaceContainerLow: darkSurface,
       surfaceContainer: darkSurfaceHigh,
-      surfaceContainerHigh: const Color(0xFF352F28),
-      surfaceContainerHighest: const Color(0xFF403830),
-      outline: const Color(0xFF403830),
-      outlineVariant: const Color(0xFF2A2520),
-      error: const Color(0xFFEF5350),
+      surfaceContainerHigh: darkSurfaceHigh,
+      surfaceContainerHighest: const Color(0xFF272750),
+      outline: const Color(0xFF2E2E52),
+      outlineVariant: const Color(0xFF222242),
+      error: const Color(0xFFEF6B60),
       onError: Colors.white,
       brightness: Brightness.dark,
     );
@@ -406,8 +419,8 @@ class AlanyaTheme {
       textTheme: _buildTextTheme(Brightness.dark),
 
       appBarTheme: AppBarTheme(
-        backgroundColor: darkBg,
-        foregroundColor: const Color(0xFFE8E0D8),
+        backgroundColor: darkSurface,
+        foregroundColor: AlanyaColors.craie,
         elevation: 0,
         scrolledUnderElevation: 0.5,
         centerTitle: false,
@@ -415,7 +428,7 @@ class AlanyaTheme {
           fontFamily: 'Inter',
           fontSize: 20,
           fontWeight: FontWeight.w700,
-          color: Color(0xFFE8E0D8),
+          color: AlanyaColors.craie,
           letterSpacing: -0.3,
         ),
         systemOverlayStyle: const SystemUiOverlayStyle(
@@ -425,51 +438,51 @@ class AlanyaTheme {
       ),
 
       navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: darkBg,
+        backgroundColor: darkSurface,
         elevation: 0,
         height: 68,
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-        indicatorColor: AlanyaColors.terracottaLight.withValues(alpha: 0.15),
+        indicatorColor: AlanyaColors.terracottaNuit.withValues(alpha: 0.20),
         iconTheme: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) {
-            return const IconThemeData(color: AlanyaColors.terracottaLight, size: 24);
+            return const IconThemeData(color: AlanyaColors.terracottaNuitLight, size: 24);
           }
-          return const IconThemeData(color: Color(0xFF6B5A4A), size: 24);
+          return const IconThemeData(color: AlanyaColors.craie2, size: 24);
         }),
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) {
             return const TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.w600,
-              color: AlanyaColors.terracottaLight,
+              color: AlanyaColors.terracottaNuitLight,
             );
           }
           return const TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.w500,
-            color: Color(0xFF6B5A4A),
+            color: AlanyaColors.craie2,
           );
         }),
       ),
 
       cardTheme: CardThemeData(
-        color: darkSurface,
+        color: darkSurfaceHigh,
         elevation: 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
-          side: const BorderSide(color: Color(0xFF2A2520), width: 0.5),
+          side: const BorderSide(color: Color(0xFF272750), width: 0.5),
         ),
       ),
 
       dividerTheme: const DividerThemeData(
-        color: Color(0xFF2A2520),
+        color: Color(0xFF222242),
         thickness: 0.5,
       ),
 
       snackBarTheme: SnackBarThemeData(
-        backgroundColor: const Color(0xFF2A2520),
+        backgroundColor: darkSurfaceHigh,
         contentTextStyle: const TextStyle(
-          color: Color(0xFFE8E0D8),
+          color: AlanyaColors.craie,
           fontFamily: 'Inter',
         ),
         behavior: SnackBarBehavior.floating,
@@ -482,31 +495,31 @@ class AlanyaTheme {
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
         showDragHandle: true,
-        dragHandleColor: Color(0xFF403830),
+        dragHandleColor: AlanyaColors.craie2,
       ),
 
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: darkSurfaceHigh,
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-        hintStyle: const TextStyle(color: Color(0xFF6B5A4A)),
+        hintStyle: const TextStyle(color: AlanyaColors.craie2),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: Color(0xFF2A2520)),
+          borderSide: const BorderSide(color: Color(0xFF272750)),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: Color(0xFF2A2520)),
+          borderSide: const BorderSide(color: Color(0xFF272750)),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: AlanyaColors.terracottaLight, width: 1.5),
+          borderSide: const BorderSide(color: AlanyaColors.terracottaNuit, width: 1.5),
         ),
       ),
 
       floatingActionButtonTheme: const FloatingActionButtonThemeData(
-        backgroundColor: AlanyaColors.terracottaLight,
-        foregroundColor: AlanyaColors.terracottaDark,
+        backgroundColor: AlanyaColors.terracottaNuit,
+        foregroundColor: Colors.white,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.all(Radius.circular(16)),
         ),
@@ -520,10 +533,10 @@ class AlanyaTheme {
   static TextTheme _buildTextTheme(Brightness brightness) {
     final Color bodyColor = brightness == Brightness.light
         ? AlanyaColors.ink
-        : const Color(0xFFE8E0D8);
+        : AlanyaColors.craie;
     final Color mutedColor = brightness == Brightness.light
         ? AlanyaColors.grey500
-        : const Color(0xFF8C7A68);
+        : AlanyaColors.craie2;
 
     return TextTheme(
       // Display

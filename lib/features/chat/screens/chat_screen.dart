@@ -111,6 +111,17 @@ class _ChatScreenState extends State<ChatScreen>
       return null;
     }
   }
+  // Couleurs theme-aware (mode Nuit).
+  bool get _dark => Theme.of(context).brightness == Brightness.dark;
+  Color get _appBarBg => _dark ? AlanyaColors.nuit2 : AlanyaColors.terracotta;
+  Color get _onAppBar => _dark ? AlanyaColors.craie : Colors.white;
+  Color get _composerBg => _dark ? AlanyaColors.nuit2 : AlanyaColors.cream;
+  Color get _sentBubbleColor =>
+      _dark ? AlanyaColors.terracottaNuit : AlanyaColors.terracotta;
+  Color get _recvBubbleColor => _dark ? AlanyaColors.nuit3 : Colors.white;
+  Color _bubbleTextColor(bool mine) =>
+      mine ? Colors.white : (_dark ? AlanyaColors.craie : AlanyaColors.ink);
+
   String? _token;
   String _baseUrl = "";
   bool _uploading = false;
@@ -765,7 +776,7 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Widget _replyPreviewTextOnly(Message m, bool mine, dynamic snapshot, Message? original, String senderName) {
-    final onColor = mine ? Colors.white : AlanyaColors.ink;
+    final onColor = _bubbleTextColor(mine);
     final barColor = mine ? Colors.white70 : AlanyaColors.terracotta;
     final previewText = _replyPreviewText(original, snapshot);
     return Container(
@@ -1287,7 +1298,7 @@ class _ChatScreenState extends State<ChatScreen>
     }
     final preview = pm == null ? "Appuyez pour voir" : _pinnedPreviewText(pm);
     return Material(
-      color: AlanyaColors.cream,
+      color: _composerBg,
       child: InkWell(
         onTap: () => _scrollToMessage(id),
         child: Container(
@@ -1413,7 +1424,7 @@ class _ChatScreenState extends State<ChatScreen>
   // ══════════════════════════════════════════════
   PreferredSizeWidget _whatsappAppBar() {
     return AppBar(
-      backgroundColor: AlanyaColors.terracotta, foregroundColor: Colors.white, leadingWidth: 40, titleSpacing: 0,
+      backgroundColor: _appBarBg, foregroundColor: _onAppBar, leadingWidth: 40, titleSpacing: 0,
       title: InkWell(
         onTap: widget.isGroup ? _openGroupInfo : _openContactInfo,
         child: Row(children: [
@@ -1486,8 +1497,8 @@ class _ChatScreenState extends State<ChatScreen>
     final pos = total == 0 ? 0 : _searchIndex + 1;
     final hasQuery = _searchCtrl.text.trim().isNotEmpty;
     return AppBar(
-      backgroundColor: AlanyaColors.terracotta,
-      foregroundColor: Colors.white,
+      backgroundColor: _appBarBg,
+      foregroundColor: _onAppBar,
       titleSpacing: 0,
       leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: _closeSearch),
       title: TextField(
@@ -1541,8 +1552,8 @@ class _ChatScreenState extends State<ChatScreen>
     final mine = m.senderId == _myId;
     final hasText = (m.content ?? '').isNotEmpty;
     return AppBar(
-      backgroundColor: AlanyaColors.terracotta,
-      foregroundColor: Colors.white,
+      backgroundColor: _appBarBg,
+      foregroundColor: _onAppBar,
       leading: IconButton(
           tooltip: "Annuler", icon: const Icon(Icons.close), onPressed: _clearSelection),
       title: const SizedBox.shrink(),
@@ -1728,7 +1739,7 @@ class _ChatScreenState extends State<ChatScreen>
               padding: (isImage || isVideo || isGrid) ? const EdgeInsets.all(3) : const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               constraints: const BoxConstraints(maxWidth: 280),
               decoration: BoxDecoration(
-                color: isHighlighted ? AlanyaColors.gold.withValues(alpha: 0.3) : (mine ? AlanyaColors.terracotta : Colors.white),
+                color: isHighlighted ? AlanyaColors.gold.withValues(alpha: 0.3) : (mine ? _sentBubbleColor : _recvBubbleColor),
                 borderRadius: BorderRadius.circular(14),
                 border: mine ? null : Border.all(color: isHighlighted ? AlanyaColors.gold : AlanyaColors.sand),
               ),
@@ -1895,7 +1906,7 @@ class _ChatScreenState extends State<ChatScreen>
   Widget _textBubble(Message m, bool mine) {
     final translated = _translations[m.id];
     final isTranslating = _translating.contains(m.id);
-    final onTextColor = mine ? Colors.white : AlanyaColors.ink;
+    final onTextColor = _bubbleTextColor(mine);
     final onSubColor = mine ? Colors.white70 : Colors.black45;
     return GestureDetector(
       onTap: m.type == 'TEXT' && (m.content ?? '').isNotEmpty ? () => _translateMessage(m) : null,

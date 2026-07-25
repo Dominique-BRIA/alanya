@@ -11,17 +11,24 @@ class MotifBackground extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    // Mode nuit : motif « doux » (déjà sombre et subtil) + voile léger nuit.
+    // Mode clair : motif terre cuite + voile crème.
+    final asset =
+        dark ? "assets/images/motif_nuit_doux.png" : "assets/images/motif_bg.png";
+    final veil = dark ? AlanyaColors.nuit : AlanyaColors.cream;
+    final veilOpacity = dark ? 0.55 : overlayOpacity;
     return Stack(
       children: [
         Positioned.fill(
           child: Image.asset(
-            "assets/images/motif_bg.png",
+            asset,
             repeat: ImageRepeat.repeat,
-            errorBuilder: (_, __, ___) => const ColoredBox(color: AlanyaColors.cream),
+            errorBuilder: (_, __, ___) => ColoredBox(color: veil),
           ),
         ),
         Positioned.fill(
-          child: ColoredBox(color: AlanyaColors.cream.withValues(alpha: overlayOpacity)),
+          child: ColoredBox(color: veil.withValues(alpha: veilOpacity)),
         ),
         child,
       ],
