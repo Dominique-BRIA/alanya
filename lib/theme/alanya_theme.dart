@@ -48,6 +48,8 @@ class AlanyaColors {
   static const Color braise      = Color(0xFFA33F2E); // rouge braise (destructif/raccrocher)
   static const Color craie       = Color(0xFFEDE7DF); // texte principal
   static const Color craie2      = Color(0xFF9A96AC); // texte secondaire
+  static const Color ligne       = Color(0x247C7CD8); // filets : indigo translucide
+  static const Color erreurNuit  = Color(0xFFEF6B60); // destructif lisible sur nuit
 
   // --- Neutres chauds ---
   static const Color ink        = Color(0xFF1A1210);
@@ -91,6 +93,20 @@ class AlanyaColors {
     Color(0xFFE8A317),
   ];
 }
+
+// ---------------------------------------------------------------------------
+// SÉLECTEUR CLAIR / NUIT
+// ---------------------------------------------------------------------------
+/// Renvoie [dark] en mode Nuit, [light] sinon.
+///
+/// Le chantier « mode sombre » ne doit RIEN changer au mode clair : à chaque
+/// appel on reconduit la couleur claire d'origine telle quelle et on n'ajoute
+/// que sa variante Nuit. Ne pas remplacer une couleur claire en dur par un
+/// jeton du colorScheme : les valeurs ne coïncident pas toujours
+/// (ex. surface = warmWhite ≠ Colors.white, onSurfaceVariant = grey600 ≠ black54).
+Color themed(BuildContext context,
+        {required Color light, required Color dark}) =>
+    Theme.of(context).brightness == Brightness.dark ? dark : light;
 
 // ---------------------------------------------------------------------------
 // LIGHT THEME
@@ -406,8 +422,8 @@ class AlanyaTheme {
       surfaceContainerHighest: const Color(0xFF272750),
       outline: const Color(0xFF2E2E52),
       // « ligne » du modèle : indigo clair très translucide, jamais un gris.
-      outlineVariant: AlanyaColors.indigoLight.withValues(alpha: 0.14),
-      error: const Color(0xFFEF6B60),
+      outlineVariant: AlanyaColors.ligne,
+      error: AlanyaColors.erreurNuit,
       onError: Colors.white,
       brightness: Brightness.dark,
     );
@@ -475,8 +491,8 @@ class AlanyaTheme {
         ),
       ),
 
-      dividerTheme: DividerThemeData(
-        color: AlanyaColors.indigoLight.withValues(alpha: 0.14),
+      dividerTheme: const DividerThemeData(
+        color: AlanyaColors.ligne,
         thickness: 0.5,
       ),
 

@@ -16,19 +16,18 @@ class AlanyaNavBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final cs = theme.colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       child: Container(
         height: 64,
         decoration: BoxDecoration(
-          // Modèle Nuit : barre d'onglets en nuit-2, cernée d'un filet indigo.
-          color: cs.surface,
+          // Nuit : barre d'onglets en nuit-2, cernée d'un filet indigo.
+          color: themed(context, light: Colors.white, dark: AlanyaColors.nuit2),
           borderRadius: BorderRadius.circular(20),
-          border: isDark ? Border.all(color: cs.outlineVariant, width: 0.5) : null,
+          border:
+              isDark ? Border.all(color: AlanyaColors.ligne, width: 0.5) : null,
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: isDark ? 0.45 : 0.08),
@@ -89,11 +88,11 @@ class _NavTileState extends State<_NavTile> {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
     final activeColor = widget.isDark
         ? AlanyaColors.terracottaNuitLight
         : AlanyaColors.terracotta;
-    final inactiveColor = cs.onSurfaceVariant;
+    final inactiveColor =
+        widget.isDark ? AlanyaColors.craie2 : AlanyaColors.grey400;
     final hoverColor = widget.isDark
         ? Colors.white.withValues(alpha: 0.04)
         : AlanyaColors.grey100;

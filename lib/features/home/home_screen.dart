@@ -360,7 +360,10 @@ class _ConversationsTabState extends State<_ConversationsTab>
   @override
   Widget build(BuildContext context) {
     final user = context.watch<AuthController>().user;
-    final cs = Theme.of(context).colorScheme;
+    final searchIconColor =
+        themed(context, light: AlanyaColors.grey400, dark: AlanyaColors.craie2);
+    final searchBorder =
+        themed(context, light: AlanyaColors.grey200, dark: AlanyaColors.ligne);
 
     // Mode sélection : AppBar dédiée
     if (isSelecting) {
@@ -394,9 +397,13 @@ class _ConversationsTabState extends State<_ConversationsTab>
               margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: cs.surface,
+                color: themed(context,
+                    light: Colors.white, dark: AlanyaColors.nuit2),
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: cs.outlineVariant, width: 0.5),
+                border: Border.all(
+                    color: themed(context,
+                        light: AlanyaColors.grey200, dark: AlanyaColors.ligne),
+                    width: 0.5),
               ),
               child: Row(
                 children: [
@@ -422,7 +429,11 @@ class _ConversationsTabState extends State<_ConversationsTab>
                         Text(user.pseudo ?? "Moi",
                             style: const TextStyle(fontWeight: FontWeight.bold)),
                         Text("Numéro Alanya : ${user.publicNumber}",
-                            style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13)),
+                            style: TextStyle(
+                                color: themed(context,
+                                    light: Colors.black54,
+                                    dark: AlanyaColors.craie2),
+                                fontSize: 13)),
                       ],
                     ),
                   ),
@@ -437,10 +448,10 @@ class _ConversationsTabState extends State<_ConversationsTab>
               onChanged: (v) => setState(() => _searchQuery = v.trim().toLowerCase()),
               decoration: InputDecoration(
                 hintText: "Rechercher une discussion…",
-                prefixIcon: Icon(Icons.search, color: cs.onSurfaceVariant, size: 20),
+                prefixIcon: Icon(Icons.search, color: searchIconColor, size: 20),
                 suffixIcon: _searchQuery.isNotEmpty
                     ? IconButton(
-                        icon: Icon(Icons.close, color: cs.onSurfaceVariant, size: 18),
+                        icon: Icon(Icons.close, color: searchIconColor, size: 18),
                         onPressed: () {
                           _searchCtrl.clear();
                           setState(() => _searchQuery = '');
@@ -449,18 +460,23 @@ class _ConversationsTabState extends State<_ConversationsTab>
                     : null,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 filled: true,
-                fillColor: cs.surface,
+                fillColor: themed(context,
+                    light: Colors.white, dark: AlanyaColors.nuit2),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(color: cs.outlineVariant, width: 0.5),
+                  borderSide: BorderSide(color: searchBorder, width: 0.5),
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(color: cs.outlineVariant, width: 0.5),
+                  borderSide: BorderSide(color: searchBorder, width: 0.5),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(color: cs.primary, width: 1),
+                  borderSide: BorderSide(
+                      color: themed(context,
+                          light: AlanyaColors.terracotta,
+                          dark: AlanyaColors.terracottaNuit),
+                      width: 1),
                 ),
               ),
               style: const TextStyle(fontSize: 14),
@@ -478,9 +494,17 @@ class _ConversationsTabState extends State<_ConversationsTab>
   }
 
   Widget _buildList() {
-    final cs = Theme.of(context).colorScheme;
+    final muted =
+        themed(context, light: Colors.black54, dark: AlanyaColors.craie2);
+    final muted2 = themed(context,
+        light: AlanyaColors.grey500, dark: AlanyaColors.craie2);
     if (_convs == null && !_error) {
-      return Center(child: CircularProgressIndicator(color: cs.primary));
+      return Center(
+        child: CircularProgressIndicator(
+          color: themed(context,
+              light: AlanyaColors.terracotta, dark: AlanyaColors.terracottaNuit),
+        ),
+      );
     }
     if (_error) {
       return ListView(children: const [
@@ -498,7 +522,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
             child: Text(
               "Aucune discussion.\nAppuie sur le bouton en bas pour accéder à tes contacts et démarrer une discussion.",
               textAlign: TextAlign.center,
-              style: TextStyle(color: cs.onSurfaceVariant),
+              style: TextStyle(color: muted),
             ),
           ),
         ),
@@ -528,11 +552,14 @@ class _ConversationsTabState extends State<_ConversationsTab>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.search_off, size: 48, color: cs.outline),
+              Icon(Icons.search_off,
+                  size: 48,
+                  color: themed(context,
+                      light: AlanyaColors.grey300, dark: AlanyaColors.craie2)),
               const SizedBox(height: 12),
               Text(
                 "Aucun résultat pour \"$_searchQuery\"",
-                style: TextStyle(color: cs.onSurfaceVariant),
+                style: TextStyle(color: muted2),
               ),
             ],
           ),
@@ -548,13 +575,12 @@ class _ConversationsTabState extends State<_ConversationsTab>
         // Bouton "Conversations archivées" style WhatsApp
         if (archivedCount > 0 && _searchQuery.isEmpty)
           ListTile(
-            leading: Icon(Icons.archive_outlined,
-                color: cs.onSurfaceVariant, size: 24),
+            leading: Icon(Icons.archive_outlined, color: muted2, size: 24),
             title: Text(
               "Conversations archivées",
               style: TextStyle(
                 fontWeight: FontWeight.w500,
-                color: cs.onSurfaceVariant,
+                color: muted2,
                 fontSize: 15,
               ),
             ),
@@ -584,9 +610,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
   }
 
   Widget _tile(Conversation c) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    final isDark = theme.brightness == Brightness.dark;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final last = c.lastMessage;
     final preview = last == null
         ? "—"
@@ -632,7 +656,9 @@ class _ConversationsTabState extends State<_ConversationsTab>
           if (c.isPinned)
             Padding(
               padding: const EdgeInsets.only(left: 4),
-              child: Icon(Icons.push_pin, size: 14, color: cs.onSurfaceVariant),
+              child: Icon(Icons.push_pin,
+                  size: 14,
+                  color: isDark ? AlanyaColors.craie2 : AlanyaColors.grey400),
             ),
         ],
       ),
@@ -655,7 +681,6 @@ class _ConversationsTabState extends State<_ConversationsTab>
                       style: TextStyle(
                         color: isDark ? const Color(0xFF140A06) : Colors.white,
                         fontSize: 12,
-                        fontWeight: FontWeight.w600,
                       )),
                 )
               : null),
@@ -761,7 +786,10 @@ class _ConversationsTabState extends State<_ConversationsTab>
     if (_archivedConvs == null || _archivedConvs!.isEmpty) return;
 
     final repo = context.read<ChatRepository>();
-    final cs = Theme.of(context).colorScheme;
+    final handle =
+        themed(context, light: AlanyaColors.grey300, dark: AlanyaColors.craie2);
+    final muted2 = themed(context,
+        light: AlanyaColors.grey500, dark: AlanyaColors.craie2);
 
     await showModalBottomSheet(
       context: context,
@@ -781,7 +809,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
               width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color: cs.outline,
+                color: handle,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -794,7 +822,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
                           TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   const Spacer(),
                   Text("${_archivedConvs!.length}",
-                      style: TextStyle(color: cs.onSurfaceVariant)),
+                      style: TextStyle(color: muted2)),
                 ],
               ),
             ),
@@ -819,8 +847,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
                       c.lastMessage?.content ?? "—",
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          fontSize: 12, color: cs.onSurfaceVariant),
+                      style: TextStyle(fontSize: 12, color: muted2),
                     ),
                     trailing: TextButton(
                       onPressed: () async {
@@ -919,7 +946,8 @@ class _StatusTabState extends State<_StatusTab> {
   Widget build(BuildContext context) {
     final me = _feed?.me;
     final others = _feed?.others ?? [];
-    final cs = Theme.of(context).colorScheme;
+    final muted =
+        themed(context, light: Colors.black54, dark: AlanyaColors.craie2);
     return MotifBackground(
       overlayOpacity: 0.92,
       plainInDark: true,
@@ -937,7 +965,8 @@ class _StatusTabState extends State<_StatusTab> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
                 child: Text("Récents",
-                    style: TextStyle(color: cs.onSurfaceVariant, fontWeight: FontWeight.bold)),
+                    style: TextStyle(
+                        color: muted, fontWeight: FontWeight.bold)),
               ),
               ...others.map((g) => _statusTile(g, isMine: false)),
             ] else if (!_error && _feed != null && me == null)
@@ -947,7 +976,7 @@ class _StatusTabState extends State<_StatusTab> {
                   child: Text(
                     "Aucun statut pour le moment.\nPublie le tien avec le bouton +.",
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: cs.onSurfaceVariant),
+                    style: TextStyle(color: muted),
                   ),
                 ),
               ),
@@ -981,8 +1010,10 @@ class _StatusTabState extends State<_StatusTab> {
                     ? AlanyaColors.terracottaNuit
                     : AlanyaColors.forest,
                 shape: BoxShape.circle,
-                border:
-                    Border.all(color: theme.scaffoldBackgroundColor, width: 2),
+                border: Border.all(
+                    color: themed(context,
+                        light: Colors.white, dark: AlanyaColors.nuit),
+                    width: 2),
               ),
               child: const Icon(Icons.add, color: Colors.white, size: 12),
             ),
@@ -994,7 +1025,10 @@ class _StatusTabState extends State<_StatusTab> {
       onTap: has ? () => _openViewer(me!, isMine: true) : _openCreate,
       trailing: has
           ? IconButton(
-              icon: Icon(Icons.camera_alt, color: theme.colorScheme.primary),
+              icon: Icon(Icons.camera_alt,
+                  color: theme.brightness == Brightness.dark
+                      ? AlanyaColors.terracottaNuit
+                      : AlanyaColors.terracotta),
               onPressed: _openCreate,
             )
           : null,
@@ -1002,18 +1036,17 @@ class _StatusTabState extends State<_StatusTab> {
   }
 
   Widget _statusTile(StatusGroup g, {required bool isMine}) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    final unviewedRing = theme.brightness == Brightness.dark
-        ? AlanyaColors.terracottaNuit
-        : AlanyaColors.forest;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final unviewedRing =
+        isDark ? AlanyaColors.terracottaNuit : AlanyaColors.forest;
+    final viewedRing = isDark ? AlanyaColors.ligne : AlanyaColors.sand;
     return ListTile(
       leading: Container(
         padding: const EdgeInsets.all(2),
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           border: Border.all(
-            color: g.hasUnviewed ? unviewedRing : cs.outlineVariant,
+            color: g.hasUnviewed ? unviewedRing : viewedRing,
             width: 2.5,
           ),
         ),
@@ -1159,7 +1192,13 @@ class _AiTabState extends State<_AiTab> {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // Nuit : les bruns/verts du mode clair deviennent illisibles sur le nuit.
+    final accent =
+        isDark ? AlanyaColors.terracottaNuit : AlanyaColors.terracotta;
+    final neutral = isDark ? AlanyaColors.craie2 : AlanyaColors.chocolate;
+    final green = isDark ? AlanyaColors.indigoLight : AlanyaColors.forest;
+    final danger = isDark ? AlanyaColors.erreurNuit : Colors.red;
     return MotifBackground(
       overlayOpacity: 0.9,
       child: Column(
@@ -1169,7 +1208,7 @@ class _AiTabState extends State<_AiTab> {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             child: Row(
               children: [
-                Icon(Icons.auto_awesome, color: cs.primary),
+                Icon(Icons.auto_awesome, color: accent),
                 const SizedBox(width: 8),
                 const Expanded(
                   child: Text(
@@ -1179,22 +1218,22 @@ class _AiTabState extends State<_AiTab> {
                 ),
                 IconButton(
                   tooltip: "Mes conversations",
-                  icon: Icon(Icons.forum_outlined, color: cs.onSurfaceVariant),
+                  icon: Icon(Icons.forum_outlined, color: neutral),
                   onPressed: _showThreads,
                 ),
                 IconButton(
                   tooltip: "Nouvelle conversation",
-                  icon: Icon(Icons.add_comment_outlined, color: cs.secondary),
+                  icon: Icon(Icons.add_comment_outlined, color: green),
                   onPressed: _newConversation,
                 ),
                 IconButton(
                   tooltip: "Partager la conversation",
-                  icon: Icon(Icons.share_outlined, color: cs.onSurfaceVariant),
+                  icon: Icon(Icons.share_outlined, color: neutral),
                   onPressed: _messages.isEmpty ? null : _shareConversation,
                 ),
                 IconButton(
                   tooltip: "Supprimer cette conversation",
-                  icon: Icon(Icons.delete_outline, color: cs.error),
+                  icon: Icon(Icons.delete_outline, color: danger),
                   onPressed: _messages.isEmpty ? null : _clearConversation,
                 ),
               ],
@@ -1202,7 +1241,7 @@ class _AiTabState extends State<_AiTab> {
           ),
           Expanded(
             child: _loading
-                ? Center(child: CircularProgressIndicator(color: cs.primary))
+                ? Center(child: CircularProgressIndicator(color: accent))
                 : (_messages.isEmpty
                     ? Center(
                         child: Padding(
@@ -1214,7 +1253,10 @@ class _AiTabState extends State<_AiTab> {
                               const SizedBox(height: 12),
                               Text("Pose-moi une question pour commencer.",
                                   textAlign: TextAlign.center,
-                                  style: TextStyle(color: cs.onSurfaceVariant)),
+                                  style: TextStyle(
+                                      color: isDark
+                                          ? AlanyaColors.craie2
+                                          : Colors.black54)),
                             ],
                           ),
                         ),
@@ -1359,7 +1401,7 @@ class _AiTabState extends State<_AiTab> {
   }
 
   Widget _bubble(String text, bool mine, {bool typing = false, AiMessage? msg}) {
-    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return GestureDetector(
       onLongPress: msg == null ? null : () => _showAiMessageOptions(msg),
       child: Align(
@@ -1369,14 +1411,27 @@ class _AiTabState extends State<_AiTab> {
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           constraints: const BoxConstraints(maxWidth: 300),
           decoration: BoxDecoration(
-            color: mine ? cs.primary : cs.surface,
+            // Nuit : envoyé = indigo (identité), reçu = nuit-3.
+            color: mine
+                ? (isDark ? AlanyaColors.indigo : AlanyaColors.terracotta)
+                : (isDark ? AlanyaColors.nuit3 : Colors.white),
             borderRadius: BorderRadius.circular(14),
-            border: mine ? null : Border.all(color: cs.outlineVariant),
+            border: mine
+                ? null
+                : Border.all(
+                    color: isDark ? AlanyaColors.ligne : AlanyaColors.sand),
           ),
           child: typing
               ? Text("L'assistant écrit…",
-                  style: TextStyle(color: cs.onSurfaceVariant, fontStyle: FontStyle.italic))
-              : Text(text, style: TextStyle(color: mine ? cs.onPrimary : cs.onSurface)),
+                  style: TextStyle(
+                      color:
+                          isDark ? AlanyaColors.craie2 : Colors.black54,
+                      fontStyle: FontStyle.italic))
+              : Text(text,
+                  style: TextStyle(
+                      color: mine
+                          ? Colors.white
+                          : (isDark ? AlanyaColors.craie : AlanyaColors.ink))),
         ),
       ),
     );
@@ -1384,7 +1439,7 @@ class _AiTabState extends State<_AiTab> {
 
   /// Menu contextuel pour un message IA (copier, partager, supprimer).
   void _showAiMessageOptions(AiMessage msg) {
-    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     showModalBottomSheet(
       context: context,
       builder: (ctx) => SafeArea(
@@ -1392,7 +1447,9 @@ class _AiTabState extends State<_AiTab> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: Icon(Icons.copy, color: cs.onSurfaceVariant),
+              leading: Icon(Icons.copy,
+                  color:
+                      isDark ? AlanyaColors.craie2 : AlanyaColors.chocolate),
               title: const Text("Copier"),
               onTap: () {
                 Navigator.pop(ctx);
@@ -1403,7 +1460,9 @@ class _AiTabState extends State<_AiTab> {
               },
             ),
             ListTile(
-              leading: Icon(Icons.share, color: cs.secondary),
+              leading: Icon(Icons.share,
+                  color:
+                      isDark ? AlanyaColors.indigoLight : AlanyaColors.forest),
               title: const Text("Partager"),
               onTap: () {
                 Navigator.pop(ctx);
@@ -1414,7 +1473,8 @@ class _AiTabState extends State<_AiTab> {
               },
             ),
             ListTile(
-              leading: Icon(Icons.delete_outline, color: cs.error),
+              leading: Icon(Icons.delete_outline,
+                  color: isDark ? AlanyaColors.erreurNuit : Colors.red),
               title: const Text("Supprimer ce message"),
               onTap: () {
                 Navigator.pop(ctx);
@@ -1451,12 +1511,12 @@ class _AiTabState extends State<_AiTab> {
   }
 
   Widget _composer() {
-    final cs = Theme.of(context).colorScheme;
     return SafeArea(
       top: false,
       child: Container(
         padding: const EdgeInsets.all(8),
-        color: cs.surface,
+        color: themed(context,
+            light: AlanyaColors.cream, dark: AlanyaColors.nuit2),
         child: Row(
           children: [
             Expanded(
@@ -1504,7 +1564,9 @@ class _Placeholder extends StatelessWidget {
           Text(label, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
           const SizedBox(height: 4),
           Text("$soon — bientôt",
-              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+              style: TextStyle(
+                  color: themed(context,
+                      light: Colors.black54, dark: AlanyaColors.craie2))),
         ],
       ),
     );
