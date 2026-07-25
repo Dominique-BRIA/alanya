@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../../../core/app_snackbar.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../../widgets/avatar_circle.dart';
 import '../../../widgets/contact_picker_sheet.dart';
 import '../../chat/screens/chat_screen.dart';
 import '../call_controller.dart';
@@ -270,6 +271,13 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     final invitedChipIds =
         invitedOthers.where((id) => id != primaryId).toList();
 
+    // Photo de profil pour l'écran d'appel audio (sinon initiale).
+    final String? callAvatarUrl = (widget.incoming && cc.incoming != null)
+        ? cc.incoming!.callerAvatarUrl
+        : (primaryId != null
+            ? cc.participantAvatars[primaryId]
+            : cc.activePeerAvatarUrl);
+
     final String name = widget.incoming
         ? (cc.incoming?.displayTitle ?? "Appel")
         : (primaryId != null
@@ -394,23 +402,20 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                           color: AlanyaColors.forest,
                           active: cc.activeRole == ActiveCallRole.ongoing ||
                               cc.activeRole == ActiveCallRole.outgoing,
-                          child: CircleAvatar(
-                            radius: 52,
-                            backgroundColor: AlanyaColors.terracotta,
-                            child: cc.isGroupCall
-                                ? const Icon(Icons.groups,
-                                    size: 48, color: Colors.white)
-                                : Text(
-                                    name.isNotEmpty
-                                        ? name[0].toUpperCase()
-                                        : "?",
-                                    style: const TextStyle(
-                                      fontSize: 44,
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                          ),
+                          child: cc.isGroupCall
+                              ? const CircleAvatar(
+                                  radius: 52,
+                                  backgroundColor: AlanyaColors.terracotta,
+                                  child: Icon(Icons.groups,
+                                      size: 48, color: Colors.white),
+                                )
+                              : AvatarCircle(
+                                  name: name,
+                                  avatarUrl: callAvatarUrl,
+                                  radius: 52,
+                                  backgroundColor: AlanyaColors.terracotta,
+                                  textColor: Colors.white,
+                                ),
                         ),
                       if (!showVideo) const SizedBox(height: 20),
                       Padding(

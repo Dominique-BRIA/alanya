@@ -33,6 +33,8 @@ class CallController extends ChangeNotifier {
   String? activeCallId;
   String? activeConvId;
   String? activePeerName;
+  String? activePeerAvatarUrl;
+  final Map<String, String> participantAvatars = {};
   String activeType = "AUDIO";
   ActiveCallRole? activeRole;
   bool isGroupCall = false;
@@ -123,6 +125,9 @@ class CallController extends ChangeNotifier {
     isGroupCall = started.isGroup;
     isCallInitiator = true;
     activePeerName = started.isGroup ? (started.groupName ?? title) : title;
+    activePeerAvatarUrl = started.isGroup
+        ? null
+        : (started.callees.isNotEmpty ? started.callees.first.avatarUrl : null);
     activeType = type;
     activeRole = ActiveCallRole.outgoing;
     participantNames.clear();
@@ -135,6 +140,7 @@ class CallController extends ChangeNotifier {
     }
     for (final c in started.callees) {
       participantNames[c.userId] = c.pseudo ?? c.publicNumber ?? "Membre";
+      if (c.avatarUrl != null) participantAvatars[c.userId] = c.avatarUrl!;
       _initialMemberIds.add(c.userId); // membres appelés dès le départ
     }
     _ringTimeout?.cancel();
@@ -177,6 +183,10 @@ class CallController extends ChangeNotifier {
     activeCallId = inc.callId; // activeCallId défini AVANT incoming = null
     activeConvId = inc.convId;
     activePeerName = inc.displayTitle;
+    activePeerAvatarUrl = inc.isGroup ? null : inc.callerAvatarUrl;
+    if (inc.callerAvatarUrl != null) {
+      participantAvatars[inc.callerId] = inc.callerAvatarUrl!;
+    }
     activeType = inc.callType;
     activeRole = ActiveCallRole.ongoing;
     incoming = null; // incoming mis à null APRÈS
@@ -266,6 +276,8 @@ class CallController extends ChangeNotifier {
     activeCallId = null;
     activeConvId = null;
     activePeerName = null;
+    activePeerAvatarUrl = null;
+    participantAvatars.clear();
     activeRole = null;
     isGroupCall = false;
     isCallInitiator = false;
@@ -494,6 +506,7 @@ class CallController extends ChangeNotifier {
         callType: e["callType"] as String? ?? "AUDIO",
         callerId: e["callerId"] as String,
         callerName: e["callerName"] as String? ?? "Appel",
+        callerAvatarUrl: e["callerAvatarUrl"] as String?,
         isGroup: (e["isGroup"] as bool?) ?? false,
         groupName: e["groupName"] as String?,
         memberCount: (e["memberCount"] as num?)?.toInt() ?? 2,

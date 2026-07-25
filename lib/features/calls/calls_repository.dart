@@ -5,7 +5,13 @@ class CallCallee {
   final String userId;
   final String? pseudo;
   final String? publicNumber;
-  CallCallee({required this.userId, required this.pseudo, required this.publicNumber});
+  final String? avatarUrl;
+  CallCallee({
+    required this.userId,
+    required this.pseudo,
+    required this.publicNumber,
+    this.avatarUrl,
+  });
 }
 
 class StartedCall {
@@ -62,6 +68,7 @@ class CallsRepository {
             userId: m["userId"] as String,
             pseudo: m["pseudo"] as String?,
             publicNumber: m["publicNumber"] as String?,
+            avatarUrl: m["avatarUrl"] as String?,
           );
         })
         .toList();

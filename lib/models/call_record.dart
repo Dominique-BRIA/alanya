@@ -67,6 +67,7 @@ class IncomingCallInfo {
   final String callType;
   final String callerId;
   final String callerName;
+  final String? callerAvatarUrl;
   final bool isGroup;
   final String? groupName;
   final int memberCount;
@@ -77,6 +78,7 @@ class IncomingCallInfo {
     required this.callType,
     required this.callerId,
     required this.callerName,
+    this.callerAvatarUrl,
     required this.isGroup,
     required this.groupName,
     required this.memberCount,

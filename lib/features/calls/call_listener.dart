@@ -74,10 +74,11 @@ class _CallListenerState extends State<CallListener> {
     ));
   }
 
-  void _showHeadsUp(
-      CallController cc, String callId, String title, bool isVideo) {
+  void _showHeadsUp(CallController cc, String callId, String title, bool isVideo,
+      {String? avatarUrl}) {
     InAppNotifier.instance.showCall(
       title: title,
+      avatarUrl: avatarUrl,
       isVideo: isVideo,
       onTap: () {
         InAppNotifier.instance.dismissCall();
@@ -112,7 +113,8 @@ class _CallListenerState extends State<CallListener> {
           await cc.acceptIncoming();
           if (mounted) _openCallScreen();
         } else {
-          _showHeadsUp(cc, inc.callId, title, isVideo);
+          _showHeadsUp(cc, inc.callId, title, isVideo,
+              avatarUrl: inc.callerAvatarUrl);
         }
       });
     } else if (inc == null && _shownCallId != null) {
