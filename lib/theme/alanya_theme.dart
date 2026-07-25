@@ -405,7 +405,8 @@ class AlanyaTheme {
       surfaceContainerHigh: darkSurfaceHigh,
       surfaceContainerHighest: const Color(0xFF272750),
       outline: const Color(0xFF2E2E52),
-      outlineVariant: const Color(0xFF222242),
+      // « ligne » du modèle : indigo clair très translucide, jamais un gris.
+      outlineVariant: AlanyaColors.indigoLight.withValues(alpha: 0.14),
       error: const Color(0xFFEF6B60),
       onError: Colors.white,
       brightness: Brightness.dark,
@@ -474,8 +475,8 @@ class AlanyaTheme {
         ),
       ),
 
-      dividerTheme: const DividerThemeData(
-        color: Color(0xFF222242),
+      dividerTheme: DividerThemeData(
+        color: AlanyaColors.indigoLight.withValues(alpha: 0.14),
         thickness: 0.5,
       ),
 

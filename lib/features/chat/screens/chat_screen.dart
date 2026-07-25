@@ -116,8 +116,10 @@ class _ChatScreenState extends State<ChatScreen>
   Color get _appBarBg => _dark ? AlanyaColors.nuit2 : AlanyaColors.terracotta;
   Color get _onAppBar => _dark ? AlanyaColors.craie : Colors.white;
   Color get _composerBg => _dark ? AlanyaColors.nuit2 : AlanyaColors.cream;
+  // Modèle Nuit : l'indigo porte les messages envoyés, la terre cuite reste
+  // réservée à l'action et au non-lu (« un seul accent par écran »).
   Color get _sentBubbleColor =>
-      _dark ? AlanyaColors.terracottaNuit : AlanyaColors.terracotta;
+      _dark ? AlanyaColors.indigo : AlanyaColors.terracotta;
   Color get _recvBubbleColor => _dark ? AlanyaColors.nuit3 : Colors.white;
   Color _bubbleTextColor(bool mine) =>
       mine ? Colors.white : (_dark ? AlanyaColors.craie : AlanyaColors.ink);
