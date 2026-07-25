@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../../core/biometric_service.dart';
 import '../../../core/data_saver_service.dart';
 import '../../../core/locale_controller.dart';
+import '../../../core/theme_controller.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
@@ -82,6 +83,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) {
     final user = context.watch<AuthController>().user;
     final localeCtrl = context.watch<LocaleController>();
+    final themeCtrl = context.watch<ThemeController>();
 
     return Scaffold(
       appBar: backAppBar(context, "Paramètres"),
@@ -166,6 +168,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           // PREFERENCES
           _sectionHeader("Préférences"),
+          _settingsTile(
+            icon: themeCtrl.mode == ThemeMode.dark
+                ? Icons.dark_mode
+                : themeCtrl.mode == ThemeMode.light
+                    ? Icons.light_mode
+                    : Icons.brightness_auto,
+            iconColor: AlanyaColors.terracotta,
+            title: "Thème",
+            subtitle: ThemeController.label(themeCtrl.mode),
+            trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+            onTap: () => _showThemePicker(themeCtrl),
+          ),
           _settingsTile(
             icon: _dataSaverEnabled ? Icons.data_saver_on : Icons.data_saver_off,
             iconColor:
@@ -324,6 +338,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _currentLanguageName(LocaleController localeCtrl) {
     final match = LocaleController.supported.where((l) => l.code == localeCtrl.languageCode);
     return match.isNotEmpty ? match.first.nativeName : 'Français';
+  }
+
+  void _showThemePicker(ThemeController themeCtrl) {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Padding(
+            padding: EdgeInsets.all(16),
+            child: Text("Thème",
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          ),
+          const Divider(height: 1),
+          ...[ThemeMode.system, ThemeMode.light, ThemeMode.dark].map((m) {
+            final selected = themeCtrl.mode == m;
+            return ListTile(
+              leading: Icon(
+                m == ThemeMode.dark
+                    ? Icons.dark_mode
+                    : m == ThemeMode.light
+                        ? Icons.light_mode
+                        : Icons.brightness_auto,
+                color: AlanyaColors.terracotta,
+              ),
+              title: Text(ThemeController.label(m)),
+              trailing: selected
+                  ? const Icon(Icons.check, color: AlanyaColors.terracotta)
+                  : null,
+              onTap: () {
+                Navigator.pop(ctx);
+                themeCtrl.setMode(m);
+              },
+            );
+          }),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
   }
 
   void _showAbout() {

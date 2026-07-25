@@ -13,6 +13,7 @@ import 'core/outbox.dart';
 import 'core/presence_store.dart';
 import 'core/push_service.dart';
 import 'core/realtime_client.dart';
+import 'core/theme_controller.dart';
 import 'core/token_storage.dart';
 import 'features/auth/auth_controller.dart';
 import 'features/auth/auth_repository.dart';
@@ -75,6 +76,9 @@ void main() async {
         ChangeNotifierProvider<LocaleController>(
           create: (_) => LocaleController()..load(),
         ),
+        ChangeNotifierProvider<ThemeController>(
+          create: (_) => ThemeController()..load(),
+        ),
         ChangeNotifierProvider<ConnectivityService>(
           create: (ctx) => ConnectivityService(ctx.read<RealtimeClient>()),
         ),
@@ -105,12 +109,14 @@ class AlanyaApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localeCtrl = context.watch<LocaleController>();
+    final themeCtrl = context.watch<ThemeController>();
     return MaterialApp(
       navigatorKey: PushService.navigatorKey,
       title: "Alanya",
       debugShowCheckedModeBanner: false,
       theme: AlanyaTheme.light,
-      themeMode: ThemeMode.light,
+      darkTheme: AlanyaTheme.dark,
+      themeMode: themeCtrl.mode,
       locale: localeCtrl.locale,
       supportedLocales: const [
         Locale('fr'),
