@@ -137,54 +137,69 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      extendBodyBehindAppBar: true,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        foregroundColor: AlanyaColors.chocolate,
+      ),
       body: MotifBackground(
         overlayOpacity: 0.94,
-        child: CustomScrollView(
-          slivers: [
-            SliverAppBar(
-              pinned: true,
-              backgroundColor: AlanyaColors.terracotta,
-              foregroundColor: Colors.white,
-              expandedHeight: 250,
-              flexibleSpace: FlexibleSpaceBar(
-                title: Text(widget.name, style: const TextStyle(fontSize: 16)),
-                background: GestureDetector(
-                  onTap: _openAvatarViewer,
-                  child: Container(
-                    color: AlanyaColors.terracotta,
-                    alignment: Alignment.center,
-                    child: Padding(
-                      padding: const EdgeInsets.only(bottom: 40),
-                      child: AvatarCircle(
-                        name: widget.name,
-                        avatarUrl: widget.avatarUrl,
-                        radius: 70,
-                        backgroundColor: Colors.white24,
-                        borderColor: Colors.white,
-                        borderWidth: 2,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            SliverList(
-              delegate: SliverChildListDelegate([
-                const SizedBox(height: 12),
-                _actionsRow(),
-                const SizedBox(height: 12),
-                _aboutCard(),
-                const SizedBox(height: 12),
-                _numberCard(),
-                const SizedBox(height: 12),
-                _sharedMediaCard(),
-                const SizedBox(height: 12),
-                _dangerCard(),
-                const SizedBox(height: 24),
-              ]),
-            ),
+        child: ListView(
+          padding: const EdgeInsets.only(bottom: 24),
+          children: [
+            _header(),
+            const SizedBox(height: 6),
+            _actionsRow(),
+            const SizedBox(height: 12),
+            _aboutCard(),
+            const SizedBox(height: 12),
+            _sharedMediaCard(),
+            const SizedBox(height: 12),
+            _dangerCard(),
           ],
         ),
+      ),
+    );
+  }
+
+  // En-tête épuré : avatar centré (sans gros fond coloré), nom, numéro.
+  Widget _header() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 52, 16, 4),
+      child: Column(
+        children: [
+          GestureDetector(
+            onTap: _openAvatarViewer,
+            child: AvatarCircle(
+              name: widget.name,
+              avatarUrl: widget.avatarUrl,
+              radius: 56,
+              backgroundColor: AlanyaColors.sand,
+            ),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            widget.name,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w700,
+              color: AlanyaColors.chocolate,
+            ),
+          ),
+          const SizedBox(height: 4),
+          GestureDetector(
+            onTap: () {
+              Clipboard.setData(ClipboardData(text: widget.publicNumber));
+              showAppSnackBar("Numéro copié");
+            },
+            child: Text(
+              "#${_formatNumber(widget.publicNumber)}",
+              style: const TextStyle(fontSize: 15, color: Colors.black54),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -241,39 +256,6 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
                 ? widget.statusMsg!
                 : "Hey ! J'utilise Alanya.",
             style: const TextStyle(fontSize: 15),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _numberCard() {
-    return _card(
-      child: Row(
-        children: [
-          const Icon(Icons.tag, color: AlanyaColors.terracotta),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text("Numéro Alanya",
-                    style: TextStyle(fontSize: 12, color: Colors.black54)),
-                Text(
-                  _formatNumber(widget.publicNumber),
-                  style:
-                      const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                ),
-              ],
-            ),
-          ),
-          IconButton(
-            tooltip: "Copier",
-            icon: const Icon(Icons.copy, size: 20),
-            onPressed: () {
-              Clipboard.setData(ClipboardData(text: widget.publicNumber));
-              showAppSnackBar("Numéro copié");
-            },
           ),
         ],
       ),
