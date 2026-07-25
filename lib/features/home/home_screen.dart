@@ -252,12 +252,16 @@ class _ConversationsTabState extends State<_ConversationsTab>
         body = content ?? "Nouveau message";
     }
 
-    // Bandeau in-app (heads-up custom) au-dessus de toutes les pages.
+    // Bandeau in-app (heads-up custom glassmorphism) au-dessus de toutes les
+    // pages : regroupement par conversation (groupKey) + réponse rapide inline.
     final conversation = conv;
+    final chat = context.read<ChatRepository>();
     InAppNotifier.instance.showMessage(
       title: title,
       body: body,
       avatarUrl: conversation?.avatarUrl,
+      groupKey: convId,
+      onQuickReply: convId.isEmpty ? null : (text) => chat.sendText(convId, text),
       onTap: () {
         PushService.navigatorKey.currentState?.push(MaterialPageRoute(
           builder: (_) => ChatScreen(
