@@ -124,6 +124,13 @@ class ChatRepository {
     await _api.patch("/api/conversations/$convId/messages/$messageId", {"content": content});
   }
 
+  /// Infos d'un message : accusés « lu » par membre (réservé à l'expéditeur).
+  Future<Map<String, dynamic>> getMessageInfo(String convId, String messageId) async {
+    final data =
+        await _api.get("/api/conversations/$convId/messages/$messageId/info");
+    return Map<String, dynamic>.from(data as Map);
+  }
+
   /// Message épinglé courant d'une conversation ({pinnedMessageId, message}).
   Future<Map<String, dynamic>> getPinned(String convId) async {
     final data = await _api.get("/api/conversations/$convId/pinned");

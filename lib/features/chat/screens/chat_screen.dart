@@ -1074,6 +1074,87 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
+  // Infos du message : qui a lu (accusés dérivés de lastReadAt), + en attente.
+  void _showMessageInfo(Message m) {
+    final repo = context.read<ChatRepository>();
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => FutureBuilder<Map<String, dynamic>>(
+        future: repo.getMessageInfo(widget.convId, m.id),
+        builder: (fctx, snap) {
+          if (snap.connectionState != ConnectionState.done) {
+            return const SizedBox(
+                height: 160,
+                child: Center(child: CircularProgressIndicator()));
+          }
+          if (snap.hasError || snap.data == null) {
+            return const SizedBox(
+                height: 120,
+                child: Center(child: Text("Infos indisponibles")));
+          }
+          final members = ((snap.data!["members"] as List?) ?? [])
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .toList();
+          final readList = members.where((x) => x["read"] == true).toList();
+          final pending = members.where((x) => x["read"] != true).toList();
+          return SafeArea(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Padding(
+                padding: EdgeInsets.all(14),
+                child: Text("Infos du message",
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              ),
+              const Divider(height: 1),
+              _infoSection(Icons.done_all, AlanyaColors.tickRead, "Lu", readList),
+              _infoSection(Icons.done, AlanyaColors.grey400, "En attente", pending),
+              if (readList.isEmpty && pending.isEmpty)
+                const Padding(
+                    padding: EdgeInsets.all(20),
+                    child: Text("Aucun destinataire.")),
+              const SizedBox(height: 8),
+            ]),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _infoSection(
+      IconData icon, Color color, String title, List<Map<String, dynamic>> list) {
+    if (list.isEmpty) return const SizedBox.shrink();
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 2),
+        child: Row(children: [
+          Icon(icon, size: 18, color: color),
+          const SizedBox(width: 8),
+          Text("$title (${list.length})",
+              style: TextStyle(fontWeight: FontWeight.w600, color: color)),
+        ]),
+      ),
+      ...list.map((x) {
+        final readAtStr = x["readAt"] as String?;
+        final when = readAtStr != null ? _readAtLabel(readAtStr) : null;
+        return ListTile(
+          dense: true,
+          leading: const Icon(Icons.person_outline, color: AlanyaColors.grey400),
+          title: Text((x["name"] as String?) ?? ""),
+          trailing: when != null
+              ? Text(when,
+                  style: const TextStyle(fontSize: 12, color: Colors.black54))
+              : null,
+        );
+      }),
+    ]);
+  }
+
+  String _readAtLabel(String iso) {
+    final dt = DateTime.tryParse(iso);
+    if (dt == null) return "";
+    return _time(dt.toLocal());
+  }
+
   Future<void> _loadPinned() async {
     try {
       final data = await context.read<ChatRepository>().getPinned(widget.convId);
@@ -1384,9 +1465,19 @@ class _ChatScreenState extends State<ChatScreen>
               _startEdit(m);
             } else if (v == 'pin') {
               _togglePin(m);
+            } else if (v == 'info') {
+              _showMessageInfo(m);
             }
           },
           itemBuilder: (_) => [
+            if (mine && !m.isDeleted)
+              const PopupMenuItem(
+                  value: 'info',
+                  child: Row(children: [
+                    Icon(Icons.info_outline, size: 20, color: AlanyaColors.chocolate),
+                    SizedBox(width: 12),
+                    Text("Infos"),
+                  ])),
             if (hasText)
               const PopupMenuItem(
                   value: 'copy',
