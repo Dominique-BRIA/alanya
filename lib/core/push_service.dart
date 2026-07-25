@@ -190,6 +190,10 @@ class PushService {
           fullScreenIntent: true,
           ongoing: true,
           autoCancel: false,
+          // Filet de sécurité : Android retire la notif tout seul après ~60 s
+          // (durée de sonnerie) — couvre le cas où le push d'annulation
+          // n'arrive pas (app « force stop »).
+          timeoutAfter: 60000,
           icon: '@mipmap/ic_launcher',
           sound: RawResourceAndroidNotificationSound("notification"),
           playSound: true,
@@ -362,6 +366,10 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
           fullScreenIntent: true,
           ongoing: true,
           autoCancel: false,
+          // Filet de sécurité : Android retire la notif tout seul après ~60 s
+          // (durée de sonnerie) — couvre le cas où le push d'annulation
+          // n'arrive pas (app « force stop »).
+          timeoutAfter: 60000,
           icon: '@mipmap/ic_launcher',
           sound: RawResourceAndroidNotificationSound("notification"),
           playSound: true,
