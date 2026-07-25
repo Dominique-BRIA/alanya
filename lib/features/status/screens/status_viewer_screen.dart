@@ -20,16 +20,43 @@ class StatusViewerScreen extends StatefulWidget {
   State<StatusViewerScreen> createState() => _StatusViewerScreenState();
 }
 
-class _StatusViewerScreenState extends State<StatusViewerScreen> {
+class _StatusViewerScreenState extends State<StatusViewerScreen>
+    with SingleTickerProviderStateMixin {
   int _index = 0;
   String _baseUrl = "";
   String? _token;
+
+  late final AnimationController _progress = AnimationController(vsync: this)
+    ..addStatusListener((s) {
+      if (s == AnimationStatus.completed) _next();
+    });
+
+  Duration _durationFor(int index) {
+    final s = widget.group.statuses[index];
+    // Vidéo : un peu plus long ; texte/image : 5 s (comme WhatsApp).
+    return Duration(seconds: s.type == "VIDEO" ? 20 : 5);
+  }
+
+  void _startProgress() {
+    _progress.stop();
+    _progress.duration = _durationFor(_index);
+    _progress.forward(from: 0);
+  }
 
   @override
   void initState() {
     super.initState();
     _loadConfig();
     _markViewed();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _startProgress();
+    });
+  }
+
+  @override
+  void dispose() {
+    _progress.dispose();
+    super.dispose();
   }
 
   Future<void> _loadConfig() async {
@@ -52,16 +79,23 @@ class _StatusViewerScreenState extends State<StatusViewerScreen> {
   }
 
   void _next() {
+    if (!mounted) return;
     if (_index < widget.group.statuses.length - 1) {
       setState(() => _index++);
       _markViewed();
+      _startProgress();
     } else {
       Navigator.of(context).pop();
     }
   }
 
   void _prev() {
-    if (_index > 0) setState(() => _index--);
+    if (_index > 0) {
+      setState(() => _index--);
+      _startProgress();
+    } else {
+      _startProgress(); // relance la barre du 1er statut
+    }
   }
 
   Future<void> _delete() async {
@@ -105,22 +139,38 @@ class _StatusViewerScreenState extends State<StatusViewerScreen> {
         child: SafeArea(
           child: Column(
             children: [
-              // Barres de progression par statut.
+              // Barres de progression animées (façon WhatsApp).
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                child: Row(
-                  children: List.generate(widget.group.statuses.length, (i) {
-                    return Expanded(
-                      child: Container(
-                        height: 3,
-                        margin: const EdgeInsets.symmetric(horizontal: 2),
-                        decoration: BoxDecoration(
-                          color: i <= _index ? Colors.white : Colors.white38,
-                          borderRadius: BorderRadius.circular(2),
+                child: AnimatedBuilder(
+                  animation: _progress,
+                  builder: (_, __) => Row(
+                    children: List.generate(widget.group.statuses.length, (i) {
+                      final double fill = i < _index
+                          ? 1.0
+                          : (i == _index ? _progress.value : 0.0);
+                      return Expanded(
+                        child: Container(
+                          height: 3,
+                          margin: const EdgeInsets.symmetric(horizontal: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.white38,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                          child: FractionallySizedBox(
+                            alignment: Alignment.centerLeft,
+                            widthFactor: fill,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                            ),
+                          ),
                         ),
-                      ),
-                    );
-                  }),
+                      );
+                    }),
+                  ),
                 ),
               ),
               Padding(
