@@ -10,14 +10,11 @@ import '../auth_controller.dart';
 import '../auth_repository.dart';
 import 'forgot_password_screen.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../../core/alanya_id_formatter.dart';
 
-/// Formateur qui insère un espace tous les 2 chiffres, uniquement quand le champ
-/// ne contient que des chiffres/espaces (numéro Alanya). Si l'utilisateur tape
-/// un email, on ne touche à rien.
-///
-/// - Longueur affichée max : 11 caractères (8 chiffres + 3 espaces = "12 34 56 78")
-/// - Gère correctement la position du curseur pendant l'édition (insertions,
-///   suppressions, collage).
+/// Formateur qui applique le formatage visuel de l'Alanya ID selon sa
+/// longueur (3/4/6/8/10 chiffres) uniquement quand le champ ne contient
+/// que des chiffres/espaces. Si l'utilisateur tape un email, on laisse passer.
 class _AlanyaNumberFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
@@ -34,18 +31,13 @@ class _AlanyaNumberFormatter extends TextInputFormatter {
 
     // Retire tous les espaces pour obtenir les chiffres purs.
     final digitsOnly = raw.replaceAll(RegExp(r'\s+'), '');
-    if (digitsOnly.length > 8) {
-      // Limite dure : au-delà de 8 chiffres, on refuse l'ajout.
+    if (digitsOnly.length > 10) {
+      // Limite dure : au-delà de 10 chiffres, on refuse l'ajout.
       return oldValue;
     }
 
-    // Reconstruit avec un espace tous les 2 chiffres.
-    final buf = StringBuffer();
-    for (int i = 0; i < digitsOnly.length; i++) {
-      if (i > 0 && i % 2 == 0) buf.write(' ');
-      buf.write(digitsOnly[i]);
-    }
-    final formatted = buf.toString();
+    // Reconstruit avec le formatage visuel approprié selon la longueur.
+    final formatted = formatAlanyaId(digitsOnly);
 
     // Recalcule la position du curseur : on veut qu'il reste à la même position
     // "relative" aux chiffres, pas décalé par les espaces auto-insérés.
@@ -96,11 +88,11 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _loading = true);
     try {
-      // Nettoie les espaces si l'utilisateur a tapé un numéro Alanya formaté.
-      // (Le backend attend 6 chiffres bruts, pas "12 34 56".)
+      // Nettoie les espaces si l'utilisateur a tapé un Alanya ID formaté.
+      // (Le backend attend le numéro brut, sans espaces.)
       final rawId = _idCtrl.text.trim();
       final identifier = RegExp(r'^[\d\s]+$').hasMatch(rawId)
-          ? rawId.replaceAll(RegExp(r'\s+'), '')
+          ? stripAlanyaId(rawId)
           : rawId;
 
       final session = await context.read<AuthRepository>().login(

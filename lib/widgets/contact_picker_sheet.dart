@@ -220,7 +220,7 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
                       controller: _manualCtrl,
                       keyboardType: TextInputType.number,
                       decoration: InputDecoration(
-                        hintText: "Numéro Alanya (ex: 67641599)",
+                        hintText: "Alanya ID (ex: 67641599)",
                         contentPadding: const EdgeInsets.symmetric(
                             horizontal: 16, vertical: 10),
                         isDense: true,

@@ -13,7 +13,7 @@ import '../contacts_repository.dart';
 
 /// Ajout d'un contact + démarrage d'une discussion (style WhatsApp).
 ///
-/// Formulaire simple : nom (optionnel) + numéro Alanya à 6 ou 8 chiffres + bouton
+/// Formulaire simple : nom (optionnel) + Alanya ID à 6 ou 8 chiffres + bouton
 /// « Enregistrer ». Si le numéro n'existe pas, on affiche une erreur claire.
 /// Si l'utilisateur est déjà un contact, on ouvre directement le chat.
 class NewChatScreen extends StatefulWidget {
@@ -46,7 +46,7 @@ class _NewChatScreenState extends State<NewChatScreen> {
 
     // Validation locale du numéro.
     if (!_isNumberValid) {
-      setState(() => _numberError = "Le numéro Alanya doit comporter 6 ou 8 chiffres");
+      setState(() => _numberError = "L'Alanya ID doit comporter 6 ou 8 chiffres");
       return;
     }
     setState(() {
@@ -87,7 +87,7 @@ class _NewChatScreenState extends State<NewChatScreen> {
       if (!mounted) return;
       setState(() => _saving = false);
       if (e.statusCode == 404) {
-        setState(() => _numberError = "Aucun utilisateur avec ce numéro Alanya");
+        setState(() => _numberError = "Aucun utilisateur avec cet Alanya ID");
       } else if (e.code == 'ALREADY_CONTACT') {
         // Déjà contact : on ouvre quand même la discussion.
         try {
@@ -144,14 +144,14 @@ class _NewChatScreenState extends State<NewChatScreen> {
               ),
               const SizedBox(height: 16),
 
-              // --- Champ numéro Alanya ---
+              // --- Champ Alanya ID ---
               TextField(
                 controller: _numberCtrl,
                 keyboardType: TextInputType.number,
                 maxLength: 8,
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 decoration: InputDecoration(
-                  labelText: "Numéro Alanya",
+                  labelText: "Alanya ID",
                   hintText: "6 ou 8 chiffres",
                   prefixIcon: const Icon(Icons.tag),
                   counterText: "",
@@ -164,7 +164,7 @@ class _NewChatScreenState extends State<NewChatScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                "Le numéro Alanya est un identifiant public à 6 chiffres "
+                "L'Alanya ID est un identifiant public à 6 chiffres "
                 "que chaque utilisateur reçoit à l'inscription.",
                 style: TextStyle(fontSize: 12, color: mutedOf(context, Colors.black54)),
               ),

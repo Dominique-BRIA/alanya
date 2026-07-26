@@ -420,7 +420,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
                       children: [
                         Text(user.pseudo ?? "Moi",
                             style: const TextStyle(fontWeight: FontWeight.bold)),
-                        Text("Numéro Alanya : ${user.publicNumber}",
+                        Text("Alanya ID : ${user.publicNumber}",
                             style: TextStyle(
                                 color: themed(context,
                                     light: Colors.black54,

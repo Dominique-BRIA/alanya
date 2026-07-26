@@ -148,7 +148,7 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
       case PhoneSyncStatus.noAlanyaNumbers:
         return _messageView(
           icon: Icons.search_off,
-          title: "Aucun numéro Alanya détecté",
+          title: "Aucun Alanya ID détecté",
           subtitle: "Aucun de tes contacts n'a de numéro à 6 chiffres dans son profil.\nLes numéros Alanya sont des numéros à 6 ou 8 chiffres (ex: 123456 ou 12345678).",
           action: _retryButton(),
         );
@@ -322,7 +322,7 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text("Numéro Alanya : ${user.publicNumber}"),
+          Text("Alanya ID : ${user.publicNumber}"),
           if (match.phoneName != displayName)
             Text(
               "Dans ton répertoire : ${match.phoneName}",

@@ -107,7 +107,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               title: Text(user?.pseudo ?? "Utilisateur",
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-              subtitle: Text("Numéro Alanya : ${user?.publicNumber ?? '—'}",
+              subtitle: Text("Alanya ID : ${user?.publicNumber ?? '—'}",
                   style: TextStyle(fontSize: 13, color: _muted)),
               trailing: _chevron(),
               onTap: () => Navigator.of(context).push(

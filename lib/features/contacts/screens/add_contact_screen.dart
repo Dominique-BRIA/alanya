@@ -11,7 +11,7 @@ import '../../chat/chat_repository.dart';
 import '../../chat/screens/chat_screen.dart';
 import '../contacts_repository.dart';
 
-/// Recherche par numéro Alanya (6 chiffres) puis ajout au répertoire.
+/// Recherche par Alanya ID (6 chiffres) puis ajout au répertoire.
 class AddContactScreen extends StatefulWidget {
   const AddContactScreen({super.key});
 
@@ -37,7 +37,7 @@ class _AddContactScreenState extends State<AddContactScreen> {
     final number = _numberCtrl.text.trim();
     final isValid = (number.length == 6 || number.length == 8) && RegExp(r'^(\d{6}|\d{8})$').hasMatch(number);
     if (!isValid) {
-      setState(() => _error = "Entre un numéro Alanya valide (6 ou 8 chiffres)");
+      setState(() => _error = "Entre un Alanya ID valide (6 ou 8 chiffres)");
       return;
     }
     setState(() {
@@ -52,7 +52,7 @@ class _AddContactScreenState extends State<AddContactScreen> {
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() => _error = e.statusCode == 404
-          ? "Aucun utilisateur avec ce numéro Alanya"
+          ? "Aucun utilisateur avec cet Alanya ID"
           : "Erreur ${e.statusCode} : ${e.message}");
     } catch (_) {
       if (!mounted) return;
@@ -132,7 +132,7 @@ class _AddContactScreenState extends State<AddContactScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const Text(
-                "Numéro Alanya",
+                "Alanya ID",
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 4),

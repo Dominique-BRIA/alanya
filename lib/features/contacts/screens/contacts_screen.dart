@@ -232,7 +232,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
             icon: Icons.person_add,
             color: accentOf(context),
             title: "Ajouter un contact",
-            subtitle: "Rechercher par numéro Alanya",
+            subtitle: "Rechercher par Alanya ID",
             onTap: () async {
               await Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const NewChatScreen()),
@@ -287,7 +287,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
               icon: Icons.person_add,
               color: accentOf(context),
               title: "Ajouter un contact",
-              subtitle: "Rechercher par numéro Alanya",
+              subtitle: "Rechercher par Alanya ID",
               onTap: () async {
                 await Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const NewChatScreen()),

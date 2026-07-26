@@ -6,7 +6,7 @@ class ContactsRepository {
   ContactsRepository(this._api);
   final AuthedApi _api;
 
-  /// Recherche un utilisateur par son numéro Alanya à 6 chiffres.
+  /// Recherche un utilisateur par son Alanya ID à 6 chiffres.
   Future<UserSearchResult> searchByNumber(String number) async {
     final data = await _api.get("/api/users/search?number=$number");
     return UserSearchResult.fromJson(data);
@@ -34,7 +34,7 @@ class ContactsRepository {
         .toList();
   }
 
-  /// Ajoute un contact via son numéro Alanya à 6 chiffres.
+  /// Ajoute un contact via son Alanya ID à 6 chiffres.
   Future<Contact> add(String publicNumber, {String? alias}) async {
     final data = await _api.post("/api/contacts", {
       "publicNumber": publicNumber,
