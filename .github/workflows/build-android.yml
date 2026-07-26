@@ -2,9 +2,9 @@ name: Build Android APK
 
 on:
   push:
-    branches: [test, main, backup/pre-harmonisation-2026-07-24]
+    branches: [test, main, backup/pre-harmonisation-2026-07-24, arena/019f9ff6-alanya]
   pull_request:
-    branches: [test, main, backup/pre-harmonisation-2026-07-24]
+    branches: [test, main, backup/pre-harmonisation-2026-07-24, arena/019f9ff6-alanya]
   workflow_dispatch:
 
 jobs:
