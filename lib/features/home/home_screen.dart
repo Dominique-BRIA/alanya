@@ -379,10 +379,12 @@ class _ConversationsTabState extends State<_ConversationsTab>
       );
     }
 
-    return MotifBackground(
-      overlayOpacity: 0.92,
-      plainInDark: true,
-      child: Column(
+    return DefaultTabController(
+      length: 3,
+      child: MotifBackground(
+        overlayOpacity: 0.92,
+        plainInDark: true,
+        child: Column(
         children: [
           if (user != null)
             Container(
@@ -433,6 +435,21 @@ class _ConversationsTabState extends State<_ConversationsTab>
                 ],
               ),
             ),
+          // --- Onglets : Tous / Non lues / Groupes ---
+          Container(
+            color: themed(context, light: Colors.white, dark: AlanyaColors.nuit2),
+            child: const TabBar(
+              tabs: [
+                Tab(text: "Tous"),
+                Tab(text: "Non lues"),
+                Tab(text: "Groupes"),
+              ],
+              labelColor: AlanyaColors.terracotta,
+              unselectedLabelColor: AlanyaColors.craie2,
+              indicatorColor: AlanyaColors.terracotta,
+              indicatorWeight: 2.5,
+            ),
+          ),
           // --- Barre de recherche ---
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
@@ -484,6 +501,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
         ],
       ),
     );
+    );
   }
 
   Widget _buildList() {
@@ -506,7 +524,13 @@ class _ConversationsTabState extends State<_ConversationsTab>
       ]);
     }
     final allConvs = _convs ?? [];
-    if (allConvs.isEmpty) {
+    final tabIndex = DefaultTabController.of(context)?.index ?? 0;
+    final baseConvs = tabIndex == 0
+        ? allConvs
+        : (tabIndex == 1
+            ? allConvs.where((c) => c.unread > 0).toList()
+            : allConvs.where((c) => c.isGroup).toList());
+    if (baseConvs.isEmpty) {
       return ListView(children: [
         const SizedBox(height: 100),
         Center(
@@ -524,8 +548,8 @@ class _ConversationsTabState extends State<_ConversationsTab>
 
     // Filtre les conversations selon la recherche (WhatsApp-like)
     final convs = _searchQuery.isEmpty
-        ? allConvs
-        : allConvs.where((c) {
+        ? baseConvs
+        : baseConvs.where((c) {
             final title = (c.title ?? '').toLowerCase();
             if (title.contains(_searchQuery)) return true;
             // Cherche dans les numéros des membres
