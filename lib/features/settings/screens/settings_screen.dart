@@ -7,6 +7,7 @@ import '../../../core/locale_controller.dart';
 import '../../../core/theme_controller.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../../widgets/alanya_wordmark.dart';
 import '../../../widgets/avatar_circle.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../../auth/auth_controller.dart';
@@ -466,7 +467,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            const Text("ALANYA", style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: 4)),
+            const AlanyaWordmark(fontSize: 22, letterSpacing: 4),
             const SizedBox(height: 4),
             Text("Version 1.0.0", style: TextStyle(color: _muted)),
             const SizedBox(height: 8),

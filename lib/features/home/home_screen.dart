@@ -15,6 +15,7 @@ import '../../models/ai_message.dart';
 import '../../models/conversation.dart';
 import '../../models/status.dart';
 import '../../theme/alanya_theme.dart';
+import '../../widgets/alanya_wordmark.dart';
 import '../../widgets/alanya_nav_bar.dart';
 import '../../widgets/avatar_circle.dart';
 import '../../widgets/motif_background.dart';
@@ -100,16 +101,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-          title: const Text(
-            "ALANYA",
-            style: TextStyle(
-              fontFamily: 'Inter',
-              fontSize: 22,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 4,
-              height: 1,
-            ),
-          ),
+          title: const AlanyaWordmark(fontSize: 22, letterSpacing: 4, height: 1),
           actions: [
             PopupMenuButton<String>(
               onSelected: (v) {

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../core/biometric_service.dart';
+import '../../../widgets/alanya_wordmark.dart';
 import '../../../theme/alanya_theme.dart';
 
 class BiometricLockScreen extends StatefulWidget {
@@ -76,11 +77,7 @@ class _BiometricLockScreenState extends State<BiometricLockScreen> {
                   ),
                 ),
                 const SizedBox(height: 20),
-                const Text("ALANYA",
-                    style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 6)),
+                const AlanyaWordmark(fontSize: 24, letterSpacing: 6),
                 const SizedBox(height: 40),
 
                 // Bouton empreinte
