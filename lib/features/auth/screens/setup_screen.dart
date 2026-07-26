@@ -113,31 +113,31 @@ class _SetupScreenState extends State<SetupScreen> {
                 Container(
                   padding: const EdgeInsets.all(18),
                   decoration: BoxDecoration(
-                    color: AlanyaColors.terracotta.withValues(alpha: 0.12),
+                    color: accentOf(context).withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: AlanyaColors.terracotta.withValues(alpha: 0.4)),
+                    border: Border.all(color: accentOf(context).withValues(alpha: 0.4)),
                   ),
                   child: Column(
                     children: [
                       Text(
                         tr(context, 'alanya_number'),
-                        style: const TextStyle(color: AlanyaColors.chocolate),
+                        style: TextStyle(color: themed(context, light: AlanyaColors.chocolate, dark: AlanyaColors.craie)),
                       ),
                       const SizedBox(height: 6),
                       Text(
                         widget.publicNumber,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 32,
                           fontWeight: FontWeight.bold,
                           letterSpacing: 6,
-                          color: AlanyaColors.terracotta,
+                          color: accentOf(context),
                         ),
                       ),
                       const SizedBox(height: 4),
                       Text(
                         tr(context, 'alanya_number_help'),
                         textAlign: TextAlign.center,
-                        style: const TextStyle(fontSize: 12, color: Colors.black54),
+                        style: TextStyle(fontSize: 12, color: mutedOf(context, Colors.black54)),
                       ),
                     ],
                   ),

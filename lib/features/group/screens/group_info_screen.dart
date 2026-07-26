@@ -242,7 +242,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Annuler")),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text("Retirer", style: TextStyle(color: Colors.red))),
+              child: Text("Retirer", style: TextStyle(color: dangerOf(context)))),
         ],
       ),
     );
@@ -305,7 +305,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Annuler")),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text("Quitter", style: TextStyle(color: Colors.red))),
+              child: Text("Quitter", style: TextStyle(color: dangerOf(context)))),
         ],
       ),
     );
@@ -380,7 +380,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                         name: _title,
                         avatarUrl: _avatarUrl,
                         radius: 40,
-                        backgroundColor: AlanyaColors.forest,
+                        backgroundColor: positiveOf(context),
                       ),
                       if (_amAdmin)
                         Positioned(
@@ -389,9 +389,9 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                           child: Container(
                             padding: const EdgeInsets.all(6),
                             decoration: BoxDecoration(
-                              color: AlanyaColors.terracotta,
+                              color: accentOf(context),
                               shape: BoxShape.circle,
-                              border: Border.all(color: Colors.white, width: 2),
+                              border: Border.all(color: themed(context, light: Colors.white, dark: AlanyaColors.nuit), width: 2),
                             ),
                             child: const Icon(Icons.camera_alt, size: 16, color: Colors.white),
                           ),
@@ -410,13 +410,13 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                     ),
                     if (_amAdmin)
                       IconButton(
-                        icon: Icon(Icons.edit, size: 20, color: AlanyaColors.grey500),
+                        icon: Icon(Icons.edit, size: 20, color: mutedOf(context, AlanyaColors.grey500)),
                         onPressed: _editName,
                       ),
                   ],
                 ),
                 Text("${_members.length} membres",
-                    style: TextStyle(color: AlanyaColors.grey500)),
+                    style: TextStyle(color: mutedOf(context, AlanyaColors.grey500))),
               ],
             ),
           ),
@@ -425,16 +425,16 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
           Container(
             margin: const EdgeInsets.symmetric(horizontal: 16),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: themed(context, light: Colors.white, dark: AlanyaColors.nuit2),
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: AlanyaColors.grey200, width: 0.5),
+              border: Border.all(color: themed(context, light: AlanyaColors.grey200, dark: AlanyaColors.ligne), width: 0.5),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
                 _actionButton(Icons.person_add, "Ajouter", _addMembers),
                 _actionButton(Icons.exit_to_app, "Quitter", _leaveGroup,
-                    color: Colors.red),
+                    color: dangerOf(context)),
               ],
             ),
           ),
@@ -447,7 +447,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                 style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
-                    color: AlanyaColors.grey500)),
+                    color: mutedOf(context, AlanyaColors.grey500))),
           ),
           const SizedBox(height: 8),
 
@@ -462,7 +462,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                 name: name,
                 avatarUrl: m['avatarUrl'] as String?,
                 radius: 20,
-                backgroundColor: isMe ? AlanyaColors.terracotta : AlanyaColors.gold,
+                backgroundColor: isMe ? accentOf(context) : AlanyaColors.gold,
               ),
               title: Row(
                 children: [
@@ -475,13 +475,13 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                        color: AlanyaColors.terracotta.withValues(alpha: 0.1),
+                        color: accentOf(context).withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text("Admin",
                           style: TextStyle(
                               fontSize: 10,
-                              color: AlanyaColors.terracotta,
+                              color: accentOf(context),
                               fontWeight: FontWeight.w600)),
                     ),
                 ],
@@ -492,7 +492,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                     : (m['publicNumber'] as String? ?? ''),
                 style: TextStyle(
                     fontSize: 12,
-                    color: online ? AlanyaColors.forest : AlanyaColors.grey500),
+                    color: online ? positiveOf(context) : mutedOf(context, AlanyaColors.grey500)),
               ),
               trailing: (!isMe)
                   ? IconButton(
@@ -517,12 +517,12 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
         child: Column(
           children: [
-            Icon(icon, color: color ?? AlanyaColors.forest, size: 24),
+            Icon(icon, color: color ?? positiveOf(context), size: 24),
             const SizedBox(height: 4),
             Text(label,
                 style: TextStyle(
                     fontSize: 12,
-                    color: color ?? AlanyaColors.forest,
+                    color: color ?? positiveOf(context),
                     fontWeight: FontWeight.w500)),
           ],
         ),
@@ -552,7 +552,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
             const Divider(height: 1),
             if (!isMe) ...[
               ListTile(
-                leading: const Icon(Icons.message, color: AlanyaColors.forest),
+                leading: Icon(Icons.message, color: positiveOf(context)),
                 title: const Text("Envoyer un message"),
                 onTap: () {
                   Navigator.pop(ctx);
@@ -562,8 +562,8 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
               if (_amAdmin) ...[
                 if ((member['role'] as String?) == 'ADMIN')
                   ListTile(
-                    leading: const Icon(Icons.remove_moderator_outlined,
-                        color: AlanyaColors.chocolate),
+                    leading: Icon(Icons.remove_moderator_outlined,
+                        color: themed(context, light: AlanyaColors.chocolate, dark: AlanyaColors.craie2)),
                     title: const Text("Retirer le rôle admin"),
                     onTap: () {
                       Navigator.pop(ctx);
@@ -572,8 +572,8 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                   )
                 else
                   ListTile(
-                    leading: const Icon(Icons.shield_outlined,
-                        color: AlanyaColors.forest),
+                    leading: Icon(Icons.shield_outlined,
+                        color: positiveOf(context)),
                     title: const Text("Nommer administrateur"),
                     onTap: () {
                       Navigator.pop(ctx);
@@ -581,9 +581,9 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                     },
                   ),
                 ListTile(
-                  leading: const Icon(Icons.remove_circle_outline, color: Colors.red),
-                  title: const Text("Retirer du groupe",
-                      style: TextStyle(color: Colors.red)),
+                  leading: Icon(Icons.remove_circle_outline, color: dangerOf(context)),
+                  title: Text("Retirer du groupe",
+                      style: TextStyle(color: dangerOf(context))),
                   onTap: () {
                     Navigator.pop(ctx);
                     _removeMember(member);
@@ -593,9 +593,9 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
             ],
             if (isMe)
               ListTile(
-                leading: const Icon(Icons.exit_to_app, color: Colors.red),
-                title: const Text("Quitter le groupe",
-                    style: TextStyle(color: Colors.red)),
+                leading: Icon(Icons.exit_to_app, color: dangerOf(context)),
+                title: Text("Quitter le groupe",
+                    style: TextStyle(color: dangerOf(context))),
                 onTap: () {
                   Navigator.pop(ctx);
                   _leaveGroup();

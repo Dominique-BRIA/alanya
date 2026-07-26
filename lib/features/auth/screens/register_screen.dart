@@ -4,6 +4,7 @@ import '../../../l10n/app_localizations.dart';
 
 import '../../../core/api_client.dart';
 import '../../../core/app_snackbar.dart';
+import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../auth_repository.dart';
 import 'otp_screen.dart';
@@ -66,7 +67,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 const SizedBox(height: 8),
                 Text(
                   tr(context, 'register_hint'),
-                  style: const TextStyle(color: Colors.black54),
+                  style: TextStyle(color: mutedOf(context, Colors.black54)),
                 ),
                 const SizedBox(height: 24),
                 TextFormField(

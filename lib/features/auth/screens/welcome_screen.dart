@@ -35,8 +35,8 @@ class WelcomeScreen extends StatelessWidget {
                           shape: BoxShape.circle,
                           gradient: RadialGradient(
                             colors: [
-                              AlanyaColors.terracotta.withValues(alpha: 0.12),
-                              AlanyaColors.terracotta.withValues(alpha: 0.04),
+                              accentOf(context).withValues(alpha: 0.12),
+                              accentOf(context).withValues(alpha: 0.04),
                               Colors.transparent,
                             ],
                             stops: const [0.3, 0.6, 1.0],
@@ -49,10 +49,10 @@ class WelcomeScreen extends StatelessWidget {
                       width: 280,
                       fit: BoxFit.contain,
                       filterQuality: FilterQuality.high,
-                      errorBuilder: (_, __, ___) => const Icon(
+                      errorBuilder: (_, __, ___) => Icon(
                         Icons.chat_bubble_rounded,
                         size: 120,
-                        color: AlanyaColors.terracotta,
+                        color: accentOf(context),
                       ),
                     ),
                   ],
@@ -64,7 +64,7 @@ class WelcomeScreen extends StatelessWidget {
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
                       colors: [
-                        AlanyaColors.terracotta.withValues(alpha: 0.06),
+                        accentOf(context).withValues(alpha: 0.06),
                         Colors.transparent,
                       ],
                     ),
@@ -74,7 +74,7 @@ class WelcomeScreen extends StatelessWidget {
                 Text(
                   tr(context, 'app_tagline'),
                   textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 15, color: AlanyaColors.ink),
+                  style: TextStyle(fontSize: 15, color: themed(context, light: AlanyaColors.ink, dark: AlanyaColors.craie)),
                 ),
                 const Spacer(flex: 3),
                 ElevatedButton(
@@ -87,8 +87,8 @@ class WelcomeScreen extends StatelessWidget {
                 OutlinedButton(
                   style: OutlinedButton.styleFrom(
                     minimumSize: const Size.fromHeight(52),
-                    side: const BorderSide(color: AlanyaColors.terracotta),
-                    foregroundColor: AlanyaColors.terracotta,
+                    side: BorderSide(color: accentOf(context)),
+                    foregroundColor: accentOf(context),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14),
                     ),
@@ -103,13 +103,13 @@ class WelcomeScreen extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: themed(context, light: Colors.white, dark: AlanyaColors.nuit2),
                     borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: AlanyaColors.grey200, width: 0.5),
+                    border: Border.all(color: themed(context, light: AlanyaColors.grey200, dark: AlanyaColors.ligne), width: 0.5),
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.language, size: 18, color: AlanyaColors.grey500),
+                      Icon(Icons.language, size: 18, color: mutedOf(context, AlanyaColors.grey500)),
                       const SizedBox(width: 10),
                       Expanded(
                         child: DropdownButtonHideUnderline(
@@ -119,7 +119,7 @@ class WelcomeScreen extends StatelessWidget {
                                 ? localeCtrl.languageCode
                                 : 'fr',
                             isExpanded: true,
-                            icon: Icon(Icons.expand_more, color: AlanyaColors.grey400),
+                            icon: Icon(Icons.expand_more, color: mutedOf(context, AlanyaColors.grey400)),
                             items: LocaleController.supported.map((l) {
                               return DropdownMenuItem(
                                 value: l.code,

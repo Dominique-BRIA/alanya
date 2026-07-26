@@ -50,7 +50,7 @@ class _BiometricLockScreenState extends State<BiometricLockScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AlanyaColors.cream,
+      backgroundColor: themed(context, light: AlanyaColors.cream, dark: AlanyaColors.nuit),
       body: SafeArea(
         child: Center(
           child: Padding(
@@ -87,22 +87,21 @@ class _BiometricLockScreenState extends State<BiometricLockScreen> {
                     width: 72,
                     height: 72,
                     decoration: BoxDecoration(
-                      color: AlanyaColors.terracotta.withValues(alpha: 0.08),
+                      color: accentOf(context).withValues(alpha: 0.08),
                       shape: BoxShape.circle,
                       border: Border.all(
-                        color: AlanyaColors.terracotta.withValues(alpha: 0.3),
+                        color: accentOf(context).withValues(alpha: 0.3),
                         width: 2,
                       ),
                     ),
                     child: _authenticating
-                        ? const Padding(
-                            padding: EdgeInsets.all(18),
+                        ? Padding(
+                            padding: const EdgeInsets.all(18),
                             child: CircularProgressIndicator(
-                                strokeWidth: 2.5,
-                                color: AlanyaColors.terracotta),
+                                strokeWidth: 2.5, color: accentOf(context)),
                           )
-                        : const Icon(Icons.fingerprint,
-                            size: 36, color: AlanyaColors.terracotta),
+                        : Icon(Icons.fingerprint,
+                            size: 36, color: accentOf(context)),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -111,7 +110,7 @@ class _BiometricLockScreenState extends State<BiometricLockScreen> {
                       ? "Vérification..."
                       : "Appuyez pour déverrouiller",
                   style: TextStyle(
-                      fontSize: 13, color: AlanyaColors.grey500),
+                      fontSize: 13, color: mutedOf(context, AlanyaColors.grey500)),
                 ),
                 const SizedBox(height: 32),
 
@@ -119,9 +118,9 @@ class _BiometricLockScreenState extends State<BiometricLockScreen> {
                 TextButton.icon(
                   onPressed: _authenticating ? null : _authenticateWithPin,
                   icon: Icon(Icons.lock_outline,
-                      size: 18, color: AlanyaColors.grey500),
+                      size: 18, color: mutedOf(context, AlanyaColors.grey500)),
                   label: Text("Utiliser le code de l'appareil",
-                      style: TextStyle(color: AlanyaColors.grey500)),
+                      style: TextStyle(color: mutedOf(context, AlanyaColors.grey500))),
                 ),
                 const SizedBox(height: 8),
 
@@ -136,7 +135,7 @@ class _BiometricLockScreenState extends State<BiometricLockScreen> {
                   child: Text(
                     "Désactiver le verrouillage",
                     style: TextStyle(
-                        fontSize: 12, color: AlanyaColors.grey400),
+                        fontSize: 12, color: mutedOf(context, AlanyaColors.grey400)),
                   ),
                 ),
               ],

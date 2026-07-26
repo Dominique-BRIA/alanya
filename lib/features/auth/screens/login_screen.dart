@@ -197,9 +197,9 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       );
                     },
-                    child: const Text(
+                    child: Text(
                       "Mot de passe oublié ?",
-                      style: TextStyle(color: AlanyaColors.terracotta),
+                      style: TextStyle(color: accentOf(context)),
                     ),
                   ),
                 ),

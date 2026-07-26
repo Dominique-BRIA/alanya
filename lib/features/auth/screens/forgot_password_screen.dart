@@ -110,7 +110,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   // Icône
-                  const Icon(Icons.lock_reset, size: 64, color: AlanyaColors.terracotta),
+                  Icon(Icons.lock_reset, size: 64, color: accentOf(context)),
                   const SizedBox(height: 16),
 
                   Text(
@@ -126,7 +126,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                         ? "Saisis le code à 6 chiffres reçu par email et ton nouveau mot de passe."
                         : "Saisis ton adresse email. Si un compte existe, tu recevras un code de vérification.",
                     textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.black54),
+                    style: TextStyle(color: mutedOf(context, Colors.black54)),
                   ),
                   const SizedBox(height: 32),
 
