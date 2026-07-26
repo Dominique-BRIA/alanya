@@ -8,6 +8,7 @@ import '../../core/contact_cache.dart';
 import '../../core/conversation_cache.dart';
 import '../../core/message_cache.dart';
 import '../../core/push_service.dart';
+import '../../core/realtime_client.dart';
 import '../../core/token_storage.dart';
 import '../../models/auth_user.dart';
 import 'auth_repository.dart';
@@ -16,10 +17,12 @@ enum AuthStatus { unknown, unauthenticated, authenticated }
 
 /// État global d'authentification (exposé via Provider).
 class AuthController extends ChangeNotifier {
-  AuthController(this._repo, this._storage);
+  AuthController(this._repo, this._storage, {RealtimeClient? realtime})
+      : _realtime = realtime;
 
   final AuthRepository _repo;
   final TokenStorage _storage;
+  final RealtimeClient? _realtime;
 
   AuthStatus status = AuthStatus.unknown;
   AuthUser? user;
@@ -125,6 +128,8 @@ class AuthController extends ChangeNotifier {
     }
     await _storage.clear();
     await MessageCache.clear();
+    // Déconnecte le WebSocket avant de nettoyer la session.
+    _realtime?.disconnect();
     // Purge des caches offline : la session change, un autre user pourrait
     // se connecter sur ce téléphone.
     await ConversationCache.clear();
@@ -144,6 +149,9 @@ class AuthController extends ChangeNotifier {
     // Ré-enregistre le token FCM : maintenant qu'on est authentifié,
     // le backend peut associer le token à l'utilisateur.
     PushService.instance.registerTokenIfAuthenticated();
+    // Reconnecte le WebSocket avec le nouveau token (empêche le bug où
+    // le WS reste ouvert avec le token du précédent utilisateur).
+    _realtime?.connect();
   }
 
   Future<void> _saveUserCache(AuthUser u) async {
@@ -170,6 +178,9 @@ class AuthController extends ChangeNotifier {
     // tryInitialize() s'exécutait avant l'authentification.
     if (s == AuthStatus.authenticated && !wasAuth) {
       PushService.instance.registerTokenIfAuthenticated();
+      _realtime?.connect();
+    } else if (s == AuthStatus.unauthenticated && wasAuth) {
+      _realtime?.disconnect();
     }
   }
 }

@@ -97,7 +97,11 @@ void main() async {
           ),
         ),
         ChangeNotifierProvider<AuthController>(
-          create: (_) => AuthController(repo, storage)..bootstrap(),
+          create: (ctx) => AuthController(
+            repo,
+            storage,
+            realtime: ctx.read<RealtimeClient>(),
+          )..bootstrap(),
         ),
       ],
       child: const AlanyaApp(),
