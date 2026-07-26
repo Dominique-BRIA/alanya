@@ -115,6 +115,7 @@ class _ChatScreenState extends State<ChatScreen>
   bool get _dark => Theme.of(context).brightness == Brightness.dark;
   Color get _appBarBg => _dark ? AlanyaColors.nuit2 : AlanyaColors.terracotta;
   Color get _onAppBar => _dark ? AlanyaColors.craie : Colors.white;
+  Color get _onAppBarSub => _dark ? AlanyaColors.craie2 : Colors.white70;
   Color get _composerBg => _dark ? AlanyaColors.nuit2 : AlanyaColors.cream;
   // Modèle Nuit : l'indigo porte les messages envoyés, la terre cuite reste
   // réservée à l'action et au non-lu (« un seul accent par écran »).
@@ -123,6 +124,36 @@ class _ChatScreenState extends State<ChatScreen>
   Color get _recvBubbleColor => _dark ? AlanyaColors.nuit3 : Colors.white;
   Color _bubbleTextColor(bool mine) =>
       mine ? Colors.white : (_dark ? AlanyaColors.craie : AlanyaColors.ink);
+  // Le mode clair reste EXACTEMENT ce qu'il était : seule la branche Nuit est
+  // nouvelle (cf. helper themed() dans alanya_theme.dart).
+  Color get _muted => _dark ? AlanyaColors.craie2 : Colors.black54;
+  Color get _muted45 => _dark ? AlanyaColors.craie2 : Colors.black45;
+  Color get _mutedIcon => _dark ? AlanyaColors.craie2 : AlanyaColors.grey400;
+  Color get _accent =>
+      _dark ? AlanyaColors.terracottaNuit : AlanyaColors.terracotta;
+  Color get _accentSoft =>
+      _dark ? AlanyaColors.terracottaNuitLight : AlanyaColors.terracotta;
+  Color get _iconNeutral => _dark ? AlanyaColors.craie2 : AlanyaColors.chocolate;
+  Color get _positive => _dark ? AlanyaColors.indigoLight : AlanyaColors.forest;
+  Color get _danger => _dark ? AlanyaColors.erreurNuit : Colors.red;
+  Color get _hairline => _dark ? AlanyaColors.ligne : AlanyaColors.sand;
+  Color get _cardBg => _dark ? AlanyaColors.nuit2 : Colors.white;
+  /// Fond des pastilles système du fil (date, message éphémère…).
+  Color get _pillBg => _dark
+      ? AlanyaColors.nuit3.withValues(alpha: 0.9)
+      : Colors.black.withValues(alpha: 0.06);
+
+  /// Fond du bloc de citation dans une bulle reçue. En Nuit, le modèle demande
+  /// un creux plus sombre que la bulle ; en clair on garde le sable et son
+  /// opacité d'origine, qui diffère selon l'emplacement d'où l'appel vient.
+  Color _quoteBgRecv(double lightAlpha) => _dark
+      ? AlanyaColors.nuit.withValues(alpha: 0.35)
+      : AlanyaColors.sand.withOpacity(lightAlpha);
+
+  /// Bandeau d'enregistrement vocal en cours.
+  Color get _recordBg => _dark
+      ? AlanyaColors.erreurNuit.withValues(alpha: 0.16)
+      : Colors.red.shade50;
 
   String? _token;
   String _baseUrl = "";
@@ -779,12 +810,12 @@ class _ChatScreenState extends State<ChatScreen>
 
   Widget _replyPreviewTextOnly(Message m, bool mine, dynamic snapshot, Message? original, String senderName) {
     final onColor = _bubbleTextColor(mine);
-    final barColor = mine ? Colors.white70 : AlanyaColors.terracotta;
+    final barColor = mine ? Colors.white70 : _accentSoft;
     final previewText = _replyPreviewText(original, snapshot);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
-        color: mine ? Colors.white.withOpacity(0.15) : AlanyaColors.sand.withOpacity(0.5),
+        color: mine ? Colors.white.withOpacity(0.15) : _quoteBgRecv(0.5),
         borderRadius: BorderRadius.circular(8),
         border: Border(left: BorderSide(color: barColor, width: 3)),
       ),
@@ -1016,8 +1047,8 @@ class _ChatScreenState extends State<ChatScreen>
 
   Future<String?> _showDeleteDialog(bool canDeleteForAll) {
     return showModalBottomSheet<String>(context: context, builder: (ctx) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
-      ListTile(leading: const Icon(Icons.delete_outline, color: AlanyaColors.chocolate), title: Text(tr(context, 'delete_for_me')), onTap: () => Navigator.pop(ctx, "me")),
-      if (canDeleteForAll) ListTile(leading: const Icon(Icons.delete_forever, color: Colors.red), title: Text(tr(context, 'delete_for_everyone')), onTap: () => Navigator.pop(ctx, "everyone")),
+      ListTile(leading: Icon(Icons.delete_outline, color: _iconNeutral), title: Text(tr(context, 'delete_for_me')), onTap: () => Navigator.pop(ctx, "me")),
+      if (canDeleteForAll) ListTile(leading: Icon(Icons.delete_forever, color: _danger), title: Text(tr(context, 'delete_for_everyone')), onTap: () => Navigator.pop(ctx, "everyone")),
     ])));
   }
 
@@ -1131,7 +1162,7 @@ class _ChatScreenState extends State<ChatScreen>
               ),
               const Divider(height: 1),
               _infoSection(Icons.done_all, AlanyaColors.tickRead, "Lu", readList),
-              _infoSection(Icons.done, AlanyaColors.grey400, "En attente", pending),
+              _infoSection(Icons.done, _mutedIcon, "En attente", pending),
               if (readList.isEmpty && pending.isEmpty)
                 const Padding(
                     padding: EdgeInsets.all(20),
@@ -1162,11 +1193,11 @@ class _ChatScreenState extends State<ChatScreen>
         final when = readAtStr != null ? _readAtLabel(readAtStr) : null;
         return ListTile(
           dense: true,
-          leading: const Icon(Icons.person_outline, color: AlanyaColors.grey400),
+          leading: Icon(Icons.person_outline, color: _mutedIcon),
           title: Text((x["name"] as String?) ?? ""),
           trailing: when != null
               ? Text(when,
-                  style: const TextStyle(fontSize: 12, color: Colors.black54))
+                  style: TextStyle(fontSize: 12, color: _muted))
               : null,
         );
       }),
@@ -1225,11 +1256,11 @@ class _ChatScreenState extends State<ChatScreen>
               ),
             ]),
           ),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: Text(
               "Les nouveaux messages disparaîtront après la durée choisie, pour tout le monde.",
-              style: TextStyle(fontSize: 13, color: Colors.black54),
+              style: TextStyle(fontSize: 13, color: _muted),
             ),
           ),
           const Divider(height: 1),
@@ -1238,7 +1269,7 @@ class _ChatScreenState extends State<ChatScreen>
             return ListTile(
               title: Text(e.value),
               trailing: selected
-                  ? const Icon(Icons.check, color: AlanyaColors.terracotta)
+                  ? Icon(Icons.check, color: _accent)
                   : null,
               onTap: () {
                 Navigator.pop(ctx);
@@ -1305,31 +1336,31 @@ class _ChatScreenState extends State<ChatScreen>
         onTap: () => _scrollToMessage(id),
         child: Container(
           padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
-          decoration: const BoxDecoration(
-            border: Border(bottom: BorderSide(color: AlanyaColors.sand)),
+          decoration: BoxDecoration(
+            border: Border(bottom: BorderSide(color: _hairline)),
           ),
           child: Row(children: [
-            const Icon(Icons.push_pin, size: 18, color: AlanyaColors.terracotta),
+            Icon(Icons.push_pin, size: 18, color: _accent),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text("Message épinglé",
+                  Text("Message épinglé",
                       style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
-                          color: AlanyaColors.terracotta)),
+                          color: _accent)),
                   Text(preview,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 13, color: Colors.black54)),
+                      style: TextStyle(fontSize: 13, color: _muted)),
                 ],
               ),
             ),
             IconButton(
               tooltip: "Détacher",
-              icon: const Icon(Icons.close, size: 20, color: Colors.black45),
+              icon: Icon(Icons.close, size: 20, color: _muted45),
               onPressed: () {
                 setState(() => _pinnedMessageId = null);
                 final rt = context.read<RealtimeClient>();
@@ -1381,7 +1412,7 @@ class _ChatScreenState extends State<ChatScreen>
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: selected
-                    ? AlanyaColors.terracotta.withValues(alpha: 0.18)
+                    ? _accent.withValues(alpha: 0.18)
                     : Colors.transparent,
               ),
               child: Text(e, style: const TextStyle(fontSize: 26)),
@@ -1397,13 +1428,13 @@ class _ChatScreenState extends State<ChatScreen>
       if (!m.isDeleted) _reactionPickerRow(m, ctx),
       if (!m.isDeleted) const Divider(height: 1),
       if (!m.isDeleted) ...[
-        ListTile(leading: const Icon(Icons.reply, color: AlanyaColors.terracotta), title: Text(tr(context, 'reply')), onTap: () { Navigator.pop(ctx); _setReplyTo(m); }),
+        ListTile(leading: Icon(Icons.reply, color: _accent), title: Text(tr(context, 'reply')), onTap: () { Navigator.pop(ctx); _setReplyTo(m); }),
         if (m.senderId == _myId && m.type == 'TEXT')
-          ListTile(leading: const Icon(Icons.edit_outlined, color: AlanyaColors.forest), title: const Text("Modifier"), onTap: () { Navigator.pop(ctx); _startEdit(m); }),
-        ListTile(leading: const Icon(Icons.forward, color: AlanyaColors.forest), title: Text(tr(context, 'forward')), onTap: () { Navigator.pop(ctx); _forwardMessage(m); }),
-        ListTile(leading: const Icon(Icons.copy, color: AlanyaColors.chocolate), title: Text(tr(context, 'copy')), onTap: () { Navigator.pop(ctx); if (m.content != null) { Clipboard.setData(ClipboardData(text: m.content!)); showAppSnackBar(tr(context, 'copied')); } }),
+          ListTile(leading: Icon(Icons.edit_outlined, color: _positive), title: const Text("Modifier"), onTap: () { Navigator.pop(ctx); _startEdit(m); }),
+        ListTile(leading: Icon(Icons.forward, color: _positive), title: Text(tr(context, 'forward')), onTap: () { Navigator.pop(ctx); _forwardMessage(m); }),
+        ListTile(leading: Icon(Icons.copy, color: _iconNeutral), title: Text(tr(context, 'copy')), onTap: () { Navigator.pop(ctx); if (m.content != null) { Clipboard.setData(ClipboardData(text: m.content!)); showAppSnackBar(tr(context, 'copied')); } }),
       ],
-      ListTile(leading: Icon(m.isDeleted ? Icons.delete_outline : Icons.delete, color: Colors.red), title: Text(tr(context, 'delete')), onTap: () { Navigator.pop(ctx); _deleteMessage(m); }),
+      ListTile(leading: Icon(m.isDeleted ? Icons.delete_outline : Icons.delete, color: _danger), title: Text(tr(context, 'delete')), onTap: () { Navigator.pop(ctx); _deleteMessage(m); }),
     ])));
   }
 
@@ -1435,7 +1466,7 @@ class _ChatScreenState extends State<ChatScreen>
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
             Text(widget.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
             if (widget.isGroup)
-              Text("${widget.memberNames.length} membres", style: const TextStyle(fontSize: 11, color: Colors.white70))
+              Text("${widget.memberNames.length} membres", style: TextStyle(fontSize: 11, color: _onAppBarSub))
             else
               // Présence LIVE : lit le PresenceStore (mis à jour par les events WS
               // `presence`), avec repli sur les données REST passées au widget.
@@ -1452,7 +1483,8 @@ class _ChatScreenState extends State<ChatScreen>
                   sub = widget.otherStatusMsg;
                 }
                 if (sub == null) return const SizedBox.shrink();
-                return Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, color: Colors.white70));
+                // Modèle Nuit : la présence est le seul accent chaud de l'en-tête.
+                return Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, color: _dark ? AlanyaColors.terracottaNuitLight : Colors.white70));
               }),
           ])),
         ]),
@@ -1478,7 +1510,7 @@ class _ChatScreenState extends State<ChatScreen>
                         ? Icons.timer
                         : Icons.timer_outlined,
                     size: 20,
-                    color: AlanyaColors.terracotta),
+                    color: _accent),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(_disappearingSeconds > 0
@@ -1506,33 +1538,33 @@ class _ChatScreenState extends State<ChatScreen>
       title: TextField(
         controller: _searchCtrl,
         autofocus: true,
-        style: const TextStyle(color: Colors.white, fontSize: 16),
-        cursorColor: Colors.white,
+        style: TextStyle(color: _onAppBar, fontSize: 16),
+        cursorColor: _onAppBar,
         textInputAction: TextInputAction.search,
         onChanged: _onSearchChanged,
-        decoration: const InputDecoration(
+        decoration: InputDecoration(
           hintText: "Rechercher…",
-          hintStyle: TextStyle(color: Colors.white70),
+          hintStyle: TextStyle(color: _onAppBarSub),
           border: InputBorder.none,
         ),
       ),
       actions: [
         if (_searchLoading)
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Center(
               child: SizedBox(
                 width: 18, height: 18,
                 child: CircularProgressIndicator(
                     strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white)),
+                    valueColor: AlwaysStoppedAnimation<Color>(_onAppBar)),
               ),
             ),
           )
         else if (hasQuery) ...[
           Center(
             child: Text(total == 0 ? "0" : "$pos/$total",
-                style: const TextStyle(color: Colors.white, fontSize: 13)),
+                style: TextStyle(color: _onAppBar, fontSize: 13)),
           ),
           IconButton(
               tooltip: "Plus ancien",
@@ -1600,20 +1632,20 @@ class _ChatScreenState extends State<ChatScreen>
           },
           itemBuilder: (_) => [
             if (mine && !m.isDeleted)
-              const PopupMenuItem(
+              PopupMenuItem(
                   value: 'info',
                   child: Row(children: [
-                    Icon(Icons.info_outline, size: 20, color: AlanyaColors.chocolate),
-                    SizedBox(width: 12),
-                    Text("Infos"),
+                    Icon(Icons.info_outline, size: 20, color: _iconNeutral),
+                    const SizedBox(width: 12),
+                    const Text("Infos"),
                   ])),
             if (hasText)
-              const PopupMenuItem(
+              PopupMenuItem(
                   value: 'copy',
                   child: Row(children: [
-                    Icon(Icons.copy, size: 20, color: AlanyaColors.chocolate),
-                    SizedBox(width: 12),
-                    Text("Copier"),
+                    Icon(Icons.copy, size: 20, color: _iconNeutral),
+                    const SizedBox(width: 12),
+                    const Text("Copier"),
                   ])),
             PopupMenuItem(
                 value: 'pin',
@@ -1623,17 +1655,17 @@ class _ChatScreenState extends State<ChatScreen>
                           ? Icons.push_pin
                           : Icons.push_pin_outlined,
                       size: 20,
-                      color: AlanyaColors.terracotta),
+                      color: _accent),
                   const SizedBox(width: 12),
                   Text(_pinnedMessageId == m.id ? "Détacher" : "Épingler"),
                 ])),
             if (mine && m.type == 'TEXT')
-              const PopupMenuItem(
+              PopupMenuItem(
                   value: 'edit',
                   child: Row(children: [
-                    Icon(Icons.edit_outlined, size: 20, color: AlanyaColors.forest),
-                    SizedBox(width: 12),
-                    Text("Modifier"),
+                    Icon(Icons.edit_outlined, size: 20, color: _positive),
+                    const SizedBox(width: 12),
+                    const Text("Modifier"),
                   ])),
           ],
         ),
@@ -1673,7 +1705,7 @@ class _ChatScreenState extends State<ChatScreen>
         child: Column(children: [
           _pinnedBanner(),
           Expanded(child: _loading
-              ? const Center(child: CircularProgressIndicator(color: AlanyaColors.terracotta))
+              ? Center(child: CircularProgressIndicator(color: _accent))
               : _messages.isEmpty
                   ? Center(child: Text(tr(context, 'no_messages')))
                   : ListView.builder(controller: _scrollCtrl, padding: const EdgeInsets.all(12), itemCount: _messages.length, itemBuilder: (_, i) {
@@ -1701,16 +1733,16 @@ class _ChatScreenState extends State<ChatScreen>
           margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 36),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           decoration: BoxDecoration(
-            color: AlanyaColors.gold.withValues(alpha: 0.18),
+            color: _dark ? AlanyaColors.gold.withValues(alpha: 0.14) : AlanyaColors.gold.withValues(alpha: 0.18),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            const Icon(Icons.timer_outlined, size: 15, color: AlanyaColors.chocolate),
+            Icon(Icons.timer_outlined, size: 15, color: _iconNeutral),
             const SizedBox(width: 6),
             Flexible(
               child: Text(m.content ?? '',
                   textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 12.5, color: AlanyaColors.chocolate)),
+                  style: TextStyle(fontSize: 12.5, color: _iconNeutral)),
             ),
           ]),
         ),
@@ -1730,7 +1762,7 @@ class _ChatScreenState extends State<ChatScreen>
       key: _messageKeys.putIfAbsent(m.id, () => GlobalKey()),
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
       child: Column(crossAxisAlignment: mine ? CrossAxisAlignment.end : CrossAxisAlignment.start, children: [
-        if (senderLabel != null) Padding(padding: const EdgeInsets.only(left: 4, bottom: 2), child: Text(senderLabel, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AlanyaColors.forest))),
+        if (senderLabel != null) Padding(padding: const EdgeInsets.only(left: 4, bottom: 2), child: Text(senderLabel, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _positive))),
         _SwipeToReply(
           onReply: () => _setReplyTo(m),
           child: GestureDetector(
@@ -1741,9 +1773,9 @@ class _ChatScreenState extends State<ChatScreen>
               padding: (isImage || isVideo || isGrid) ? const EdgeInsets.all(3) : const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               constraints: const BoxConstraints(maxWidth: 280),
               decoration: BoxDecoration(
-                color: isHighlighted ? AlanyaColors.gold.withValues(alpha: 0.3) : (mine ? _sentBubbleColor : _recvBubbleColor),
+                color: isHighlighted ? AlanyaColors.gold.withValues(alpha: _dark ? 0.22 : 0.3) : (mine ? _sentBubbleColor : _recvBubbleColor),
                 borderRadius: BorderRadius.circular(14),
-                border: mine ? null : Border.all(color: isHighlighted ? AlanyaColors.gold : AlanyaColors.sand),
+                border: mine ? null : Border.all(color: isHighlighted ? AlanyaColors.gold : _hairline),
               ),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 if (m.replyToId != null && !m.isDeleted) _replyPreviewHeader(m, mine),
@@ -1811,7 +1843,7 @@ class _ChatScreenState extends State<ChatScreen>
                                         },
                                         onLongPress: () => _openMessageActions(m),
                                         timestamp: _time(m.createdAt),
-                                        statusWidget: mine ? _statusTicks(m.status, mine ? Colors.white70 : Colors.black45) : null,
+                                        statusWidget: mine ? _statusTicks(m.status, mine ? Colors.white70 : _muted45) : null,
                                         isMe: mine,
                                       )
                                     : isAudio
@@ -1820,7 +1852,7 @@ class _ChatScreenState extends State<ChatScreen>
                                             duration: m.media.first.durationMs,
                                             onTap: () => InlineAudioPlayer.toggle(_mediaUrl(m.media.first), totalDuration: m.media.first.durationMs != null ? Duration(milliseconds: m.media.first.durationMs!) : null),
                                             timestamp: _time(m.createdAt),
-                                            statusWidget: mine ? _statusTicks(m.status, mine ? Colors.white70 : Colors.black45) : null,
+                                            statusWidget: mine ? _statusTicks(m.status, mine ? Colors.white70 : _muted45) : null,
                                             isMe: mine,
                                           )
                                         : _textBubble(m, mine),
@@ -1858,13 +1890,13 @@ class _ChatScreenState extends State<ChatScreen>
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
                 color: isMine
-                    ? AlanyaColors.terracotta.withValues(alpha: 0.15)
-                    : Colors.white,
+                    ? _accent.withValues(alpha: 0.15)
+                    : _cardBg,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
                     color: isMine
-                        ? AlanyaColors.terracotta.withValues(alpha: 0.5)
-                        : AlanyaColors.sand),
+                        ? _accent.withValues(alpha: 0.5)
+                        : _hairline),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withValues(alpha: 0.12),
@@ -1878,10 +1910,11 @@ class _ChatScreenState extends State<ChatScreen>
                 if (e.value > 1) ...[
                   const SizedBox(width: 3),
                   Text("${e.value}",
-                      style: const TextStyle(
+                      style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
-                          color: AlanyaColors.grey700)),
+                          color:
+                              _dark ? AlanyaColors.craie : AlanyaColors.grey700)),
                 ],
               ]),
             ),
@@ -1892,7 +1925,7 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Widget _deletedBubble(Message m, bool mine) {
-    final onSub = mine ? Colors.white70 : Colors.black45;
+    final onSub = mine ? Colors.white70 : _muted45;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(mainAxisSize: MainAxisSize.min, children: [
         Icon(Icons.block, size: 14, color: onSub),
@@ -1909,7 +1942,7 @@ class _ChatScreenState extends State<ChatScreen>
     final translated = _translations[m.id];
     final isTranslating = _translating.contains(m.id);
     final onTextColor = _bubbleTextColor(mine);
-    final onSubColor = mine ? Colors.white70 : Colors.black45;
+    final onSubColor = mine ? Colors.white70 : _muted45;
     return GestureDetector(
       onTap: m.type == 'TEXT' && (m.content ?? '').isNotEmpty ? () => _translateMessage(m) : null,
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1917,7 +1950,7 @@ class _ChatScreenState extends State<ChatScreen>
         if ((m.content ?? '').isNotEmpty) buildLinkPreview(m.content!, mine),
         if (translated != null) ...[
           const SizedBox(height: 6),
-          Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: mine ? Colors.white.withOpacity(0.15) : AlanyaColors.sand.withOpacity(0.7), borderRadius: BorderRadius.circular(8)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: mine ? Colors.white.withOpacity(0.15) : _quoteBgRecv(0.7), borderRadius: BorderRadius.circular(8)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.translate, size: 12, color: onSubColor), const SizedBox(width: 4), Text(tr(context, 'translated'), style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: onSubColor))]),
             const SizedBox(height: 2),
             Text(translated, style: TextStyle(fontSize: 13, color: onTextColor, fontStyle: FontStyle.italic)),
@@ -1960,7 +1993,7 @@ class _ChatScreenState extends State<ChatScreen>
     return "vu il y a ${diff.inDays}j";
   }
   Widget _dateChip(String label) {
-    return Center(child: Container(margin: const EdgeInsets.symmetric(vertical: 10), padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6), decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(10)), child: Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: AlanyaColors.grey600))));
+    return Center(child: Container(margin: const EdgeInsets.symmetric(vertical: 10), padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6), decoration: BoxDecoration(color: _pillBg, borderRadius: BorderRadius.circular(10)), child: Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: _dark ? AlanyaColors.craie2 : AlanyaColors.grey600))));
   }
   String _dateLabel(DateTime d) {
     final l = d.toLocal(); final now = DateTime.now(); final today = DateTime(now.year, now.month, now.day); final msgDay = DateTime(l.year, l.month, l.day); final diff = today.difference(msgDay).inDays;
@@ -1980,55 +2013,55 @@ class _ChatScreenState extends State<ChatScreen>
   // ══════════════════════════════════════════════
   Widget _composer() {
     if (_recordLocked) {
-      return SafeArea(top: false, child: Container(padding: const EdgeInsets.all(8), color: AlanyaColors.cream, child: Row(children: [
-        GestureDetector(onTap: () => _stopVoiceRecord(cancel: true), child: CircleAvatar(backgroundColor: Colors.red.shade400, child: const Icon(Icons.delete_outline, color: Colors.white))),
+      return SafeArea(top: false, child: Container(padding: const EdgeInsets.all(8), color: _composerBg, child: Row(children: [
+        GestureDetector(onTap: () => _stopVoiceRecord(cancel: true), child: CircleAvatar(backgroundColor: _dark ? AlanyaColors.erreurNuit : Colors.red.shade400, child: const Icon(Icons.delete_outline, color: Colors.white))),
         const SizedBox(width: 8),
-        Expanded(child: Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(24)), child: Row(children: [
-          const Icon(Icons.fiber_manual_record, color: Colors.red, size: 14), const SizedBox(width: 8),
-          Text(_formatDuration(_recordDuration), style: TextStyle(fontWeight: FontWeight.w600, color: Colors.red.shade700, fontSize: 15)),
-          const Spacer(), Icon(Icons.lock, color: Colors.red.shade400, size: 18), const SizedBox(width: 4),
-          Text(tr(context, 'recording_locked'), style: const TextStyle(fontSize: 13, color: Colors.black54)),
+        Expanded(child: Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), decoration: BoxDecoration(color: _recordBg, borderRadius: BorderRadius.circular(24)), child: Row(children: [
+          Icon(Icons.fiber_manual_record, color: _danger, size: 14), const SizedBox(width: 8),
+          Text(_formatDuration(_recordDuration), style: TextStyle(fontWeight: FontWeight.w600, color: _dark ? AlanyaColors.erreurNuit : Colors.red.shade700, fontSize: 15)),
+          const Spacer(), Icon(Icons.lock, color: _dark ? AlanyaColors.erreurNuit : Colors.red.shade400, size: 18), const SizedBox(width: 4),
+          Text(tr(context, 'recording_locked'), style: TextStyle(fontSize: 13, color: _muted)),
         ]))),
         const SizedBox(width: 8),
-        GestureDetector(onTap: _uploading ? null : () => _stopVoiceRecord(), child: CircleAvatar(backgroundColor: AlanyaColors.terracotta, child: const Icon(Icons.send, color: Colors.white))),
+        GestureDetector(onTap: _uploading ? null : () => _stopVoiceRecord(), child: CircleAvatar(backgroundColor: _accent, child: const Icon(Icons.send, color: Colors.white))),
       ])));
     }
     return SafeArea(top: false, child: Column(mainAxisSize: MainAxisSize.min, children: [
-      if (_editing != null) Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6), color: AlanyaColors.cream, child: Row(children: [
-        const Icon(Icons.edit_outlined, size: 18, color: AlanyaColors.forest),
+      if (_editing != null) Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6), color: _composerBg, child: Row(children: [
+        Icon(Icons.edit_outlined, size: 18, color: _positive),
         const SizedBox(width: 8),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text("Modifier le message", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AlanyaColors.forest)),
-          Text(_editing!.content ?? '', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.black54)),
+          Text("Modifier le message", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _positive)),
+          Text(_editing!.content ?? '', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: _muted)),
         ])),
-        GestureDetector(onTap: _cancelEdit, child: const Icon(Icons.close, size: 20, color: Colors.black54)),
+        GestureDetector(onTap: _cancelEdit, child: Icon(Icons.close, size: 20, color: _muted)),
       ])),
-      if (_replyTo != null && _editing == null) Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6), color: AlanyaColors.cream, child: Row(children: [
-        Container(width: 3, height: 32, decoration: BoxDecoration(color: AlanyaColors.terracotta, borderRadius: BorderRadius.circular(2))),
+      if (_replyTo != null && _editing == null) Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6), color: _composerBg, child: Row(children: [
+        Container(width: 3, height: 32, decoration: BoxDecoration(color: _accentSoft, borderRadius: BorderRadius.circular(2))),
         const SizedBox(width: 8),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(_replyTo!.senderId == _myId ? tr(context, 'you') : (widget.memberNames[_replyTo!.senderId] ?? tr(context, 'reply_to')), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AlanyaColors.terracotta)),
-          Text(_replyTo!.isDeleted ? tr(context, 'message_deleted') : (_replyTo!.content ?? (_replyTo!.media.isNotEmpty ? '📎 ${_replyTo!.media.first.filename ?? tr(context, 'file')}' : '...')), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.black54)),
+          Text(_replyTo!.senderId == _myId ? tr(context, 'you') : (widget.memberNames[_replyTo!.senderId] ?? tr(context, 'reply_to')), style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _accent)),
+          Text(_replyTo!.isDeleted ? tr(context, 'message_deleted') : (_replyTo!.content ?? (_replyTo!.media.isNotEmpty ? '📎 ${_replyTo!.media.first.filename ?? tr(context, 'file')}' : '...')), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: _muted)),
         ])),
-        GestureDetector(onTap: () => setState(() => _replyTo = null), child: const Icon(Icons.close, size: 20, color: Colors.black54)),
+        GestureDetector(onTap: () => setState(() => _replyTo = null), child: Icon(Icons.close, size: 20, color: _muted)),
       ])),
-      Container(padding: const EdgeInsets.all(8), color: AlanyaColors.cream, child: Row(children: [
-        Offstage(offstage: _recording, child: IconButton(tooltip: tr(context, 'attach_file'), icon: _uploading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.attach_file, color: AlanyaColors.chocolate), onPressed: _uploading ? null : _pickAndSendFile)),
+      Container(padding: const EdgeInsets.all(8), color: _composerBg, child: Row(children: [
+        Offstage(offstage: _recording, child: IconButton(tooltip: tr(context, 'attach_file'), icon: _uploading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : Icon(Icons.attach_file, color: _iconNeutral), onPressed: _uploading ? null : _pickAndSendFile)),
         Expanded(child: _recording ? _recordingBar() : TextField(controller: _inputCtrl, focusNode: _inputFocus, minLines: 1, maxLines: 4, textInputAction: TextInputAction.send, onChanged: _onInputChanged, onSubmitted: (_) => _send(), decoration: InputDecoration(hintText: tr(context, 'write_message'), contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10)))),
         const SizedBox(width: 4),
         _micButton(),
-        Offstage(offstage: _recording, child: Row(mainAxisSize: MainAxisSize.min, children: [const SizedBox(width: 8), CircleAvatar(backgroundColor: AlanyaColors.terracotta, child: IconButton(icon: const Icon(Icons.send, color: Colors.white), onPressed: _sending ? null : _send))])),
+        Offstage(offstage: _recording, child: Row(mainAxisSize: MainAxisSize.min, children: [const SizedBox(width: 8), CircleAvatar(backgroundColor: _accent, child: IconButton(icon: const Icon(Icons.send, color: Colors.white), onPressed: _sending ? null : _send))])),
       ])),
     ]));
   }
 
   Widget _recordingBar() {
-    return Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(24)), child: Row(children: [
-      const Icon(Icons.fiber_manual_record, color: Colors.red, size: 14), const SizedBox(width: 8),
-      Text(_formatDuration(_recordDuration), style: TextStyle(fontWeight: FontWeight.w600, color: Colors.red.shade700, fontSize: 15)),
+    return Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), decoration: BoxDecoration(color: _recordBg, borderRadius: BorderRadius.circular(24)), child: Row(children: [
+      Icon(Icons.fiber_manual_record, color: _danger, size: 14), const SizedBox(width: 8),
+      Text(_formatDuration(_recordDuration), style: TextStyle(fontWeight: FontWeight.w600, color: _dark ? AlanyaColors.erreurNuit : Colors.red.shade700, fontSize: 15)),
       const SizedBox(width: 12),
-      Expanded(child: Text(tr(context, 'slide_up_to_lock'), style: const TextStyle(fontSize: 13, color: Colors.black54), textAlign: TextAlign.center)),
-      const Icon(Icons.keyboard_arrow_up, color: Colors.black38, size: 20),
+      Expanded(child: Text(tr(context, 'slide_up_to_lock'), style: TextStyle(fontSize: 13, color: _muted), textAlign: TextAlign.center)),
+      Icon(Icons.keyboard_arrow_up, color: _dark ? AlanyaColors.craie2 : Colors.black38, size: 20),
     ]));
   }
 
@@ -2040,7 +2073,7 @@ class _ChatScreenState extends State<ChatScreen>
       onLongPressEnd: (_) { if (_recording && !_recordLocked) _stopVoiceRecord(); },
       onLongPressCancel: () { if (_recording && !_recordLocked) _stopVoiceRecord(cancel: true); },
       child: Stack(clipBehavior: Clip.none, alignment: Alignment.center, children: [
-        CircleAvatar(backgroundColor: _recording ? Colors.red : AlanyaColors.chocolate, child: Icon(_recording ? Icons.mic : Icons.mic_none, color: Colors.white, size: 22)),
+        CircleAvatar(backgroundColor: _recording ? _danger : (_dark ? AlanyaColors.terracottaNuit : AlanyaColors.chocolate), child: Icon(_recording ? Icons.mic : Icons.mic_none, color: Colors.white, size: 22)),
         if (_recording) Positioned(top: -30, child: Container(width: 28, height: 28, decoration: BoxDecoration(color: Colors.black.withOpacity(0.6), shape: BoxShape.circle), child: const Icon(Icons.lock_open, color: Colors.white, size: 14))),
       ]),
     );
@@ -2074,7 +2107,7 @@ class _SwipeToReplyState extends State<_SwipeToReply> with SingleTickerProviderS
       onHorizontalDragEnd: (_) { if (_dragExtent >= _threshold) widget.onReply(); _ctrl.forward(from: 0); },
       child: Stack(clipBehavior: Clip.none, children: [
         Transform.translate(offset: Offset(offset, 0), child: widget.child),
-        if (offset > 5) Positioned(left: offset - 28, top: 0, bottom: 0, child: Center(child: Icon(Icons.reply_rounded, color: Colors.grey[400], size: 22))),
+        if (offset > 5) Positioned(left: offset - 28, top: 0, bottom: 0, child: Center(child: Icon(Icons.reply_rounded, color: _dark ? AlanyaColors.craie2 : Colors.grey[400], size: 22))),
       ]),
     );
   }
@@ -2097,13 +2130,13 @@ class _ForwardPickerState extends State<_ForwardPicker> {
     return SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
       Container(padding: const EdgeInsets.all(16), child: Row(children: [
         Text(widget.title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)), const Spacer(),
-        TextButton(onPressed: _selected.isEmpty ? null : () => Navigator.pop(context, _selected), child: Text(_selected.isEmpty ? '' : '${_selected.length}', style: TextStyle(color: _selected.isEmpty ? Colors.grey : AlanyaColors.terracotta, fontWeight: FontWeight.bold))),
+        TextButton(onPressed: _selected.isEmpty ? null : () => Navigator.pop(context, _selected), child: Text(_selected.isEmpty ? '' : '${_selected.length}', style: TextStyle(color: _selected.isEmpty ? (_dark ? AlanyaColors.craie2 : Colors.grey) : _accent, fontWeight: FontWeight.bold))),
       ])),
       const Divider(height: 1),
       SizedBox(height: MediaQuery.of(context).size.height * 0.5, child: ListView.builder(shrinkWrap: true, itemCount: widget.conversations.length, itemBuilder: (_, i) {
         final conv = widget.conversations[i]; final isSelected = _selected.contains(conv.id);
         return ListTile(
-          leading: CircleAvatar(backgroundColor: isSelected ? AlanyaColors.terracotta : AlanyaColors.sand, child: Icon(isSelected ? Icons.check : (conv.isGroup ? Icons.group : Icons.person), color: isSelected ? Colors.white : AlanyaColors.chocolate)),
+          leading: CircleAvatar(backgroundColor: isSelected ? _accent : (_dark ? AlanyaColors.nuit3 : AlanyaColors.sand), child: Icon(isSelected ? Icons.check : (conv.isGroup ? Icons.group : Icons.person), color: isSelected ? Colors.white : _iconNeutral)),
           title: Text(conv.title ?? 'Conversation'), subtitle: conv.isGroup ? const Text('Groupe') : null,
           onTap: () { setState(() { if (isSelected) { _selected.remove(conv.id); } else { _selected.add(conv.id); } }); },
         );
@@ -2196,7 +2229,7 @@ class _ReactionBarrierState extends State<_ReactionBarrier>
                     padding:
                         const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                     decoration: BoxDecoration(
-                      color: dark ? const Color(0xFF2A2520) : Colors.white,
+                      color: dark ? AlanyaColors.nuit2 : Colors.white,
                       borderRadius: BorderRadius.circular(30),
                       boxShadow: [
                         BoxShadow(
@@ -2220,8 +2253,7 @@ class _ReactionBarrierState extends State<_ReactionBarrier>
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
                               color: selected
-                                  ? AlanyaColors.terracotta
-                                      .withValues(alpha: 0.18)
+                                  ? _accent.withValues(alpha: 0.18)
                                   : Colors.transparent,
                             ),
                             child: Text(e, style: const TextStyle(fontSize: 24)),
