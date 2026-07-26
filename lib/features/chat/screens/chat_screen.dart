@@ -1412,7 +1412,8 @@ class _ChatScreenState extends State<ChatScreen>
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: selected
-                    ? _accent.withValues(alpha: 0.18)
+                    ? themed(context, light: AlanyaColors.terracotta, dark: AlanyaColors.terracottaNuit)
+                                      .withValues(alpha: 0.18)
                     : Colors.transparent,
               ),
               child: Text(e, style: const TextStyle(fontSize: 26)),
@@ -2107,7 +2108,7 @@ class _SwipeToReplyState extends State<_SwipeToReply> with SingleTickerProviderS
       onHorizontalDragEnd: (_) { if (_dragExtent >= _threshold) widget.onReply(); _ctrl.forward(from: 0); },
       child: Stack(clipBehavior: Clip.none, children: [
         Transform.translate(offset: Offset(offset, 0), child: widget.child),
-        if (offset > 5) Positioned(left: offset - 28, top: 0, bottom: 0, child: Center(child: Icon(Icons.reply_rounded, color: _dark ? AlanyaColors.craie2 : Colors.grey[400], size: 22))),
+        if (offset > 5) Positioned(left: offset - 28, top: 0, bottom: 0, child: Center(child: Icon(Icons.reply_rounded, color: themed(context, light: Colors.grey.shade400, dark: AlanyaColors.craie2), size: 22))),
       ]),
     );
   }
@@ -2130,13 +2131,13 @@ class _ForwardPickerState extends State<_ForwardPicker> {
     return SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
       Container(padding: const EdgeInsets.all(16), child: Row(children: [
         Text(widget.title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)), const Spacer(),
-        TextButton(onPressed: _selected.isEmpty ? null : () => Navigator.pop(context, _selected), child: Text(_selected.isEmpty ? '' : '${_selected.length}', style: TextStyle(color: _selected.isEmpty ? (_dark ? AlanyaColors.craie2 : Colors.grey) : _accent, fontWeight: FontWeight.bold))),
+        TextButton(onPressed: _selected.isEmpty ? null : () => Navigator.pop(context, _selected), child: Text(_selected.isEmpty ? '' : '${_selected.length}', style: TextStyle(color: _selected.isEmpty ? themed(context, light: Colors.grey, dark: AlanyaColors.craie2) : themed(context, light: AlanyaColors.terracotta, dark: AlanyaColors.terracottaNuit), fontWeight: FontWeight.bold))),
       ])),
       const Divider(height: 1),
       SizedBox(height: MediaQuery.of(context).size.height * 0.5, child: ListView.builder(shrinkWrap: true, itemCount: widget.conversations.length, itemBuilder: (_, i) {
         final conv = widget.conversations[i]; final isSelected = _selected.contains(conv.id);
         return ListTile(
-          leading: CircleAvatar(backgroundColor: isSelected ? _accent : (_dark ? AlanyaColors.nuit3 : AlanyaColors.sand), child: Icon(isSelected ? Icons.check : (conv.isGroup ? Icons.group : Icons.person), color: isSelected ? Colors.white : _iconNeutral)),
+          leading: CircleAvatar(backgroundColor: isSelected ? themed(context, light: AlanyaColors.terracotta, dark: AlanyaColors.terracottaNuit) : themed(context, light: AlanyaColors.sand, dark: AlanyaColors.nuit3), child: Icon(isSelected ? Icons.check : (conv.isGroup ? Icons.group : Icons.person), color: isSelected ? Colors.white : themed(context, light: AlanyaColors.chocolate, dark: AlanyaColors.craie2))),
           title: Text(conv.title ?? 'Conversation'), subtitle: conv.isGroup ? const Text('Groupe') : null,
           onTap: () { setState(() { if (isSelected) { _selected.remove(conv.id); } else { _selected.add(conv.id); } }); },
         );
@@ -2253,7 +2254,8 @@ class _ReactionBarrierState extends State<_ReactionBarrier>
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
                               color: selected
-                                  ? _accent.withValues(alpha: 0.18)
+                                  ? themed(context, light: AlanyaColors.terracotta, dark: AlanyaColors.terracottaNuit)
+                                      .withValues(alpha: 0.18)
                                   : Colors.transparent,
                             ),
                             child: Text(e, style: const TextStyle(fontSize: 24)),
