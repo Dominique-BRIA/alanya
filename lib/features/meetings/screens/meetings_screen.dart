@@ -90,50 +90,71 @@ class _MeetingsScreenState extends State<MeetingsScreen>
 
   @override
   Widget build(BuildContext context) {
-    return MotifBackground(
-      overlayOpacity: 0.92,
-      child: isSelecting
-          ? Scaffold(
-              appBar: selectAppBar(
-                title: "Réunions",
-                onDelete: _deleteSelected,
-                onCancel: clearSelection,
-                onSelectAll: () => selectAll(
-                    (_meetings ?? [])
-                        .where((m) => m.isFinished)
-                        .map((m) => m.idMeeting.toString())
-                        .toList()),
-              ),
-              body: RefreshIndicator(
-                onRefresh: _load,
-                child: _buildList(),
-              ),
-            )
-          : Stack(
-              children: [
-                RefreshIndicator(
-                  onRefresh: _load,
-                  child: _buildList(),
+    return DefaultTabController(
+      length: 3,
+      child: MotifBackground(
+        overlayOpacity: 0.92,
+        child: isSelecting
+            ? Scaffold(
+                appBar: selectAppBar(
+                  title: "Réunions",
+                  onDelete: _deleteSelected,
+                  onCancel: clearSelection,
+                  onSelectAll: () => selectAll(
+                      (_meetings ?? [])
+                          .where((m) => m.isFinished)
+                          .map((m) => m.idMeeting.toString())
+                          .toList()),
                 ),
-                Positioned(
-                  right: 16,
-                  bottom: 16,
-                  child: FloatingActionButton(
-                    backgroundColor: accentOf(context),
-                    onPressed: _create,
-                    child: const Icon(Icons.add, color: Colors.white),
+                body: RefreshIndicator(
+                  onRefresh: _load,
+                  child: TabBarView(
+                    children: [
+                      _buildTabContent("En cours"),
+                      _buildTabContent("À venir"),
+                      _buildTabContent("Terminée"),
+                    ],
                   ),
                 ),
-              ],
-            ),
+              )
+            : Scaffold(
+                appBar: AppBar(
+                  title: const Text("Réunions"),
+                  bottom: const TabBar(
+                    tabs: [
+                      Tab(text: "En cours"),
+                      Tab(text: "À venir"),
+                      Tab(text: "Terminée"),
+                    ],
+                    labelColor: AlanyaColors.terracotta,
+                    unselectedLabelColor: AlanyaColors.craie2,
+                    indicatorColor: AlanyaColors.terracotta,
+                    indicatorWeight: 2.5,
+                  ),
+                ),
+                body: RefreshIndicator(
+                  onRefresh: _load,
+                  child: TabBarView(
+                    children: [
+                      _buildTabContent("En cours"),
+                      _buildTabContent("À venir"),
+                      _buildTabContent("Terminée"),
+                    ],
+                  ),
+                ),
+                floatingActionButton: FloatingActionButton(
+                  backgroundColor: accentOf(context),
+                  onPressed: _create,
+                  child: const Icon(Icons.add, color: Colors.white),
+                ),
+              ),
+      ),
     );
   }
 
-  Widget _buildList() {
+  Widget _buildTabContent(String tabName) {
     if (_meetings == null && !_error) {
-      return Center(
-        child: CircularProgressIndicator(color: accentOf(context)),
-      );
+      return const Center(child: CircularProgressIndicator());
     }
     if (_error) {
       return ListView(children: const [
@@ -143,9 +164,25 @@ class _MeetingsScreenState extends State<MeetingsScreen>
     }
 
     final meetings = _meetings ?? [];
-    if (meetings.isEmpty) {
+    final now = DateTime.now();
+    List<Meeting> filtered;
+    switch (tabName) {
+      case "En cours":
+        filtered = meetings.where((m) => !m.isFinished && (m.startTime.isBefore(now) || m.startTime.isAtSameMomentAs(now))).toList();
+        break;
+      case "À venir":
+        filtered = meetings.where((m) => !m.isFinished && m.startTime.isAfter(now)).toList();
+        break;
+      case "Terminée":
+        filtered = meetings.where((m) => m.isFinished).toList();
+        break;
+      default:
+        filtered = [];
+    }
+
+    if (filtered.isEmpty) {
       return ListView(children: [
-        SizedBox(height: 100),
+        SizedBox(height: 120),
         Center(
           child: Padding(
             padding: EdgeInsets.all(24),
@@ -155,7 +192,9 @@ class _MeetingsScreenState extends State<MeetingsScreen>
                 Icon(Icons.videocam_outlined, size: 64, color: AlanyaColors.gold),
                 SizedBox(height: 12),
                 Text(
-                  "Aucune réunion.\nAppuie sur + pour créer une réunion audio ou vidéo.",
+                  tabName == "Terminée"
+                      ? "Aucune réunion terminée."
+                      : "Aucune réunion ${tabName.toLowerCase()}.",
                   textAlign: TextAlign.center,
                   style: TextStyle(color: mutedOf(context, Colors.black54)),
                 ),
@@ -166,49 +205,10 @@ class _MeetingsScreenState extends State<MeetingsScreen>
       ]);
     }
 
-    final active = meetings.where((m) => !m.isFinished).toList();
-    final ended = meetings.where((m) => m.isFinished).toList();
-
     return ListView(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
       children: [
-        if (active.isNotEmpty) ...[
-          Padding(
-            padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
-            child: Text("En cours / À venir",
-                style: TextStyle(
-                    color: mutedOf(context, Colors.black54), fontWeight: FontWeight.bold)),
-          ),
-          ...active.map(_tile),
-        ],
-        if (ended.isNotEmpty) ...[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
-            child: Row(
-              children: [
-                Text("Terminées",
-                    style: TextStyle(
-                        color: faintOf(context, Colors.black38), fontWeight: FontWeight.bold)),
-                const Spacer(),
-                if (!isSelecting && ended.isNotEmpty)
-                  TextButton.icon(
-                    onPressed: () {
-                      // Sélectionne toutes les réunions terminées
-                      for (final m in ended) {
-                        startSelecting(m.idMeeting.toString());
-                      }
-                    },
-                    icon: const Icon(Icons.delete_outline, size: 16),
-                    label: const Text("Supprimer", style: TextStyle(fontSize: 12)),
-                    style: TextButton.styleFrom(
-                      foregroundColor: dangerOf(context, Colors.red.shade400),
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          ...ended.map(_tile),
-        ],
+        ...filtered.map(_tile),
         const SizedBox(height: 80),
       ],
     );

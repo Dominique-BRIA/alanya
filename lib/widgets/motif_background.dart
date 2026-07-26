@@ -42,7 +42,7 @@ class MotifBackground extends StatelessWidget {
         children: [
           Positioned.fill(
             child: Image.asset(
-              "assets/images/motif_nuit_doux.png",
+              "assets/images/motif_nuit_fort.png",
               repeat: ImageRepeat.repeat,
               errorBuilder: (_, __, ___) =>
                   const ColoredBox(color: AlanyaColors.nuit),
