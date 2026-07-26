@@ -321,15 +321,47 @@ class PushService {
   }
 
   /// Désenregistre le token FCM (à la déconnexion).
+  /// Tente d'utiliser le refresh token si l'access token est expiré,
+  /// pour que le backend supprime bien l'association du token FCM.
   Future<void> unregister() async {
     try {
       _fcmToken ??= await FirebaseMessaging.instance.getToken();
       if (_fcmToken != null && _api != null && _storage != null) {
-        final accessToken = await _storage!.accessToken;
+        String? accessToken = await _storage!.accessToken;
+        // Si le token d'accès est expiré, on tente un refresh avant le DELETE
+        // pour que le backend puisse identifier le compte et supprimer
+        // l'association du token FCM.
+        if (accessToken == null) {
+          final refresh = await _storage!.refreshToken;
+          if (refresh != null) {
+            try {
+              final data = await _api!.post(
+                "/api/auth/refresh",
+                {"refreshToken": refresh},
+              );
+              accessToken = data["accessToken"] as String?;
+              final newRefresh = data["refreshToken"] as String?;
+              if (accessToken != null && newRefresh != null) {
+                await _storage!.saveTokens(
+                  access: accessToken!,
+                  refresh: newRefresh,
+                );
+              }
+            } catch (_) {
+              // Si le refresh échoue, on continue sans token valide.
+            }
+          }
+        }
         if (accessToken != null) {
           await _api!.delete(
             '/api/push/register?token=$_fcmToken',
             bearer: accessToken,
+          );
+        } else {
+          // Même sans token valide, on tente le DELETE : le backend
+          // peut supprimer l'association côté serveur s'il connaît le token.
+          await _api!.delete(
+            '/api/push/register?token=$_fcmToken',
           );
         }
       }
