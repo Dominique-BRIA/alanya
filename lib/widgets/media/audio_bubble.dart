@@ -35,8 +35,15 @@ class AudioBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final onSub = isMe ? Colors.white70 : Colors.black45;
-    final accent = isMe ? Colors.white : AlanyaColors.terracotta;
+    // Nuit : dans une bulle reçue, l'onde et le bouton de lecture passent en
+    // terre cuite claire (le modèle en fait le seul accent chaud de la bulle).
+    // Le mode clair est inchangé.
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final onSub =
+        isMe ? Colors.white70 : (dark ? AlanyaColors.craie2 : Colors.black45);
+    final accent = isMe
+        ? Colors.white
+        : (dark ? AlanyaColors.terracottaNuitLight : AlanyaColors.terracotta);
     final totalDuration = duration != null ? Duration(milliseconds: duration!) : null;
     final secs = duration != null ? (duration! ~/ 1000) : null;
 

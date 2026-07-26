@@ -78,22 +78,24 @@ class _TypingContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const accent = AlanyaColors.forest;
     final dark = Theme.of(context).brightness == Brightness.dark;
+    // Nuit : l'indigo clair remplace le vert forêt, illisible sur fond nuit.
+    // Le mode clair garde le vert forêt.
+    final accent = dark ? AlanyaColors.indigoLight : AlanyaColors.forest;
     final label = name == null ? "en train d'écrire" : "$name écrit";
     return _Pill(
       accent: accent,
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const TypingDots(color: accent),
+          TypingDots(color: accent),
           const SizedBox(width: 10),
           Text(
             label,
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w500,
-              color: dark ? AlanyaColors.forestLight : accent,
+              color: accent,
             ),
           ),
         ],
@@ -108,26 +110,26 @@ class _RecordingContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const accent = AlanyaColors.terracotta;
     final label =
         name == null ? "en train d'enregistrer un vocal" : "$name enregistre";
     final dark = Theme.of(context).brightness == Brightness.dark;
+    final accent =
+        dark ? AlanyaColors.terracottaNuitLight : AlanyaColors.terracotta;
     return _Pill(
       accent: accent,
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.mic_rounded,
-              size: 16, color: dark ? AlanyaColors.terracottaLight : accent),
+          Icon(Icons.mic_rounded, size: 16, color: accent),
           const SizedBox(width: 8),
-          const RecordingWave(color: accent),
+          RecordingWave(color: accent),
           const SizedBox(width: 10),
           Text(
             label,
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w500,
-              color: dark ? AlanyaColors.terracottaLight : accent,
+              color: accent,
             ),
           ),
         ],
