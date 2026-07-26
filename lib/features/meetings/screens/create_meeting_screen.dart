@@ -179,14 +179,14 @@ class _CreateMeetingScreenState extends State<CreateMeetingScreen> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: themed(context, light: Colors.white, dark: AlanyaColors.nuit2),
                     borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: AlanyaColors.grey200),
+                    border: Border.all(color: themed(context, light: AlanyaColors.grey200, dark: AlanyaColors.ligne)),
                   ),
                   child: Row(
                     children: [
                       Icon(Icons.person_add_outlined,
-                          color: AlanyaColors.terracotta),
+                          color: accentOf(context)),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
@@ -195,12 +195,12 @@ class _CreateMeetingScreenState extends State<CreateMeetingScreen> {
                               : "${_selectedContacts.length} participant(s) sélectionné(s)",
                           style: TextStyle(
                             color: _selectedContacts.isEmpty
-                                ? AlanyaColors.grey400
-                                : AlanyaColors.ink,
+                                ? mutedOf(context, AlanyaColors.grey400)
+                                : themed(context, light: AlanyaColors.ink, dark: AlanyaColors.craie),
                           ),
                         ),
                       ),
-                      Icon(Icons.chevron_right, color: AlanyaColors.grey400),
+                      Icon(Icons.chevron_right, color: mutedOf(context, AlanyaColors.grey400)),
                     ],
                   ),
                 ),
@@ -226,7 +226,7 @@ class _CreateMeetingScreenState extends State<CreateMeetingScreen> {
                         setState(() =>
                             _selectedContacts.removeWhere((s) => s.userId == c.userId));
                       },
-                      backgroundColor: AlanyaColors.terracotta.withValues(alpha: 0.08),
+                      backgroundColor: accentOf(context).withValues(alpha: 0.08),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(10),
                       ),
@@ -237,7 +237,7 @@ class _CreateMeetingScreenState extends State<CreateMeetingScreen> {
               const SizedBox(height: 8),
               Text(
                 "Sélectionne tes contacts. Laisse vide pour une réunion solo.",
-                style: TextStyle(fontSize: 12, color: AlanyaColors.grey500),
+                style: TextStyle(fontSize: 12, color: mutedOf(context, AlanyaColors.grey500)),
               ),
               const SizedBox(height: 20),
 
@@ -332,7 +332,7 @@ class _ContactPickerSheetState extends State<_ContactPickerSheet> {
               width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color: AlanyaColors.grey300,
+                color: themed(context, light: AlanyaColors.grey300, dark: AlanyaColors.ligne),
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -357,7 +357,7 @@ class _ContactPickerSheetState extends State<_ContactPickerSheet> {
                           ? "Valider"
                           : "Valider (${_selected.length})",
                       style: TextStyle(
-                        color: AlanyaColors.terracotta,
+                        color: accentOf(context),
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -374,17 +374,17 @@ class _ContactPickerSheetState extends State<_ContactPickerSheet> {
                 decoration: InputDecoration(
                   hintText: "Rechercher un contact…",
                   prefixIcon:
-                      Icon(Icons.search, size: 20, color: AlanyaColors.grey400),
+                      Icon(Icons.search, size: 20, color: mutedOf(context, AlanyaColors.grey400)),
                   contentPadding:
                       const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   isDense: true,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: AlanyaColors.grey200),
+                    borderSide: BorderSide(color: themed(context, light: AlanyaColors.grey200, dark: AlanyaColors.ligne)),
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: AlanyaColors.grey200),
+                    borderSide: BorderSide(color: themed(context, light: AlanyaColors.grey200, dark: AlanyaColors.ligne)),
                   ),
                 ),
               ),
@@ -395,7 +395,7 @@ class _ContactPickerSheetState extends State<_ContactPickerSheet> {
                   ? Center(
                       child: Text(
                         "Aucun contact trouvé",
-                        style: TextStyle(color: AlanyaColors.grey400),
+                        style: TextStyle(color: mutedOf(context, AlanyaColors.grey400)),
                       ),
                     )
                   : ListView.builder(
@@ -416,10 +416,10 @@ class _ContactPickerSheetState extends State<_ContactPickerSheet> {
                                   const TextStyle(fontWeight: FontWeight.w500)),
                           subtitle: Text(c.publicNumber,
                               style: TextStyle(
-                                  fontSize: 12, color: AlanyaColors.grey500)),
+                                  fontSize: 12, color: mutedOf(context, AlanyaColors.grey500))),
                           trailing: Checkbox(
                             value: isSelected,
-                            activeColor: AlanyaColors.terracotta,
+                            activeColor: accentOf(context),
                             onChanged: (_) {
                               setState(() {
                                 if (isSelected) {

@@ -71,8 +71,8 @@ class _MeetingsScreenState extends State<MeetingsScreen>
               child: const Text("Annuler")),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text("Supprimer",
-                  style: TextStyle(color: Colors.red))),
+              child: Text("Supprimer",
+                  style: TextStyle(color: dangerOf(context)))),
         ],
       ),
     );
@@ -119,7 +119,7 @@ class _MeetingsScreenState extends State<MeetingsScreen>
                   right: 16,
                   bottom: 16,
                   child: FloatingActionButton(
-                    backgroundColor: AlanyaColors.terracotta,
+                    backgroundColor: accentOf(context),
                     onPressed: _create,
                     child: const Icon(Icons.add, color: Colors.white),
                   ),
@@ -131,8 +131,8 @@ class _MeetingsScreenState extends State<MeetingsScreen>
 
   Widget _buildList() {
     if (_meetings == null && !_error) {
-      return const Center(
-        child: CircularProgressIndicator(color: AlanyaColors.terracotta),
+      return Center(
+        child: CircularProgressIndicator(color: accentOf(context)),
       );
     }
     if (_error) {
@@ -144,7 +144,7 @@ class _MeetingsScreenState extends State<MeetingsScreen>
 
     final meetings = _meetings ?? [];
     if (meetings.isEmpty) {
-      return ListView(children: const [
+      return ListView(children: [
         SizedBox(height: 100),
         Center(
           child: Padding(
@@ -157,7 +157,7 @@ class _MeetingsScreenState extends State<MeetingsScreen>
                 Text(
                   "Aucune réunion.\nAppuie sur + pour créer une réunion audio ou vidéo.",
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.black54),
+                  style: TextStyle(color: mutedOf(context, Colors.black54)),
                 ),
               ],
             ),
@@ -172,11 +172,11 @@ class _MeetingsScreenState extends State<MeetingsScreen>
     return ListView(
       children: [
         if (active.isNotEmpty) ...[
-          const Padding(
+          Padding(
             padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
             child: Text("En cours / À venir",
                 style: TextStyle(
-                    color: Colors.black54, fontWeight: FontWeight.bold)),
+                    color: mutedOf(context, Colors.black54), fontWeight: FontWeight.bold)),
           ),
           ...active.map(_tile),
         ],
@@ -185,9 +185,9 @@ class _MeetingsScreenState extends State<MeetingsScreen>
             padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
             child: Row(
               children: [
-                const Text("Terminées",
+                Text("Terminées",
                     style: TextStyle(
-                        color: Colors.black38, fontWeight: FontWeight.bold)),
+                        color: faintOf(context, Colors.black38), fontWeight: FontWeight.bold)),
                 const Spacer(),
                 if (!isSelecting && ended.isNotEmpty)
                   TextButton.icon(
@@ -200,7 +200,7 @@ class _MeetingsScreenState extends State<MeetingsScreen>
                     icon: const Icon(Icons.delete_outline, size: 16),
                     label: const Text("Supprimer", style: TextStyle(fontSize: 12)),
                     style: TextButton.styleFrom(
-                      foregroundColor: Colors.red.shade400,
+                      foregroundColor: dangerOf(context, Colors.red.shade400),
                       padding: const EdgeInsets.symmetric(horizontal: 8),
                     ),
                   ),
@@ -227,7 +227,7 @@ class _MeetingsScreenState extends State<MeetingsScreen>
             ? selectCheckbox(m.idMeeting.toString())
             : CircleAvatar(
                 backgroundColor:
-                    m.isFinished ? Colors.grey.shade300 : AlanyaColors.forest,
+                    m.isFinished ? themed(context, light: Colors.grey.shade300, dark: AlanyaColors.nuit3) : positiveOf(context),
                 child: Icon(icon, color: Colors.white, size: 20),
               ),
         title: Text(m.objet,
@@ -245,12 +245,12 @@ class _MeetingsScreenState extends State<MeetingsScreen>
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(Icons.people_outline,
-                      size: 16, color: AlanyaColors.grey400),
+                      size: 16, color: mutedOf(context, AlanyaColors.grey400)),
                   const SizedBox(width: 4),
                   Text(
                     "${m.participants.length}",
                     style:
-                        const TextStyle(fontSize: 13, color: Colors.black54),
+                        TextStyle(fontSize: 13, color: mutedOf(context, Colors.black54)),
                   ),
                 ],
               ),

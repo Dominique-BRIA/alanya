@@ -74,8 +74,8 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
               child: const Text("Annuler")),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text("Terminer",
-                  style: TextStyle(color: Colors.red))),
+              child: Text("Terminer",
+                  style: TextStyle(color: dangerOf(context)))),
         ],
       ),
     );
@@ -113,8 +113,8 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
               child: const Text("Annuler")),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text("Décliner",
-                  style: TextStyle(color: Colors.red))),
+              child: Text("Décliner",
+                  style: TextStyle(color: dangerOf(context)))),
         ],
       ),
     );
@@ -159,9 +159,9 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
               Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: themed(context, light: Colors.white, dark: AlanyaColors.nuit2),
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AlanyaColors.grey200, width: 0.5),
+                  border: Border.all(color: themed(context, light: AlanyaColors.grey200, dark: AlanyaColors.ligne), width: 0.5),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -170,7 +170,7 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
                       children: [
                         Icon(
                           m.isVideo ? Icons.videocam : Icons.call,
-                          color: m.isFinished ? Colors.grey : AlanyaColors.forest,
+                          color: m.isFinished ? mutedOf(context, Colors.grey) : positiveOf(context),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
@@ -203,7 +203,7 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
                   icon: const Icon(Icons.login),
                   label: const Text("Rejoindre la réunion"),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AlanyaColors.forest,
+                    backgroundColor: positiveOf(context),
                     foregroundColor: Colors.white,
                     minimumSize: const Size(double.infinity, 52),
                   ),
@@ -212,9 +212,9 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
                 const SizedBox(height: 12),
                 OutlinedButton.icon(
                   onPressed: _loading ? null : _decline,
-                  icon: const Icon(Icons.event_busy_outlined, color: Colors.red),
-                  label: const Text("Décliner l'invitation",
-                      style: TextStyle(color: Colors.red)),
+                  icon: Icon(Icons.event_busy_outlined, color: dangerOf(context)),
+                  label: Text("Décliner l'invitation",
+                      style: TextStyle(color: dangerOf(context))),
                   style: OutlinedButton.styleFrom(
                     minimumSize: const Size(double.infinity, 48),
                   ),
@@ -224,9 +224,9 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
                 const SizedBox(height: 12),
                 OutlinedButton.icon(
                   onPressed: _loading ? null : _end,
-                  icon: const Icon(Icons.stop_circle_outlined, color: Colors.red),
-                  label: const Text("Terminer la réunion",
-                      style: TextStyle(color: Colors.red)),
+                  icon: Icon(Icons.stop_circle_outlined, color: dangerOf(context)),
+                  label: Text("Terminer la réunion",
+                      style: TextStyle(color: dangerOf(context))),
                   style: OutlinedButton.styleFrom(
                     minimumSize: const Size(double.infinity, 48),
                   ),
@@ -255,7 +255,7 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
         children: [
           SizedBox(
             width: 120,
-            child: Text(label, style: const TextStyle(color: Colors.black54)),
+            child: Text(label, style: TextStyle(color: mutedOf(context, Colors.black54))),
           ),
           Expanded(
             child: Text(value, style: const TextStyle(fontWeight: FontWeight.w500)),
@@ -288,7 +288,7 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
         subtitle: Text(statusText, style: const TextStyle(fontSize: 12)),
         trailing: p.duree != null
             ? Text(_formatDuration(p.duree!),
-                style: const TextStyle(fontSize: 12, color: Colors.black54))
+                style: TextStyle(fontSize: 12, color: mutedOf(context, Colors.black54)))
             : null,
       ),
     );

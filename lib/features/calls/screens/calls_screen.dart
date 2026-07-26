@@ -105,8 +105,8 @@ class _CallsScreenState extends State<CallsScreen>
               child: const Text("Annuler")),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text("Supprimer",
-                  style: TextStyle(color: Colors.red))),
+              child: Text("Supprimer",
+                  style: TextStyle(color: dangerOf(context)))),
         ],
       ),
     );
@@ -149,9 +149,9 @@ class _CallsScreenState extends State<CallsScreen>
 
   Widget _buildBody() {
     if (_calls == null && !_error) {
-      return ListView(children: const [
+      return ListView(children: [
         SizedBox(height: 120),
-        Center(child: CircularProgressIndicator(color: AlanyaColors.terracotta)),
+        Center(child: CircularProgressIndicator(color: accentOf(context))),
       ]);
     }
     if (_error) {
@@ -162,7 +162,7 @@ class _CallsScreenState extends State<CallsScreen>
     }
     final calls = _calls ?? [];
     if (calls.isEmpty) {
-      return ListView(children: const [
+      return ListView(children: [
         SizedBox(height: 100),
         Center(
           child: Padding(
@@ -170,7 +170,7 @@ class _CallsScreenState extends State<CallsScreen>
             child: Text(
               "Aucun appel pour le moment.\nLance un appel depuis une discussion.",
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.black54),
+              style: TextStyle(color: mutedOf(context, Colors.black54)),
             ),
           ),
         ),
@@ -187,7 +187,7 @@ class _CallsScreenState extends State<CallsScreen>
     final icon = c.isOutgoing
         ? Icons.call_made
         : (c.status == "MISSED" ? Icons.call_missed : Icons.call_received);
-    final color = c.status == "MISSED" ? Colors.red : AlanyaColors.forest;
+    final color = c.status == "MISSED" ? dangerOf(context) : positiveOf(context);
     return ListTile(
       leading: isSelecting
           ? selectCheckbox(c.id)
@@ -207,7 +207,7 @@ class _CallsScreenState extends State<CallsScreen>
       subtitle: Text(
         "${c.isGroup ? "Groupe · " : ""}${c.isOutgoing ? "Sortant" : "Entrant"} · ${_duration(c)}",
         style: TextStyle(
-            color: c.status == "MISSED" ? Colors.red.shade700 : Colors.black54),
+            color: c.status == "MISSED" ? dangerOf(context, Colors.red.shade700) : mutedOf(context, Colors.black54)),
       ),
       trailing: isSelecting
           ? null
