@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/alanya_id_formatter.dart';
 import '../../../core/api_client.dart';
 import '../../../core/server_config.dart';
 import '../../../core/token_storage.dart';
@@ -173,7 +174,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              _infoCard(user?.publicNumber ?? "—", user?.email ?? "—"),
+              _infoCard(formatAlanyaId(user?.publicNumber ?? "—"), user?.email ?? "—"),
               const SizedBox(height: 20),
               TextField(
                 controller: _pseudoCtrl,

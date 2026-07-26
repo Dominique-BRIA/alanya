@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../../core/api_client.dart';
 import '../../../core/app_snackbar.dart';
+import '../../../core/alanya_id_formatter.dart';
 import '../../../core/contact_cache.dart';
 import '../../../models/contact.dart';
 import '../../../theme/alanya_theme.dart';
@@ -338,7 +339,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
         backgroundColor: c.isBlocked ? themed(context, light: Colors.grey, dark: AlanyaColors.nuit3) : AlanyaColors.gold,
       ),
       title: Text(c.displayName, style: const TextStyle(fontWeight: FontWeight.w600)),
-      subtitle: Text("Numéro : ${c.publicNumber}${c.isBlocked ? " · bloqué" : ""}"),
+      subtitle: Text("Alanya ID : ${formatAlanyaId(c.publicNumber)}${c.isBlocked ? " · bloqué" : ""}"),
       onTap: c.isBlocked ? null : () => _startChat(c),
       trailing: PopupMenuButton<String>(
         onSelected: (v) {

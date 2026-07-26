@@ -7,6 +7,7 @@ import '../../../core/app_snackbar.dart';
 import '../../../models/contact.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
+import '../../../core/alanya_id_formatter.dart';
 import '../../chat/chat_repository.dart';
 import '../../chat/screens/chat_screen.dart';
 import '../contacts_repository.dart';
@@ -64,7 +65,7 @@ class _AddContactScreenState extends State<AddContactScreen> {
 
   Future<void> _add(UserSearchResult user) async {
     if (user.alreadyContact) {
-      showAppSnackBar("${user.pseudo ?? user.publicNumber} est déjà dans tes contacts");
+      showAppSnackBar("${user.pseudo ?? formatAlanyaId(user.publicNumber)} est déjà dans tes contacts");
       return;
     }
     setState(() { _loading = true; _error = null; });
@@ -188,7 +189,7 @@ class _AddContactScreenState extends State<AddContactScreen> {
   }
 
   Widget _resultCard(UserSearchResult user) {
-    final name = user.pseudo ?? "Utilisateur ${user.publicNumber}";
+    final name = user.pseudo ?? "Utilisateur ${formatAlanyaId(user.publicNumber)}";
     return Card(
       elevation: 0,
       shape: RoundedRectangleBorder(
@@ -215,7 +216,7 @@ class _AddContactScreenState extends State<AddContactScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
-                      Text("Numéro : ${user.publicNumber}", style: TextStyle(color: mutedOf(context, Colors.black54))),
+                      Text("Alanya ID : ${formatAlanyaId(user.publicNumber)}", style: TextStyle(color: mutedOf(context, Colors.black54))),
                       if (user.alreadyContact)
                         Text(
                           "Déjà dans ton répertoire",

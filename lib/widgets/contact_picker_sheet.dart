@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../core/alanya_id_formatter.dart';
 import '../core/api_client.dart';
 import '../features/contacts/contacts_repository.dart';
 import '../models/contact.dart';
@@ -316,7 +317,7 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
                                 title: Text(c.displayName,
                                     style: const TextStyle(
                                         fontWeight: FontWeight.w500)),
-                                subtitle: Text(c.publicNumber,
+                                subtitle: Text(formatAlanyaId(c.publicNumber),
                                     style: TextStyle(
                                         fontSize: 12,
                                         color: mutedOf(context, AlanyaColors.grey500))),

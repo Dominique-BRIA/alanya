@@ -3,6 +3,7 @@ import 'package:permission_handler/permission_handler.dart' show openAppSettings
 import 'package:provider/provider.dart';
 
 import '../../../core/api_client.dart';
+import '../../../core/alanya_id_formatter.dart';
 import '../../../core/app_snackbar.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
@@ -322,7 +323,7 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text("Alanya ID : ${user.publicNumber}"),
+          Text("Alanya ID : ${formatAlanyaId(user.publicNumber)}"),
           if (match.phoneName != displayName)
             Text(
               "Dans ton répertoire : ${match.phoneName}",

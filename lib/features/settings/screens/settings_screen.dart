@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/alanya_id_formatter.dart';
 import '../../../core/biometric_service.dart';
 import '../../../core/data_saver_service.dart';
 import '../../../core/locale_controller.dart';
@@ -107,7 +108,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               title: Text(user?.pseudo ?? "Utilisateur",
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-              subtitle: Text("Alanya ID : ${user?.publicNumber ?? '—'}",
+              subtitle: Text("Alanya ID : ${formatAlanyaId(user?.publicNumber ?? '—')}",
                   style: TextStyle(fontSize: 13, color: _muted)),
               trailing: _chevron(),
               onTap: () => Navigator.of(context).push(

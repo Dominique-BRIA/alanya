@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../l10n/app_localizations.dart';
 
+import '../../core/alanya_id_formatter.dart';
 import '../../core/connectivity_service.dart';
 import '../../core/conversation_cache.dart';
 import '../../core/push_service.dart';
@@ -420,7 +421,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
                       children: [
                         Text(user.pseudo ?? "Moi",
                             style: const TextStyle(fontWeight: FontWeight.bold)),
-                        Text("Alanya ID : ${user.publicNumber}",
+                        Text("Alanya ID : ${formatAlanyaId(user.publicNumber)}",
                             style: TextStyle(
                                 color: themed(context,
                                     light: Colors.black54,

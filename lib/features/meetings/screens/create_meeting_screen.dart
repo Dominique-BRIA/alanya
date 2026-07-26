@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/alanya_id_formatter.dart';
 import '../../../core/api_client.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
@@ -414,7 +415,7 @@ class _ContactPickerSheetState extends State<_ContactPickerSheet> {
                           title: Text(c.displayName,
                               style:
                                   const TextStyle(fontWeight: FontWeight.w500)),
-                          subtitle: Text(c.publicNumber,
+                          subtitle: Text(formatAlanyaId(c.publicNumber),
                               style: TextStyle(
                                   fontSize: 12, color: mutedOf(context, AlanyaColors.grey500))),
                           trailing: Checkbox(

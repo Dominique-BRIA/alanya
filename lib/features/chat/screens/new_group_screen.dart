@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/alanya_id_formatter.dart';
 import '../../../core/api_client.dart';
 import '../../../models/contact.dart';
 import '../../../theme/alanya_theme.dart';
@@ -152,7 +153,7 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
                                 });
                               },
                               title: Text(c.displayName),
-                              subtitle: Text("Numéro : ${c.publicNumber}"),
+                              subtitle: Text("Alanya ID : ${formatAlanyaId(c.publicNumber)}"),
                               secondary: CircleAvatar(
                                 backgroundColor: AlanyaColors.gold,
                                 child: Text(

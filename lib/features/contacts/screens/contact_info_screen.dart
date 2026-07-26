@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/api_client.dart';
+import '../../../core/alanya_id_formatter.dart';
 import '../../../core/app_snackbar.dart';
 import '../../../core/token_storage.dart';
 import '../../../models/message.dart';
@@ -671,15 +672,7 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
     );
   }
 
-  String _formatNumber(String n) {
-    // Format 2 par 2 pour lisibilité : "67641599" → "67 64 15 99"
-    final buf = StringBuffer();
-    for (int i = 0; i < n.length; i++) {
-      if (i > 0 && i % 2 == 0) buf.write(' ');
-      buf.write(n[i]);
-    }
-    return buf.toString();
-  }
+  String _formatNumber(String n) => formatAlanyaId(n);
 }
 
 /// Bouton d'action rond avec icône + label (micro-interaction au tap).
