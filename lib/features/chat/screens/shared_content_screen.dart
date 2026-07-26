@@ -111,7 +111,7 @@ class _SharedContentScreenState extends State<SharedContentScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: AlanyaColors.terracotta,
+        backgroundColor: themed(context, light: AlanyaColors.terracotta, dark: AlanyaColors.nuit2),
         foregroundColor: Colors.white,
         title: Text(widget.title),
         bottom: TabBar(
@@ -151,7 +151,7 @@ class _SharedContentScreenState extends State<SharedContentScreen>
         return GestureDetector(
           onTap: () => _openMediaAt(i),
           child: ColoredBox(
-            color: Colors.black12,
+            color: themed(context, light: Colors.black12, dark: AlanyaColors.nuit3),
             child: it.isVideo
                 ? Stack(fit: StackFit.expand, children: [
                     _videoThumb(it),
@@ -229,16 +229,16 @@ class _SharedContentScreenState extends State<SharedContentScreen>
       itemBuilder: (_, i) {
         final l = _links[i];
         return ListTile(
-          tileColor: Colors.white,
+          tileColor: themed(context, light: Colors.white, dark: AlanyaColors.nuit2),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          leading: const CircleAvatar(
-            backgroundColor: AlanyaColors.sand,
-            child: Icon(Icons.link, color: AlanyaColors.forest),
+          leading: CircleAvatar(
+            backgroundColor: themed(context, light: AlanyaColors.sand, dark: AlanyaColors.nuit3),
+            child: Icon(Icons.link, color: positiveOf(context)),
           ),
           title: Text(l.url,
               maxLines: 2, overflow: TextOverflow.ellipsis),
           subtitle: Text(_fmtDate(l.at),
-              style: const TextStyle(fontSize: 11, color: Colors.black45)),
+              style: TextStyle(fontSize: 11, color: mutedOf(context, Colors.black45))),
           onTap: () async {
             final uri = Uri.tryParse(l.url);
             if (uri != null && await canLaunchUrl(uri)) {
@@ -261,7 +261,7 @@ class _SharedContentScreenState extends State<SharedContentScreen>
         final d = _docs[i];
         final color = MediaHelper.colorForType(d.type);
         return ListTile(
-          tileColor: Colors.white,
+          tileColor: themed(context, light: Colors.white, dark: AlanyaColors.nuit2),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           leading: CircleAvatar(
             backgroundColor: color.withValues(alpha: 0.15),
@@ -271,7 +271,7 @@ class _SharedContentScreenState extends State<SharedContentScreen>
               maxLines: 1, overflow: TextOverflow.ellipsis),
           subtitle: d.sizeBytes != null
               ? Text(MediaHelper.formatSize(d.sizeBytes),
-                  style: const TextStyle(fontSize: 11, color: Colors.black45))
+                  style: TextStyle(fontSize: 11, color: mutedOf(context, Colors.black45)))
               : null,
           trailing: const Icon(Icons.open_in_new, size: 18),
           onTap: () => _openDoc(d),
@@ -297,7 +297,7 @@ class _SharedContentScreenState extends State<SharedContentScreen>
   }
 
   Widget _empty(String text) => Center(
-        child: Text(text, style: const TextStyle(color: Colors.black45)),
+        child: Text(text, style: TextStyle(color: mutedOf(context, Colors.black45))),
       );
 
   String _fmtDate(DateTime d) =>

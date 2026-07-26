@@ -133,7 +133,7 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
             width: 40,
             height: 4,
             decoration: BoxDecoration(
-              color: AlanyaColors.grey300,
+              color: themed(context, light: AlanyaColors.grey300, dark: AlanyaColors.ligne),
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -157,8 +157,8 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
                         : "${widget.confirmLabel} (${_selectedNumbers.length})",
                     style: TextStyle(
                       color: _selectedNumbers.isEmpty
-                          ? AlanyaColors.grey400
-                          : AlanyaColors.terracotta,
+                          ? mutedOf(context, AlanyaColors.grey400)
+                          : accentOf(context),
                       fontWeight: FontWeight.bold,
                     ),
                   ),
@@ -179,17 +179,17 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
                     decoration: InputDecoration(
                       hintText: "Rechercher un contact…",
                       prefixIcon: Icon(Icons.search,
-                          size: 20, color: AlanyaColors.grey400),
+                          size: 20, color: mutedOf(context, AlanyaColors.grey400)),
                       contentPadding: const EdgeInsets.symmetric(
                           horizontal: 16, vertical: 10),
                       isDense: true,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: AlanyaColors.grey200),
+                        borderSide: BorderSide(color: themed(context, light: AlanyaColors.grey200, dark: AlanyaColors.ligne)),
                       ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: AlanyaColors.grey200),
+                        borderSide: BorderSide(color: themed(context, light: AlanyaColors.grey200, dark: AlanyaColors.ligne)),
                       ),
                     ),
                   ),
@@ -201,7 +201,7 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
                       setState(() => _showManualInput = !_showManualInput),
                   icon: Icon(
                     _showManualInput ? Icons.keyboard_hide : Icons.dialpad,
-                    color: AlanyaColors.terracotta,
+                    color: accentOf(context),
                   ),
                   tooltip: "Saisir un numéro",
                 ),
@@ -226,7 +226,7 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
                         isDense: true,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(color: AlanyaColors.grey200),
+                          borderSide: BorderSide(color: themed(context, light: AlanyaColors.grey200, dark: AlanyaColors.ligne)),
                         ),
                       ),
                       onSubmitted: (_) => _addManualNumber(),
@@ -236,7 +236,7 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
                   IconButton(
                     onPressed: _addManualNumber,
                     icon: Icon(Icons.add_circle,
-                        color: AlanyaColors.terracotta),
+                        color: accentOf(context)),
                   ),
                 ],
               ),
@@ -272,7 +272,7 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
                       deleteIcon: const Icon(Icons.close, size: 16),
                       onDeleted: () => _toggleNumber(n),
                       backgroundColor:
-                          AlanyaColors.terracotta.withValues(alpha: 0.08),
+                          accentOf(context).withValues(alpha: 0.08),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(20)),
                     ),
@@ -284,13 +284,13 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
           // Liste des contacts
           Expanded(
             child: _loading
-                ? const Center(
+                ? Center(
                     child:
-                        CircularProgressIndicator(color: AlanyaColors.terracotta))
+                        CircularProgressIndicator(color: accentOf(context)))
                 : _error
                     ? Center(
                         child: Text("Erreur de chargement",
-                            style: TextStyle(color: AlanyaColors.grey500)))
+                            style: TextStyle(color: mutedOf(context, AlanyaColors.grey500))))
                     : filtered.isEmpty
                         ? Center(
                             child: Text(
@@ -298,7 +298,7 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
                                     ? "Aucun contact"
                                     : "Aucun résultat",
                                 style:
-                                    TextStyle(color: AlanyaColors.grey400)))
+                                    TextStyle(color: mutedOf(context, AlanyaColors.grey400))))
                         : ListView.builder(
                             controller: scrollCtrl,
                             itemCount: filtered.length,
@@ -319,12 +319,12 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
                                 subtitle: Text(c.publicNumber,
                                     style: TextStyle(
                                         fontSize: 12,
-                                        color: AlanyaColors.grey500)),
+                                        color: mutedOf(context, AlanyaColors.grey500))),
                                 trailing: selected
                                     ? Icon(Icons.check_circle,
-                                        color: AlanyaColors.terracotta)
+                                        color: accentOf(context))
                                     : Icon(Icons.radio_button_unchecked,
-                                        color: AlanyaColors.grey300),
+                                        color: themed(context, light: AlanyaColors.grey300, dark: AlanyaColors.ligne)),
                                 onTap: () =>
                                     _toggleNumber(c.publicNumber),
                               );
