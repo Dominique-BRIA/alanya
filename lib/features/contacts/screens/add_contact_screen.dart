@@ -136,9 +136,9 @@ class _AddContactScreenState extends State<AddContactScreen> {
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 4),
-              const Text(
+              Text(
                 "Chaque utilisateur a un numéro public à 6 ou 8 chiffres (comme un numéro de téléphone).",
-                style: TextStyle(color: Colors.black54),
+                style: TextStyle(color: mutedOf(context, Colors.black54)),
               ),
               const SizedBox(height: 16),
               Row(
@@ -169,12 +169,12 @@ class _AddContactScreenState extends State<AddContactScreen> {
               ),
               if (_error != null) ...[
                 const SizedBox(height: 8),
-                Text(_error!, style: const TextStyle(color: Colors.red)),
+                Text(_error!, style: TextStyle(color: dangerOf(context))),
               ],
               if (_loading && _result == null)
-                const Padding(
-                  padding: EdgeInsets.only(top: 24),
-                  child: Center(child: CircularProgressIndicator(color: AlanyaColors.terracotta)),
+                Padding(
+                  padding: const EdgeInsets.only(top: 24),
+                  child: Center(child: CircularProgressIndicator(color: accentOf(context))),
                 ),
               if (_result != null) ...[
                 const SizedBox(height: 20),
@@ -193,7 +193,7 @@ class _AddContactScreenState extends State<AddContactScreen> {
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        side: const BorderSide(color: AlanyaColors.sand),
+        side: BorderSide(color: themed(context, light: AlanyaColors.sand, dark: AlanyaColors.ligne)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -215,11 +215,11 @@ class _AddContactScreenState extends State<AddContactScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
-                      Text("Numéro : ${user.publicNumber}", style: const TextStyle(color: Colors.black54)),
+                      Text("Numéro : ${user.publicNumber}", style: TextStyle(color: mutedOf(context, Colors.black54))),
                       if (user.alreadyContact)
-                        const Text(
+                        Text(
                           "Déjà dans ton répertoire",
-                          style: TextStyle(color: AlanyaColors.forest, fontSize: 12),
+                          style: TextStyle(color: themed(context, light: AlanyaColors.forest, dark: AlanyaColors.indigoLight), fontSize: 12),
                         ),
                     ],
                   ),

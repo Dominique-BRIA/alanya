@@ -162,7 +162,7 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
       case PhoneSyncStatus.error:
         return _messageView(
           icon: Icons.cloud_off,
-          color: Colors.red,
+          color: dangerOf(context),
           title: "Erreur",
           subtitle: result.errorMessage ?? "Erreur inconnue.",
           action: _retryButton(),
@@ -182,10 +182,10 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
             Container(
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
-                color: AlanyaColors.forest.withValues(alpha: 0.1),
+                color: positiveOf(context).withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.contacts, size: 56, color: AlanyaColors.forest),
+              child: Icon(Icons.contacts, size: 56, color: positiveOf(context)),
             ),
             const SizedBox(height: 24),
             const Text(
@@ -194,15 +194,15 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 12),
-            const Text(
+            Text(
               "Alanya va scanner ton répertoire téléphonique, extraire les numéros à 6 ou 8 chiffres et vérifier lesquels ont un compte.",
-              style: TextStyle(color: Colors.black54, height: 1.5),
+              style: TextStyle(color: mutedOf(context, Colors.black54), height: 1.5),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               "Aucune donnée n'est stockée. Seuls les numéros à 6 ou 8 chiffres sont envoyés au serveur.",
-              style: TextStyle(color: Colors.black38, fontSize: 12, height: 1.5),
+              style: TextStyle(color: faintOf(context, Colors.black38), fontSize: 12, height: 1.5),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 32),
@@ -213,7 +213,7 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
                 icon: const Icon(Icons.search),
                 label: const Text("Scanner mon répertoire"),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: AlanyaColors.forest,
+                  backgroundColor: positiveOf(context),
                   padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
               ),
@@ -231,11 +231,11 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const CircularProgressIndicator(color: AlanyaColors.terracotta),
+            CircularProgressIndicator(color: accentOf(context)),
             const SizedBox(height: 24),
             Text(
               _statusMsg,
-              style: const TextStyle(color: Colors.black54),
+              style: TextStyle(color: mutedOf(context, Colors.black54)),
               textAlign: TextAlign.center,
             ),
           ],
@@ -255,13 +255,13 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
           margin: const EdgeInsets.all(16),
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: AlanyaColors.forest.withValues(alpha: 0.08),
+            color: positiveOf(context).withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AlanyaColors.forest.withValues(alpha: 0.2)),
+            border: Border.all(color: positiveOf(context).withValues(alpha: 0.2)),
           ),
           child: Row(
             children: [
-              const Icon(Icons.check_circle, color: AlanyaColors.forest),
+              Icon(Icons.check_circle, color: positiveOf(context)),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -273,7 +273,7 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
                     ),
                     Text(
                       "$newOnes nouveau${newOnes > 1 ? 'x' : ''} · ${result.totalScanned} numéros scannés",
-                      style: const TextStyle(color: Colors.black54, fontSize: 13),
+                      style: TextStyle(color: mutedOf(context, Colors.black54), fontSize: 13),
                     ),
                   ],
                 ),
@@ -306,17 +306,17 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
 
     return ListTile(
       leading: CircleAvatar(
-        backgroundColor: isAlready ? Colors.grey.shade300 : AlanyaColors.gold,
+        backgroundColor: isAlready ? themed(context, light: Colors.grey.shade300, dark: AlanyaColors.nuit3) : AlanyaColors.gold,
         child: Text(
           displayName.isNotEmpty ? displayName[0].toUpperCase() : "?",
-          style: TextStyle(color: isAlready ? Colors.grey : Colors.white),
+          style: TextStyle(color: isAlready ? mutedOf(context, Colors.grey) : Colors.white),
         ),
       ),
       title: Text(
         displayName,
         style: TextStyle(
           fontWeight: FontWeight.w600,
-          color: isAlready ? Colors.grey : null,
+          color: isAlready ? mutedOf(context, Colors.grey) : null,
         ),
       ),
       subtitle: Column(
@@ -326,20 +326,20 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
           if (match.phoneName != displayName)
             Text(
               "Dans ton répertoire : ${match.phoneName}",
-              style: const TextStyle(fontSize: 11, color: Colors.black38),
+              style: TextStyle(fontSize: 11, color: faintOf(context, Colors.black38)),
             ),
           if (isAlready)
-            const Text(
+            Text(
               "Déjà dans ton répertoire Alanya",
-              style: TextStyle(fontSize: 12, color: AlanyaColors.forest),
+              style: TextStyle(fontSize: 12, color: positiveOf(context)),
             ),
         ],
       ),
       trailing: isAlready
-          ? const Icon(Icons.check, color: AlanyaColors.forest)
+          ? Icon(Icons.check, color: positiveOf(context))
           : Checkbox(
               value: isSelected,
-              activeColor: AlanyaColors.forest,
+              activeColor: positiveOf(context),
               onChanged: _importing
                   ? null
                   : (v) => setState(() => _selected[user.publicNumber] = v ?? false),
@@ -365,7 +365,7 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
           child: ElevatedButton(
             onPressed: (_importing || selectedCount == 0) ? null : _importSelected,
             style: ElevatedButton.styleFrom(
-              backgroundColor: AlanyaColors.forest,
+              backgroundColor: positiveOf(context),
               padding: const EdgeInsets.symmetric(vertical: 14),
             ),
             child: _importing
@@ -399,14 +399,14 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 64, color: color ?? Colors.black26),
+            Icon(icon, size: 64, color: color ?? faintOf(context, Colors.black26)),
             const SizedBox(height: 16),
             Text(title,
                 style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
                 textAlign: TextAlign.center),
             const SizedBox(height: 8),
             Text(subtitle,
-                style: const TextStyle(color: Colors.black54, height: 1.5),
+                style: TextStyle(color: mutedOf(context, Colors.black54), height: 1.5),
                 textAlign: TextAlign.center),
             if (action != null) ...[const SizedBox(height: 20), action],
           ],
@@ -419,13 +419,13 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
         onPressed: _scan,
         icon: const Icon(Icons.refresh),
         label: const Text("Réessayer"),
-        style: ElevatedButton.styleFrom(backgroundColor: AlanyaColors.terracotta),
+        style: ElevatedButton.styleFrom(backgroundColor: accentOf(context)),
       );
 
   Widget _settingsButton() => ElevatedButton.icon(
         onPressed: () => openAppSettings(),
         icon: const Icon(Icons.settings),
         label: const Text("Ouvrir les paramètres"),
-        style: ElevatedButton.styleFrom(backgroundColor: AlanyaColors.terracotta),
+        style: ElevatedButton.styleFrom(backgroundColor: accentOf(context)),
       );
 }

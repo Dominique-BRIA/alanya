@@ -126,7 +126,7 @@ class _NewChatScreenState extends State<NewChatScreen> {
               Center(
                 child: CircleAvatar(
                   radius: 44,
-                  backgroundColor: AlanyaColors.terracotta,
+                  backgroundColor: accentOf(context),
                   child: const Icon(Icons.person_add, size: 40, color: Colors.white),
                 ),
               ),
@@ -163,10 +163,10 @@ class _NewChatScreenState extends State<NewChatScreen> {
                 onSubmitted: (_) => _save(),
               ),
               const SizedBox(height: 8),
-              const Text(
+              Text(
                 "Le numéro Alanya est un identifiant public à 6 chiffres "
                 "que chaque utilisateur reçoit à l'inscription.",
-                style: TextStyle(fontSize: 12, color: Colors.black54),
+                style: TextStyle(fontSize: 12, color: mutedOf(context, Colors.black54)),
               ),
               const SizedBox(height: 32),
 

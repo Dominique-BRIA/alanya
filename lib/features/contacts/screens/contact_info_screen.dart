@@ -219,7 +219,7 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
       colors: dark
-          ? const [Color(0xFF3A2A20), AlanyaColors.forestDark]
+          ? const [AlanyaColors.indigo, AlanyaColors.nuit2]
           : const [AlanyaColors.terracotta, AlanyaColors.forest],
     );
 
@@ -228,7 +228,7 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
       stretch: true,
       expandedHeight: _expandedHeight,
       backgroundColor:
-          dark ? const Color(0xFF2A1E17) : AlanyaColors.terracottaDark,
+          dark ? AlanyaColors.nuit2 : AlanyaColors.terracottaDark,
       foregroundColor: Colors.white,
       elevation: 0,
       systemOverlayStyle: SystemUiOverlayStyle.light,
@@ -468,7 +468,7 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(icon, size: 22, color: AlanyaColors.terracotta),
+              Icon(icon, size: 22, color: accentOf(context)),
               const SizedBox(width: 14),
               Expanded(
                 child: Column(
@@ -538,8 +538,8 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
         children: [
           Row(
             children: [
-              const Icon(Icons.perm_media_rounded,
-                  size: 20, color: AlanyaColors.terracotta),
+              Icon(Icons.perm_media_rounded,
+                  size: 20, color: accentOf(context)),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
@@ -627,7 +627,7 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
               _muted
                   ? Icons.notifications_off_rounded
                   : Icons.notifications_rounded,
-              color: AlanyaColors.terracotta,
+              color: accentOf(context),
             ),
             title: Text(
               "Notifications",
@@ -641,7 +641,7 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
               style: TextStyle(fontSize: 12.5, color: cs.onSurfaceVariant),
             ),
             value: !_muted,
-            activeColor: AlanyaColors.forest,
+            activeColor: positiveOf(context),
             onChanged: (on) => _toggleMuted(!on),
           ),
           _divider(),
@@ -701,7 +701,7 @@ class _RoundAction extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Material(
-          color: AlanyaColors.terracotta.withValues(alpha: 0.12),
+          color: accentOf(context).withValues(alpha: 0.12),
           shape: const CircleBorder(),
           child: InkWell(
             customBorder: const CircleBorder(),
@@ -709,7 +709,7 @@ class _RoundAction extends StatelessWidget {
             child: SizedBox(
               width: 60,
               height: 60,
-              child: Icon(icon, color: AlanyaColors.terracotta, size: 26),
+              child: Icon(icon, color: accentOf(context), size: 26),
             ),
           ),
         ),

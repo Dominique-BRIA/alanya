@@ -175,7 +175,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
   Widget _body() {
     // Chargement initial
     if (_contacts == null && _loading) {
-      return const Center(child: CircularProgressIndicator(color: AlanyaColors.terracotta));
+      return Center(child: CircularProgressIndicator(color: accentOf(context)));
     }
 
     // Erreur avec bouton retry
@@ -188,19 +188,19 @@ class _ContactsScreenState extends State<ContactsScreen> {
               padding: const EdgeInsets.all(24),
               child: Column(
                 children: [
-                  const Icon(Icons.cloud_off, size: 48, color: Colors.black26),
+                  Icon(Icons.cloud_off, size: 48, color: faintOf(context, Colors.black26)),
                   const SizedBox(height: 12),
                   Text(
                     _errorMsg!,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.black54),
+                    style: TextStyle(color: mutedOf(context, Colors.black54)),
                   ),
                   const SizedBox(height: 16),
                   ElevatedButton.icon(
                     onPressed: _load,
                     icon: const Icon(Icons.refresh, size: 18),
                     label: const Text("Réessayer"),
-                    style: ElevatedButton.styleFrom(backgroundColor: AlanyaColors.terracotta),
+                    style: ElevatedButton.styleFrom(backgroundColor: accentOf(context)),
                   ),
                 ],
               ),
@@ -217,7 +217,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
           // --- Actions rapides (visibles même si aucun contact) ---
           _actionTile(
             icon: Icons.group_add,
-            color: AlanyaColors.forest,
+            color: themed(context, light: AlanyaColors.forest, dark: AlanyaColors.indigoLight),
             title: "Nouveau groupe",
             subtitle: "Créer un groupe avec des contacts",
             onTap: () async {
@@ -230,7 +230,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
           const Divider(height: 1),
           _actionTile(
             icon: Icons.person_add,
-            color: AlanyaColors.terracotta,
+            color: accentOf(context),
             title: "Ajouter un contact",
             subtitle: "Rechercher par numéro Alanya",
             onTap: () async {
@@ -241,20 +241,21 @@ class _ContactsScreenState extends State<ContactsScreen> {
             },
           ),
 
-          const Divider(height: 1, thickness: 8, color: AlanyaColors.cream),
+          Divider(height: 1, thickness: 8, color: themed(context, light: AlanyaColors.cream, dark: AlanyaColors.nuit)),
           // --- Message d'état vide ---
           const SizedBox(height: 60),
-          const Center(
+          Center(
             child: Padding(
-              padding: EdgeInsets.all(24),
+              padding: const EdgeInsets.all(24),
               child: Column(
                 children: [
-                  Icon(Icons.people_outline, size: 56, color: Colors.black12),
-                  SizedBox(height: 12),
+                  Icon(Icons.people_outline,
+                      size: 56, color: faintOf(context, Colors.black12)),
+                  const SizedBox(height: 12),
                   Text(
                     "Aucun contact pour l'instant.\nUtilise les options ci-dessus pour en ajouter.",
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.black54),
+                    style: TextStyle(color: mutedOf(context, Colors.black54)),
                   ),
                 ],
               ),
@@ -271,7 +272,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
             // --- Actions rapides (style WhatsApp) ---
             _actionTile(
               icon: Icons.group_add,
-              color: AlanyaColors.forest,
+              color: themed(context, light: AlanyaColors.forest, dark: AlanyaColors.indigoLight),
               title: "Nouveau groupe",
               subtitle: "Créer un groupe avec des contacts",
               onTap: () async {
@@ -284,7 +285,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
             const Divider(height: 1),
             _actionTile(
               icon: Icons.person_add,
-              color: AlanyaColors.terracotta,
+              color: accentOf(context),
               title: "Ajouter un contact",
               subtitle: "Rechercher par numéro Alanya",
               onTap: () async {
@@ -295,15 +296,15 @@ class _ContactsScreenState extends State<ContactsScreen> {
               },
             ),
 
-            const Divider(height: 1, thickness: 8, color: AlanyaColors.cream),
+            Divider(height: 1, thickness: 8, color: themed(context, light: AlanyaColors.cream, dark: AlanyaColors.nuit)),
             // --- Liste des contacts ---
             ...contacts.map((c) => _tile(c)),
           ],
         ),
         if (_loading)
-          const Positioned(
+          Positioned(
             top: 0, left: 0, right: 0,
-            child: LinearProgressIndicator(color: AlanyaColors.terracotta),
+            child: LinearProgressIndicator(color: accentOf(context)),
           ),
       ],
     );
@@ -334,7 +335,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
         name: c.displayName,
         avatarUrl: c.avatarUrl,
         radius: 22,
-        backgroundColor: c.isBlocked ? Colors.grey : AlanyaColors.gold,
+        backgroundColor: c.isBlocked ? themed(context, light: Colors.grey, dark: AlanyaColors.nuit3) : AlanyaColors.gold,
       ),
       title: Text(c.displayName, style: const TextStyle(fontWeight: FontWeight.w600)),
       subtitle: Text("Numéro : ${c.publicNumber}${c.isBlocked ? " · bloqué" : ""}"),

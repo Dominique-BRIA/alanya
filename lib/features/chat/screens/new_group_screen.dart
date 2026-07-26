@@ -94,7 +94,7 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
     return Scaffold(
       appBar: backAppBar(context, "Nouveau groupe"),
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: AlanyaColors.terracotta))
+          ? Center(child: CircularProgressIndicator(color: accentOf(context)))
           : Column(
               children: [
                 Padding(
@@ -110,7 +110,7 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
                 if (_error != null)
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Text(_error!, style: const TextStyle(color: Colors.red)),
+                    child: Text(_error!, style: TextStyle(color: dangerOf(context))),
                   ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
@@ -125,13 +125,13 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
                 ),
                 Expanded(
                   child: _contacts.isEmpty
-                      ? const Center(
+                      ? Center(
                           child: Padding(
-                            padding: EdgeInsets.all(24),
+                            padding: const EdgeInsets.all(24),
                             child: Text(
                               "Aucun contact.\nAjoute des contacts avant de créer un groupe.",
                               textAlign: TextAlign.center,
-                              style: TextStyle(color: Colors.black54),
+                              style: TextStyle(color: mutedOf(context, Colors.black54)),
                             ),
                           ),
                         )

@@ -108,6 +108,29 @@ Color themed(BuildContext context,
         {required Color light, required Color dark}) =>
     Theme.of(context).brightness == Brightness.dark ? dark : light;
 
+/// Accent d'action : terre cuite en clair, sa variante Nuit sinon.
+Color accentOf(BuildContext context) => themed(context,
+    light: AlanyaColors.terracotta, dark: AlanyaColors.terracottaNuit);
+
+/// Texte secondaire. La couleur claire reste à fournir : les écrans
+/// n'utilisent pas tous le même gris (`black54`, `grey500`, `grey600`…) et on
+/// ne doit pas les uniformiser au passage.
+Color mutedOf(BuildContext context, Color light) =>
+    themed(context, light: light, dark: AlanyaColors.craie2);
+
+/// Élément volontairement très discret (grande icône d'état vide, filigrane).
+Color faintOf(BuildContext context, Color light) => themed(context,
+    light: light, dark: AlanyaColors.craie2.withValues(alpha: 0.4));
+
+/// Destructif : rouge d'origine en clair, rouge lisible sur nuit sinon.
+Color dangerOf(BuildContext context, [Color light = Colors.red]) =>
+    themed(context, light: light, dark: AlanyaColors.erreurNuit);
+
+/// Vert forêt en clair. En Nuit il devient indigo clair : le `#2D6A4F` tombe
+/// sous le seuil de contraste sur le fond nuit, et l'indigo porte l'identité.
+Color positiveOf(BuildContext context) => themed(context,
+    light: AlanyaColors.forest, dark: AlanyaColors.indigoLight);
+
 // ---------------------------------------------------------------------------
 // LIGHT THEME
 // ---------------------------------------------------------------------------
