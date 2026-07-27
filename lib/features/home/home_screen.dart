@@ -511,7 +511,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
               child: _buildList(),
             ),
           ),
-        ]),
+        ],
       ),
     ),
   );
