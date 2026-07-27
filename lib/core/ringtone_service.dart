@@ -26,25 +26,46 @@ class RingtoneService {
   AudioPlayer? _player;
   String? _currentAsset;
 
-  // Lecteur séparé pour les "cues" courts (indicateur d'activité) afin de ne
-  // jamais perturber la sonnerie d'appel (_player).
+  // Lecteur séparé pour les sons courts (message reçu) afin de ne jamais
+  // perturber la sonnerie d'appel (_player).
   AudioPlayer? _cuePlayer;
+  DateTime? _lastMessageCueAt;
 
   static const _outgoingAsset = "sounds/outgoing_ring.mp3";
   static const _incomingAsset = "sounds/incoming_ring.mp3";
   static const _cueAsset = "sounds/notification.mp3";
 
+  /// Anti-rafale : plusieurs messages reçus coup sur coup ne produisent qu'un
+  /// son. Le verrou vit ici, et non chez les appelants, pour que la
+  /// conversation ouverte et le reste de l'app ne puissent pas sonner deux
+  /// fois pour un même message.
+  static const _messageCueGap = Duration(milliseconds: 1500);
+
   Future<void> startOutgoing() => _play(_outgoingAsset);
 
   Future<void> startIncoming() => _play(_incomingAsset);
 
-  /// Son discret et bref (one-shot, volume bas) — ex. apparition d'un
-  /// indicateur "en train d'écrire". Non bloquant, échec silencieux.
-  Future<void> playCue() async {
+  /// Son bref signalant l'**arrivée d'un message** (one-shot, non bloquant,
+  /// échec silencieux).
+  ///
+  /// Ce son portait auparavant l'apparition de l'indicateur « en train
+  /// d'écrire » : le destinataire l'entendait pendant que l'expéditeur tapait,
+  /// donc avant que le message existe, et n'entendait rien à sa réception.
+  /// Il ne marque désormais que la réception.
+  Future<void> playMessageReceived() async {
+    final now = DateTime.now();
+    if (_lastMessageCueAt != null &&
+        now.difference(_lastMessageCueAt!) < _messageCueGap) {
+      return;
+    }
+    _lastMessageCueAt = now;
     try {
       final p = _cuePlayer ??= AudioPlayer();
       await p.setReleaseMode(ReleaseMode.release);
-      await p.setVolume(0.22);
+      // Volume plein : c'est une notification, le volume physique du téléphone
+      // reste maître. L'ancien 0.22 convenait à un son d'ambiance, pas à un
+      // événement que l'utilisateur doit remarquer.
+      await p.setVolume(1.0);
       await p.stop();
       await p.play(AssetSource(_cueAsset));
     } catch (_) {}

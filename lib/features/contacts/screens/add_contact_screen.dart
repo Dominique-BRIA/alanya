@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/api_client.dart';
@@ -149,10 +148,12 @@ class _AddContactScreenState extends State<AddContactScreen> {
                     child: TextField(
                       controller: _numberCtrl,
                       keyboardType: TextInputType.number,
-                      maxLength: 8,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      // Le plafond porte sur les chiffres, pas sur les
+                      // caractères : un maxLength compterait les espaces.
+                      inputFormatters: const [AlanyaIdInputFormatter()],
                       decoration: const InputDecoration(
-                        labelText: "Numéro (6 ou 8 chiffres)",
+                        labelText: "Alanya ID (6 ou 8 chiffres)",
+                        hintText: "67 64 15 99",
                         counterText: "",
                         prefixIcon: Icon(Icons.tag),
                       ),

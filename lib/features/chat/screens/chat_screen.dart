@@ -15,6 +15,7 @@ import '../../../core/api_client.dart';
 import '../../../core/app_snackbar.dart';
 import '../../../core/audio_player.dart';
 import '../../../core/downloader.dart';
+import '../../../core/notification_settings.dart';
 import '../../../core/presence_store.dart';
 import '../../../core/realtime_client.dart';
 import '../../../core/ringtone_service.dart';
@@ -175,7 +176,6 @@ class _ChatScreenState extends State<ChatScreen>
   bool _peerRecording = false;
   Timer? _typingTimeout;
   Timer? _recordingTimeout;
-  DateTime? _lastCueAt;
   Message? _replyTo;
   Message? _editing; // message en cours d'édition (compose = mode édition)
 
@@ -366,7 +366,15 @@ class _ChatScreenState extends State<ChatScreen>
         if (idx >= 0) { _messages[idx] = msg; }
         else if (!_messages.any((m) => m.id == msg.id)) { _messages = [..._messages, msg]; }
       });
-      if (msg.senderId != _myId) _markReadRemote();
+      if (msg.senderId != _myId) {
+        _markReadRemote();
+        // Conversation ouverte : aucune notification système n'est affichée,
+        // le son est donc le seul signal d'arrivée. Respecte le réglage
+        // « Notifications de messages ».
+        if (NotificationSettings.instance.messagesOn) {
+          RingtoneService.instance.playMessageReceived();
+        }
+      }
       _scrollToBottom();
     } else if (type == "read") {
       if (e["convId"] != widget.convId) return;
@@ -461,16 +469,10 @@ class _ChatScreenState extends State<ChatScreen>
       }
       if (_peerRecording != recording) setState(() => _peerRecording = recording);
     }
-    // Bonus : son discret à l'apparition (throttlé, non répétitif).
-    if (appearing && (_peerTyping || _peerRecording)) _playActivityCue();
-  }
-
-  void _playActivityCue() {
-    final now = DateTime.now();
-    if (_lastCueAt != null &&
-        now.difference(_lastCueAt!) < const Duration(seconds: 4)) return;
-    _lastCueAt = now;
-    RingtoneService.instance.playCue();
+    // Aucun son ici : l'indicateur d'activité est une information visuelle.
+    // Faire sonner le destinataire pendant que l'autre tape le prévenait d'un
+    // message qui n'existait pas encore. Le son est déclenché à la réception
+    // du message, dans _onRealtimeEvent.
   }
 
   void _markReadRemote() {

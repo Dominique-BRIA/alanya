@@ -10,6 +10,7 @@ import '../../core/connectivity_service.dart';
 import '../../core/conversation_cache.dart';
 import '../../core/push_service.dart';
 import '../../core/in_app_notifier.dart';
+import '../../core/ringtone_service.dart';
 import '../../core/notification_settings.dart';
 import '../../core/realtime_client.dart';
 import '../../models/ai_message.dart';
@@ -238,6 +239,11 @@ class _ConversationsTabState extends State<_ConversationsTab>
     final content = msg["content"] as String?;
     final type = msg["type"] as String? ?? "TEXT";
     if (type == "SYSTEM") return; // pas de notif pour les messages système
+
+    // Le bandeau interne est muet : sans ce son, un message reçu alors que
+    // l'app est ouverte sur un autre écran passait totalement inaperçu.
+    // L'anti-rafale est dans RingtoneService.
+    RingtoneService.instance.playMessageReceived();
 
     // Trouve la conversation (titre + avatar)
     Conversation? conv;

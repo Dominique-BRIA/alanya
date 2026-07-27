@@ -230,8 +230,9 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
                     child: TextField(
                       controller: _manualCtrl,
                       keyboardType: TextInputType.number,
+                      inputFormatters: const [AlanyaIdInputFormatter()],
                       decoration: InputDecoration(
-                        hintText: "Alanya ID (ex: 67641599)",
+                        hintText: "Alanya ID (ex : 67 64 15 99)",
                         contentPadding: const EdgeInsets.symmetric(
                             horizontal: 16, vertical: 10),
                         isDense: true,

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../../l10n/app_localizations.dart';
 
@@ -12,55 +11,6 @@ import 'forgot_password_screen.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../core/alanya_id_formatter.dart';
 
-/// Formateur qui applique le formatage visuel de l'Alanya ID selon sa
-/// longueur (3/4/6/8/10 chiffres) uniquement quand le champ ne contient
-/// que des chiffres/espaces. Si l'utilisateur tape un email, on laisse passer.
-class _AlanyaNumberFormatter extends TextInputFormatter {
-  @override
-  TextEditingValue formatEditUpdate(
-    TextEditingValue oldValue,
-    TextEditingValue newValue,
-  ) {
-    final raw = newValue.text;
-
-    // Si l'utilisateur tape autre chose que des chiffres/espaces (lettre, @, .),
-    // on considère que c'est un email : on laisse passer tel quel.
-    if (raw.isNotEmpty && !RegExp(r'^[\d\s]*$').hasMatch(raw)) {
-      return newValue;
-    }
-
-    // Retire tous les espaces pour obtenir les chiffres purs.
-    final digitsOnly = raw.replaceAll(RegExp(r'\s+'), '');
-    if (digitsOnly.length > 10) {
-      // Limite dure : au-delà de 10 chiffres, on refuse l'ajout.
-      return oldValue;
-    }
-
-    // Reconstruit avec le formatage visuel approprié selon la longueur.
-    final formatted = formatAlanyaId(digitsOnly);
-
-    // Recalcule la position du curseur : on veut qu'il reste à la même position
-    // "relative" aux chiffres, pas décalé par les espaces auto-insérés.
-    // On compte combien de chiffres il y avait avant l'ancienne position du curseur.
-    final oldCursor = newValue.selection.baseOffset.clamp(0, raw.length);
-    int digitsBeforeCursor = 0;
-    for (int i = 0; i < oldCursor; i++) {
-      if (RegExp(r'\d').hasMatch(raw[i])) digitsBeforeCursor++;
-    }
-    // Retrouve la nouvelle position en avançant du même nombre de chiffres.
-    int newCursor = 0;
-    int seen = 0;
-    while (newCursor < formatted.length && seen < digitsBeforeCursor) {
-      if (RegExp(r'\d').hasMatch(formatted[newCursor])) seen++;
-      newCursor++;
-    }
-
-    return TextEditingValue(
-      text: formatted,
-      selection: TextSelection.collapsed(offset: newCursor),
-    );
-  }
-}
 
 /// Connexion par email OU numéro public (6 ou 8 chiffres) + mot de passe.
 class LoginScreen extends StatefulWidget {
@@ -141,7 +91,9 @@ class _LoginScreenState extends State<LoginScreen> {
                 TextFormField(
                   controller: _idCtrl,
                   keyboardType: TextInputType.emailAddress,
-                  inputFormatters: [_AlanyaNumberFormatter()],
+                  inputFormatters: const [
+                    AlanyaIdInputFormatter(maxDigits: 10, allowNonDigits: true)
+                  ],
                   decoration: InputDecoration(
                     labelText: tr(context, 'email_or_alanya'),
                     prefixIcon: const Icon(Icons.alternate_email),

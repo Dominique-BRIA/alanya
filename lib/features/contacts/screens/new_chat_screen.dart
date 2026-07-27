@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/alanya_id_formatter.dart';
@@ -151,11 +150,13 @@ class _NewChatScreenState extends State<NewChatScreen> {
               TextField(
                 controller: _numberCtrl,
                 keyboardType: TextInputType.number,
-                maxLength: 8,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                // Pas de maxLength : le formateur plafonne à 8 CHIFFRES, alors
+                // qu'un maxLength compterait aussi les espaces et bloquerait la
+                // saisie à « 67 64 15 » (8 caractères, 6 chiffres).
+                inputFormatters: const [AlanyaIdInputFormatter()],
                 decoration: InputDecoration(
                   labelText: "Alanya ID",
-                  hintText: "6 ou 8 chiffres",
+                  hintText: "67 64 15 99",
                   prefixIcon: const Icon(Icons.tag),
                   counterText: "",
                   errorText: _numberError,
