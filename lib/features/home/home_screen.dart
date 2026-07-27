@@ -16,6 +16,7 @@ import '../../models/ai_message.dart';
 import '../../models/conversation.dart';
 import '../../models/status.dart';
 import '../../theme/alanya_theme.dart';
+import '../../core/theme_controller.dart';
 import '../../widgets/alanya_wordmark.dart';
 import '../../widgets/alanya_nav_bar.dart';
 import '../../widgets/avatar_circle.dart';
@@ -104,6 +105,19 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
           title: const AlanyaWordmark(fontSize: 22, letterSpacing: 4, height: 1),
           actions: [
+            IconButton(
+              icon: Icon(
+                Theme.of(context).brightness == Brightness.dark ? Icons.wb_sunny : Icons.nightlight_round,
+                color: Theme.of(context).brightness == Brightness.dark ? AlanyaColors.terracottaNuit : AlanyaColors.terracotta,
+              ),
+              tooltip: Theme.of(context).brightness == Brightness.dark ? "Passer au mode clair" : "Passer au mode sombre",
+              onPressed: () {
+                final themeCtrl = context.read<ThemeController>();
+                themeCtrl.setMode(
+                  Theme.of(context).brightness == Brightness.dark ? ThemeMode.light : ThemeMode.dark,
+                );
+              },
+            ),
             PopupMenuButton<String>(
               onSelected: (v) {
                 if (v == "settings") {
@@ -185,6 +199,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
   StreamSubscription<Map<String, dynamic>>? _rtSub;
   final _searchCtrl = TextEditingController();
   String _searchQuery = '';
+  int _tabFilter = 0;
 
   @override
   void initState() {
@@ -379,10 +394,12 @@ class _ConversationsTabState extends State<_ConversationsTab>
       );
     }
 
-    return MotifBackground(
-      overlayOpacity: 0.92,
-      plainInDark: true,
-      child: Column(
+    return DefaultTabController(
+      length: 3,
+      child: MotifBackground(
+        overlayOpacity: 0.92,
+        plainInDark: true,
+        child: Column(
         children: [
           if (user != null)
             Container(
@@ -433,6 +450,19 @@ class _ConversationsTabState extends State<_ConversationsTab>
                 ],
               ),
             ),
+          // --- Onglets : Tous / Non lues / Groupes ---
+          TabBar(
+            tabs: const [
+              Tab(text: "Tous"),
+              Tab(text: "Non lues"),
+              Tab(text: "Groupes"),
+            ],
+            labelColor: AlanyaColors.terracotta,
+            unselectedLabelColor: AlanyaColors.craie2,
+            indicatorColor: AlanyaColors.terracotta,
+            indicatorWeight: 2.5,
+            onTap: (i) => setState(() => _tabFilter = i),
+          ),
           // --- Barre de recherche ---
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
@@ -483,7 +513,8 @@ class _ConversationsTabState extends State<_ConversationsTab>
           ),
         ],
       ),
-    );
+    ),
+  );
   }
 
   Widget _buildList() {
@@ -506,7 +537,12 @@ class _ConversationsTabState extends State<_ConversationsTab>
       ]);
     }
     final allConvs = _convs ?? [];
-    if (allConvs.isEmpty) {
+    final baseConvs = _tabFilter == 0
+        ? allConvs
+        : (_tabFilter == 1
+            ? allConvs.where((c) => c.unread > 0).toList()
+            : allConvs.where((c) => c.isGroup).toList());
+    if (baseConvs.isEmpty) {
       return ListView(children: [
         const SizedBox(height: 100),
         Center(
@@ -524,8 +560,8 @@ class _ConversationsTabState extends State<_ConversationsTab>
 
     // Filtre les conversations selon la recherche (WhatsApp-like)
     final convs = _searchQuery.isEmpty
-        ? allConvs
-        : allConvs.where((c) {
+        ? baseConvs
+        : baseConvs.where((c) {
             final title = (c.title ?? '').toLowerCase();
             if (title.contains(_searchQuery)) return true;
             // Cherche dans les numéros des membres
@@ -941,39 +977,59 @@ class _StatusTabState extends State<_StatusTab> {
     final others = _feed?.others ?? [];
     final muted =
         themed(context, light: Colors.black54, dark: AlanyaColors.craie2);
-    return MotifBackground(
-      overlayOpacity: 0.92,
-      plainInDark: true,
-      child: RefreshIndicator(
-        onRefresh: _load,
-        child: ListView(
-          children: [
-            _myStatusTile(me),
-            if (_error)
-              const Padding(
-                padding: EdgeInsets.all(24),
-                child: Center(child: Text("Erreur de chargement. Tire pour réessayer.")),
-              ),
-            if (others.isNotEmpty) ...[
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                child: Text("Récents",
-                    style: TextStyle(
-                        color: muted, fontWeight: FontWeight.bold)),
-              ),
-              ...others.map((g) => _statusTile(g, isMine: false)),
-            ] else if (!_error && _feed != null && me == null)
-              Padding(
-                padding: const EdgeInsets.all(24),
-                child: Center(
-                  child: Text(
-                    "Aucun statut pour le moment.\nPublie le tien avec le bouton +.",
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: muted),
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("Status"),
+        actions: [
+          IconButton(
+            icon: Icon(
+              Theme.of(context).brightness == Brightness.dark ? Icons.wb_sunny : Icons.nightlight_round,
+              color: Theme.of(context).brightness == Brightness.dark ? AlanyaColors.terracottaNuit : AlanyaColors.terracotta,
+            ),
+            tooltip: Theme.of(context).brightness == Brightness.dark ? "Passer au mode clair" : "Passer au mode sombre",
+            onPressed: () {
+              final themeCtrl = context.read<ThemeController>();
+              themeCtrl.setMode(
+                Theme.of(context).brightness == Brightness.dark ? ThemeMode.light : ThemeMode.dark,
+              );
+            },
+          ),
+        ],
+      ),
+      body: MotifBackground(
+        overlayOpacity: 0.92,
+        plainInDark: true,
+        child: RefreshIndicator(
+          onRefresh: _load,
+          child: ListView(
+            children: [
+              _myStatusTile(me),
+              if (_error)
+                const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Center(child: Text("Erreur de chargement. Tire pour réessayer.")),
+                ),
+              if (others.isNotEmpty) ...[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                  child: Text("Récents",
+                      style: TextStyle(
+                          color: muted, fontWeight: FontWeight.bold)),
+                ),
+                ...others.map((g) => _statusTile(g, isMine: false)),
+              ] else if (!_error && _feed != null && me == null)
+                Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Center(
+                    child: Text(
+                      "Aucun statut pour le moment.\nPublie le tien avec le bouton +.",
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: muted),
+                    ),
                   ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );

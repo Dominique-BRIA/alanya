@@ -7,7 +7,7 @@ class ThemeController extends ChangeNotifier {
 
   static const _prefsKey = 'alanya_theme_mode';
 
-  ThemeMode _mode = ThemeMode.system;
+  ThemeMode _mode = ThemeMode.light;
   ThemeMode get mode => _mode;
 
   Future<void> load() async {

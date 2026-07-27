@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/call_cache.dart';
+import '../../../core/theme_controller.dart';
 import '../../../models/call_record.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
@@ -141,7 +142,26 @@ class _CallsScreenState extends State<CallsScreen>
                 child: _buildBody(),
               ),
             )
-          : Stack(
+          : Scaffold(
+              appBar: AppBar(
+                title: const Text("Appels"),
+                actions: [
+                  IconButton(
+                    icon: Icon(
+                      Theme.of(context).brightness == Brightness.dark ? Icons.wb_sunny : Icons.nightlight_round,
+                      color: Theme.of(context).brightness == Brightness.dark ? AlanyaColors.terracottaNuit : AlanyaColors.terracotta,
+                    ),
+                    tooltip: Theme.of(context).brightness == Brightness.dark ? "Passer au mode clair" : "Passer au mode sombre",
+                    onPressed: () {
+                      final themeCtrl = context.read<ThemeController>();
+                      themeCtrl.setMode(
+                        Theme.of(context).brightness == Brightness.dark ? ThemeMode.light : ThemeMode.dark,
+                      );
+                    },
+                  ),
+                ],
+              ),
+              body: Stack(
               children: [
                 RefreshIndicator(
                   onRefresh: _load,
@@ -160,6 +180,7 @@ class _CallsScreenState extends State<CallsScreen>
                 ),
               ],
             ),
+          ),
     );
   }
 
