@@ -132,7 +132,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
                         strokeWidth: 2,
                         valueColor: AlwaysStoppedAnimation<Color>(Colors.white)),
                   )
-                : const Text("Supprimer définitivement mon compte"),
+                : const Text("Supprimer définitivement"),
           ),
         ],
       ),

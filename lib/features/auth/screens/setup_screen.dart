@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../l10n/app_localizations.dart';
 
+import '../../../core/alanya_id_formatter.dart';
 import '../../../core/api_client.dart';
 import '../../../core/app_snackbar.dart';
 import '../../../theme/alanya_theme.dart';
@@ -61,15 +62,18 @@ class _SetupScreenState extends State<SetupScreen> {
   final _nomCtrl = TextEditingController();
   final _pseudoCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
+  final _confirmCtrl = TextEditingController();
   int? _selectedPaysId;
   bool _loading = false;
   bool _obscure = true;
+  bool _obscureConfirm = true;
 
   @override
   void dispose() {
     _nomCtrl.dispose();
     _pseudoCtrl.dispose();
     _passwordCtrl.dispose();
+    _confirmCtrl.dispose();
     super.dispose();
   }
 
@@ -125,11 +129,14 @@ class _SetupScreenState extends State<SetupScreen> {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        widget.publicNumber,
+                        formatAlanyaId(widget.publicNumber),
                         style: TextStyle(
-                          fontSize: 32,
+                          // Le formatage apporte déjà des espaces : un
+                          // letterSpacing de 6 par-dessus disloquait les
+                          // groupes au lieu de les séparer.
+                          fontSize: 24,
                           fontWeight: FontWeight.bold,
-                          letterSpacing: 6,
+                          letterSpacing: 2,
                           color: accentOf(context),
                         ),
                       ),
@@ -168,23 +175,6 @@ class _SetupScreenState extends State<SetupScreen> {
                 ),
                 const SizedBox(height: 16),
 
-                // --- Pays ---
-                DropdownButtonFormField<int>(
-                  value: _selectedPaysId,
-                  decoration: const InputDecoration(
-                    labelText: "Pays",
-                    prefixIcon: Icon(Icons.public_outlined),
-                  ),
-                  items: _paysList.map((p) {
-                    return DropdownMenuItem(
-                      value: p.id,
-                      child: Text("${p.flag}  ${p.nom}  (${p.prefix})"),
-                    );
-                  }).toList(),
-                  onChanged: (v) => setState(() => _selectedPaysId = v),
-                ),
-                const SizedBox(height: 16),
-
                 // --- Mot de passe ---
                 TextFormField(
                   controller: _passwordCtrl,
@@ -199,6 +189,52 @@ class _SetupScreenState extends State<SetupScreen> {
                   ),
                   validator: (v) =>
                       (v ?? "").length < 8 ? tr(context, 'password_min_8') : null,
+                ),
+                const SizedBox(height: 16),
+
+                // --- Confirmation du mot de passe ---
+                TextFormField(
+                  controller: _confirmCtrl,
+                  obscureText: _obscureConfirm,
+                  decoration: InputDecoration(
+                    labelText: "Confirmer le mot de passe",
+                    prefixIcon: const Icon(Icons.lock_outline),
+                    suffixIcon: IconButton(
+                      icon: Icon(_obscureConfirm
+                          ? Icons.visibility
+                          : Icons.visibility_off),
+                      onPressed: () =>
+                          setState(() => _obscureConfirm = !_obscureConfirm),
+                    ),
+                  ),
+                  // Comparaison sur la valeur brute, sans trim : un espace
+                  // final fait partie du mot de passe.
+                  validator: (v) {
+                    if ((v ?? "").isEmpty) return "Confirme ton mot de passe";
+                    if (v != _passwordCtrl.text) {
+                      return "Les mots de passe ne correspondent pas";
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 16),
+
+                // --- Pays ---
+                // Placé en dernier : c'est le champ le moins engageant, et
+                // l'utilisateur arrive au bouton juste après.
+                DropdownButtonFormField<int>(
+                  value: _selectedPaysId,
+                  decoration: const InputDecoration(
+                    labelText: "Pays",
+                    prefixIcon: Icon(Icons.public_outlined),
+                  ),
+                  items: _paysList.map((p) {
+                    return DropdownMenuItem(
+                      value: p.id,
+                      child: Text("${p.flag}  ${p.nom}  (${p.prefix})"),
+                    );
+                  }).toList(),
+                  onChanged: (v) => setState(() => _selectedPaysId = v),
                 ),
                 const SizedBox(height: 24),
 
