@@ -5,7 +5,6 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../l10n/app_localizations.dart';
 
-import '../../core/alanya_id_formatter.dart';
 import '../../core/connectivity_service.dart';
 import '../../core/conversation_cache.dart';
 import '../../core/push_service.dart';
@@ -185,7 +184,6 @@ class _ConversationsTabState extends State<_ConversationsTab>
   StreamSubscription<Map<String, dynamic>>? _rtSub;
   final _searchCtrl = TextEditingController();
   String _searchQuery = '';
-  int _tabFilter = 0;
 
   @override
   void initState() {
@@ -381,9 +379,9 @@ class _ConversationsTabState extends State<_ConversationsTab>
     }
 
     return MotifBackground(
-        overlayOpacity: 0.92,
-        plainInDark: true,
-        child: Column(
+      overlayOpacity: 0.92,
+      plainInDark: true,
+      child: Column(
         children: [
           if (user != null)
             Container(
@@ -433,19 +431,6 @@ class _ConversationsTabState extends State<_ConversationsTab>
                   ),
                 ],
               ),
-            ),
-          // --- Onglets : Tous / Non lues / Groupes ---
-          TabBar(
-              tabs: [
-                Tab(text: "Tous"),
-                Tab(text: "Non lues"),
-                Tab(text: "Groupes"),
-              ],
-              labelColor: AlanyaColors.terracotta,
-              unselectedLabelColor: AlanyaColors.craie2,
-              indicatorColor: AlanyaColors.terracotta,
-              indicatorWeight: 2.5,
-              onTap: (i) => setState(() => _tabFilter = i),
             ),
           // --- Barre de recherche ---
           Padding(
@@ -520,12 +505,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
       ]);
     }
     final allConvs = _convs ?? [];
-    final baseConvs = _tabFilter == 0
-        ? allConvs
-        : (_tabFilter == 1
-            ? allConvs.where((c) => c.unread > 0).toList()
-            : allConvs.where((c) => c.isGroup).toList());
-    if (baseConvs.isEmpty) {
+    if (allConvs.isEmpty) {
       return ListView(children: [
         const SizedBox(height: 100),
         Center(
@@ -543,8 +523,8 @@ class _ConversationsTabState extends State<_ConversationsTab>
 
     // Filtre les conversations selon la recherche (WhatsApp-like)
     final convs = _searchQuery.isEmpty
-        ? baseConvs
-        : baseConvs.where((c) {
+        ? allConvs
+        : allConvs.where((c) {
             final title = (c.title ?? '').toLowerCase();
             if (title.contains(_searchQuery)) return true;
             // Cherche dans les numéros des membres
@@ -1090,7 +1070,6 @@ class _AiTabState extends State<_AiTab> {
   String? _threadId; // conversation courante ; null = nouvelle conversation
   bool _loading = true;
   bool _sending = false;
-  int _aiTabFilter = 0;
 
   @override
   void initState() {
@@ -1216,26 +1195,7 @@ class _AiTabState extends State<_AiTab> {
       overlayOpacity: 0.9,
       child: Column(
         children: [
-          // --- Bande Assistant Alanya ---
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            color: themed(context, light: AlanyaColors.cream, dark: AlanyaColors.nuit2),
-            child: const Text("Assistant Alanya",
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 0.3)),
-          ),
-          // --- Onglets Discussion / Mes Conversations ---
-          TabBar(
-            tabs: const [
-              Tab(text: "Discussion"),
-              Tab(text: "Mes Conversations"),
-            ],
-            labelColor: AlanyaColors.terracotta,
-            unselectedLabelColor: AlanyaColors.craie2,
-            indicatorColor: AlanyaColors.terracotta,
-            indicatorWeight: 2.5,
-            onTap: (i) => setState(() => _aiTabFilter = i),
-          ),
-          // --- En-tête actions ---
+          // --- En-tête avec actions (supprimer / partager) ---
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             child: Row(
@@ -1272,9 +1232,41 @@ class _AiTabState extends State<_AiTab> {
             ),
           ),
           Expanded(
-            child: _aiTabFilter == 0 ? _buildDiscussion() : _buildThreadsList(),
+            child: _loading
+                ? Center(child: CircularProgressIndicator(color: accent))
+                : (_messages.isEmpty
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(28),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.auto_awesome, size: 56, color: AlanyaColors.gold),
+                              const SizedBox(height: 12),
+                              Text("Pose-moi une question pour commencer.",
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                      color: isDark
+                                          ? AlanyaColors.craie2
+                                          : Colors.black54)),
+                            ],
+                          ),
+                        ),
+                      )
+                    : ListView.builder(
+                        controller: _scrollCtrl,
+                        padding: const EdgeInsets.all(12),
+                        itemCount: _messages.length + (_sending ? 1 : 0),
+                        itemBuilder: (_, i) {
+                          if (_sending && i == _messages.length) {
+                            return _bubble("…", false, typing: true);
+                          }
+                          final m = _messages[i];
+                          return _bubble(m.content, m.isUser, msg: m);
+                        },
+                      )),
           ),
-          if (_aiTabFilter == 0) _composer(),
+          _composer(),
         ],
       ),
     );
@@ -1434,109 +1426,6 @@ class _AiTabState extends State<_AiTab> {
                           : (isDark ? AlanyaColors.craie : AlanyaColors.ink))),
         ),
       ),
-    );
-  }
-
-  Widget _buildDiscussion() {
-    return _loading
-        ? Center(child: CircularProgressIndicator(color: Theme.of(context).brightness == Brightness.dark ? AlanyaColors.terracottaNuit : AlanyaColors.terracotta))
-        : (_messages.isEmpty
-            ? Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(28),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.auto_awesome, size: 56, color: AlanyaColors.gold),
-                      const SizedBox(height: 12),
-                      Text("Pose-moi une question pour commencer.",
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                              color: Theme.of(context).brightness == Brightness.dark ? AlanyaColors.craie2 : Colors.black54)),
-                    ],
-                  ),
-                ),
-              )
-            : ListView.builder(
-                controller: _scrollCtrl,
-                padding: const EdgeInsets.all(12),
-                itemCount: _messages.length + (_sending ? 1 : 0),
-                itemBuilder: (_, i) {
-                  if (_sending && i == _messages.length) {
-                    return _bubble("…", false, typing: true);
-                  }
-                  final m = _messages[i];
-                  return _bubble(m.content, m.isUser, msg: m);
-                },
-              ));
-  }
-
-  Widget _buildThreadsList() {
-    final repo = context.read<AiRepository>();
-    return FutureBuilder<List<AiThreadSummary>>(
-      future: repo.threads(),
-      builder: (fctx, snap) {
-        if (snap.connectionState != ConnectionState.done) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        final threads = snap.data ?? const [];
-        return Column(
-          children: [
-            const SizedBox(height: 8),
-            ListTile(
-              leading: const CircleAvatar(
-                backgroundColor: AlanyaColors.terracotta,
-                child: Icon(Icons.add, color: Colors.white),
-              ),
-              title: const Text("Nouvelle conversation", style: TextStyle(fontWeight: FontWeight.bold)),
-              onTap: () {
-                _newConversation();
-                setState(() => _aiTabFilter = 0);
-              },
-            ),
-            const Divider(height: 1),
-            Expanded(
-              child: threads.isEmpty
-                  ? const Center(child: Text("Aucune conversation. Pose une question !"))
-                  : ListView.separated(
-                      itemCount: threads.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
-                      itemBuilder: (_, i) {
-                        final t = threads[i];
-                        return ListTile(
-                          leading: const Icon(Icons.chat_bubble_outline, color: AlanyaColors.terracotta),
-                          title: Text(t.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                          subtitle: t.lastMessage != null ? Text(t.lastMessage!, maxLines: 1, overflow: TextOverflow.ellipsis) : null,
-                          trailing: PopupMenuButton<String>(
-                            icon: const Icon(Icons.more_vert, size: 20),
-                            onSelected: (v) async {
-                              if (v == 'delete') {
-                                await repo.deleteThread(t.id);
-                                if (_threadId == t.id) _newConversation();
-                              } else if (v == 'share') {
-                                final text = "Conversation: ${t.title}";
-                                await Clipboard.setData(ClipboardData(text: text));
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text("Lien copié")),
-                                );
-                              }
-                            },
-                            itemBuilder: (_) => [
-                              const PopupMenuItem(value: 'share', child: Text("Partager")),
-                              const PopupMenuItem(value: 'delete', child: Text("Supprimer", style: TextStyle(color: Colors.red))),
-                            ],
-                          ),
-                          onTap: () {
-                            _openThread(t.id);
-                            setState(() => _aiTabFilter = 0);
-                          },
-                        );
-                      },
-                    ),
-            ),
-          ],
-        );
-      },
     );
   }
 
