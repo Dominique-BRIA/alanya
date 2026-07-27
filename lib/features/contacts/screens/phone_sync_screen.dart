@@ -150,7 +150,7 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
         return _messageView(
           icon: Icons.search_off,
           title: "Aucun Alanya ID détecté",
-          subtitle: "Aucun de tes contacts n'a de numéro à 6 chiffres dans son profil.\nLes numéros Alanya sont des numéros à 6 ou 8 chiffres (ex: 123456 ou 12345678).",
+          subtitle: "Aucun de tes contacts n'a d'Alanya ID dans son répertoire.\nUn Alanya ID est un identifiant à 6 ou 8 chiffres (ex : 123456 ou 12345678).",
           action: _retryButton(),
         );
       case PhoneSyncStatus.noMatches:
@@ -196,7 +196,7 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
             ),
             const SizedBox(height: 12),
             Text(
-              "Alanya va scanner ton répertoire téléphonique, extraire les numéros à 6 ou 8 chiffres et vérifier lesquels ont un compte.",
+              "Alanya va scanner ton répertoire téléphonique, y repérer les Alanya ID (6 ou 8 chiffres) et vérifier lesquels ont un compte.",
               style: TextStyle(color: mutedOf(context, Colors.black54), height: 1.5),
               textAlign: TextAlign.center,
             ),

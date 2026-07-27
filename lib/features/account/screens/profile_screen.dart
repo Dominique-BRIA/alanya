@@ -174,7 +174,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              _infoCard(formatAlanyaId(user?.publicNumber ?? "—"), user?.email ?? "—"),
+              // Le repli « — » reste hors du formateur : celui-ci ne garde que
+              // les chiffres et effacerait le tiret.
+              _infoCard(
+                  user?.publicNumber == null
+                      ? "—"
+                      : formatAlanyaId(user!.publicNumber),
+                  user?.email ?? "—"),
               const SizedBox(height: 20),
               TextField(
                 controller: _pseudoCtrl,

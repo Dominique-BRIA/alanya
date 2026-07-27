@@ -35,9 +35,10 @@ class _AddContactScreenState extends State<AddContactScreen> {
   }
 
   Future<void> _search() async {
-    final number = _numberCtrl.text.trim();
-    final isValid = (number.length == 6 || number.length == 8) && RegExp(r'^(\d{6}|\d{8})$').hasMatch(number);
-    if (!isValid) {
+    // On nettoie AVANT de valider : l'utilisateur peut coller un ID formaté
+    // (« 67 64 15 99 »), qui serait sinon rejeté comme invalide.
+    final number = stripAlanyaId(_numberCtrl.text);
+    if (!RegExp(r'^(\d{6}|\d{8})$').hasMatch(number)) {
       setState(() => _error = "Entre un Alanya ID valide (6 ou 8 chiffres)");
       return;
     }
@@ -138,7 +139,7 @@ class _AddContactScreenState extends State<AddContactScreen> {
               ),
               const SizedBox(height: 4),
               Text(
-                "Chaque utilisateur a un numéro public à 6 ou 8 chiffres (comme un numéro de téléphone).",
+                "Chaque utilisateur reçoit un Alanya ID public à 6 ou 8 chiffres à l'inscription.",
                 style: TextStyle(color: mutedOf(context, Colors.black54)),
               ),
               const SizedBox(height: 16),

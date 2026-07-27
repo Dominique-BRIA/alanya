@@ -108,7 +108,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               title: Text(user?.pseudo ?? "Utilisateur",
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-              subtitle: Text("Alanya ID : ${formatAlanyaId(user?.publicNumber ?? '—')}",
+              // Le repli « — » reste hors du formateur : celui-ci ne garde que
+              // les chiffres et effacerait le tiret.
+              subtitle: Text(
+                  "Alanya ID : ${user == null ? '—' : formatAlanyaId(user.publicNumber)}",
                   style: TextStyle(fontSize: 13, color: _muted)),
               trailing: _chevron(),
               onTap: () => Navigator.of(context).push(

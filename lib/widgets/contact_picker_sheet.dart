@@ -97,14 +97,24 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
   }
 
   void _addManualNumber() {
-    final number = _manualCtrl.text.trim();
-    if (number.isNotEmpty && !_selectedNumbers.contains(number)) {
-      setState(() {
-        _selectedNumbers.add(number);
-        _manualCtrl.clear();
-        _showManualInput = false;
-      });
+    // L'ID saisi part tel quel au serveur : on le nettoie et on le valide ici,
+    // sinon un ID formaté ou une faute de frappe remonte en erreur 400.
+    final number = stripAlanyaId(_manualCtrl.text);
+    if (!RegExp(r'^(\d{6}|\d{8})$').hasMatch(number)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Alanya ID invalide (6 ou 8 chiffres)")),
+      );
+      return;
     }
+    if (_selectedNumbers.contains(number)) {
+      _manualCtrl.clear();
+      return;
+    }
+    setState(() {
+      _selectedNumbers.add(number);
+      _manualCtrl.clear();
+      _showManualInput = false;
+    });
   }
 
   @override
@@ -204,7 +214,7 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
                     _showManualInput ? Icons.keyboard_hide : Icons.dialpad,
                     color: accentOf(context),
                   ),
-                  tooltip: "Saisir un numéro",
+                  tooltip: "Saisir un Alanya ID",
                 ),
               ],
             ),
