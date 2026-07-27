@@ -1105,23 +1105,29 @@ class _AiTab extends StatefulWidget {
   State<_AiTab> createState() => _AiTabState();
 }
 
-class _AiTabState extends State<_AiTab> {
+class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
   final _inputCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
   List<AiMessage> _messages = [];
   String? _threadId; // conversation courante ; null = nouvelle conversation
   bool _loading = true;
   bool _sending = false;
-  int _aiTabFilter = 0;
+  late final TabController _tabCtrl;
 
   @override
   void initState() {
     super.initState();
+    _tabCtrl = TabController(length: 2, vsync: this);
+    _tabCtrl.addListener(() {
+      if (_tabCtrl.indexIsChanging) return;
+      setState(() {});
+    });
     _load();
   }
 
   @override
   void dispose() {
+    _tabCtrl.dispose();
     _inputCtrl.dispose();
     _scrollCtrl.dispose();
     super.dispose();
@@ -1161,6 +1167,7 @@ class _AiTabState extends State<_AiTab> {
       _messages = [];
     });
     _inputCtrl.clear();
+    _switchToDiscussion();
   }
 
   Future<void> _openThread(String threadId) async {
@@ -1173,9 +1180,16 @@ class _AiTabState extends State<_AiTab> {
         _messages = msgs;
         _loading = false;
       });
+      _switchToDiscussion();
       _scrollToBottom();
     } catch (_) {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  void _switchToDiscussion() {
+    if (_tabCtrl.index != 0) {
+      _tabCtrl.animateTo(0);
     }
   }
 
@@ -1227,80 +1241,27 @@ class _AiTabState extends State<_AiTab> {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    // Nuit : les bruns/verts du mode clair deviennent illisibles sur le nuit.
-    final accent =
-        isDark ? AlanyaColors.terracottaNuit : AlanyaColors.terracotta;
-    final neutral = isDark ? AlanyaColors.craie2 : AlanyaColors.chocolate;
-    final green = isDark ? AlanyaColors.indigoLight : AlanyaColors.forest;
-    final danger = isDark ? AlanyaColors.erreurNuit : Colors.red;
-    return DefaultTabController(
-      length: 2,
-      child: MotifBackground(
-        overlayOpacity: 0.9,
-        child: Column(
-        children: [
-          // --- Bande Assistant Alanya ---
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            color: themed(context, light: AlanyaColors.cream, dark: AlanyaColors.nuit2),
-            child: const Text("Assistant Alanya",
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 0.3)),
-          ),
-          // --- Onglets Discussion / Mes Conversations ---
-          TabBar(
-            tabs: const [
-              Tab(text: "Discussion"),
-              Tab(text: "Mes Conversations"),
-            ],
-            labelColor: AlanyaColors.terracotta,
-            unselectedLabelColor: AlanyaColors.craie2,
-            indicatorColor: AlanyaColors.terracotta,
-            indicatorWeight: 2.5,
-            onTap: (i) => setState(() => _aiTabFilter = i),
-          ),
-          // --- En-tête actions ---
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Row(
-              children: [
-                Icon(Icons.auto_awesome, color: accent),
-                const SizedBox(width: 8),
-                const Expanded(
-                  child: Text(
-                    "Assistant Alanya",
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                ),
-                IconButton(
-                  tooltip: "Mes conversations",
-                  icon: Icon(Icons.forum_outlined, color: neutral),
-                  onPressed: _showThreads,
-                ),
-                IconButton(
-                  tooltip: "Nouvelle conversation",
-                  icon: Icon(Icons.add_comment_outlined, color: green),
-                  onPressed: _newConversation,
-                ),
-                IconButton(
-                  tooltip: "Partager la conversation",
-                  icon: Icon(Icons.share_outlined, color: neutral),
-                  onPressed: _messages.isEmpty ? null : _shareConversation,
-                ),
-                IconButton(
-                  tooltip: "Supprimer cette conversation",
-                  icon: Icon(Icons.delete_outline, color: danger),
-                  onPressed: _messages.isEmpty ? null : _clearConversation,
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: _aiTabFilter == 0 ? _buildDiscussion() : _buildThreadsList(),
-          ),
-          if (_aiTabFilter == 0) _composer(),
-        ],
-      ),
+    return MotifBackground(
+      overlayOpacity: 0.9,
+      child: Column(
+      children: [
+        // --- Onglets Discussion / Mes Conversations ---
+        TabBar(
+          controller: _tabCtrl,
+          tabs: const [
+            Tab(text: "Discussion"),
+            Tab(text: "Mes Conversations"),
+          ],
+          labelColor: AlanyaColors.terracotta,
+          unselectedLabelColor: AlanyaColors.craie2,
+          indicatorColor: AlanyaColors.terracotta,
+          indicatorWeight: 2.5,
+        ),
+        Expanded(
+          child: _tabCtrl.index == 0 ? _buildDiscussion() : _buildThreadsList(),
+        ),
+        if (_tabCtrl.index == 0) _composer(),
+      ],
     ),
   );
   }
@@ -1398,6 +1359,7 @@ class _AiTabState extends State<_AiTab> {
                         onTap: () {
                           Navigator.pop(ctx);
                           _openThread(t.id);
+                          _switchToDiscussion();
                         },
                       );
                     },
@@ -1514,10 +1476,7 @@ class _AiTabState extends State<_AiTab> {
                 child: Icon(Icons.add, color: Colors.white),
               ),
               title: const Text("Nouvelle conversation", style: TextStyle(fontWeight: FontWeight.bold)),
-              onTap: () {
-                _newConversation();
-                setState(() => _aiTabFilter = 0);
-              },
+              onTap: _newConversation,
             ),
             const Divider(height: 1),
             Expanded(
@@ -1551,10 +1510,7 @@ class _AiTabState extends State<_AiTab> {
                               const PopupMenuItem(value: 'delete', child: Text("Supprimer", style: TextStyle(color: Colors.red))),
                             ],
                           ),
-                          onTap: () {
-                            _openThread(t.id);
-                            setState(() => _aiTabFilter = 0);
-                          },
+                          onTap: () => _openThread(t.id),
                         );
                       },
                     ),
