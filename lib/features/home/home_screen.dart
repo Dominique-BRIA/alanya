@@ -450,19 +450,6 @@ class _ConversationsTabState extends State<_ConversationsTab>
                 ],
               ),
             ),
-          // --- Onglets : Tous / Non lues / Groupes ---
-          TabBar(
-            tabs: const [
-              Tab(text: "Tous"),
-              Tab(text: "Non lues"),
-              Tab(text: "Groupes"),
-            ],
-            labelColor: AlanyaColors.terracotta,
-            unselectedLabelColor: AlanyaColors.craie2,
-            indicatorColor: AlanyaColors.terracotta,
-            indicatorWeight: 2.5,
-            onTap: (i) => setState(() => _tabFilter = i),
-          ),
           // --- Barre de recherche ---
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
@@ -504,6 +491,19 @@ class _ConversationsTabState extends State<_ConversationsTab>
               ),
               style: const TextStyle(fontSize: 14),
             ),
+          ),
+          // --- Onglets : Tous / Non lues / Groupes ---
+          TabBar(
+            tabs: const [
+              Tab(text: "Tous"),
+              Tab(text: "Non lues"),
+              Tab(text: "Groupes"),
+            ],
+            labelColor: AlanyaColors.terracotta,
+            unselectedLabelColor: AlanyaColors.craie2,
+            indicatorColor: AlanyaColors.terracotta,
+            indicatorWeight: 2.5,
+            onTap: (i) => setState(() => _tabFilter = i),
           ),
           Expanded(
             child: RefreshIndicator(
@@ -980,21 +980,6 @@ class _StatusTabState extends State<_StatusTab> {
     return Scaffold(
       appBar: AppBar(
         title: const Text("Status"),
-        actions: [
-          IconButton(
-            icon: Icon(
-              Theme.of(context).brightness == Brightness.dark ? Icons.wb_sunny : Icons.nightlight_round,
-              color: Theme.of(context).brightness == Brightness.dark ? AlanyaColors.terracottaNuit : AlanyaColors.terracotta,
-            ),
-            tooltip: Theme.of(context).brightness == Brightness.dark ? "Passer au mode clair" : "Passer au mode sombre",
-            onPressed: () {
-              final themeCtrl = context.read<ThemeController>();
-              themeCtrl.setMode(
-                Theme.of(context).brightness == Brightness.dark ? ThemeMode.light : ThemeMode.dark,
-              );
-            },
-          ),
-        ],
       ),
       body: MotifBackground(
         overlayOpacity: 0.92,

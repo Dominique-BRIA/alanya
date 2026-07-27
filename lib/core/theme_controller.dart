@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Contrôleur de thème : Système (défaut), Clair ou Sombre. Persisté localement.
+/// Contrôleur de thème : Clair (défaut), Sombre ou Système. Persisté localement.
 class ThemeController extends ChangeNotifier {
   ThemeController();
 
@@ -12,7 +12,13 @@ class ThemeController extends ChangeNotifier {
 
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
-    _mode = _decode(prefs.getString(_prefsKey));
+    final saved = prefs.getString(_prefsKey);
+    // Premier lancement : pas de préférence sauvegardée → mode clair par défaut.
+    if (saved == null) {
+      _mode = ThemeMode.light;
+    } else {
+      _mode = _decode(saved);
+    }
     notifyListeners();
   }
 
