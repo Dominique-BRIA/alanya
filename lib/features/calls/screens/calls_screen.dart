@@ -9,6 +9,7 @@ import '../../../widgets/motif_background.dart';
 import '../../../widgets/multi_select_mixin.dart';
 import '../call_controller.dart';
 import '../calls_repository.dart';
+import 'dialer_screen.dart';
 import '../../chat/screens/chat_screen.dart';
 
 class CallsScreen extends StatefulWidget {
@@ -140,9 +141,24 @@ class _CallsScreenState extends State<CallsScreen>
                 child: _buildBody(),
               ),
             )
-          : RefreshIndicator(
-              onRefresh: _load,
-              child: _buildBody(),
+          : Stack(
+              children: [
+                RefreshIndicator(
+                  onRefresh: _load,
+                  child: _buildBody(),
+                ),
+                Positioned(
+                  right: 16,
+                  bottom: 16,
+                  child: FloatingActionButton(
+                    backgroundColor: AlanyaColors.terracotta,
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const DialerScreen()),
+                    ),
+                    child: const Icon(Icons.dialpad, color: Colors.white),
+                  ),
+                ),
+              ],
             ),
     );
   }
