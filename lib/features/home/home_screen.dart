@@ -418,14 +418,14 @@ class _ConversationsTabState extends State<_ConversationsTab>
               child: Row(
                 children: [
                   AvatarCircle(
-                    name: user.pseudo ?? "?",
+                    name: user.nom ?? user.pseudo ?? "?",
                     avatarUrl: user.avatarUrl,
                     radius: 22,
                     backgroundColor: AlanyaColors.terracotta,
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (_) => AvatarViewerScreen(
-                          name: user.pseudo ?? "Moi",
+                          name: user.nom ?? user.pseudo ?? "Moi",
                           avatarUrl: user.avatarUrl,
                         ),
                       ),
@@ -436,7 +436,10 @@ class _ConversationsTabState extends State<_ConversationsTab>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(user.pseudo ?? "Moi",
+                        // La carte identifie l'utilisateur par son nom. `nom` est
+                        // nullable : repli sur le pseudo pour les comptes qui
+                        // n'en ont pas encore, plutôt qu'un « Moi » anonyme.
+                        Text(user.nom ?? user.pseudo ?? "Moi",
                             style: const TextStyle(fontWeight: FontWeight.bold)),
                         Text("Alanya ID : ${formatAlanyaId(user.publicNumber)}",
                             style: TextStyle(
