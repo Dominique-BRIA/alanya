@@ -80,7 +80,9 @@ flutter_launcher_icons:
   android: true
   ios: true
   image_path: assets/images/app_icon.png
-  adaptive_icon_background: "#000000"
+  # Blanc, comme la plaque intégrée à app_icon.png. Un fond noir ferait
+  # apparaître un cadre sombre autour du logo sur les lanceurs adaptatifs.
+  adaptive_icon_background: "#FFFFFF"
   adaptive_icon_foreground: assets/images/app_icon.png
   min_sdk_android: 21
   remove_alpha_ios: true
