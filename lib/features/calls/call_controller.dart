@@ -264,6 +264,24 @@ class CallController extends ChangeNotifier {
     }
   }
 
+  /// Un autre appareil connecté au **même compte** a pris la main sur cet appel
+  /// (décroché ou refusé). Le serveur nous relaie son `call_state`, portant
+  /// notre propre identifiant — d'où la confusion possible avec l'écho de nos
+  /// propres actions.
+  ///
+  /// Deux garde-fous distinguent les deux cas : l'appel doit être en cours de
+  /// sonnerie chez nous (`incoming`), et ne pas être celui que nous venons
+  /// nous-mêmes d'accepter (`activeCallId`).
+  ///
+  /// On se contente de nettoyer localement : **rien n'est envoyé au serveur**,
+  /// sans quoi on raccrocherait l'appel que l'autre appareil vient de prendre.
+  bool _takenByAnotherDevice(String callId) {
+    if (incoming == null || incoming!.callId != callId) return false;
+    if (callId == activeCallId) return false; // c'est nous qui avons agi
+    _clear(); // coupe la sonnerie, retire la notification, notifie l'UI
+    return true;
+  }
+
   void _clear() {
     _ringTimeout?.cancel();
     _ringTimeout = null;
@@ -539,8 +557,13 @@ class CallController extends ChangeNotifier {
       if (callId == null) return;
 
       if (state == "joined" || state == "accepted") {
-        // Ignore l'écho de notre propre "joined" (le serveur nous le renvoie maintenant)
-        if (userId == myUserId) return;
+        // Notre propre identifiant : soit l'écho de notre « joined », soit un
+        // autre appareil du même compte qui vient de décrocher — auquel cas il
+        // faut couper la sonnerie ici.
+        if (userId == myUserId) {
+          _takenByAnotherDevice(callId);
+          return;
+        }
         if (callId == activeCallId || callId == incoming?.callId) {
           _onPeerJoined(userId ?? "", displayName);
           // Flushe les signaux bufferisés pour ce callId
@@ -567,8 +590,12 @@ class CallController extends ChangeNotifier {
           _transferTargetId = userId;
         }
       } else if (state == "left" || state == "declined") {
-        // Ignore notre propre départ (on le gère en local dans hangUp)
-        if (userId == myUserId) return;
+        // Notre propre départ est géré localement dans hangUp — sauf s'il vient
+        // d'un autre appareil qui a refusé l'appel pendant qu'on sonne.
+        if (userId == myUserId) {
+          _takenByAnotherDevice(callId);
+          return;
+        }
         // Cible du transfert qui refuse : on annule et on reste dans l'appel.
         if (state == "declined" &&
             _pendingTransfer &&
@@ -583,8 +610,12 @@ class CallController extends ChangeNotifier {
           _onPeerLeft(userId);
         }
       } else if (state == "rejected" || state == "ended") {
-        // "ended" émis par nous-mêmes via hangUp — on ignore l'écho
-        if (fromUserId == myUserId) return;
+        // « ended » émis par nous-mêmes via hangUp : écho à ignorer. Mais un
+        // autre appareil du même compte peut aussi avoir refusé l'appel.
+        if (fromUserId == myUserId) {
+          _takenByAnotherDevice(callId);
+          return;
+        }
         final isOurCall = callId == activeCallId ||
             callId == incoming?.callId ||
             (activeCallId == null && activeRole != null);
