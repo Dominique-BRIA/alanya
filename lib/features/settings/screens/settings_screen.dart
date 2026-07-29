@@ -17,6 +17,7 @@ import '../../account/screens/delete_account_screen.dart';
 import '../../account/screens/profile_screen.dart';
 import 'notification_settings_screen.dart';
 import 'privacy_settings_screen.dart';
+import 'login_history_screen.dart';
 import '../../blocked/screens/blocked_users_screen.dart';
 import '../../chat/screens/starred_messages_screen.dart';
 
@@ -130,6 +131,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
             trailing: _chevron(),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const PrivacySettingsScreen()),
+            ),
+          ),
+          _settingsTile(
+            icon: Icons.history,
+            iconColor: _positive,
+            title: "Historique de connexion",
+            subtitle: "Quand et depuis où ton compte a été ouvert",
+            trailing: _chevron(),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const LoginHistoryScreen()),
             ),
           ),
           _settingsTile(

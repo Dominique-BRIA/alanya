@@ -54,4 +54,46 @@ class AccountRepository {
     if (lastSeenVisibility != null) body["lastSeenVisibility"] = lastSeenVisibility;
     await _api.post("/api/account/privacy", body);
   }
+
+  /// Historique des connexions du compte, de la plus récente à la plus
+  /// ancienne. L'API ne renvoie jamais que les siennes.
+  Future<List<LoginAccess>> loginHistory({int limit = 30}) async {
+    final data = await _api.get("/api/user-access?limit=$limit");
+    final brut = (data["acces"] as List?) ?? const [];
+    return brut
+        .map((e) => LoginAccess.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+}
+
+/// Une connexion enregistrée au journal.
+class LoginAccess {
+  const LoginAccess({
+    required this.idLogin,
+    required this.device,
+    required this.ipAdress,
+    required this.osSystem,
+    required this.dateLogin,
+  });
+
+  final int idLogin;
+  final String device;
+  final String ipAdress;
+  final String osSystem;
+  final DateTime dateLogin;
+
+  /// « INDEFINI » est la valeur du référentiel quand l'information manque :
+  /// on ne l'affiche pas telle quelle à l'utilisateur.
+  bool get deviceConnu => device != "INDEFINI";
+  bool get systemeConnu => osSystem != "INDEFINI";
+  bool get ipConnue => ipAdress != "INDEFINI" && ipAdress != "unknown";
+
+  factory LoginAccess.fromJson(Map<String, dynamic> j) => LoginAccess(
+        idLogin: (j["idLogin"] as num).toInt(),
+        device: j["device"] as String? ?? "INDEFINI",
+        ipAdress: j["ipAdress"] as String? ?? "INDEFINI",
+        osSystem: j["osSystem"] as String? ?? "INDEFINI",
+        dateLogin:
+            DateTime.tryParse(j["dateLogin"] as String? ?? "") ?? DateTime.now(),
+      );
 }
