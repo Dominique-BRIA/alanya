@@ -1,21 +1,21 @@
 {
   "project_info": {
-    "project_number": "854184379004",
-    "project_id": "alanya00",
-    "storage_bucket": "alanya00.firebasestorage.app"
+    "project_number": "205366376782",
+    "project_id": "alanya-9233f",
+    "storage_bucket": "alanya-9233f.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:854184379004:android:c09fe4301e61fedc323ff9",
+        "mobilesdk_app_id": "1:205366376782:android:7d0ff54d7a0dfb2fe1461f",
         "android_client_info": {
-          "package_name": "com.alanya.app"
+          "package_name": "com.alanya.work"
         }
       },
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyDHdCoM62u7bQd6nNAJ055bcElYWIpM-ZI"
+          "current_key": "AIzaSyAJehfBBKxyKxWoX4161gAAR5I-jJPj3Uw"
         }
       ],
       "services": {
@@ -26,15 +26,34 @@
     },
     {
       "client_info": {
-        "mobilesdk_app_id": "1:854184379004:android:daf6c3a59da598d3323ff9",
+        "mobilesdk_app_id": "1:205366376782:android:35a2f010a750c4ade1461f",
         "android_client_info": {
-          "package_name": "com.example.sewachat"
+          "package_name": "com.alanya237.alanya"
         }
       },
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyDHdCoM62u7bQd6nNAJ055bcElYWIpM-ZI"
+          "current_key": "AIzaSyAJehfBBKxyKxWoX4161gAAR5I-jJPj3Uw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:205366376782:android:38f15b542150056be1461f",
+        "android_client_info": {
+          "package_name": "com.example.talky_flutter"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAJehfBBKxyKxWoX4161gAAR5I-jJPj3Uw"
         }
       ],
       "services": {

@@ -1,4 +1,4 @@
-package com.example.sewachat
+package com.alanya.work
 
 import io.flutter.embedding.android.FlutterActivity
 

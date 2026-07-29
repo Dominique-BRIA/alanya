@@ -7,7 +7,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.sewachat"
+    namespace = "com.alanya.work"
     compileSdk = 36
     ndkVersion = "28.2.13676358"
 
@@ -24,7 +24,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.sewachat"
+        applicationId = "com.alanya.work"
         minSdk = 21
         targetSdk = 36
         versionCode = flutter.versionCode
