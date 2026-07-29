@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Icône adaptative (Android 8.0 / API 26 et au-delà).
+     Ce fichier prend le pas sur les mipmap-*/ic_launcher.png, qui restent en
+     place pour les versions antérieures (minSdk 21).
+
+     Chaque couche fait 108 dp de côté, dont seuls les 72 dp centraux sont
+     affichés et 66 dp garantis visibles quel que soit le masque. Les
+     ic_launcher_foreground.png ont été générés avec la bulle à 62 % du
+     canevas, donc à l'intérieur de cette zone sûre. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+</adaptive-icon>

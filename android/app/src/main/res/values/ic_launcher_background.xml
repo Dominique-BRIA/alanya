@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Fond de l'icône adaptative. Le blanc remplit la forme découpée par le
+     masque du constructeur (rond, squircle, carré arrondi selon l'appareil),
+     ce qu'un PNG aplati sur blanc ne saurait pas faire : il donnerait un
+     carré à angles vifs. -->
+<resources>
+    <color name="ic_launcher_background">#FFFFFFFF</color>
+</resources>
