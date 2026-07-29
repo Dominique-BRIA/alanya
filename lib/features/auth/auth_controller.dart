@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -27,6 +28,32 @@ class AuthController extends ChangeNotifier {
 
   AuthStatus status = AuthStatus.unknown;
   AuthUser? user;
+
+  StreamSubscription<Map<String, dynamic>>? _revocationSub;
+
+  /// Déconnexion à distance : une autre session du compte a révoqué un
+  /// appareil. Chaque client compare l'identifiant reçu au sien ; seul celui
+  /// qui est visé s'efface.
+  ///
+  /// La révocation en base reste la garantie de fond — cet événement évite
+  /// simplement d'attendre l'expiration du jeton d'accès (15 minutes).
+  void _ecouterRevocation() {
+    final rt = _realtime;
+    if (rt == null || _revocationSub != null) return;
+    _revocationSub = rt.events.listen((e) async {
+      if (e["type"] != "session_revoked") return;
+      final vise = e["deviceId"] as String?;
+      if (vise == null) return;
+      if (vise != await DeviceRegistry.instance.deviceId()) return;
+      await logout();
+    });
+  }
+
+  @override
+  void dispose() {
+    _revocationSub?.cancel();
+    super.dispose();
+  }
 
   /// Au démarrage : tente de restaurer une session depuis les tokens stockés.
   /// - Si un access_token est présent, on tente /api/me
@@ -185,7 +212,10 @@ class AuthController extends ChangeNotifier {
       // repasser par _persist, l'appareil doit quand même se signaler.
       DeviceRegistry.instance.registerIfAuthenticated();
       _realtime?.connect();
+      _ecouterRevocation();
     } else if (s == AuthStatus.unauthenticated && wasAuth) {
+      _revocationSub?.cancel();
+      _revocationSub = null;
       _realtime?.disconnect();
     }
   }

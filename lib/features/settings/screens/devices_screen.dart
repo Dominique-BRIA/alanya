@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import '../../../core/realtime_client.dart';
 
 import '../../../core/device_registry.dart';
 import '../../../theme/alanya_theme.dart';
@@ -75,6 +78,10 @@ class _DevicesScreenState extends State<DevicesScreen> {
     try {
       await DeviceRegistry.instance.disconnect(a.appareilId);
       if (!mounted) return;
+      // Coupe l'accès sans attendre l'expiration du jeton : l'appareil visé
+      // reçoit l'annonce et se déconnecte de lui-même.
+      final id = a.cookiesWebId;
+      if (id != null) context.read<RealtimeClient>().sendSessionRevoked(id);
       setState(() {
         _appareils =
             (_appareils ?? []).where((x) => x.appareilId != a.appareilId).toList();

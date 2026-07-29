@@ -190,6 +190,15 @@ class RealtimeClient extends ChangeNotifier {
 
   void markRead(String convId) => _send({"type": "read", "convId": convId});
 
+  /// Annonce aux autres sessions du compte qu'un appareil vient d'être
+  /// déconnecté, pour qu'elles réagissent sans attendre l'expiration du jeton
+  /// d'accès (15 minutes).
+  ///
+  /// Le serveur ne rediffuse qu'aux sockets du même compte : on ne peut couper
+  /// que ses propres appareils.
+  void sendSessionRevoked(String deviceId) =>
+      _send({"type": "session_revoked", "deviceId": deviceId});
+
   /// Réaction emoji sur un message. `emoji` vide = retrait ; renvoyer le même
   /// emoji que l'actuel = bascule (retrait) côté serveur.
   void sendReaction(String convId, String messageId, String emoji) => _send({
