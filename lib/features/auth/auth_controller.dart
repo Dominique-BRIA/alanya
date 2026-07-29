@@ -7,6 +7,7 @@ import '../../core/call_cache.dart';
 import '../../core/contact_cache.dart';
 import '../../core/conversation_cache.dart';
 import '../../core/message_cache.dart';
+import '../../core/device_registry.dart';
 import '../../core/push_service.dart';
 import '../../core/realtime_client.dart';
 import '../../core/token_storage.dart';
@@ -149,6 +150,8 @@ class AuthController extends ChangeNotifier {
     // Ré-enregistre le token FCM : maintenant qu'on est authentifié,
     // le backend peut associer le token à l'utilisateur.
     PushService.instance.registerTokenIfAuthenticated();
+    // Inscrit l'appareil au registre du compte (écran « Appareils connectés »).
+    DeviceRegistry.instance.registerIfAuthenticated();
     // Reconnecte le WebSocket avec le nouveau token (empêche le bug où
     // le WS reste ouvert avec le token du précédent utilisateur).
     _realtime?.connect();
@@ -178,6 +181,9 @@ class AuthController extends ChangeNotifier {
     // tryInitialize() s'exécutait avant l'authentification.
     if (s == AuthStatus.authenticated && !wasAuth) {
       PushService.instance.registerTokenIfAuthenticated();
+      // Couvre aussi le redémarrage à froid : la session est restaurée sans
+      // repasser par _persist, l'appareil doit quand même se signaler.
+      DeviceRegistry.instance.registerIfAuthenticated();
       _realtime?.connect();
     } else if (s == AuthStatus.unauthenticated && wasAuth) {
       _realtime?.disconnect();

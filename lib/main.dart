@@ -12,6 +12,7 @@ import 'core/notification_settings.dart';
 import 'core/locale_controller.dart';
 import 'core/outbox.dart';
 import 'core/presence_store.dart';
+import 'core/device_registry.dart';
 import 'core/push_service.dart';
 import 'core/realtime_client.dart';
 import 'core/theme_controller.dart';
@@ -53,6 +54,9 @@ void main() async {
   final realtime = RealtimeClient(storage);
 
   await PushService.instance.tryInitialize(api: api, storage: storage);
+  // Registre des appareils : simple câblage, aucun appel réseau ici.
+  // L'enregistrement a lieu à l'authentification (voir AuthController).
+  DeviceRegistry.instance.init(api: api, storage: storage);
   await DataSaverService.instance.load();
   await NotificationSettings.instance.load();
 

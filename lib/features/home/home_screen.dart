@@ -26,6 +26,7 @@ import '../../widgets/multi_select_mixin.dart';
 import '../account/screens/avatar_viewer_screen.dart';
 import '../account/screens/profile_screen.dart';
 import '../settings/screens/settings_screen.dart';
+import '../settings/screens/devices_screen.dart';
 import '../ai/ai_repository.dart';
 import '../auth/auth_controller.dart';
 import '../chat/chat_repository.dart';
@@ -125,11 +126,16 @@ class _HomeScreenState extends State<HomeScreen> {
                   Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const SettingsScreen()),
                   );
+                } else if (v == "devices") {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const DevicesScreen()),
+                  );
                 } else if (v == "logout") {
                   context.read<AuthController>().logout();
                 }
               },
               itemBuilder: (_) => [
+                const PopupMenuItem(value: "devices", child: ListTile(leading: Icon(Icons.devices_outlined), title: Text("Appareils connectés"), contentPadding: EdgeInsets.zero,)),
                 const PopupMenuItem(value: "settings", child: ListTile(leading: Icon(Icons.settings_outlined), title: Text("Paramètres"), contentPadding: EdgeInsets.zero,)),
                 const PopupMenuItem(value: "logout", child: Text("Se déconnecter")),
               ],
