@@ -7,9 +7,9 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:205366376782:android:7d0ff54d7a0dfb2fe1461f",
+        "mobilesdk_app_id": "1:205366376782:android:35a2f010a750c4ade1461f",
         "android_client_info": {
-          "package_name": "com.alanya.work"
+          "package_name": "com.alanya237.alanya"
         }
       },
       "oauth_client": [],
@@ -26,9 +26,9 @@
     },
     {
       "client_info": {
-        "mobilesdk_app_id": "1:205366376782:android:35a2f010a750c4ade1461f",
+        "mobilesdk_app_id": "1:205366376782:android:82b110a36ef0e154e1461f",
         "android_client_info": {
-          "package_name": "com.alanya237.alanya"
+          "package_name": "com.alanya237.work"
         }
       },
       "oauth_client": [],

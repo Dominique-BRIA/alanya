@@ -7,7 +7,7 @@ plugins {
 }
 
 android {
-    namespace = "com.alanya.work"
+    namespace = "com.alanya237.work"
     compileSdk = 36
     ndkVersion = "28.2.13676358"
 
@@ -24,7 +24,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.alanya.work"
+        applicationId = "com.alanya237.work"
         minSdk = 21
         targetSdk = 36
         versionCode = flutter.versionCode

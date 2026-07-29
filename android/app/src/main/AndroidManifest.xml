@@ -58,8 +58,8 @@
             android:value="2" />
 
         <!-- FileProvider : ouverture des fichiers téléchargés. L'autorité suit
-             applicationId, donc elle devient com.alanya.work.fileprovider sans
-             rien changer ici. -->
+             applicationId, donc elle devient com.alanya237.work.fileprovider
+             sans rien changer ici. -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
