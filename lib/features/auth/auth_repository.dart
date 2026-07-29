@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import '../../core/device_registry.dart';
 import '../../core/api_client.dart';
 import '../../models/auth_user.dart';
 
@@ -60,6 +61,7 @@ class AuthRepository {
     };
     if (nom != null) body["nom"] = nom;
     if (idPays != null) body["idPays"] = idPays;
+    body["deviceId"] = await DeviceRegistry.instance.deviceId();
 
     final data = await _api.post(
       "/api/auth/setup",
@@ -71,8 +73,14 @@ class AuthRepository {
 
   /// Connexion par email OU numéro public à 6 chiffres.
   Future<AuthSession> login({required String identifier, required String password}) async {
-    final data =
-        await _api.post("/api/auth/login", {"identifier": identifier, "password": password});
+    // `deviceId` rattache la session à cet appareil : c'est ce qui permet de la
+    // révoquer depuis « Appareils connectés ». Sans lui, le serveur sait à quel
+    // compte appartient le jeton, mais pas depuis quel appareil il a été émis.
+    final data = await _api.post("/api/auth/login", {
+      "identifier": identifier,
+      "password": password,
+      "deviceId": await DeviceRegistry.instance.deviceId(),
+    });
     return _session(data);
   }
 
