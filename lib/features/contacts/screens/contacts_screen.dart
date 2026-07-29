@@ -339,7 +339,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
         backgroundColor: c.isBlocked ? themed(context, light: Colors.grey, dark: AlanyaColors.nuit3) : AlanyaColors.gold,
       ),
       title: Text(c.displayName, style: const TextStyle(fontWeight: FontWeight.w600)),
-      subtitle: Text("Alanya ID : ${formatAlanyaId(c.publicNumber)}${c.isBlocked ? " · bloqué" : ""}"),
+      subtitle: Text("Alanya ID : ${formatAlanyaId(c.publicNumber)}${c.isBlocked ? " · bloqué" : ""}",
+          style: alanyaIdStyleOf(context)),
       onTap: c.isBlocked ? null : () => _startChat(c),
       trailing: PopupMenuButton<String>(
         onSelected: (v) {

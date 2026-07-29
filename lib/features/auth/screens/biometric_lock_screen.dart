@@ -77,7 +77,7 @@ class _BiometricLockScreenState extends State<BiometricLockScreen> {
                   ),
                 ),
                 const SizedBox(height: 20),
-                const AlanyaWordmark(fontSize: 24, letterSpacing: 6),
+                const AlanyaWordmark(fontSize: 24, letterSpacing: 3),
                 const SizedBox(height: 40),
 
                 // Bouton empreinte

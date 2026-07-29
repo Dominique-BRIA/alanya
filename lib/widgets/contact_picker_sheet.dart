@@ -331,7 +331,7 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
                                 subtitle: Text(formatAlanyaId(c.publicNumber),
                                     style: TextStyle(
                                         fontSize: 12,
-                                        color: mutedOf(context, AlanyaColors.grey500))),
+                                        color: alanyaIdOf(context, AlanyaColors.grey500))),
                                 trailing: selected
                                     ? Icon(Icons.check_circle,
                                         color: accentOf(context))

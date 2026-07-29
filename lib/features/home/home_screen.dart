@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../l10n/app_localizations.dart';
 import '../../core/alanya_id_formatter.dart';
+import '../../core/whatsapp_text.dart';
 
 import '../../core/connectivity_service.dart';
 import '../../core/conversation_cache.dart';
@@ -105,7 +106,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-          title: const AlanyaWordmark(fontSize: 22, letterSpacing: 4, height: 1),
+          // letterSpacing réduit de 4 à 2 : « ALANYA WORK » fait onze
+          // caractères, et l'AppBar porte aussi des actions.
+          title: const AlanyaWordmark(fontSize: 22, letterSpacing: 2, height: 1),
           actions: [
             IconButton(
               icon: Icon(
@@ -455,9 +458,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
                             style: const TextStyle(fontWeight: FontWeight.bold)),
                         Text("Alanya ID : ${formatAlanyaId(user.publicNumber)}",
                             style: TextStyle(
-                                color: themed(context,
-                                    light: Colors.black54,
-                                    dark: AlanyaColors.craie2),
+                                color: alanyaIdOf(context, Colors.black54),
                                 fontSize: 13)),
                       ],
                     ),
@@ -888,7 +889,11 @@ class _ConversationsTabState extends State<_ConversationsTab>
                     title: Text(title,
                         style: const TextStyle(fontWeight: FontWeight.w500)),
                     subtitle: Text(
-                      c.lastMessage?.content ?? "—",
+                      // Marqueurs retirés : l'aperçu n'applique pas les
+                      // styles, y laisser « *coucou* » exposerait la mécanique.
+                      c.lastMessage?.content == null
+                          ? "—"
+                          : sansMarqueursWhatsApp(c.lastMessage!.content!),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(fontSize: 12, color: muted2),

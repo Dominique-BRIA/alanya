@@ -125,7 +125,7 @@ class _SetupScreenState extends State<SetupScreen> {
                     children: [
                       Text(
                         tr(context, 'alanya_number'),
-                        style: TextStyle(color: themed(context, light: AlanyaColors.chocolate, dark: AlanyaColors.craie)),
+                        style: TextStyle(color: alanyaIdOf(context, AlanyaColors.chocolate)),
                       ),
                       const SizedBox(height: 6),
                       Text(

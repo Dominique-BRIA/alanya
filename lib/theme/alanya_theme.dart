@@ -118,6 +118,27 @@ Color accentOf(BuildContext context) => themed(context,
 Color mutedOf(BuildContext context, Color light) =>
     themed(context, light: light, dark: AlanyaColors.craie2);
 
+/// Texte « Alanya ID » et le numéro qui l'accompagne : **blanc franc en Nuit**.
+///
+/// C'est un identifiant qu'on lit pour le recopier ou le dicter, pas un
+/// sous-titre décoratif — le gris `craie2` y était inutilement discret. Comme
+/// pour [mutedOf], la couleur claire est passée en paramètre et reconduite
+/// telle quelle : le mode clair ne bouge pas.
+Color alanyaIdOf(BuildContext context, Color light) =>
+    themed(context, light: light, dark: Colors.white);
+
+/// Variante pour les écrans où l'Alanya ID n'avait **aucune** couleur explicite
+/// (sous-titre de `ListTile`, qui hérite du thème).
+///
+/// Renvoyer `null` en clair est délibéré : le style d'origine reste appliqué
+/// intégralement, donc rien ne peut dériver. En Nuit, seule la couleur est
+/// surchargée — `Text` fusionne ce style avec celui hérité, la taille et la
+/// graisse d'origine sont conservées.
+TextStyle? alanyaIdStyleOf(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+        ? const TextStyle(color: Colors.white)
+        : null;
+
 /// Élément volontairement très discret (grande icône d'état vide, filigrane).
 Color faintOf(BuildContext context, Color light) => themed(context,
     light: light, dark: AlanyaColors.craie2.withValues(alpha: 0.4));

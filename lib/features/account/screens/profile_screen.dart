@@ -245,10 +245,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   dark: AlanyaColors.terracottaNuit)),
           const SizedBox(width: 10),
           Text(tr(context, 'alanya_number_label'),
+              style: TextStyle(color: alanyaIdOf(context, Colors.black54))),
+          // Le `const` a sauté : la couleur dépend désormais du thème.
+          Text(number,
               style: TextStyle(
-                  color: themed(context,
-                      light: Colors.black54, dark: AlanyaColors.craie2))),
-          Text(number, style: const TextStyle(fontWeight: FontWeight.bold)),
+                  fontWeight: FontWeight.bold,
+                  color: alanyaIdStyleOf(context)?.color)),
         ]),
         const SizedBox(height: 8),
         Row(children: [

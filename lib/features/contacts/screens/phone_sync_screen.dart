@@ -323,7 +323,8 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text("Alanya ID : ${formatAlanyaId(user.publicNumber)}"),
+          Text("Alanya ID : ${formatAlanyaId(user.publicNumber)}",
+              style: alanyaIdStyleOf(context)),
           if (match.phoneName != displayName)
             Text(
               "Dans ton répertoire : ${match.phoneName}",

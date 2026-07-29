@@ -153,7 +153,8 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
                                 });
                               },
                               title: Text(c.displayName),
-                              subtitle: Text("Alanya ID : ${formatAlanyaId(c.publicNumber)}"),
+                              subtitle: Text("Alanya ID : ${formatAlanyaId(c.publicNumber)}",
+                                  style: alanyaIdStyleOf(context)),
                               secondary: CircleAvatar(
                                 backgroundColor: AlanyaColors.gold,
                                 child: Text(

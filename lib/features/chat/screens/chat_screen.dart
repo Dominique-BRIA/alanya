@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 
 import '../../../core/message_cache.dart';
+import '../../../core/whatsapp_text.dart';
 import '../../../core/outbox.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -759,15 +760,20 @@ class _ChatScreenState extends State<ChatScreen>
     Future.delayed(const Duration(seconds: 2), () { if (mounted && _highlightedMessageId == id) setState(() => _highlightedMessageId = null); });
   }
 
+  /// Texte de la citation d'une réponse.
+  ///
+  /// Les marqueurs de mise en forme sont retirés : la citation tient sur une
+  /// ligne et n'applique pas les styles, or y laisser `*coucou*` afficherait la
+  /// mécanique au lieu du message. WhatsApp procède de même.
   String _replyPreviewText(Message? original, ReplyPreview? snapshot) {
     if (snapshot != null) {
       if (snapshot.isDeleted) return tr(context, 'message_deleted');
-      if (snapshot.content != null) return snapshot.content!;
+      if (snapshot.content != null) return sansMarqueursWhatsApp(snapshot.content!);
       return _typeLabel(snapshot.type);
     }
     if (original == null) return '...';
     if (original.isDeleted) return tr(context, 'message_deleted');
-    if (original.content != null) return original.content!;
+    if (original.content != null) return sansMarqueursWhatsApp(original.content!);
     if (original.media.isNotEmpty) return original.media.first.filename ?? 'Fichier';
     return _typeLabel(original.type);
   }
@@ -1949,7 +1955,15 @@ class _ChatScreenState extends State<ChatScreen>
     return GestureDetector(
       onTap: m.type == 'TEXT' && (m.content ?? '').isNotEmpty ? () => _translateMessage(m) : null,
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(m.content ?? "[${m.type}]", style: TextStyle(color: onTextColor)),
+        // Mise en forme façon WhatsApp : *gras*, _italique_, ~barré~ et
+        // ```chasse fixe```. Les marqueurs disparaissent à l'affichage ; le
+        // contenu stocké et envoyé reste le texte brut avec ses marqueurs, ce
+        // qui garde le message lisible pour tout client qui ne les interprète
+        // pas.
+        Text.rich(
+          TextSpan(children: spansWhatsApp(m.content ?? "[${m.type}]")),
+          style: TextStyle(color: onTextColor),
+        ),
         if ((m.content ?? '').isNotEmpty) buildLinkPreview(m.content!, mine),
         if (translated != null) ...[
           const SizedBox(height: 6),

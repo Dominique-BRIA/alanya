@@ -218,7 +218,7 @@ class _AddContactScreenState extends State<AddContactScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
-                      Text("Alanya ID : ${formatAlanyaId(user.publicNumber)}", style: TextStyle(color: mutedOf(context, Colors.black54))),
+                      Text("Alanya ID : ${formatAlanyaId(user.publicNumber)}", style: TextStyle(color: alanyaIdOf(context, Colors.black54))),
                       if (user.alreadyContact)
                         Text(
                           "Déjà dans ton répertoire",

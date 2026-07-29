@@ -113,7 +113,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               // les chiffres et effacerait le tiret.
               subtitle: Text(
                   "Alanya ID : ${user == null ? '—' : formatAlanyaId(user.publicNumber)}",
-                  style: TextStyle(fontSize: 13, color: _muted)),
+                  style: TextStyle(
+                      fontSize: 13,
+                      // Clair inchangé : `_muted` vaut grey500 en clair.
+                      color: alanyaIdOf(context, AlanyaColors.grey500))),
               trailing: _chevron(),
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const ProfileScreen()),
@@ -482,7 +485,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            const AlanyaWordmark(fontSize: 22, letterSpacing: 4),
+            const AlanyaWordmark(fontSize: 22, letterSpacing: 2),
             const SizedBox(height: 4),
             Text("Version 1.0.0", style: TextStyle(color: _muted)),
             const SizedBox(height: 8),

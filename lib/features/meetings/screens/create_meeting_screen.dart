@@ -417,7 +417,7 @@ class _ContactPickerSheetState extends State<_ContactPickerSheet> {
                                   const TextStyle(fontWeight: FontWeight.w500)),
                           subtitle: Text(formatAlanyaId(c.publicNumber),
                               style: TextStyle(
-                                  fontSize: 12, color: mutedOf(context, AlanyaColors.grey500))),
+                                  fontSize: 12, color: alanyaIdOf(context, AlanyaColors.grey500))),
                           trailing: Checkbox(
                             value: isSelected,
                             activeColor: accentOf(context),
