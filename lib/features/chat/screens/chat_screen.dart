@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 
 import '../../../core/message_cache.dart';
 import '../../../core/whatsapp_text.dart';
+import '../../../core/whatsapp_format_input.dart';
 import '../../../core/outbox.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -100,6 +101,12 @@ class _ChatScreenState extends State<ChatScreen>
   List<Message> _messages = [];
   bool _loading = true;
   bool _sending = false;
+  /// Barre de mise en forme dépliée par le bouton « A » du composeur.
+  bool _formatBarOpen = false;
+  /// Doigt posé sur le micro. Distinct de `_recording`, qui ne passe à vrai
+  /// qu'une fois l'enregistrement réellement démarré : l'agrandissement doit
+  /// répondre à l'appui, pas attendre l'ouverture du fichier audio.
+  bool _micHeld = false;
   Timer? _pollTimer;
   StreamSubscription<Map<String, dynamic>>? _rtSub;
   // _myId reflète TOUJOURS l'utilisateur courant. Un getter (au lieu d'un champ
@@ -2062,12 +2069,49 @@ class _ChatScreenState extends State<ChatScreen>
         ])),
         GestureDetector(onTap: () => setState(() => _replyTo = null), child: Icon(Icons.close, size: 20, color: _muted)),
       ])),
-      Container(padding: const EdgeInsets.all(8), color: _composerBg, child: Row(children: [
+      Container(padding: const EdgeInsets.all(8), color: _composerBg, child: Column(mainAxisSize: MainAxisSize.min, children: [
+        _formatBar(),
+        Row(children: [
         Offstage(offstage: _recording, child: IconButton(tooltip: tr(context, 'attach_file'), icon: _uploading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : Icon(Icons.attach_file, color: _iconNeutral), onPressed: _uploading ? null : _pickAndSendFile)),
-        Expanded(child: _recording ? _recordingBar() : TextField(controller: _inputCtrl, focusNode: _inputFocus, minLines: 1, maxLines: 4, textInputAction: TextInputAction.send, onChanged: _onInputChanged, onSubmitted: (_) => _send(), decoration: InputDecoration(hintText: tr(context, 'write_message'), contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10)))),
+        // Bouton « A » : déplie la barre de mise en forme. Il s'allume à
+        // l'accent quand elle est ouverte, seul repère visuel de son état.
+        Offstage(offstage: _recording, child: IconButton(icon: Icon(Icons.text_format, color: _formatBarOpen ? _accent : _iconNeutral), onPressed: () => setState(() => _formatBarOpen = !_formatBarOpen))),
+        Expanded(child: _recording ? _recordingBar() : TextField(
+          controller: _inputCtrl,
+          focusNode: _inputFocus,
+          minLines: 1,
+          maxLines: 4,
+          textInputAction: TextInputAction.send,
+          onChanged: _onInputChanged,
+          onSubmitted: (_) => _send(),
+          // Second chemin, celui de WhatsApp : sélectionner du texte, puis
+          // choisir la mise en forme dans le menu contextuel, à la suite de
+          // Couper / Copier / Coller. On repart des entrées natives plutôt que
+          // de les remplacer, sinon on perdrait le presse-papiers.
+          //
+          // Les libellés sont résolus avec le `context` de l'écran, pas celui
+          // du constructeur de menu : la traduction passe par un Provider, et
+          // l'observer depuis un contexte plus profond n'apporterait rien.
+          contextMenuBuilder: (menuContext, editableState) => AdaptiveTextSelectionToolbar.buttonItems(
+            anchors: editableState.contextMenuAnchors,
+            buttonItems: [
+              ...editableState.contextMenuButtonItems,
+              for (final m in MarqueurWhatsApp.tous)
+                ContextMenuButtonItem(
+                  label: tr(context, m.cleTraduction),
+                  onPressed: () {
+                    editableState.hideToolbar();
+                    appliqueMarqueur(_inputCtrl, m.code);
+                  },
+                ),
+            ],
+          ),
+          decoration: InputDecoration(hintText: tr(context, 'write_message'), contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10)),
+        )),
         const SizedBox(width: 4),
         _micButton(),
         Offstage(offstage: _recording, child: Row(mainAxisSize: MainAxisSize.min, children: [const SizedBox(width: 8), CircleAvatar(backgroundColor: _accent, child: IconButton(icon: const Icon(Icons.send, color: Colors.white), onPressed: _sending ? null : _send))])),
+        ]),
       ])),
     ]));
   }
@@ -2085,14 +2129,67 @@ class _ChatScreenState extends State<ChatScreen>
   Widget _micButton() {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onLongPressStart: (_) => _startVoiceRecord(),
+      onLongPressStart: (_) { setState(() => _micHeld = true); _startVoiceRecord(); },
       onLongPressMoveUpdate: (details) { if (details.offsetFromOrigin.dy < -60 && _recording && !_recordLocked) setState(() => _recordLocked = true); },
-      onLongPressEnd: (_) { if (_recording && !_recordLocked) _stopVoiceRecord(); },
-      onLongPressCancel: () { if (_recording && !_recordLocked) _stopVoiceRecord(cancel: true); },
-      child: Stack(clipBehavior: Clip.none, alignment: Alignment.center, children: [
-        CircleAvatar(backgroundColor: _recording ? _danger : (_dark ? AlanyaColors.terracottaNuit : AlanyaColors.chocolate), child: Icon(_recording ? Icons.mic : Icons.mic_none, color: Colors.white, size: 22)),
-        if (_recording) Positioned(top: -30, child: Container(width: 28, height: 28, decoration: BoxDecoration(color: Colors.black.withOpacity(0.6), shape: BoxShape.circle), child: const Icon(Icons.lock_open, color: Colors.white, size: 14))),
-      ]),
+      onLongPressEnd: (_) { setState(() => _micHeld = false); if (_recording && !_recordLocked) _stopVoiceRecord(); },
+      onLongPressCancel: () { setState(() => _micHeld = false); if (_recording && !_recordLocked) _stopVoiceRecord(cancel: true); },
+      // AnimatedScale plutôt qu'un AnimationController : pas de ticker à gérer,
+      // donc pas de mixin à ajouter au State ni de dispose à ne pas oublier.
+      //
+      // La mise à l'échelle est une transformation de PEINTURE : elle ne change
+      // pas la place occupée dans la rangée, le micro déborde par-dessus le
+      // composeur sans rien décaler. C'est le comportement de WhatsApp.
+      //
+      // `_micHeld || _recording` et non `_recording` seul : le premier répond à
+      // l'appui, le second maintient l'agrandissement quand l'enregistrement
+      // est verrouillé et que le doigt est parti.
+      child: AnimatedScale(
+        scale: (_micHeld || _recording) ? 1.5 : 1.0,
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.easeOut,
+        child: Stack(clipBehavior: Clip.none, alignment: Alignment.center, children: [
+          CircleAvatar(backgroundColor: _recording ? _danger : (_dark ? AlanyaColors.terracottaNuit : AlanyaColors.chocolate), child: Icon(_recording ? Icons.mic : Icons.mic_none, color: Colors.white, size: 22)),
+          if (_recording) Positioned(top: -30, child: Container(width: 28, height: 28, decoration: BoxDecoration(color: Colors.black.withOpacity(0.6), shape: BoxShape.circle), child: const Icon(Icons.lock_open, color: Colors.white, size: 14))),
+        ]),
+      ),
+    );
+  }
+
+  /// Barre de mise en forme, dépliée par le bouton « A » du composeur.
+  ///
+  /// C'est le chemin « pour les pressés » : pas besoin de connaître les
+  /// marqueurs. Un appui insère `**` et pose le curseur entre les deux ; si du
+  /// texte est sélectionné, il est enveloppé à la place.
+  ///
+  /// `AnimatedSize` plutôt qu'un `if` sec : la barre pousse le champ de saisie
+  /// vers le bas, et un saut brutal juste au-dessus du clavier se voit.
+  Widget _formatBar() {
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOut,
+      alignment: Alignment.bottomCenter,
+      child: (!_formatBarOpen || _recording)
+          ? const SizedBox(width: double.infinity, height: 0)
+          : Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  for (final m in MarqueurWhatsApp.tous)
+                    IconButton(
+                      tooltip: tr(context, m.cleTraduction),
+                      icon: Icon(m.icone, color: _iconNeutral),
+                      onPressed: () {
+                        appliqueMarqueur(_inputCtrl, m.code);
+                        // Rendre le focus : l'appui sur l'icône le retire du
+                        // champ, et le curseur qu'on vient de placer serait
+                        // invisible sans clavier.
+                        _inputFocus.requestFocus();
+                      },
+                    ),
+                ],
+              ),
+            ),
     );
   }
 }

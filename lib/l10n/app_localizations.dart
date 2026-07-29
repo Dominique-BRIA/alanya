@@ -13,6 +13,10 @@ class AppLocalizations {
   static const _localizedValues = <String, Map<String, String>>{
 'fr': {
 'app_tagline': 'Discutez, appelez, partagez — en toute simplicité.',
+'format_bold': 'Gras',
+'format_italic': 'Italique',
+'format_strike': 'Barré',
+'format_mono': 'Chasse fixe',
 'create_account': 'Créer un compte',
 'have_account': "J'ai déjà un compte",
 'language': 'Langue',
@@ -118,6 +122,10 @@ class AppLocalizations {
 },
 'en': {
 'app_tagline': 'Chat, call, share — simply.',
+'format_bold': 'Bold',
+'format_italic': 'Italic',
+'format_strike': 'Strikethrough',
+'format_mono': 'Monospace',
 'create_account': 'Create an account',
 'have_account': 'I already have an account',
 'language': 'Language',
@@ -223,6 +231,10 @@ class AppLocalizations {
 },
 'es': {
 'app_tagline': 'Chatea, llama, comparte — con sencillez.',
+'format_bold': 'Negrita',
+'format_italic': 'Cursiva',
+'format_strike': 'Tachado',
+'format_mono': 'Monoespaciado',
 'create_account': 'Crear una cuenta',
 'have_account': 'Ya tengo una cuenta',
 'language': 'Idioma',
@@ -328,6 +340,10 @@ class AppLocalizations {
 },
 'de': {
 'app_tagline': 'Chatten, anrufen, teilen – ganz einfach.',
+'format_bold': 'Fett',
+'format_italic': 'Kursiv',
+'format_strike': 'Durchgestrichen',
+'format_mono': 'Monospace',
 'create_account': 'Konto erstellen',
 'have_account': 'Ich habe bereits ein Konto',
 'language': 'Sprache',
@@ -433,6 +449,10 @@ class AppLocalizations {
 },
 'pt': {
 'app_tagline': 'Converse, ligue, compartilhe — com simplicidade.',
+'format_bold': 'Negrito',
+'format_italic': 'Itálico',
+'format_strike': 'Riscado',
+'format_mono': 'Monoespaçado',
 'create_account': 'Criar uma conta',
 'have_account': 'Já tenho uma conta',
 'language': 'Idioma',
@@ -538,6 +558,10 @@ class AppLocalizations {
 },
 'ru': {
 'app_tagline': 'Общайтесь, звоните, делитесь — просто.',
+'format_bold': 'Жирный',
+'format_italic': 'Курсив',
+'format_strike': 'Зачёркнутый',
+'format_mono': 'Моноширинный',
 'create_account': 'Создать аккаунт',
 'have_account': 'У меня уже есть аккаунт',
 'language': 'Язык',
@@ -643,6 +667,10 @@ class AppLocalizations {
 },
 'zh': {
 'app_tagline': '聊天、通话、分享 — 简单易用。',
+'format_bold': '粗体',
+'format_italic': '斜体',
+'format_strike': '删除线',
+'format_mono': '等宽',
 'create_account': '创建账户',
 'have_account': '我已有账户',
 'language': '语言',
@@ -748,6 +776,10 @@ class AppLocalizations {
 },
 'sv': {
 'app_tagline': 'Chatta, ring, dela — enkelt.',
+'format_bold': 'Fet',
+'format_italic': 'Kursiv',
+'format_strike': 'Genomstruken',
+'format_mono': 'Monospace',
 'create_account': 'Skapa konto',
 'have_account': 'Jag har redan ett konto',
 'language': 'Språk',
@@ -853,6 +885,10 @@ class AppLocalizations {
 },
 'no': {
 'app_tagline': 'Chat, ring, del — enkelt.',
+'format_bold': 'Fet',
+'format_italic': 'Kursiv',
+'format_strike': 'Gjennomstreket',
+'format_mono': 'Monospace',
 'create_account': 'Opprett konto',
 'have_account': 'Jeg har allerede en konto',
 'language': 'Språk',
