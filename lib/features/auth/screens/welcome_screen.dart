@@ -27,26 +27,30 @@ class WelcomeScreen extends StatelessWidget {
                 Stack(
                   alignment: Alignment.center,
                   children: [
-                    Positioned(
-                      child: Container(
-                        width: 260,
-                        height: 260,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: RadialGradient(
-                            colors: [
-                              accentOf(context).withValues(alpha: 0.12),
-                              accentOf(context).withValues(alpha: 0.04),
-                              Colors.transparent,
-                            ],
-                            stops: const [0.3, 0.6, 1.0],
-                          ),
+                    // Halo réduit dans la même proportion que le logo (260 → 173)
+                    // pour conserver le rapport d'origine entre la lueur et la bulle.
+                    // Le Positioned englobant a été retiré : tous ses décalages
+                    // étaient nuls, et un enfant positionné ne participe pas au
+                    // dimensionnement du Stack. Sans lui, alignment: center
+                    // centre réellement le halo sur le logo.
+                    Container(
+                      width: 173,
+                      height: 173,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: RadialGradient(
+                          colors: [
+                            accentOf(context).withValues(alpha: 0.12),
+                            accentOf(context).withValues(alpha: 0.04),
+                            Colors.transparent,
+                          ],
+                          stops: const [0.3, 0.6, 1.0],
                         ),
                       ),
                     ),
                     Image.asset(
                       "assets/images/logo.png",
-                      width: 280,
+                      width: 187,
                       fit: BoxFit.contain,
                       filterQuality: FilterQuality.high,
                       errorBuilder: (_, __, ___) => Icon(
