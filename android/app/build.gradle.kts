@@ -25,6 +25,10 @@ android {
 
     defaultConfig {
         applicationId = "com.alanya237.work"
+        // 21 (Android 5.0) et NON flutter.minSdkVersion, qui vaut 24 sur
+        // Flutter 3.44. Le public d'Alanya comprend beaucoup d'appareils
+        // anciens : passer à 24 exclurait Android 5.0, 5.1 et 6.0 sans rien
+        // apporter en échange. Choix délibéré, à ne pas « corriger ».
         minSdk = 21
         targetSdk = 36
         versionCode = flutter.versionCode
