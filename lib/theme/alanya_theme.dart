@@ -237,8 +237,11 @@ class AlanyaSurfaces extends ThemeExtension<AlanyaSurfaces> {
     champ: AlanyaColors.blancChamp,
     bulleRecue: AlanyaColors.blancRecue,
     texteBulleRecue: AlanyaColors.blancTexte,
-    bulleEnvoyee: AlanyaColors.blancEnvoyee,
-    texteBulleEnvoyee: AlanyaColors.blancTexte,
+    // Le teal PLEIN, celui du bouton d'envoi, et non plus la teinte pâle
+    // `blancEnvoyee` : les deux éléments portent la même action, ils doivent
+    // porter la même couleur.
+    bulleEnvoyee: AlanyaColors.teal,
+    texteBulleEnvoyee: Colors.white,
     avecMotif: false,
     variante: VarianteTheme.blanc,
   );
