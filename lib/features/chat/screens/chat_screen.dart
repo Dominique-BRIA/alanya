@@ -1766,10 +1766,20 @@ class _ChatScreenState extends State<ChatScreen>
     }
     final hasMedia = m.media.isNotEmpty;
     final isMultiMedia = hasMedia && m.media.length > 1;
-    final isImage = !isMultiMedia && m.type == "IMAGE" && hasMedia;
-    final isVideo = !isMultiMedia && m.type == "VIDEO" && hasMedia;
-    final isFile = !isMultiMedia && m.type == "FILE" && hasMedia;
-    final isAudio = !isMultiMedia && m.type == "AUDIO" && hasMedia;
+    // Type EFFECTIF, et non celui annoncé par le message.
+    //
+    // Le client web omettait « video » dans sa table de conversion : les
+    // vidéos ont été enregistrées avec le type TEXT. Corriger le web ne répare
+    // pas les messages déjà en base — sans ce repli, ils continueraient
+    // d'afficher « [TEXT] » pour toujours.
+    //
+    // Dès qu'un média est présent, son type MIME fait autorité : il vient du
+    // fichier lui-même, là où le type du message vient d'un client.
+    final effectif = _typeEffectif(m);
+    final isImage = !isMultiMedia && effectif == "IMAGE" && hasMedia;
+    final isVideo = !isMultiMedia && effectif == "VIDEO" && hasMedia;
+    final isFile = !isMultiMedia && effectif == "FILE" && hasMedia;
+    final isAudio = !isMultiMedia && effectif == "AUDIO" && hasMedia;
     final senderLabel = widget.isGroup && !mine ? (widget.memberNames[m.senderId] ?? "Membre") : null;
     final isHighlighted = _highlightedMessageId == m.id || _selectedMessageId == m.id;
     final isGrid = isMultiMedia; // 2+ médias → grille
@@ -1954,6 +1964,23 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   // ══ TEXT BUBBLE AVEC LINK PREVIEW ══
+  /// Type réel d'un message, déduit du MIME de son premier média.
+  ///
+  /// Sans média, le type annoncé est conservé tel quel. Avec média, le MIME
+  /// prime : il décrit le fichier, alors que le type du message n'est qu'une
+  /// affirmation du client qui l'a envoyé — et cette affirmation a été fausse
+  /// pour toutes les vidéos venues du web.
+  String _typeEffectif(Message m) {
+    if (m.media.isEmpty) return m.type;
+    final mime = m.media.first.mimeType;
+    if (mime.startsWith('image/')) return 'IMAGE';
+    if (mime.startsWith('video/')) return 'VIDEO';
+    if (mime.startsWith('audio/')) return 'AUDIO';
+    // MIME inconnu : un message porteur d'un fichier n'est en tout cas pas du
+    // texte, sinon il retomberait sur la bulle texte et afficherait « [TEXT] ».
+    return m.type == 'TEXT' ? 'FILE' : m.type;
+  }
+
   Widget _textBubble(Message m, bool mine) {
     final translated = _translations[m.id];
     final isTranslating = _translating.contains(m.id);
