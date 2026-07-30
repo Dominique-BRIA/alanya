@@ -118,8 +118,8 @@ class _HomeScreenState extends State<HomeScreen> {
               tooltip: Theme.of(context).brightness == Brightness.dark ? "Passer au mode clair" : "Passer au mode sombre",
               onPressed: () {
                 final themeCtrl = context.read<ThemeController>();
-                themeCtrl.setMode(
-                  Theme.of(context).brightness == Brightness.dark ? ThemeMode.light : ThemeMode.dark,
+                themeCtrl.basculerClairSombre(
+                  Theme.of(context).brightness == Brightness.dark,
                 );
               },
             ),

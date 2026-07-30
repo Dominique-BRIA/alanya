@@ -223,14 +223,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           _settingsTile(
-            icon: themeCtrl.mode == ThemeMode.dark
-                ? Icons.dark_mode
-                : themeCtrl.mode == ThemeMode.light
-                    ? Icons.light_mode
-                    : Icons.brightness_auto,
+            icon: ThemeController.icone(themeCtrl.choix),
             iconColor: _accent,
             title: "Thème",
-            subtitle: ThemeController.label(themeCtrl.mode),
+            subtitle: ThemeController.label(themeCtrl.choix),
             trailing: _chevron(),
             onTap: () => _showThemePicker(themeCtrl),
           ),
@@ -437,22 +433,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           ),
           const Divider(height: 1),
-          ...[ThemeMode.system, ThemeMode.light, ThemeMode.dark].map((m) {
-            final selected = themeCtrl.mode == m;
+          ...ChoixTheme.values.map((c) {
+            final selected = themeCtrl.choix == c;
             return ListTile(
-              leading: Icon(
-                m == ThemeMode.dark
-                    ? Icons.dark_mode
-                    : m == ThemeMode.light
-                        ? Icons.light_mode
-                        : Icons.brightness_auto,
-                color: _accent,
+              leading: Icon(ThemeController.icone(c), color: _accent),
+              title: Text(ThemeController.label(c)),
+              // Sans sous-titre, « Nuit » et « Noir » ne se distinguent pas.
+              subtitle: Text(
+                ThemeController.description(c),
+                style: TextStyle(fontSize: 12, color: _muted),
               ),
-              title: Text(ThemeController.label(m)),
               trailing: selected ? Icon(Icons.check, color: _accent) : null,
               onTap: () {
                 Navigator.pop(ctx);
-                themeCtrl.setMode(m);
+                themeCtrl.setChoix(c);
               },
             );
           }),

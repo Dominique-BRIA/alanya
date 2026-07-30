@@ -51,6 +51,20 @@ class AlanyaColors {
   static const Color ligne       = Color(0x247C7CD8); // filets : indigo translucide
   static const Color erreurNuit  = Color(0xFFEF6B60); // destructif lisible sur nuit
 
+  // --- Thème NOIR (3e thème — base noire, accent teal) ---
+  // Palette distincte de Nuit : là où Nuit est un indigo-nuit avec accents
+  // terre cuite, Noir est un vrai noir OLED avec un seul accent teal.
+  static const Color noir         = Color(0xFF000000); // fond page — pixels éteints sur OLED
+  static const Color noir2        = Color(0xFF0D0D0D); // barres, composeur
+  static const Color noir3        = Color(0xFF1C1C1E); // cartes, surfaces élevées
+  static const Color noirChamp    = Color(0xFF1A1A1A); // champs de saisie
+  static const Color teal         = Color(0xFF008B8B); // accent unique
+  static const Color tealSombre   = Color(0xFF00494A); // bulle envoyée
+  static const Color noirTexte    = Color(0xFFFFFFFF); // texte principal
+  static const Color noirTexte2   = Color(0xFF8E8E93); // texte secondaire
+  static const Color noirLigne    = Color(0xFF3A3A3C); // filets et bordures
+  static const Color erreurNoir   = Color(0xFFFF6B6B); // destructif sur noir
+
   // --- Neutres chauds ---
   static const Color ink        = Color(0xFF1A1210);
   static const Color inkLight   = Color(0xFF3D322C);
@@ -104,19 +118,192 @@ class AlanyaColors {
 /// que sa variante Nuit. Ne pas remplacer une couleur claire en dur par un
 /// jeton du colorScheme : les valeurs ne coïncident pas toujours
 /// (ex. surface = warmWhite ≠ Colors.white, onSurfaceVariant = grey600 ≠ black54).
+/// Surfaces propres à chaque thème, portées par le ThemeData lui-même.
+///
+/// **Pourquoi une ThemeExtension plutôt que des constantes.** Le code appelait
+/// `AlanyaColors.nuit / nuit2 / nuit3` en dur à 54 endroits. Ces valeurs sont
+/// justes pour Nuit et fausses pour Noir, mais un simple `if` supplémentaire à
+/// chaque site aurait été intenable — et surtout risqué : remplacer des
+/// couleurs en dur par des jetons approchants est exactement ce qui avait fait
+/// dériver le mode clair en juillet.
+///
+/// Ici, chaque thème déclare SES valeurs. Nuit reçoit très exactement celles
+/// qu'il avait, au bit près, donc il ne peut pas bouger.
+@immutable
+class AlanyaSurfaces extends ThemeExtension<AlanyaSurfaces> {
+  const AlanyaSurfaces({
+    required this.fond,
+    required this.surface,
+    required this.surfaceHaute,
+    required this.champ,
+    required this.bulleRecue,
+    required this.texteBulleRecue,
+    required this.bulleEnvoyee,
+    required this.texteBulleEnvoyee,
+    required this.avecMotif,
+    this.noirIntegral = false,
+  });
+
+  /// Fond de page — l'ancien `AlanyaColors.nuit`.
+  final Color fond;
+
+  /// Cartes, barres, composeur — l'ancien `AlanyaColors.nuit2`.
+  final Color surface;
+
+  /// Surface élevée — l'ancien `AlanyaColors.nuit3`.
+  final Color surfaceHaute;
+
+  /// Champs de saisie.
+  final Color champ;
+
+  final Color bulleRecue;
+  final Color texteBulleRecue;
+  final Color bulleEnvoyee;
+  final Color texteBulleEnvoyee;
+
+  /// Le motif de fond s'affiche-t-il ? Faux en Noir : un motif rallume des
+  /// pixels sur toute la surface et annule le gain OLED, qui est la raison
+  /// d'être du thème.
+  final bool avecMotif;
+
+  /// Marque le thème Noir. Un drapeau explicite plutôt qu'une comparaison de
+  /// couleur : pendant l'animation de changement de thème, les couleurs sont
+  /// interpolées et `fond == #000000` ne deviendrait vrai qu'à la toute fin,
+  /// provoquant un saut d'accent en fin de transition.
+  final bool noirIntegral;
+
+  /// Valeurs du thème Nuit — reprises telles quelles de l'existant.
+  static const nuit = AlanyaSurfaces(
+    fond: AlanyaColors.nuit,
+    surface: AlanyaColors.nuit2,
+    surfaceHaute: AlanyaColors.nuit3,
+    champ: AlanyaColors.nuit2,
+    bulleRecue: AlanyaColors.nuit2,
+    texteBulleRecue: AlanyaColors.craie,
+    bulleEnvoyee: AlanyaColors.indigo,
+    texteBulleEnvoyee: AlanyaColors.craie,
+    avecMotif: true,
+  );
+
+  /// Valeurs du thème Noir.
+  static const noir = AlanyaSurfaces(
+    fond: AlanyaColors.noir,
+    surface: AlanyaColors.noir2,
+    surfaceHaute: AlanyaColors.noir3,
+    champ: AlanyaColors.noirChamp,
+    // Bulles reçues BLANCHES à texte noir, comme demandé. C'est le contraste
+    // le plus fort possible ; il distingue immédiatement reçu et envoyé.
+    bulleRecue: Colors.white,
+    texteBulleRecue: AlanyaColors.ink,
+    bulleEnvoyee: AlanyaColors.tealSombre,
+    texteBulleEnvoyee: Colors.white,
+    avecMotif: false,
+    noirIntegral: true,
+  );
+
+  /// Valeurs du mode clair. Présentes pour que l'accesseur ne renvoie jamais
+  /// nul : aucun site d'appel n'a besoin de tester la nullité.
+  static const clair = AlanyaSurfaces(
+    fond: AlanyaColors.cream,
+    surface: Colors.white,
+    surfaceHaute: AlanyaColors.warmWhite,
+    champ: Colors.white,
+    bulleRecue: Colors.white,
+    texteBulleRecue: AlanyaColors.ink,
+    bulleEnvoyee: AlanyaColors.sand,
+    texteBulleEnvoyee: AlanyaColors.ink,
+    avecMotif: true,
+  );
+
+  @override
+  AlanyaSurfaces copyWith({
+    Color? fond,
+    Color? surface,
+    Color? surfaceHaute,
+    Color? champ,
+    Color? bulleRecue,
+    Color? texteBulleRecue,
+    Color? bulleEnvoyee,
+    Color? texteBulleEnvoyee,
+    bool? avecMotif,
+    bool? noirIntegral,
+  }) =>
+      AlanyaSurfaces(
+        fond: fond ?? this.fond,
+        surface: surface ?? this.surface,
+        surfaceHaute: surfaceHaute ?? this.surfaceHaute,
+        champ: champ ?? this.champ,
+        bulleRecue: bulleRecue ?? this.bulleRecue,
+        texteBulleRecue: texteBulleRecue ?? this.texteBulleRecue,
+        bulleEnvoyee: bulleEnvoyee ?? this.bulleEnvoyee,
+        texteBulleEnvoyee: texteBulleEnvoyee ?? this.texteBulleEnvoyee,
+        avecMotif: avecMotif ?? this.avecMotif,
+        noirIntegral: noirIntegral ?? this.noirIntegral,
+      );
+
+  @override
+  AlanyaSurfaces lerp(ThemeExtension<AlanyaSurfaces>? other, double t) {
+    if (other is! AlanyaSurfaces) return this;
+    return AlanyaSurfaces(
+      fond: Color.lerp(fond, other.fond, t)!,
+      surface: Color.lerp(surface, other.surface, t)!,
+      surfaceHaute: Color.lerp(surfaceHaute, other.surfaceHaute, t)!,
+      champ: Color.lerp(champ, other.champ, t)!,
+      bulleRecue: Color.lerp(bulleRecue, other.bulleRecue, t)!,
+      texteBulleRecue: Color.lerp(texteBulleRecue, other.texteBulleRecue, t)!,
+      bulleEnvoyee: Color.lerp(bulleEnvoyee, other.bulleEnvoyee, t)!,
+      texteBulleEnvoyee:
+          Color.lerp(texteBulleEnvoyee, other.texteBulleEnvoyee, t)!,
+      // Un booléen ne s'interpole pas : on bascule à mi-parcours.
+      avecMotif: t < 0.5 ? avecMotif : other.avecMotif,
+      noirIntegral: t < 0.5 ? noirIntegral : other.noirIntegral,
+    );
+  }
+}
+
+/// Surfaces du thème courant. Ne renvoie jamais nul — les trois thèmes
+/// déclarent l'extension.
+AlanyaSurfaces surfacesOf(BuildContext context) {
+  final theme = Theme.of(context);
+  return theme.extension<AlanyaSurfaces>() ??
+      (theme.brightness == Brightness.dark
+          ? AlanyaSurfaces.nuit
+          : AlanyaSurfaces.clair);
+}
+
+/// Vrai si le thème courant est « Noir ».
+///
+/// À n'utiliser que pour les rares cas qu'aucune couleur ne couvre — un
+/// changement d'ASSET par exemple. Pour une couleur, passer par
+/// [surfacesOf] : c'est le seul moyen de garantir que Nuit ne dérive pas.
+bool estNoir(BuildContext context) =>
+    Theme.of(context).extension<AlanyaSurfaces>()?.noirIntegral ?? false;
+
 Color themed(BuildContext context,
         {required Color light, required Color dark}) =>
     Theme.of(context).brightness == Brightness.dark ? dark : light;
 
-/// Accent d'action : terre cuite en clair, sa variante Nuit sinon.
+/// Choisit entre les deux thèmes SOMBRES. Le mode clair ne passe jamais ici.
+///
+/// C'est le pivot du troisième thème : en le glissant dans la branche `dark`
+/// des helpers ci-dessous, les 218 sites qui les appellent basculent en Noir
+/// sans qu'aucun ne soit modifié.
+Color _sombre(BuildContext context, {required Color nuit, required Color noir}) =>
+    estNoir(context) ? noir : nuit;
+
+/// Accent d'action : terre cuite en clair, sa variante Nuit, teal en Noir.
 Color accentOf(BuildContext context) => themed(context,
-    light: AlanyaColors.terracotta, dark: AlanyaColors.terracottaNuit);
+    light: AlanyaColors.terracotta,
+    dark: _sombre(context,
+        nuit: AlanyaColors.terracottaNuit, noir: AlanyaColors.teal));
 
 /// Texte secondaire. La couleur claire reste à fournir : les écrans
 /// n'utilisent pas tous le même gris (`black54`, `grey500`, `grey600`…) et on
 /// ne doit pas les uniformiser au passage.
-Color mutedOf(BuildContext context, Color light) =>
-    themed(context, light: light, dark: AlanyaColors.craie2);
+Color mutedOf(BuildContext context, Color light) => themed(context,
+    light: light,
+    dark: _sombre(context,
+        nuit: AlanyaColors.craie2, noir: AlanyaColors.noirTexte2));
 
 /// Texte « Alanya ID » et le numéro qui l'accompagne : **blanc franc en Nuit**.
 ///
@@ -141,16 +328,24 @@ TextStyle? alanyaIdStyleOf(BuildContext context) =>
 
 /// Élément volontairement très discret (grande icône d'état vide, filigrane).
 Color faintOf(BuildContext context, Color light) => themed(context,
-    light: light, dark: AlanyaColors.craie2.withValues(alpha: 0.4));
+    light: light,
+    dark: _sombre(context,
+        nuit: AlanyaColors.craie2.withValues(alpha: 0.4),
+        noir: AlanyaColors.noirTexte2.withValues(alpha: 0.4)));
 
 /// Destructif : rouge d'origine en clair, rouge lisible sur nuit sinon.
 Color dangerOf(BuildContext context, [Color light = Colors.red]) =>
-    themed(context, light: light, dark: AlanyaColors.erreurNuit);
+    themed(context,
+        light: light,
+        dark: _sombre(context,
+            nuit: AlanyaColors.erreurNuit, noir: AlanyaColors.erreurNoir));
 
 /// Vert forêt en clair. En Nuit il devient indigo clair : le `#2D6A4F` tombe
 /// sous le seuil de contraste sur le fond nuit, et l'indigo porte l'identité.
 Color positiveOf(BuildContext context) => themed(context,
-    light: AlanyaColors.forest, dark: AlanyaColors.indigoLight);
+    light: AlanyaColors.forest,
+    dark: _sombre(context,
+        nuit: AlanyaColors.indigoLight, noir: AlanyaColors.teal));
 
 // ---------------------------------------------------------------------------
 // LIGHT THEME
@@ -193,6 +388,7 @@ class AlanyaTheme {
 
       // --- Typography ---
       textTheme: _buildTextTheme(Brightness.light),
+      extensions: const [AlanyaSurfaces.clair],
 
       // --- AppBar ---
       appBarTheme: AppBarTheme(
@@ -478,6 +674,7 @@ class AlanyaTheme {
       brightness: Brightness.dark,
       scaffoldBackgroundColor: darkBg,
       textTheme: _buildTextTheme(Brightness.dark),
+      extensions: const [AlanyaSurfaces.nuit],
 
       appBarTheme: AppBarTheme(
         backgroundColor: darkSurface,
@@ -588,16 +785,187 @@ class AlanyaTheme {
     );
   }
 
+  /// Troisième thème : **Noir**. Base noire OLED, accent teal unique.
+  ///
+  /// Sa `brightness` est `dark`, et c'est délibéré : les 218 appels à
+  /// `themed()`, `accentOf()` et `mutedOf()` répartis dans l'application
+  /// branchent sur ce booléen. En restant « sombre », Noir hérite de tout
+  /// l'existant sans qu'aucun de ces sites ne soit modifié — seules les
+  /// valeurs changent, par la ThemeExtension et par ce ColorScheme.
+  ///
+  /// Différence de fond avec Nuit : Nuit a deux accents (terre cuite pour
+  /// l'action, indigo pour l'identité), Noir n'en a qu'un. Le teal porte donc
+  /// à la fois `primary` et `secondary`.
+  static ThemeData get noir {
+    const bg = AlanyaColors.noir;          // #000000
+    const surface = AlanyaColors.noir2;    // #0D0D0D
+    const surfaceHigh = AlanyaColors.noir3; // #1C1C1E
+
+    final colorScheme = ColorScheme.dark(
+      primary: AlanyaColors.teal,
+      onPrimary: Colors.white,
+      primaryContainer: AlanyaColors.tealSombre,
+      onPrimaryContainer: AlanyaColors.noirTexte,
+      // Un seul accent : secondary reprend le teal plutôt que d'introduire une
+      // seconde couleur que le modèle ne prévoit pas.
+      secondary: AlanyaColors.teal,
+      onSecondary: Colors.white,
+      secondaryContainer: AlanyaColors.tealSombre,
+      onSecondaryContainer: AlanyaColors.noirTexte,
+      tertiary: AlanyaColors.teal,
+      onTertiary: AlanyaColors.noir,
+      surface: surface,
+      onSurface: AlanyaColors.noirTexte,
+      onSurfaceVariant: AlanyaColors.noirTexte2,
+      surfaceContainerLowest: bg,
+      surfaceContainerLow: surface,
+      surfaceContainer: surfaceHigh,
+      surfaceContainerHigh: surfaceHigh,
+      surfaceContainerHighest: const Color(0xFF2C2C2E),
+      outline: AlanyaColors.noirLigne,
+      outlineVariant: AlanyaColors.noirLigne,
+      error: AlanyaColors.erreurNoir,
+      onError: Colors.black,
+      brightness: Brightness.dark,
+    );
+
+    return ThemeData(
+      useMaterial3: true,
+      colorScheme: colorScheme,
+      brightness: Brightness.dark,
+      scaffoldBackgroundColor: bg,
+      textTheme: _buildTextTheme(
+        Brightness.dark,
+        corps: AlanyaColors.noirTexte,
+        attenue: AlanyaColors.noirTexte2,
+      ),
+      extensions: const [AlanyaSurfaces.noir],
+
+      appBarTheme: const AppBarTheme(
+        backgroundColor: surface,
+        foregroundColor: AlanyaColors.noirTexte,
+        elevation: 0,
+        scrolledUnderElevation: 0.5,
+        centerTitle: false,
+        titleTextStyle: TextStyle(
+          fontFamily: 'Inter',
+          fontSize: 20,
+          fontWeight: FontWeight.w700,
+          color: AlanyaColors.noirTexte,
+          letterSpacing: -0.3,
+        ),
+        systemOverlayStyle: SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness: Brightness.light,
+        ),
+      ),
+
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: surface,
+        elevation: 0,
+        height: 68,
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+        indicatorColor: AlanyaColors.teal.withValues(alpha: 0.22),
+        iconTheme: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return const IconThemeData(color: AlanyaColors.teal, size: 24);
+          }
+          return const IconThemeData(color: AlanyaColors.noirTexte2, size: 24);
+        }),
+        labelTextStyle: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: AlanyaColors.teal,
+            );
+          }
+          return const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+            color: AlanyaColors.noirTexte2,
+          );
+        }),
+      ),
+
+      cardTheme: CardThemeData(
+        color: surfaceHigh,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: AlanyaColors.noirLigne, width: 0.5),
+        ),
+      ),
+
+      dividerTheme: const DividerThemeData(
+        color: AlanyaColors.noirLigne,
+        thickness: 0.5,
+      ),
+
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: surfaceHigh,
+        contentTextStyle: const TextStyle(
+          color: AlanyaColors.noirTexte,
+          fontFamily: 'Inter',
+        ),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+
+      bottomSheetTheme: const BottomSheetThemeData(
+        backgroundColor: surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        showDragHandle: true,
+        dragHandleColor: AlanyaColors.noirTexte2,
+      ),
+
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: AlanyaColors.noirChamp,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        hintStyle: const TextStyle(color: AlanyaColors.noirTexte2),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: AlanyaColors.noirLigne),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: AlanyaColors.noirLigne),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: AlanyaColors.teal, width: 1.5),
+        ),
+      ),
+
+      floatingActionButtonTheme: const FloatingActionButtonThemeData(
+        backgroundColor: AlanyaColors.teal,
+        foregroundColor: Colors.black,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(16)),
+        ),
+      ),
+    );
+  }
+
   // ---------------------------------------------------------------------------
   // TYPOGRAPHY (Inter)
   // ---------------------------------------------------------------------------
-  static TextTheme _buildTextTheme(Brightness brightness) {
-    final Color bodyColor = brightness == Brightness.light
-        ? AlanyaColors.ink
-        : AlanyaColors.craie;
-    final Color mutedColor = brightness == Brightness.light
-        ? AlanyaColors.grey500
-        : AlanyaColors.craie2;
+  /// [corps] et [attenue] ne servent qu'au thème Noir, dont le texte est blanc
+  /// franc et non le craie chaud de Nuit. Sans argument, le comportement
+  /// d'origine est strictement conservé pour Clair et Nuit.
+  static TextTheme _buildTextTheme(Brightness brightness,
+      {Color? corps, Color? attenue}) {
+    final Color bodyColor = corps ??
+        (brightness == Brightness.light
+            ? AlanyaColors.ink
+            : AlanyaColors.craie);
+    final Color mutedColor = attenue ??
+        (brightness == Brightness.light
+            ? AlanyaColors.grey500
+            : AlanyaColors.craie2);
 
     return TextTheme(
       // Display
