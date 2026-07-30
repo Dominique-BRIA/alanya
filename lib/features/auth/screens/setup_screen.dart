@@ -166,6 +166,8 @@ class _SetupScreenState extends State<SetupScreen> {
                 // --- Pseudo ---
                 TextFormField(
                   controller: _pseudoCtrl,
+                  // Aligné sur la colonne users.pseudo, en VARCHAR(50).
+                  maxLength: 50,
                   decoration: InputDecoration(
                     labelText: tr(context, 'pseudo'),
                     prefixIcon: const Icon(Icons.person_outline),

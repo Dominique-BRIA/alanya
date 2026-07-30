@@ -184,6 +184,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(height: 20),
               TextField(
                 controller: _pseudoCtrl,
+                // Aligné sur la colonne users.pseudo, passée en VARCHAR(50).
+                // Bloquer à la frappe évite un aller-retour serveur pour se
+                // faire refuser, et c'est aussi la longueur au-delà de laquelle
+                // le pseudo déborde des en-têtes sur mobile.
+                maxLength: 50,
                 decoration: InputDecoration(
                   labelText: tr(context, 'pseudo'),
                   prefixIcon: const Icon(Icons.person),
