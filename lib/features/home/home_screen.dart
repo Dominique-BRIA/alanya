@@ -1620,7 +1620,7 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
       child: Container(
         padding: const EdgeInsets.all(8),
         color: themed(context,
-            light: AlanyaColors.cream, dark: surfacesOf(context).surface),
+            light: surfacesOf(context).fond, dark: surfacesOf(context).surface),
         child: Row(
           children: [
             Expanded(

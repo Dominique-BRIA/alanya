@@ -124,7 +124,9 @@ class AlanyaApp extends StatelessWidget {
       navigatorKey: PushService.navigatorKey,
       title: "Alanya",
       debugShowCheckedModeBanner: false,
-      theme: AlanyaTheme.light,
+      // Clair ou Blanc selon le choix — même mécanique que pour le sombre :
+      // MaterialApp n'accepte qu'UN thème clair.
+      theme: themeCtrl.themeClair,
       // Nuit ou Noir selon le choix : MaterialApp n'accepte qu'UN thème sombre,
       // c'est donc le contrôleur qui tranche entre les deux.
       darkTheme: themeCtrl.themeSombre,

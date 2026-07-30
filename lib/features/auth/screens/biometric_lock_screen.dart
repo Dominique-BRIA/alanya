@@ -50,7 +50,7 @@ class _BiometricLockScreenState extends State<BiometricLockScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: themed(context, light: AlanyaColors.cream, dark: surfacesOf(context).fond),
+      backgroundColor: surfacesOf(context).fond,
       body: SafeArea(
         child: Center(
           child: Padding(

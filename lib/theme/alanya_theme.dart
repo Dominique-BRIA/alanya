@@ -65,6 +65,18 @@ class AlanyaColors {
   static const Color noirLigne    = Color(0xFF3A3A3C); // filets et bordures
   static const Color erreurNoir   = Color(0xFFFF6B6B); // destructif sur noir
 
+  // --- Thème BLANC (4e thème — base blanche, accent teal, terre cuite en 2d) ---
+  // Là où « Clair » est chaud (crème, sable, terre cuite), « Blanc » est net et
+  // froid : fond blanc pur, accent teal. Le terre cuite y reste présent comme
+  // couleur SECONDAIRE, ce qui garde le lien avec l'identité d'Alanya.
+  static const Color blancSurfaceH  = Color(0xFFF7F7F7); // surface élevée
+  static const Color blancChamp     = Color(0xFFF2F2F2); // champ de saisie
+  static const Color blancRecue     = Color(0xFFEFEFEF); // bulle reçue
+  static const Color blancEnvoyee   = Color(0xFFD6ECEC); // bulle envoyée, teinte du teal
+  static const Color blancTexte     = Color(0xFF16181A); // texte principal, neutre
+  static const Color blancTexte2    = Color(0xFF8A8A8E); // horodatages, secondaire
+  static const Color blancLigne     = Color(0xFFE5E5EA); // filets
+
   // --- Neutres chauds ---
   static const Color ink        = Color(0xFF1A1210);
   static const Color inkLight   = Color(0xFF3D322C);
@@ -118,6 +130,13 @@ class AlanyaColors {
 /// que sa variante Nuit. Ne pas remplacer une couleur claire en dur par un
 /// jeton du colorScheme : les valeurs ne coïncident pas toujours
 /// (ex. surface = warmWhite ≠ Colors.white, onSurfaceVariant = grey600 ≠ black54).
+/// Les quatre variantes d'Alanya.
+///
+/// Deux claires et deux sombres. `Theme.of(context).brightness` ne distingue
+/// que clair/sombre : c'est cette énumération, portée par [AlanyaSurfaces],
+/// qui permet de savoir LAQUELLE des deux est active.
+enum VarianteTheme { clair, blanc, nuit, noir }
+
 /// Surfaces propres à chaque thème, portées par le ThemeData lui-même.
 ///
 /// **Pourquoi une ThemeExtension plutôt que des constantes.** Le code appelait
@@ -141,7 +160,7 @@ class AlanyaSurfaces extends ThemeExtension<AlanyaSurfaces> {
     required this.bulleEnvoyee,
     required this.texteBulleEnvoyee,
     required this.avecMotif,
-    this.noirIntegral = false,
+    required this.variante,
   });
 
   /// Fond de page — l'ancien `AlanyaColors.nuit`.
@@ -166,11 +185,13 @@ class AlanyaSurfaces extends ThemeExtension<AlanyaSurfaces> {
   /// d'être du thème.
   final bool avecMotif;
 
-  /// Marque le thème Noir. Un drapeau explicite plutôt qu'une comparaison de
-  /// couleur : pendant l'animation de changement de thème, les couleurs sont
-  /// interpolées et `fond == #000000` ne deviendrait vrai qu'à la toute fin,
-  /// provoquant un saut d'accent en fin de transition.
-  final bool noirIntegral;
+  /// Laquelle des quatre variantes est active.
+  ///
+  /// Une valeur explicite plutôt qu'une comparaison de couleur : pendant
+  /// l'animation de changement de thème les couleurs sont interpolées, et
+  /// `fond == #000000` ne deviendrait vrai qu'à la toute fin, provoquant un
+  /// saut d'accent en fin de transition.
+  final VarianteTheme variante;
 
   /// Valeurs du thème Nuit — reprises telles quelles de l'existant.
   static const nuit = AlanyaSurfaces(
@@ -187,6 +208,7 @@ class AlanyaSurfaces extends ThemeExtension<AlanyaSurfaces> {
     bulleEnvoyee: AlanyaColors.indigo,
     texteBulleEnvoyee: Colors.white,
     avecMotif: true,
+    variante: VarianteTheme.nuit,
   );
 
   /// Valeurs du thème Noir.
@@ -202,7 +224,23 @@ class AlanyaSurfaces extends ThemeExtension<AlanyaSurfaces> {
     bulleEnvoyee: AlanyaColors.tealSombre,
     texteBulleEnvoyee: Colors.white,
     avecMotif: false,
-    noirIntegral: true,
+    variante: VarianteTheme.noir,
+  );
+
+  /// Valeurs du thème Blanc : base blanche nette, accent teal, bulle reçue en
+  /// gris clair et envoyée dans une teinte du teal. Pas de motif — la
+  /// référence visuelle est une surface blanche unie.
+  static const blanc = AlanyaSurfaces(
+    fond: Colors.white,
+    surface: Colors.white,
+    surfaceHaute: AlanyaColors.blancSurfaceH,
+    champ: AlanyaColors.blancChamp,
+    bulleRecue: AlanyaColors.blancRecue,
+    texteBulleRecue: AlanyaColors.blancTexte,
+    bulleEnvoyee: AlanyaColors.blancEnvoyee,
+    texteBulleEnvoyee: AlanyaColors.blancTexte,
+    avecMotif: false,
+    variante: VarianteTheme.blanc,
   );
 
   /// Valeurs du mode clair. Présentes pour que l'accesseur ne renvoie jamais
@@ -218,6 +256,7 @@ class AlanyaSurfaces extends ThemeExtension<AlanyaSurfaces> {
     bulleEnvoyee: AlanyaColors.terracotta,
     texteBulleEnvoyee: Colors.white,
     avecMotif: true,
+    variante: VarianteTheme.clair,
   );
 
   @override
@@ -231,7 +270,7 @@ class AlanyaSurfaces extends ThemeExtension<AlanyaSurfaces> {
     Color? bulleEnvoyee,
     Color? texteBulleEnvoyee,
     bool? avecMotif,
-    bool? noirIntegral,
+    VarianteTheme? variante,
   }) =>
       AlanyaSurfaces(
         fond: fond ?? this.fond,
@@ -243,7 +282,7 @@ class AlanyaSurfaces extends ThemeExtension<AlanyaSurfaces> {
         bulleEnvoyee: bulleEnvoyee ?? this.bulleEnvoyee,
         texteBulleEnvoyee: texteBulleEnvoyee ?? this.texteBulleEnvoyee,
         avecMotif: avecMotif ?? this.avecMotif,
-        noirIntegral: noirIntegral ?? this.noirIntegral,
+        variante: variante ?? this.variante,
       );
 
   @override
@@ -261,7 +300,7 @@ class AlanyaSurfaces extends ThemeExtension<AlanyaSurfaces> {
           Color.lerp(texteBulleEnvoyee, other.texteBulleEnvoyee, t)!,
       // Un booléen ne s'interpole pas : on bascule à mi-parcours.
       avecMotif: t < 0.5 ? avecMotif : other.avecMotif,
-      noirIntegral: t < 0.5 ? noirIntegral : other.noirIntegral,
+      variante: t < 0.5 ? variante : other.variante,
     );
   }
 }
@@ -282,7 +321,17 @@ AlanyaSurfaces surfacesOf(BuildContext context) {
 /// changement d'ASSET par exemple. Pour une couleur, passer par
 /// [surfacesOf] : c'est le seul moyen de garantir que Nuit ne dérive pas.
 bool estNoir(BuildContext context) =>
-    Theme.of(context).extension<AlanyaSurfaces>()?.noirIntegral ?? false;
+    surfacesOf(context).variante == VarianteTheme.noir;
+
+/// Vrai si le thème courant est « Blanc ».
+bool estBlanc(BuildContext context) =>
+    surfacesOf(context).variante == VarianteTheme.blanc;
+
+/// Choisit entre les deux thèmes CLAIRS. Les thèmes sombres ne passent jamais
+/// ici. Pendant du helper `_sombre` plus bas.
+Color _clairVariante(BuildContext context,
+        {required Color clair, required Color blanc}) =>
+    estBlanc(context) ? blanc : clair;
 
 Color themed(BuildContext context,
         {required Color light, required Color dark}) =>
@@ -296,9 +345,15 @@ Color themed(BuildContext context,
 Color _sombre(BuildContext context, {required Color nuit, required Color noir}) =>
     estNoir(context) ? noir : nuit;
 
-/// Accent d'action : terre cuite en clair, sa variante Nuit, teal en Noir.
+/// Accent d'action, par thème : terre cuite en Clair, **teal en Blanc**,
+/// terre cuite Nuit en Nuit, teal en Noir.
+///
+/// En Blanc, le terre cuite n'est pas abandonné : il devient la couleur
+/// SECONDAIRE et reste posé en dur là où il porte l'identité (bandeau de
+/// notification, dégradés). Seul l'accent d'action passe au teal.
 Color accentOf(BuildContext context) => themed(context,
-    light: AlanyaColors.terracotta,
+    light: _clairVariante(context,
+        clair: AlanyaColors.terracotta, blanc: AlanyaColors.teal),
     dark: _sombre(context,
         nuit: AlanyaColors.terracottaNuit, noir: AlanyaColors.teal));
 
@@ -633,6 +688,263 @@ class AlanyaTheme {
       progressIndicatorTheme: const ProgressIndicatorThemeData(
         color: AlanyaColors.terracotta,
         linearTrackColor: AlanyaColors.sand,
+      ),
+    );
+  }
+
+  /// Quatrième thème : **Blanc**. Base blanche nette, accent teal `#008B8B`,
+  /// terre cuite conservé en couleur secondaire.
+  ///
+  /// Sa `brightness` est `light`, comme Clair : les sites qui écrivent
+  /// `themed(context, light: …, dark: …)` prennent donc la même branche dans
+  /// les deux thèmes clairs. C'est voulu — la plupart de ces valeurs sont des
+  /// blancs et des gris, identiques ici. Ce qui distingue vraiment Blanc de
+  /// Clair passe par ce ColorScheme, par la ThemeExtension et par accentOf().
+  static ThemeData get blanc {
+    final colorScheme = ColorScheme.light(
+      primary: AlanyaColors.teal,
+      onPrimary: Colors.white,
+      primaryContainer: AlanyaColors.blancEnvoyee,
+      onPrimaryContainer: AlanyaColors.tealSombre,
+      // Le terre cuite en SECONDAIRE : c'est ce qui garde le lien avec
+      // l'identité d'Alanya alors que l'accent principal a changé.
+      secondary: AlanyaColors.terracotta,
+      onSecondary: Colors.white,
+      secondaryContainer: AlanyaColors.terracottaLight,
+      onSecondaryContainer: AlanyaColors.terracottaDark,
+      tertiary: AlanyaColors.gold,
+      onTertiary: Colors.white,
+      surface: Colors.white,
+      onSurface: AlanyaColors.blancTexte,
+      onSurfaceVariant: AlanyaColors.blancTexte2,
+      surfaceContainerLowest: Colors.white,
+      surfaceContainerLow: AlanyaColors.blancSurfaceH,
+      surfaceContainer: AlanyaColors.blancChamp,
+      surfaceContainerHigh: AlanyaColors.blancRecue,
+      surfaceContainerHighest: AlanyaColors.blancLigne,
+      outline: AlanyaColors.blancLigne,
+      outlineVariant: AlanyaColors.blancLigne,
+      error: AlanyaColors.error,
+      onError: Colors.white,
+      brightness: Brightness.light,
+    );
+
+    return ThemeData(
+      useMaterial3: true,
+      colorScheme: colorScheme,
+      brightness: Brightness.light,
+      scaffoldBackgroundColor: Colors.white,
+      textTheme: _buildTextTheme(
+        Brightness.light,
+        corps: AlanyaColors.blancTexte,
+        attenue: AlanyaColors.blancTexte2,
+      ),
+      extensions: const [AlanyaSurfaces.blanc],
+
+      appBarTheme: const AppBarTheme(
+        backgroundColor: Colors.white,
+        foregroundColor: AlanyaColors.blancTexte,
+        elevation: 0,
+        scrolledUnderElevation: 0.5,
+        centerTitle: false,
+        titleTextStyle: TextStyle(
+          fontFamily: 'Inter',
+          fontSize: 20,
+          fontWeight: FontWeight.w700,
+          color: AlanyaColors.blancTexte,
+          letterSpacing: -0.3,
+        ),
+        iconTheme: IconThemeData(color: AlanyaColors.blancTexte),
+        systemOverlayStyle: SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness: Brightness.dark,
+        ),
+      ),
+
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        height: 68,
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+        indicatorColor: AlanyaColors.teal.withValues(alpha: 0.14),
+        iconTheme: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return const IconThemeData(color: AlanyaColors.teal, size: 24);
+          }
+          return const IconThemeData(color: AlanyaColors.blancTexte2, size: 24);
+        }),
+        labelTextStyle: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: AlanyaColors.teal,
+            );
+          }
+          return const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+            color: AlanyaColors.blancTexte2,
+          );
+        }),
+      ),
+
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AlanyaColors.teal,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          shadowColor: Colors.transparent,
+          minimumSize: const Size.fromHeight(52),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          textStyle: const TextStyle(
+            fontFamily: 'Inter',
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.2,
+          ),
+        ),
+      ),
+
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: AlanyaColors.teal,
+          minimumSize: const Size.fromHeight(52),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          side: BorderSide(color: AlanyaColors.teal.withValues(alpha: 0.4)),
+          textStyle: const TextStyle(
+            fontFamily: 'Inter',
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.2,
+          ),
+        ),
+      ),
+
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          foregroundColor: AlanyaColors.teal,
+          textStyle: const TextStyle(
+            fontFamily: 'Inter',
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: AlanyaColors.blancChamp,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        hintStyle: const TextStyle(color: AlanyaColors.blancTexte2),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: AlanyaColors.blancLigne),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: AlanyaColors.blancLigne),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: AlanyaColors.teal, width: 1.5),
+        ),
+      ),
+
+      cardTheme: CardThemeData(
+        color: Colors.white,
+        elevation: 0,
+        shadowColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: AlanyaColors.blancLigne, width: 0.5),
+        ),
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      ),
+
+      dividerTheme: const DividerThemeData(
+        color: AlanyaColors.blancLigne,
+        thickness: 0.5,
+        space: 1,
+      ),
+
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: AlanyaColors.blancTexte,
+        contentTextStyle: const TextStyle(
+          color: Colors.white,
+          fontFamily: 'Inter',
+          fontWeight: FontWeight.w500,
+        ),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+
+      bottomSheetTheme: const BottomSheetThemeData(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        showDragHandle: true,
+        dragHandleColor: AlanyaColors.blancLigne,
+      ),
+
+      dialogTheme: DialogThemeData(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        titleTextStyle: const TextStyle(
+          fontFamily: 'Inter',
+          fontSize: 20,
+          fontWeight: FontWeight.w700,
+          color: AlanyaColors.blancTexte,
+        ),
+        contentTextStyle: const TextStyle(
+          fontFamily: 'Inter',
+          fontSize: 14,
+          color: AlanyaColors.blancTexte2,
+        ),
+      ),
+
+      chipTheme: ChipThemeData(
+        backgroundColor: AlanyaColors.blancChamp,
+        selectedColor: AlanyaColors.teal.withValues(alpha: 0.14),
+        labelStyle: const TextStyle(
+          fontFamily: 'Inter',
+          fontSize: 13,
+          color: AlanyaColors.blancTexte,
+        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        side: BorderSide.none,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      ),
+
+      listTileTheme: const ListTileThemeData(
+        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        titleTextStyle: TextStyle(
+          fontFamily: 'Inter',
+          fontSize: 15,
+          fontWeight: FontWeight.w500,
+          color: AlanyaColors.blancTexte,
+        ),
+        subtitleTextStyle: TextStyle(
+          fontFamily: 'Inter',
+          fontSize: 13,
+          color: AlanyaColors.blancTexte2,
+        ),
+      ),
+
+      floatingActionButtonTheme: const FloatingActionButtonThemeData(
+        backgroundColor: AlanyaColors.teal,
+        foregroundColor: Colors.white,
+        elevation: 2,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(16)),
+        ),
+      ),
+
+      progressIndicatorTheme: const ProgressIndicatorThemeData(
+        color: AlanyaColors.teal,
+        linearTrackColor: AlanyaColors.blancLigne,
       ),
     );
   }

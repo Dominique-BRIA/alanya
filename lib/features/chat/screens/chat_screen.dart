@@ -136,12 +136,24 @@ class _ChatScreenState extends State<ChatScreen>
   /// ci-dessous : le mode clair ne passe jamais par ici et reste donc figé.
   bool get _noir => estNoir(context);
 
-  Color get _appBarBg => _dark ? surfacesOf(context).surface : AlanyaColors.terracotta;
-  Color get _onAppBar =>
-      _dark ? (_noir ? AlanyaColors.noirTexte : AlanyaColors.craie) : Colors.white;
-  Color get _onAppBarSub =>
-      _dark ? (_noir ? AlanyaColors.noirTexte2 : AlanyaColors.craie2) : Colors.white70;
-  Color get _composerBg => _dark ? surfacesOf(context).surface : AlanyaColors.cream;
+  /// Vrai en thème Blanc. Symétrique de [_noir] : n'intervient que dans la
+  /// branche CLAIRE, donc le thème Clair d'origine reste figé.
+  bool get _blanc => estBlanc(context);
+
+  // En Blanc, l'en-tête est blanc à texte sombre — comme la référence — et non
+  // terre cuite à texte blanc.
+  Color get _appBarBg => _dark
+      ? surfacesOf(context).surface
+      : (_blanc ? Colors.white : AlanyaColors.terracotta);
+  Color get _onAppBar => _dark
+      ? (_noir ? AlanyaColors.noirTexte : AlanyaColors.craie)
+      : (_blanc ? AlanyaColors.blancTexte : Colors.white);
+  Color get _onAppBarSub => _dark
+      ? (_noir ? AlanyaColors.noirTexte2 : AlanyaColors.craie2)
+      : (_blanc ? AlanyaColors.blancTexte2 : Colors.white70);
+  Color get _composerBg => _dark
+      ? surfacesOf(context).surface
+      : (_blanc ? Colors.white : AlanyaColors.cream);
   // Les bulles viennent désormais de la ThemeExtension. Les valeurs y ont été
   // relevées sur ce code, pas choisies : Nuit et Clair rendent à l'identique.
   Color get _sentBubbleColor => surfacesOf(context).bulleEnvoyee;
@@ -151,30 +163,33 @@ class _ChatScreenState extends State<ChatScreen>
       : surfacesOf(context).texteBulleRecue;
   // Le mode clair reste EXACTEMENT ce qu'il était : seules les branches Nuit
   // et Noir varient (cf. helper themed() dans alanya_theme.dart).
-  Color get _muted =>
-      _dark ? (_noir ? AlanyaColors.noirTexte2 : AlanyaColors.craie2) : Colors.black54;
-  Color get _muted45 =>
-      _dark ? (_noir ? AlanyaColors.noirTexte2 : AlanyaColors.craie2) : Colors.black45;
+  Color get _muted => _dark
+      ? (_noir ? AlanyaColors.noirTexte2 : AlanyaColors.craie2)
+      : (_blanc ? AlanyaColors.blancTexte2 : Colors.black54);
+  Color get _muted45 => _dark
+      ? (_noir ? AlanyaColors.noirTexte2 : AlanyaColors.craie2)
+      : (_blanc ? AlanyaColors.blancTexte2 : Colors.black45);
   Color get _mutedIcon => _dark
       ? (_noir ? AlanyaColors.noirTexte2 : AlanyaColors.craie2)
-      : AlanyaColors.grey400;
+      : (_blanc ? AlanyaColors.blancTexte2 : AlanyaColors.grey400);
   Color get _accent => _dark
       ? (_noir ? AlanyaColors.teal : AlanyaColors.terracottaNuit)
-      : AlanyaColors.terracotta;
+      : (_blanc ? AlanyaColors.teal : AlanyaColors.terracotta);
   Color get _accentSoft => _dark
       ? (_noir ? AlanyaColors.teal : AlanyaColors.terracottaNuitLight)
-      : AlanyaColors.terracotta;
+      : (_blanc ? AlanyaColors.teal : AlanyaColors.terracotta);
   Color get _iconNeutral => _dark
       ? (_noir ? AlanyaColors.noirTexte2 : AlanyaColors.craie2)
-      : AlanyaColors.chocolate;
+      : (_blanc ? AlanyaColors.blancTexte2 : AlanyaColors.chocolate);
   Color get _positive => _dark
       ? (_noir ? AlanyaColors.teal : AlanyaColors.indigoLight)
       : AlanyaColors.forest;
   Color get _danger => _dark
       ? (_noir ? AlanyaColors.erreurNoir : AlanyaColors.erreurNuit)
       : Colors.red;
-  Color get _hairline =>
-      _dark ? (_noir ? AlanyaColors.noirLigne : AlanyaColors.ligne) : AlanyaColors.sand;
+  Color get _hairline => _dark
+      ? (_noir ? AlanyaColors.noirLigne : AlanyaColors.ligne)
+      : (_blanc ? AlanyaColors.blancLigne : AlanyaColors.sand);
   Color get _cardBg => _dark ? surfacesOf(context).surface : Colors.white;
   /// Fond des pastilles système du fil (date, message éphémère…).
   Color get _pillBg => _dark

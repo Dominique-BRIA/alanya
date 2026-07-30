@@ -26,13 +26,17 @@ class MotifBackground extends StatelessWidget {
     final dark = Theme.of(context).brightness == Brightness.dark;
     final surfaces = surfacesOf(context);
 
-    // Thème NOIR : jamais de motif, quel que soit `plainInDark`. Un motif,
-    // même discret, rallume des pixels sur toute la surface et annule
-    // l'économie OLED qui est la raison d'être de ce thème.
+    // Thèmes SANS motif — Noir et Blanc. Le test porte sur `avecMotif`, pas
+    // sur la luminosité ni sur le nom du thème : chaque variante décide dans
+    // sa propre extension, et une future en décidera de même.
     //
-    // Le test porte sur `avecMotif` et non sur le nom du thème : si une autre
-    // variante sombre arrive un jour, elle décidera dans sa propre extension.
-    if (dark && (plainInDark || !surfaces.avecMotif)) {
+    // En Noir, un motif rallumerait des pixels sur toute la surface et
+    // annulerait l'économie OLED. En Blanc, la référence visuelle est une
+    // surface blanche unie.
+    //
+    // `plainInDark` reste traité à part : il concerne Nuit, où le motif existe
+    // mais doit s'effacer derrière les listes et les réglages.
+    if (!surfaces.avecMotif || (dark && plainInDark)) {
       return Stack(
         children: [
           Positioned.fill(child: ColoredBox(color: surfaces.fond)),

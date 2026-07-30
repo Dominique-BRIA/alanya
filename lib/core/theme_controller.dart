@@ -8,7 +8,7 @@ import '../theme/alanya_theme.dart';
 /// Flutter n'en connaît que trois (`ThemeMode.system/light/dark`) et Alanya en
 /// a désormais quatre entrées. On garde donc notre propre énumération, et
 /// [ThemeController] la traduit en `themeMode` + `darkTheme` pour MaterialApp.
-enum ChoixTheme { systeme, clair, nuit, noir }
+enum ChoixTheme { systeme, clair, blanc, nuit, noir }
 
 /// Contrôleur de thème : Système, Clair, Nuit ou Noir. Persisté localement.
 class ThemeController extends ChangeNotifier {
@@ -26,14 +26,21 @@ class ThemeController extends ChangeNotifier {
   /// sans qu'il ait rien demandé.
   ChoixTheme _dernierSombre = ChoixTheme.nuit;
 
+  /// Symétrique du précédent : quelqu'un qui a choisi Blanc doit y revenir,
+  /// pas atterrir sur Clair.
+  ChoixTheme _dernierClair = ChoixTheme.clair;
+
   /// Bascule clair ↔ sombre, utilisée par le bouton de l'écran d'accueil.
   Future<void> basculerClairSombre(bool actuellementSombre) async {
     if (actuellementSombre) {
       if (_choix == ChoixTheme.nuit || _choix == ChoixTheme.noir) {
         _dernierSombre = _choix;
       }
-      await setChoix(ChoixTheme.clair);
+      await setChoix(_dernierClair);
     } else {
+      if (_choix == ChoixTheme.clair || _choix == ChoixTheme.blanc) {
+        _dernierClair = _choix;
+      }
       await setChoix(_dernierSombre);
     }
   }
@@ -45,6 +52,7 @@ class ThemeController extends ChangeNotifier {
   ThemeMode get mode {
     switch (_choix) {
       case ChoixTheme.clair:
+      case ChoixTheme.blanc:
         return ThemeMode.light;
       case ChoixTheme.nuit:
       case ChoixTheme.noir:
@@ -53,6 +61,15 @@ class ThemeController extends ChangeNotifier {
         return ThemeMode.system;
     }
   }
+
+  /// Le thème clair effectivement passé à MaterialApp.
+  ///
+  /// Même mécanique que [themeSombre] : MaterialApp n'accepte qu'UN thème
+  /// clair, c'est donc ici qu'on tranche entre Clair et Blanc. En mode
+  /// Système, c'est **Clair** qui s'applique, pour la même raison que Nuit
+  /// côté sombre : le thème historique reste le défaut.
+  ThemeData get themeClair =>
+      _choix == ChoixTheme.blanc ? AlanyaTheme.blanc : AlanyaTheme.light;
 
   /// Le thème sombre effectivement passé à MaterialApp.
   ///
@@ -72,6 +89,9 @@ class ThemeController extends ChangeNotifier {
     // depuis Noir ramènerait Nuit.
     if (_choix == ChoixTheme.nuit || _choix == ChoixTheme.noir) {
       _dernierSombre = _choix;
+    }
+    if (_choix == ChoixTheme.clair || _choix == ChoixTheme.blanc) {
+      _dernierClair = _choix;
     }
     notifyListeners();
   }
@@ -95,6 +115,8 @@ class ThemeController extends ChangeNotifier {
       case 'clair':
       case 'light':
         return ChoixTheme.clair;
+      case 'blanc':
+        return ChoixTheme.blanc;
       case 'nuit':
       case 'dark':
         return ChoixTheme.nuit;
@@ -112,6 +134,8 @@ class ThemeController extends ChangeNotifier {
     switch (c) {
       case ChoixTheme.clair:
         return 'clair';
+      case ChoixTheme.blanc:
+        return 'blanc';
       case ChoixTheme.nuit:
         return 'nuit';
       case ChoixTheme.noir:
@@ -126,6 +150,8 @@ class ThemeController extends ChangeNotifier {
     switch (c) {
       case ChoixTheme.clair:
         return 'Clair';
+      case ChoixTheme.blanc:
+        return 'Blanc';
       case ChoixTheme.nuit:
         return 'Nuit';
       case ChoixTheme.noir:
@@ -141,6 +167,8 @@ class ThemeController extends ChangeNotifier {
     switch (c) {
       case ChoixTheme.clair:
         return 'Fond crème, accents terre cuite';
+      case ChoixTheme.blanc:
+        return 'Fond blanc, accent teal, terre cuite en second';
       case ChoixTheme.nuit:
         return 'Indigo profond, motif discret';
       case ChoixTheme.noir:
@@ -154,6 +182,8 @@ class ThemeController extends ChangeNotifier {
     switch (c) {
       case ChoixTheme.clair:
         return Icons.light_mode;
+      case ChoixTheme.blanc:
+        return Icons.wb_sunny_outlined;
       case ChoixTheme.nuit:
         return Icons.dark_mode;
       case ChoixTheme.noir:

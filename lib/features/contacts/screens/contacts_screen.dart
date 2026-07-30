@@ -242,7 +242,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
             },
           ),
 
-          Divider(height: 1, thickness: 8, color: themed(context, light: AlanyaColors.cream, dark: surfacesOf(context).fond)),
+          Divider(height: 1, thickness: 8, color: surfacesOf(context).fond),
           // --- Message d'état vide ---
           const SizedBox(height: 60),
           Center(
@@ -297,7 +297,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
               },
             ),
 
-            Divider(height: 1, thickness: 8, color: themed(context, light: AlanyaColors.cream, dark: surfacesOf(context).fond)),
+            Divider(height: 1, thickness: 8, color: surfacesOf(context).fond),
             // --- Liste des contacts ---
             ...contacts.map((c) => _tile(c)),
           ],
