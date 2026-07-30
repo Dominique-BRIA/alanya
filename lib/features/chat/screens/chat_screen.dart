@@ -94,7 +94,17 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen>
-    with ChatMediaIntegrationMixin, WidgetsBindingObserver {
+    with ChatMediaIntegrationMixin, WidgetsBindingObserver, SingleTickerProviderStateMixin {
+  /// Battement du chevron au-dessus du micro, qui indique « glisse vers le
+  /// haut pour verrouiller ». Il tourne en boucle tant que l'écran vit ; le
+  /// chevron n'est de toute façon affiché que pendant un enregistrement non
+  /// verrouillé, donc rien ne s'anime à l'écran le reste du temps.
+  ///
+  /// Créé dans initState et NON par un initialiseur `late final` : celui-ci
+  /// est paresseux, et si l'utilisateur n'enregistre aucun vocal, le premier
+  /// accès serait `dispose()` — qui créerait alors un ticker sur un State en
+  /// cours de destruction.
+  late final AnimationController _lockPulse;
   final _inputCtrl = TextEditingController();
   final _inputFocus = FocusNode();
   final _scrollCtrl = ScrollController();
@@ -219,6 +229,10 @@ class _ChatScreenState extends State<ChatScreen>
   @override
   void initState() {
     super.initState();
+    _lockPulse = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
     ChatScreen.activeConvId = widget.convId;
     _load();
     _loadPinned();
@@ -284,6 +298,7 @@ class _ChatScreenState extends State<ChatScreen>
     _pollTimer?.cancel();
     _recordTimer?.cancel();
     _rtSub?.cancel();
+    _lockPulse.dispose();
     _voiceRecorder.cancel();
     _translateService.dispose();
     InlineAudioPlayer.stop();
@@ -937,7 +952,10 @@ class _ChatScreenState extends State<ChatScreen>
     _voiceActive = false;
     if (!_recording) return;
     _stopRecordTimer();
-    setState(() { _recording = false; _recordLocked = false; _recordDuration = Duration.zero; });
+    // `_micHeld` remis à faux par précaution : la gestuelle a pu être
+    // interrompue sans que onLongPressEnd ne se déclenche (verrouillage,
+    // rebuild du composeur). Le laisser à vrai maintiendrait le micro agrandi.
+    setState(() { _recording = false; _recordLocked = false; _micHeld = false; _recordDuration = Duration.zero; });
     _emitRecording(false);
     if (cancel) { _voiceRecorder.cancel(); return; }
     final result = await _voiceRecorder.stop();
@@ -2100,9 +2118,6 @@ class _ChatScreenState extends State<ChatScreen>
         _formatBar(),
         Row(children: [
         Offstage(offstage: _recording, child: IconButton(tooltip: tr(context, 'attach_file'), icon: _uploading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : Icon(Icons.attach_file, color: _iconNeutral), onPressed: _uploading ? null : _pickAndSendFile)),
-        // Bouton « A » : déplie la barre de mise en forme. Il s'allume à
-        // l'accent quand elle est ouverte, seul repère visuel de son état.
-        Offstage(offstage: _recording, child: IconButton(icon: Icon(Icons.text_format, color: _formatBarOpen ? _accent : _iconNeutral), onPressed: () => setState(() => _formatBarOpen = !_formatBarOpen))),
         Expanded(child: _recording ? _recordingBar() : TextField(
           controller: _inputCtrl,
           focusNode: _inputFocus,
@@ -2133,7 +2148,21 @@ class _ChatScreenState extends State<ChatScreen>
                 ),
             ],
           ),
-          decoration: InputDecoration(hintText: tr(context, 'write_message'), contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10)),
+          decoration: InputDecoration(
+            hintText: tr(context, 'write_message'),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            // Bouton « A » À L'INTÉRIEUR du champ, contre le bord droit. Il
+            // était auparavant posé à côté du trombone, hors du champ : il
+            // volait de la largeur à la saisie et se lisait comme une action
+            // d'envoi de plus, au lieu d'un réglage du texte en cours.
+            suffixIcon: IconButton(
+              icon: Icon(Icons.text_format, color: _formatBarOpen ? _accent : _iconNeutral),
+              onPressed: () => setState(() => _formatBarOpen = !_formatBarOpen),
+            ),
+            // Sans ces contraintes, l'icône suffixe impose sa hauteur minimale
+            // de 48 px au champ, qui grossit alors visiblement.
+            suffixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+          ),
         )),
         const SizedBox(width: 4),
         _micButton(),
@@ -2154,30 +2183,82 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Widget _micButton() {
+    // Le micro grandit dès l'appui et garde SA couleur. Il virait au rouge
+    // instantanément, ce qui donnait l'impression d'une alerte plutôt que d'un
+    // enregistrement en cours — WhatsApp ne change pas la couleur du bouton,
+    // c'est la barre du composeur qui signale l'enregistrement.
+    final actif = _micHeld || _recording;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onLongPressStart: (_) { setState(() => _micHeld = true); _startVoiceRecord(); },
-      onLongPressMoveUpdate: (details) { if (details.offsetFromOrigin.dy < -60 && _recording && !_recordLocked) setState(() => _recordLocked = true); },
+      onLongPressMoveUpdate: (details) {
+        if (details.offsetFromOrigin.dy < -60 && _recording && !_recordLocked) {
+          // `_micHeld` remis à faux ICI, et c'est indispensable. Le verrouillage
+          // fait basculer _composer() sur une autre branche, qui retire ce
+          // GestureDetector de l'arbre : supprimé en pleine gestuelle, il ne
+          // déclenchera jamais son onLongPressEnd. Sans cette ligne, _micHeld
+          // restait vrai pour toujours et le micro demeurait agrandi après
+          // l'envoi ou la suppression du vocal.
+          setState(() { _recordLocked = true; _micHeld = false; });
+        }
+      },
       onLongPressEnd: (_) { setState(() => _micHeld = false); if (_recording && !_recordLocked) _stopVoiceRecord(); },
       onLongPressCancel: () { setState(() => _micHeld = false); if (_recording && !_recordLocked) _stopVoiceRecord(cancel: true); },
-      // AnimatedScale plutôt qu'un AnimationController : pas de ticker à gérer,
-      // donc pas de mixin à ajouter au State ni de dispose à ne pas oublier.
-      //
-      // La mise à l'échelle est une transformation de PEINTURE : elle ne change
-      // pas la place occupée dans la rangée, le micro déborde par-dessus le
-      // composeur sans rien décaler. C'est le comportement de WhatsApp.
-      //
-      // `_micHeld || _recording` et non `_recording` seul : le premier répond à
-      // l'appui, le second maintient l'agrandissement quand l'enregistrement
-      // est verrouillé et que le doigt est parti.
+      // AnimatedScale : la mise à l'échelle est une transformation de PEINTURE,
+      // elle ne change pas la place occupée dans la rangée. Le micro déborde
+      // par-dessus le composeur sans rien décaler, comme sur WhatsApp.
       child: AnimatedScale(
-        scale: (_micHeld || _recording) ? 1.5 : 1.0,
-        duration: const Duration(milliseconds: 160),
-        curve: Curves.easeOut,
+        scale: actif ? 2.0 : 1.0,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOutBack,
         child: Stack(clipBehavior: Clip.none, alignment: Alignment.center, children: [
-          CircleAvatar(backgroundColor: _recording ? _danger : (_dark ? AlanyaColors.terracottaNuit : AlanyaColors.chocolate), child: Icon(_recording ? Icons.mic : Icons.mic_none, color: Colors.white, size: 22)),
-          if (_recording) Positioned(top: -30, child: Container(width: 28, height: 28, decoration: BoxDecoration(color: Colors.black.withOpacity(0.6), shape: BoxShape.circle), child: const Icon(Icons.lock_open, color: Colors.white, size: 14))),
+          CircleAvatar(
+            backgroundColor: _dark ? AlanyaColors.terracottaNuit : AlanyaColors.chocolate,
+            child: Icon(actif ? Icons.mic : Icons.mic_none, color: Colors.white, size: 22),
+          ),
+          if (_recording && !_recordLocked) _indicateurCadenas(),
         ]),
+      ),
+    );
+  }
+
+  /// Cadenas au-dessus du micro, avec un chevron qui bat vers le haut.
+  ///
+  /// C'est l'affordance de WhatsApp : elle dit « glisse vers le haut » sans
+  /// texte. Le battement est ce qui la rend lisible — un cadenas immobile
+  /// ressemble à un état, pas à une invitation.
+  ///
+  /// Positionné en coordonnées NÉGATIVES dans un Stack en `Clip.none`, donc
+  /// dessiné au-dessus du bouton sans agrandir sa zone tactile.
+  Widget _indicateurCadenas() {
+    return Positioned(
+      top: -34,
+      child: AnimatedBuilder(
+        animation: _lockPulse,
+        builder: (context, child) {
+          // Le chevron monte de 4 px et s'estompe en haut de course ; le
+          // cadenas, lui, reste fixe : c'est le point d'arrivée.
+          final t = Curves.easeInOut.transform(_lockPulse.value);
+          return Column(mainAxisSize: MainAxisSize.min, children: [
+            Opacity(
+              opacity: 0.35 + 0.65 * (1 - t),
+              child: Transform.translate(
+                offset: Offset(0, -4 * t),
+                child: const Icon(Icons.keyboard_arrow_up, color: Colors.white, size: 18),
+              ),
+            ),
+            child!,
+          ]);
+        },
+        child: Container(
+          width: 28,
+          height: 28,
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.6),
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(Icons.lock_open, color: Colors.white, size: 14),
+        ),
       ),
     );
   }
