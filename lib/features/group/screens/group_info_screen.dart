@@ -391,7 +391,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                             decoration: BoxDecoration(
                               color: accentOf(context),
                               shape: BoxShape.circle,
-                              border: Border.all(color: themed(context, light: Colors.white, dark: AlanyaColors.nuit), width: 2),
+                              border: Border.all(color: themed(context, light: Colors.white, dark: surfacesOf(context).fond), width: 2),
                             ),
                             child: const Icon(Icons.camera_alt, size: 16, color: Colors.white),
                           ),
@@ -425,7 +425,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
           Container(
             margin: const EdgeInsets.symmetric(horizontal: 16),
             decoration: BoxDecoration(
-              color: themed(context, light: Colors.white, dark: AlanyaColors.nuit2),
+              color: themed(context, light: Colors.white, dark: surfacesOf(context).surface),
               borderRadius: BorderRadius.circular(14),
               border: Border.all(color: themed(context, light: AlanyaColors.grey200, dark: AlanyaColors.ligne), width: 0.5),
             ),

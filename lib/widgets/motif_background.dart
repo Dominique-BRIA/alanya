@@ -24,12 +24,18 @@ class MotifBackground extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
+    final surfaces = surfacesOf(context);
 
-    // Nuit + surface pleine : fond uni, aucun motif derrière le texte.
-    if (dark && plainInDark) {
+    // Thème NOIR : jamais de motif, quel que soit `plainInDark`. Un motif,
+    // même discret, rallume des pixels sur toute la surface et annule
+    // l'économie OLED qui est la raison d'être de ce thème.
+    //
+    // Le test porte sur `avecMotif` et non sur le nom du thème : si une autre
+    // variante sombre arrive un jour, elle décidera dans sa propre extension.
+    if (dark && (plainInDark || !surfaces.avecMotif)) {
       return Stack(
         children: [
-          const Positioned.fill(child: ColoredBox(color: AlanyaColors.nuit)),
+          Positioned.fill(child: ColoredBox(color: surfaces.fond)),
           child,
         ],
       );
@@ -44,8 +50,7 @@ class MotifBackground extends StatelessWidget {
             child: Image.asset(
               "assets/images/motif_nuit_doux.png",
               repeat: ImageRepeat.repeat,
-              errorBuilder: (_, __, ___) =>
-                  const ColoredBox(color: AlanyaColors.nuit),
+              errorBuilder: (_, __, ___) => ColoredBox(color: surfaces.fond),
             ),
           ),
           Positioned.fill(
@@ -55,8 +60,8 @@ class MotifBackground extends StatelessWidget {
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [
-                    AlanyaColors.nuit.withValues(alpha: 0.45),
-                    AlanyaColors.nuit.withValues(alpha: 0.82),
+                    surfaces.fond.withValues(alpha: 0.45),
+                    surfaces.fond.withValues(alpha: 0.82),
                   ],
                 ),
               ),

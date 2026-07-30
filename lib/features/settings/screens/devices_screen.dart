@@ -185,7 +185,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
       decoration: BoxDecoration(
         color: courant
             ? accentOf(context).withValues(alpha: 0.08)
-            : themed(context, light: Colors.white, dark: AlanyaColors.nuit2),
+            : themed(context, light: Colors.white, dark: surfacesOf(context).surface),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: courant
@@ -202,7 +202,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
           height: 42,
           decoration: BoxDecoration(
             color: themed(context,
-                light: AlanyaColors.grey100, dark: AlanyaColors.nuit3),
+                light: AlanyaColors.grey100, dark: surfacesOf(context).surfaceHaute),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Icon(

@@ -134,7 +134,7 @@ class _LoginHistoryScreenState extends State<LoginHistoryScreen> {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: themed(context, light: Colors.white, dark: AlanyaColors.nuit2),
+        color: themed(context, light: Colors.white, dark: surfacesOf(context).surface),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: themed(context,
@@ -149,7 +149,7 @@ class _LoginHistoryScreenState extends State<LoginHistoryScreen> {
           height: 40,
           decoration: BoxDecoration(
             color: themed(context,
-                light: AlanyaColors.grey100, dark: AlanyaColors.nuit3),
+                light: AlanyaColors.grey100, dark: surfacesOf(context).surfaceHaute),
             borderRadius: BorderRadius.circular(11),
           ),
           child: Icon(

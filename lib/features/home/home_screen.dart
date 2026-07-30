@@ -423,7 +423,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
                 color: themed(context,
-                    light: Colors.white, dark: AlanyaColors.nuit2),
+                    light: Colors.white, dark: surfacesOf(context).surface),
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
                     color: themed(context,
@@ -487,7 +487,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
                 contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 filled: true,
                 fillColor: themed(context,
-                    light: Colors.white, dark: AlanyaColors.nuit2),
+                    light: Colors.white, dark: surfacesOf(context).surface),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
                   borderSide: BorderSide(color: searchBorder, width: 0.5),
@@ -1066,7 +1066,7 @@ class _StatusTabState extends State<_StatusTab> {
                 shape: BoxShape.circle,
                 border: Border.all(
                     color: themed(context,
-                        light: Colors.white, dark: AlanyaColors.nuit),
+                        light: Colors.white, dark: surfacesOf(context).fond),
                     width: 2),
               ),
               child: const Icon(Icons.add, color: Colors.white, size: 12),
@@ -1421,7 +1421,7 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
             // Nuit : envoyé = indigo (identité), reçu = nuit-3.
             color: mine
                 ? (isDark ? AlanyaColors.indigo : AlanyaColors.terracotta)
-                : (isDark ? AlanyaColors.nuit3 : Colors.white),
+                : (isDark ? surfacesOf(context).surfaceHaute : Colors.white),
             borderRadius: BorderRadius.circular(14),
             border: mine
                 ? null
@@ -1620,7 +1620,7 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
       child: Container(
         padding: const EdgeInsets.all(8),
         color: themed(context,
-            light: AlanyaColors.cream, dark: AlanyaColors.nuit2),
+            light: AlanyaColors.cream, dark: surfacesOf(context).surface),
         child: Row(
           children: [
             Expanded(

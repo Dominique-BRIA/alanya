@@ -125,7 +125,9 @@ class AlanyaApp extends StatelessWidget {
       title: "Alanya",
       debugShowCheckedModeBanner: false,
       theme: AlanyaTheme.light,
-      darkTheme: AlanyaTheme.dark,
+      // Nuit ou Noir selon le choix : MaterialApp n'accepte qu'UN thème sombre,
+      // c'est donc le contrôleur qui tranche entre les deux.
+      darkTheme: themeCtrl.themeSombre,
       themeMode: themeCtrl.mode,
       locale: localeCtrl.locale,
       supportedLocales: const [

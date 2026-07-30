@@ -242,7 +242,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
             },
           ),
 
-          Divider(height: 1, thickness: 8, color: themed(context, light: AlanyaColors.cream, dark: AlanyaColors.nuit)),
+          Divider(height: 1, thickness: 8, color: themed(context, light: AlanyaColors.cream, dark: surfacesOf(context).fond)),
           // --- Message d'état vide ---
           const SizedBox(height: 60),
           Center(
@@ -297,7 +297,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
               },
             ),
 
-            Divider(height: 1, thickness: 8, color: themed(context, light: AlanyaColors.cream, dark: AlanyaColors.nuit)),
+            Divider(height: 1, thickness: 8, color: themed(context, light: AlanyaColors.cream, dark: surfacesOf(context).fond)),
             // --- Liste des contacts ---
             ...contacts.map((c) => _tile(c)),
           ],
@@ -336,7 +336,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
         name: c.displayName,
         avatarUrl: c.avatarUrl,
         radius: 22,
-        backgroundColor: c.isBlocked ? themed(context, light: Colors.grey, dark: AlanyaColors.nuit3) : AlanyaColors.gold,
+        backgroundColor: c.isBlocked ? themed(context, light: Colors.grey, dark: surfacesOf(context).surfaceHaute) : AlanyaColors.gold,
       ),
       title: Text(c.displayName, style: const TextStyle(fontWeight: FontWeight.w600)),
       subtitle: Text("Alanya ID : ${formatAlanyaId(c.publicNumber)}${c.isBlocked ? " · bloqué" : ""}",

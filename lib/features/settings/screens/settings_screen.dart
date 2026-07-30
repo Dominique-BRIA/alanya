@@ -358,7 +358,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       decoration: BoxDecoration(
-        color: themed(context, light: Colors.white, dark: AlanyaColors.nuit2),
+        color: themed(context, light: Colors.white, dark: surfacesOf(context).surface),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
             color: themed(context,
@@ -382,7 +382,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       themed(context, light: Colors.red, dark: AlanyaColors.erreurNuit);
   // Fond de la pastille ON/OFF à l'état éteint.
   Color get _chipOffBg =>
-      themed(context, light: AlanyaColors.grey200, dark: AlanyaColors.nuit3);
+      themed(context, light: AlanyaColors.grey200, dark: surfacesOf(context).surfaceHaute);
 
   Widget _chevron() => Icon(Icons.chevron_right,
       color: themed(context, light: Colors.grey, dark: AlanyaColors.craie2));

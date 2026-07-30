@@ -154,7 +154,7 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
         avatarUrl: b.avatarUrl,
         radius: 22,
         backgroundColor: themed(context,
-            light: Colors.grey.shade400, dark: AlanyaColors.nuit3),
+            light: Colors.grey.shade400, dark: surfacesOf(context).surfaceHaute),
       ),
       title: Text(b.displayName,
           style: const TextStyle(fontWeight: FontWeight.w600)),

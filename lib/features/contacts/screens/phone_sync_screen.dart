@@ -307,7 +307,7 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
 
     return ListTile(
       leading: CircleAvatar(
-        backgroundColor: isAlready ? themed(context, light: Colors.grey.shade300, dark: AlanyaColors.nuit3) : AlanyaColors.gold,
+        backgroundColor: isAlready ? themed(context, light: Colors.grey.shade300, dark: surfacesOf(context).surfaceHaute) : AlanyaColors.gold,
         child: Text(
           displayName.isNotEmpty ? displayName[0].toUpperCase() : "?",
           style: TextStyle(color: isAlready ? mutedOf(context, Colors.grey) : Colors.white),

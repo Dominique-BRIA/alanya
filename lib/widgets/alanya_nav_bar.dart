@@ -24,7 +24,7 @@ class AlanyaNavBar extends StatelessWidget {
         height: 64,
         decoration: BoxDecoration(
           // Nuit : barre d'onglets en nuit-2, cernée d'un filet indigo.
-          color: themed(context, light: Colors.white, dark: AlanyaColors.nuit2),
+          color: themed(context, light: Colors.white, dark: surfacesOf(context).surface),
           borderRadius: BorderRadius.circular(20),
           border:
               isDark ? Border.all(color: AlanyaColors.ligne, width: 0.5) : null,

@@ -235,7 +235,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: themed(context, light: Colors.white, dark: AlanyaColors.nuit2),
+        color: themed(context, light: Colors.white, dark: surfacesOf(context).surface),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
             color: themed(context,
@@ -314,7 +314,7 @@ class _AvatarWithEdit extends StatelessWidget {
               // Le liseré reprend le fond de page (crème en clair, nuit en Nuit).
               border: Border.all(
                   color: themed(context,
-                      light: Colors.white, dark: AlanyaColors.nuit),
+                      light: Colors.white, dark: surfacesOf(context).fond),
                   width: 3),
               boxShadow: [
                 BoxShadow(
@@ -357,7 +357,7 @@ class _AvatarWithEdit extends StatelessWidget {
                     dark: AlanyaColors.terracottaNuit),
                 border: Border.all(
                     color: themed(context,
-                        light: Colors.white, dark: AlanyaColors.nuit),
+                        light: Colors.white, dark: surfacesOf(context).fond),
                     width: 2),
               ),
               child: uploading

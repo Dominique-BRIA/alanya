@@ -132,41 +132,60 @@ class _ChatScreenState extends State<ChatScreen>
   }
   // Couleurs theme-aware (mode Nuit).
   bool get _dark => Theme.of(context).brightness == Brightness.dark;
-  Color get _appBarBg => _dark ? AlanyaColors.nuit2 : AlanyaColors.terracotta;
-  Color get _onAppBar => _dark ? AlanyaColors.craie : Colors.white;
-  Color get _onAppBarSub => _dark ? AlanyaColors.craie2 : Colors.white70;
-  Color get _composerBg => _dark ? AlanyaColors.nuit2 : AlanyaColors.cream;
-  // Modèle Nuit : l'indigo porte les messages envoyés, la terre cuite reste
-  // réservée à l'action et au non-lu (« un seul accent par écran »).
-  Color get _sentBubbleColor =>
-      _dark ? AlanyaColors.indigo : AlanyaColors.terracotta;
-  Color get _recvBubbleColor => _dark ? AlanyaColors.nuit3 : Colors.white;
-  Color _bubbleTextColor(bool mine) =>
-      mine ? Colors.white : (_dark ? AlanyaColors.craie : AlanyaColors.ink);
-  // Le mode clair reste EXACTEMENT ce qu'il était : seule la branche Nuit est
-  // nouvelle (cf. helper themed() dans alanya_theme.dart).
-  Color get _muted => _dark ? AlanyaColors.craie2 : Colors.black54;
-  Color get _muted45 => _dark ? AlanyaColors.craie2 : Colors.black45;
-  Color get _mutedIcon => _dark ? AlanyaColors.craie2 : AlanyaColors.grey400;
-  Color get _accent =>
-      _dark ? AlanyaColors.terracottaNuit : AlanyaColors.terracotta;
-  Color get _accentSoft =>
-      _dark ? AlanyaColors.terracottaNuitLight : AlanyaColors.terracotta;
-  Color get _iconNeutral => _dark ? AlanyaColors.craie2 : AlanyaColors.chocolate;
-  Color get _positive => _dark ? AlanyaColors.indigoLight : AlanyaColors.forest;
-  Color get _danger => _dark ? AlanyaColors.erreurNuit : Colors.red;
-  Color get _hairline => _dark ? AlanyaColors.ligne : AlanyaColors.sand;
-  Color get _cardBg => _dark ? AlanyaColors.nuit2 : Colors.white;
+  /// Vrai en thème Noir. Ne sert QUE dans la branche `_dark` des getters
+  /// ci-dessous : le mode clair ne passe jamais par ici et reste donc figé.
+  bool get _noir => estNoir(context);
+
+  Color get _appBarBg => _dark ? surfacesOf(context).surface : AlanyaColors.terracotta;
+  Color get _onAppBar =>
+      _dark ? (_noir ? AlanyaColors.noirTexte : AlanyaColors.craie) : Colors.white;
+  Color get _onAppBarSub =>
+      _dark ? (_noir ? AlanyaColors.noirTexte2 : AlanyaColors.craie2) : Colors.white70;
+  Color get _composerBg => _dark ? surfacesOf(context).surface : AlanyaColors.cream;
+  // Les bulles viennent désormais de la ThemeExtension. Les valeurs y ont été
+  // relevées sur ce code, pas choisies : Nuit et Clair rendent à l'identique.
+  Color get _sentBubbleColor => surfacesOf(context).bulleEnvoyee;
+  Color get _recvBubbleColor => surfacesOf(context).bulleRecue;
+  Color _bubbleTextColor(bool mine) => mine
+      ? surfacesOf(context).texteBulleEnvoyee
+      : surfacesOf(context).texteBulleRecue;
+  // Le mode clair reste EXACTEMENT ce qu'il était : seules les branches Nuit
+  // et Noir varient (cf. helper themed() dans alanya_theme.dart).
+  Color get _muted =>
+      _dark ? (_noir ? AlanyaColors.noirTexte2 : AlanyaColors.craie2) : Colors.black54;
+  Color get _muted45 =>
+      _dark ? (_noir ? AlanyaColors.noirTexte2 : AlanyaColors.craie2) : Colors.black45;
+  Color get _mutedIcon => _dark
+      ? (_noir ? AlanyaColors.noirTexte2 : AlanyaColors.craie2)
+      : AlanyaColors.grey400;
+  Color get _accent => _dark
+      ? (_noir ? AlanyaColors.teal : AlanyaColors.terracottaNuit)
+      : AlanyaColors.terracotta;
+  Color get _accentSoft => _dark
+      ? (_noir ? AlanyaColors.teal : AlanyaColors.terracottaNuitLight)
+      : AlanyaColors.terracotta;
+  Color get _iconNeutral => _dark
+      ? (_noir ? AlanyaColors.noirTexte2 : AlanyaColors.craie2)
+      : AlanyaColors.chocolate;
+  Color get _positive => _dark
+      ? (_noir ? AlanyaColors.teal : AlanyaColors.indigoLight)
+      : AlanyaColors.forest;
+  Color get _danger => _dark
+      ? (_noir ? AlanyaColors.erreurNoir : AlanyaColors.erreurNuit)
+      : Colors.red;
+  Color get _hairline =>
+      _dark ? (_noir ? AlanyaColors.noirLigne : AlanyaColors.ligne) : AlanyaColors.sand;
+  Color get _cardBg => _dark ? surfacesOf(context).surface : Colors.white;
   /// Fond des pastilles système du fil (date, message éphémère…).
   Color get _pillBg => _dark
-      ? AlanyaColors.nuit3.withValues(alpha: 0.9)
+      ? surfacesOf(context).surfaceHaute.withValues(alpha: 0.9)
       : Colors.black.withValues(alpha: 0.06);
 
   /// Fond du bloc de citation dans une bulle reçue. En Nuit, le modèle demande
   /// un creux plus sombre que la bulle ; en clair on garde le sable et son
   /// opacité d'origine, qui diffère selon l'emplacement d'où l'appel vient.
   Color _quoteBgRecv(double lightAlpha) => _dark
-      ? AlanyaColors.nuit.withValues(alpha: 0.35)
+      ? surfacesOf(context).fond.withValues(alpha: 0.35)
       : AlanyaColors.sand.withOpacity(lightAlpha);
 
   /// Bandeau d'enregistrement vocal en cours.
@@ -2358,7 +2377,7 @@ class _ForwardPickerState extends State<_ForwardPicker> {
       SizedBox(height: MediaQuery.of(context).size.height * 0.5, child: ListView.builder(shrinkWrap: true, itemCount: widget.conversations.length, itemBuilder: (_, i) {
         final conv = widget.conversations[i]; final isSelected = _selected.contains(conv.id);
         return ListTile(
-          leading: CircleAvatar(backgroundColor: isSelected ? themed(context, light: AlanyaColors.terracotta, dark: AlanyaColors.terracottaNuit) : themed(context, light: AlanyaColors.sand, dark: AlanyaColors.nuit3), child: Icon(isSelected ? Icons.check : (conv.isGroup ? Icons.group : Icons.person), color: isSelected ? Colors.white : themed(context, light: AlanyaColors.chocolate, dark: AlanyaColors.craie2))),
+          leading: CircleAvatar(backgroundColor: isSelected ? themed(context, light: AlanyaColors.terracotta, dark: AlanyaColors.terracottaNuit) : themed(context, light: AlanyaColors.sand, dark: surfacesOf(context).surfaceHaute), child: Icon(isSelected ? Icons.check : (conv.isGroup ? Icons.group : Icons.person), color: isSelected ? Colors.white : themed(context, light: AlanyaColors.chocolate, dark: AlanyaColors.craie2))),
           title: Text(conv.title ?? 'Conversation'), subtitle: conv.isGroup ? const Text('Groupe') : null,
           onTap: () { setState(() { if (isSelected) { _selected.remove(conv.id); } else { _selected.add(conv.id); } }); },
         );
@@ -2451,7 +2470,7 @@ class _ReactionBarrierState extends State<_ReactionBarrier>
                     padding:
                         const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                     decoration: BoxDecoration(
-                      color: dark ? AlanyaColors.nuit2 : Colors.white,
+                      color: dark ? surfacesOf(context).surface : Colors.white,
                       borderRadius: BorderRadius.circular(30),
                       boxShadow: [
                         BoxShadow(

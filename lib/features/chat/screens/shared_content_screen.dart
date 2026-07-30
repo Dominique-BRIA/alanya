@@ -111,7 +111,7 @@ class _SharedContentScreenState extends State<SharedContentScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: themed(context, light: AlanyaColors.terracotta, dark: AlanyaColors.nuit2),
+        backgroundColor: themed(context, light: AlanyaColors.terracotta, dark: surfacesOf(context).surface),
         foregroundColor: Colors.white,
         title: Text(widget.title),
         bottom: TabBar(
@@ -151,7 +151,7 @@ class _SharedContentScreenState extends State<SharedContentScreen>
         return GestureDetector(
           onTap: () => _openMediaAt(i),
           child: ColoredBox(
-            color: themed(context, light: Colors.black12, dark: AlanyaColors.nuit3),
+            color: themed(context, light: Colors.black12, dark: surfacesOf(context).surfaceHaute),
             child: it.isVideo
                 ? Stack(fit: StackFit.expand, children: [
                     _videoThumb(it),
@@ -229,10 +229,10 @@ class _SharedContentScreenState extends State<SharedContentScreen>
       itemBuilder: (_, i) {
         final l = _links[i];
         return ListTile(
-          tileColor: themed(context, light: Colors.white, dark: AlanyaColors.nuit2),
+          tileColor: themed(context, light: Colors.white, dark: surfacesOf(context).surface),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           leading: CircleAvatar(
-            backgroundColor: themed(context, light: AlanyaColors.sand, dark: AlanyaColors.nuit3),
+            backgroundColor: themed(context, light: AlanyaColors.sand, dark: surfacesOf(context).surfaceHaute),
             child: Icon(Icons.link, color: positiveOf(context)),
           ),
           title: Text(l.url,
@@ -261,7 +261,7 @@ class _SharedContentScreenState extends State<SharedContentScreen>
         final d = _docs[i];
         final color = MediaHelper.colorForType(d.type);
         return ListTile(
-          tileColor: themed(context, light: Colors.white, dark: AlanyaColors.nuit2),
+          tileColor: themed(context, light: Colors.white, dark: surfacesOf(context).surface),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           leading: CircleAvatar(
             backgroundColor: color.withValues(alpha: 0.15),

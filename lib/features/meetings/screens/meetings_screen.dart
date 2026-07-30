@@ -227,7 +227,7 @@ class _MeetingsScreenState extends State<MeetingsScreen>
             ? selectCheckbox(m.idMeeting.toString())
             : CircleAvatar(
                 backgroundColor:
-                    m.isFinished ? themed(context, light: Colors.grey.shade300, dark: AlanyaColors.nuit3) : positiveOf(context),
+                    m.isFinished ? themed(context, light: Colors.grey.shade300, dark: surfacesOf(context).surfaceHaute) : positiveOf(context),
                 child: Icon(icon, color: Colors.white, size: 20),
               ),
         title: Text(m.objet,

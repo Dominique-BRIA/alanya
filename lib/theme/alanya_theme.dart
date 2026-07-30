@@ -178,10 +178,14 @@ class AlanyaSurfaces extends ThemeExtension<AlanyaSurfaces> {
     surface: AlanyaColors.nuit2,
     surfaceHaute: AlanyaColors.nuit3,
     champ: AlanyaColors.nuit2,
-    bulleRecue: AlanyaColors.nuit2,
+    // Ces quatre valeurs sont relevées sur le code existant du fil de
+    // discussion, pas choisies : bulle reçue en nuit3, envoyée en indigo,
+    // texte craie côté reçu et blanc côté envoyé. Toute autre valeur ferait
+    // dériver Nuit dès que les getters seront branchés dessus.
+    bulleRecue: AlanyaColors.nuit3,
     texteBulleRecue: AlanyaColors.craie,
     bulleEnvoyee: AlanyaColors.indigo,
-    texteBulleEnvoyee: AlanyaColors.craie,
+    texteBulleEnvoyee: Colors.white,
     avecMotif: true,
   );
 
@@ -208,10 +212,11 @@ class AlanyaSurfaces extends ThemeExtension<AlanyaSurfaces> {
     surface: Colors.white,
     surfaceHaute: AlanyaColors.warmWhite,
     champ: Colors.white,
+    // Idem : relevé sur l'existant du mode clair, qui est figé.
     bulleRecue: Colors.white,
     texteBulleRecue: AlanyaColors.ink,
-    bulleEnvoyee: AlanyaColors.sand,
-    texteBulleEnvoyee: AlanyaColors.ink,
+    bulleEnvoyee: AlanyaColors.terracotta,
+    texteBulleEnvoyee: Colors.white,
     avecMotif: true,
   );
 

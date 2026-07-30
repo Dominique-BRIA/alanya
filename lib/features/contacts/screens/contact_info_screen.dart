@@ -220,7 +220,9 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
       colors: dark
-          ? const [AlanyaColors.indigo, AlanyaColors.nuit2]
+          // Plus de `const` ici : surfacesOf() est un appel, pas une constante.
+          // Le `const` de la branche claire est conservé, elle n'a pas changé.
+          ? [AlanyaColors.indigo, surfacesOf(context).surface]
           : const [AlanyaColors.terracotta, AlanyaColors.forest],
     );
 
@@ -229,7 +231,7 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
       stretch: true,
       expandedHeight: _expandedHeight,
       backgroundColor:
-          dark ? AlanyaColors.nuit2 : AlanyaColors.terracottaDark,
+          dark ? surfacesOf(context).surface : AlanyaColors.terracottaDark,
       foregroundColor: Colors.white,
       elevation: 0,
       systemOverlayStyle: SystemUiOverlayStyle.light,

@@ -180,7 +180,7 @@ class _CreateMeetingScreenState extends State<CreateMeetingScreen> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                   decoration: BoxDecoration(
-                    color: themed(context, light: Colors.white, dark: AlanyaColors.nuit2),
+                    color: themed(context, light: Colors.white, dark: surfacesOf(context).surface),
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(color: themed(context, light: AlanyaColors.grey200, dark: AlanyaColors.ligne)),
                   ),

@@ -107,7 +107,7 @@ class WelcomeScreen extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
                   decoration: BoxDecoration(
-                    color: themed(context, light: Colors.white, dark: AlanyaColors.nuit2),
+                    color: themed(context, light: Colors.white, dark: surfacesOf(context).surface),
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(color: themed(context, light: AlanyaColors.grey200, dark: AlanyaColors.ligne), width: 0.5),
                   ),
