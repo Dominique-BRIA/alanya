@@ -14,6 +14,7 @@ import '../../../widgets/glass_card.dart';
 import '../../../widgets/media/cached_media.dart';
 import '../../account/screens/avatar_viewer_screen.dart';
 import '../../calls/call_controller.dart';
+import '../../calls/screens/active_call_screen.dart';
 import '../../chat/chat_repository.dart';
 import '../../chat/screens/shared_content_screen.dart';
 import '../contacts_repository.dart';
@@ -69,6 +70,10 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
   late bool _isBlocked = widget.isBlocked;
   List<Message>? _sharedMedia;
   bool _loadingMedia = false;
+
+  /// Garde-fou : l'appel peut passer par une création de conversation, donc
+  /// par un aller-retour réseau. Sans ça, deux appuis lancent deux appels.
+  bool _callStarting = false;
   String _baseUrl = "";
   String? _token;
 
@@ -141,17 +146,42 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
     }
   }
 
-  void _startCall(String type) {
+  /// Lance un appel depuis la fiche contact.
+  ///
+  /// La conversation est créée à la volée quand elle n'existe pas encore :
+  /// [CallController.startOutgoing] exige un `convId`, et refuser d'appeler
+  /// tant qu'on n'a pas ouvert une discussion (l'ancien comportement) n'avait
+  /// aucune raison d'être — `createDirect` récupère la conversation existante
+  /// ou la crée, sans effet de bord visible.
+  Future<void> _startCall(String type) async {
+    if (_callStarting) return;
     final cc = context.read<CallController>();
-    final convId = widget.convId;
-    if (convId == null) {
-      showAppSnackBar("Ouvre d'abord une conversation avec ce contact");
-      return;
-    }
+    setState(() => _callStarting = true);
     try {
-      cc.startOutgoing(convId, type, widget.name);
+      var convId = widget.convId;
+      convId ??= await context
+          .read<ChatRepository>()
+          .createDirect(widget.publicNumber);
+      if (!mounted) return;
+      await cc.startOutgoing(convId, type, widget.name);
+      if (!mounted) return;
+      // Même enchaînement que depuis le fil de discussion : sans cette
+      // ouverture, l'appel démarrait sans que rien ne s'affiche, seul le
+      // bandeau global le signalait.
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) => const ActiveCallScreen(),
+        ),
+      );
+    } on StateError catch (_) {
+      showAppSnackBar("Tu es déjà en appel");
+    } on ApiException catch (e) {
+      showAppSnackBar(e.message);
     } catch (_) {
       showAppSnackBar("Impossible de lancer l'appel");
+    } finally {
+      if (mounted) setState(() => _callStarting = false);
     }
   }
 

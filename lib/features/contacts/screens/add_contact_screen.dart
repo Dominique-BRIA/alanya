@@ -12,8 +12,13 @@ import '../../chat/screens/chat_screen.dart';
 import '../contacts_repository.dart';
 
 /// Recherche par Alanya ID (6 chiffres) puis ajout au répertoire.
+///
+/// [initialNumber] pré-remplit le champ et lance la recherche : le clavier
+/// d'appel arrive ici avec l'ID déjà composé, le retaper serait absurde.
 class AddContactScreen extends StatefulWidget {
-  const AddContactScreen({super.key});
+  const AddContactScreen({super.key, this.initialNumber});
+
+  final String? initialNumber;
 
   @override
   State<AddContactScreen> createState() => _AddContactScreenState();
@@ -25,6 +30,18 @@ class _AddContactScreenState extends State<AddContactScreen> {
   bool _loading = false;
   UserSearchResult? _result;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    final initial = stripAlanyaId(widget.initialNumber ?? "");
+    if (initial.isEmpty) return;
+    _numberCtrl.text = formatAlanyaId(initial);
+    // Après la première frame : _search() touche à l'état et lit le Provider.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _search();
+    });
+  }
 
   @override
   void dispose() {
@@ -47,7 +64,8 @@ class _AddContactScreenState extends State<AddContactScreen> {
       _result = null;
     });
     try {
-      final res = await context.read<ContactsRepository>().searchByNumber(number);
+      final res =
+          await context.read<ContactsRepository>().searchByNumber(number);
       if (!mounted) return;
       setState(() => _result = res);
     } on ApiException catch (e) {
@@ -65,10 +83,14 @@ class _AddContactScreenState extends State<AddContactScreen> {
 
   Future<void> _add(UserSearchResult user) async {
     if (user.alreadyContact) {
-      showAppSnackBar("${user.pseudo ?? formatAlanyaId(user.publicNumber)} est déjà dans tes contacts");
+      showAppSnackBar(
+          "${user.pseudo ?? formatAlanyaId(user.publicNumber)} est déjà dans tes contacts");
       return;
     }
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       final alias = _aliasCtrl.text.trim();
       await context.read<ContactsRepository>().add(
@@ -84,7 +106,8 @@ class _AddContactScreenState extends State<AddContactScreen> {
       showAppSnackBar(e.message);
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = "Impossible d'ajouter ce contact. Vérifie ta connexion.");
+      setState(() =>
+          _error = "Impossible d'ajouter ce contact. Vérifie ta connexion.");
       showAppSnackBar("Erreur inattendue");
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -97,15 +120,18 @@ class _AddContactScreenState extends State<AddContactScreen> {
       final contacts = context.read<ContactsRepository>();
       final alias = _aliasCtrl.text.trim();
       if (!user.alreadyContact) {
-        await contacts.add(user.publicNumber, alias: alias.isEmpty ? null : alias);
+        await contacts.add(user.publicNumber,
+            alias: alias.isEmpty ? null : alias);
       }
-      final convId = await context.read<ChatRepository>().createDirect(user.publicNumber);
+      final convId =
+          await context.read<ChatRepository>().createDirect(user.publicNumber);
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
           builder: (_) => ChatScreen(
             convId: convId,
-            title: alias.isNotEmpty ? alias : (user.pseudo ?? user.publicNumber),
+            title:
+                alias.isNotEmpty ? alias : (user.pseudo ?? user.publicNumber),
             avatarUrl: user.avatarUrl,
             otherUserId: user.id,
             otherPublicNumber: user.publicNumber,
@@ -177,7 +203,9 @@ class _AddContactScreenState extends State<AddContactScreen> {
               if (_loading && _result == null)
                 Padding(
                   padding: const EdgeInsets.only(top: 24),
-                  child: Center(child: CircularProgressIndicator(color: accentOf(context))),
+                  child: Center(
+                      child:
+                          CircularProgressIndicator(color: accentOf(context))),
                 ),
               if (_result != null) ...[
                 const SizedBox(height: 20),
@@ -191,12 +219,15 @@ class _AddContactScreenState extends State<AddContactScreen> {
   }
 
   Widget _resultCard(UserSearchResult user) {
-    final name = user.pseudo ?? "Utilisateur ${formatAlanyaId(user.publicNumber)}";
+    final name =
+        user.pseudo ?? "Utilisateur ${formatAlanyaId(user.publicNumber)}";
     return Card(
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: themed(context, light: AlanyaColors.sand, dark: AlanyaColors.ligne)),
+        side: BorderSide(
+            color: themed(context,
+                light: AlanyaColors.sand, dark: AlanyaColors.ligne)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -217,12 +248,20 @@ class _AddContactScreenState extends State<AddContactScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
-                      Text("Alanya ID : ${formatAlanyaId(user.publicNumber)}", style: TextStyle(color: alanyaIdOf(context, Colors.black54))),
+                      Text(name,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w600, fontSize: 16)),
+                      Text("Alanya ID : ${formatAlanyaId(user.publicNumber)}",
+                          style: TextStyle(
+                              color: alanyaIdOf(context, Colors.black54))),
                       if (user.alreadyContact)
                         Text(
                           "Déjà dans ton répertoire",
-                          style: TextStyle(color: themed(context, light: AlanyaColors.forest, dark: AlanyaColors.indigoLight), fontSize: 12),
+                          style: TextStyle(
+                              color: themed(context,
+                                  light: AlanyaColors.forest,
+                                  dark: AlanyaColors.indigoLight),
+                              fontSize: 12),
                         ),
                     ],
                   ),
@@ -245,7 +284,8 @@ class _AddContactScreenState extends State<AddContactScreen> {
               onPressed: _loading
                   ? null
                   : () => user.alreadyContact ? _addAndChat(user) : _add(user),
-              child: Text(user.alreadyContact ? "Discuter" : "Ajouter au répertoire"),
+              child: Text(
+                  user.alreadyContact ? "Discuter" : "Ajouter au répertoire"),
             ),
             if (!user.alreadyContact) ...[
               const SizedBox(height: 8),
