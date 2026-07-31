@@ -155,7 +155,11 @@ class _CallsScreenState extends State<CallsScreen>
                   right: 16,
                   bottom: 16,
                   child: FloatingActionButton(
-                    backgroundColor: AlanyaColors.terracotta,
+                    // Même vert que le bouton « Saisir ID » de l'écran Chat et
+                    // que le logotype : les deux ouvrent le même clavier, ils
+                    // se reconnaissent à la couleur. Constante sur les quatre
+                    // thèmes, c'est une couleur de marque.
+                    backgroundColor: AlanyaColors.logoVert,
                     onPressed: () => Navigator.of(context).push(
                       MaterialPageRoute(builder: (_) => const DialerScreen()),
                     ),

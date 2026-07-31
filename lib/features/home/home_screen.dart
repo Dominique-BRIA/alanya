@@ -566,36 +566,36 @@ class _ConversationsTabState extends State<_ConversationsTab>
   Widget _boutonSaisirId(BuildContext context) {
     return Container(
       margin: const EdgeInsets.only(top: 12),
+      // Fond plein dans le vert du logotype, identique sur les quatre thèmes :
+      // c'est la couleur de la marque, elle ne doit pas dériver. Icône et
+      // libellé passent au blanc — sur #098084 le contraste est de 4,74:1,
+      // au-dessus du seuil de lisibilité. Plus de bordure : elle n'avait de
+      // sens que sur le fond clair d'origine.
       child: Material(
-        color: themed(context,
-            light: Colors.white, dark: surfacesOf(context).surface),
+        color: AlanyaColors.logoVert,
         borderRadius: BorderRadius.circular(14),
         child: InkWell(
           borderRadius: BorderRadius.circular(14),
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => const DialerScreen()),
           ),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                  color: themed(context,
-                      light: AlanyaColors.grey200, dark: AlanyaColors.ligne),
-                  width: 0.5),
-            ),
+          // Tout le contenu est littéral depuis que les couleurs ne dépendent
+          // plus du thème : le sous-arbre entier devient constant, donc
+          // construit une seule fois.
+          child: const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.phone, color: accentOf(context), size: 24),
-                const SizedBox(height: 2),
+                Icon(Icons.phone, color: Colors.white, size: 24),
+                SizedBox(height: 2),
                 Text(
                   "Saisir ID",
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
-                    color: mutedOf(context, Colors.black54),
+                    color: Colors.white,
                   ),
                 ),
               ],
