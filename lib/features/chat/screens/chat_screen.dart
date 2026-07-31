@@ -113,6 +113,11 @@ class _ChatScreenState extends State<ChatScreen>
   bool _sending = false;
   /// Barre de mise en forme dépliée par le bouton « A » du composeur.
   bool _formatBarOpen = false;
+  /// Le champ contient-il quelque chose ? Pilote le bouton rond du composeur,
+  /// qui montre le micro quand le champ est vide et l'envoi dès qu'on écrit.
+  bool _hasText = false;
+  /// Panneau d'emojis déplié par le bouton smiley, à gauche du champ.
+  bool _emojiPanelOpen = false;
   /// Doigt posé sur le micro. Distinct de `_recording`, qui ne passe à vrai
   /// qu'une fois l'enregistrement réellement démarré : l'agrandissement doit
   /// répondre à l'appui, pas attendre l'ouverture du fichier audio.
@@ -272,12 +277,41 @@ class _ChatScreenState extends State<ChatScreen>
     _loadPinned();
     _loadDisappearing();
     _scrollCtrl.addListener(_onScroll);
+    // Le basculement micro ↔ envoi écoute le CONTRÔLEUR et non `onChanged` :
+    // le texte change aussi sans frappe — mise en forme WhatsApp appliquée à
+    // la sélection, insertion d'un emoji, vidage après envoi. `onChanged` ne
+    // voit aucun de ces cas et le bouton resterait sur le mauvais symbole.
+    _inputCtrl.addListener(_onInputTextChanged);
     final rt = context.read<RealtimeClient>();
     _rt = rt;
     rt.connect();
     _rtSub = rt.events.listen(_onRealtimeEvent);
     _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) => _poll());
     WidgetsBinding.instance.addObserver(this);
+  }
+
+  /// Suit le remplissage du champ pour choisir le symbole du bouton rond.
+  ///
+  /// `setState` n'est appelé que sur un vrai changement d'état (vide ↔ rempli),
+  /// pas à chaque caractère : le listener se déclenche aussi à chaque
+  /// déplacement du curseur.
+  void _onInputTextChanged() {
+    final rempli = _inputCtrl.text.trim().isNotEmpty;
+    if (rempli == _hasText) return;
+    setState(() => _hasText = rempli);
+  }
+
+  /// Insère un emoji à la position du curseur, ou à la fin si le champ n'a
+  /// jamais eu le focus (la sélection vaut alors -1).
+  void _insereEmoji(String emoji) {
+    final texte = _inputCtrl.text;
+    final sel = _inputCtrl.selection;
+    final debut = sel.start < 0 ? texte.length : sel.start;
+    final fin = sel.end < 0 ? texte.length : sel.end;
+    _inputCtrl.value = TextEditingValue(
+      text: texte.replaceRange(debut, fin, emoji),
+      selection: TextSelection.collapsed(offset: debut + emoji.length),
+    );
   }
 
   // ── Indicateurs temps réel : émission (débounce + cycle de vie) ──
@@ -336,6 +370,7 @@ class _ChatScreenState extends State<ChatScreen>
     _voiceRecorder.cancel();
     _translateService.dispose();
     InlineAudioPlayer.stop();
+    _inputCtrl.removeListener(_onInputTextChanged);
     _inputCtrl.dispose();
     _inputFocus.dispose();
     _scrollCtrl.dispose();
@@ -2151,7 +2186,24 @@ class _ChatScreenState extends State<ChatScreen>
       Container(padding: const EdgeInsets.all(8), color: _composerBg, child: Column(mainAxisSize: MainAxisSize.min, children: [
         _formatBar(),
         Row(children: [
-        Offstage(offstage: _recording, child: IconButton(tooltip: tr(context, 'attach_file'), icon: _uploading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : Icon(Icons.attach_file, color: _iconNeutral), onPressed: _uploading ? null : _pickAndSendFile)),
+        // Ordre repris de la maquette : smiley HORS du champ à gauche, puis le
+        // champ, qui porte « A » et le trombone contre son bord droit, puis le
+        // bouton rond. Le trombone était auparavant à gauche, hors du champ.
+        Offstage(offstage: _recording, child: IconButton(
+          tooltip: "Emojis",
+          icon: Icon(_emojiPanelOpen ? Icons.keyboard : Icons.emoji_emotions_outlined, color: _emojiPanelOpen ? _accent : _iconNeutral),
+          onPressed: () {
+            setState(() => _emojiPanelOpen = !_emojiPanelOpen);
+            // Le panneau et le clavier système se disputent le bas de l'écran :
+            // ouvrir l'un doit refermer l'autre, sinon le composeur remonte
+            // deux fois et la moitié de la conversation disparaît.
+            if (_emojiPanelOpen) {
+              FocusScope.of(context).unfocus();
+            } else {
+              _inputFocus.requestFocus();
+            }
+          },
+        )),
         Expanded(child: _recording ? _recordingBar() : TextField(
           controller: _inputCtrl,
           focusNode: _inputFocus,
@@ -2189,21 +2241,73 @@ class _ChatScreenState extends State<ChatScreen>
             // était auparavant posé à côté du trombone, hors du champ : il
             // volait de la largeur à la saisie et se lisait comme une action
             // d'envoi de plus, au lieu d'un réglage du texte en cours.
-            suffixIcon: IconButton(
-              icon: Icon(Icons.text_format, color: _formatBarOpen ? _accent : _iconNeutral),
-              onPressed: () => setState(() => _formatBarOpen = !_formatBarOpen),
-            ),
+            // « A » puis le trombone, tous deux À L'INTÉRIEUR du champ contre
+            // le bord droit. Le trombone les rejoint : posé à gauche, hors du
+            // champ, il volait de la largeur à la saisie.
+            suffixIcon: Row(mainAxisSize: MainAxisSize.min, children: [
+              IconButton(
+                tooltip: "Mise en forme",
+                icon: Icon(Icons.text_format, color: _formatBarOpen ? _accent : _iconNeutral),
+                onPressed: () => setState(() => _formatBarOpen = !_formatBarOpen),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+              ),
+              IconButton(
+                tooltip: tr(context, 'attach_file'),
+                icon: _uploading
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                    : Icon(Icons.attach_file, color: _iconNeutral),
+                onPressed: _uploading ? null : _pickAndSendFile,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+              ),
+              const SizedBox(width: 4),
+            ]),
             // Sans ces contraintes, l'icône suffixe impose sa hauteur minimale
             // de 48 px au champ, qui grossit alors visiblement.
             suffixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 40),
           ),
         )),
-        const SizedBox(width: 4),
-        _micButton(),
-        Offstage(offstage: _recording, child: Row(mainAxisSize: MainAxisSize.min, children: [const SizedBox(width: 8), CircleAvatar(backgroundColor: _accent, child: IconButton(icon: const Icon(Icons.send, color: Colors.white), onPressed: _sending ? null : _send))])),
+        const SizedBox(width: 8),
+        // UN SEUL bouton rond, qui bascule. Le micro et l'envoi s'affichaient
+        // tous les deux en permanence : deux boutons dont un seul avait du sens
+        // à un instant donné.
+        _hasText && !_recording
+            ? CircleAvatar(backgroundColor: _accent, child: IconButton(tooltip: tr(context, 'send'), icon: const Icon(Icons.send, color: Colors.white), onPressed: _sending ? null : _send))
+            : _micButton(),
         ]),
+        if (_emojiPanelOpen && !_recording) _emojiPanel(),
       ])),
     ]));
+  }
+
+  /// Emojis les plus courants, insérés dans le champ au clic.
+  ///
+  /// Volontairement une grille figée et non un vrai clavier emoji : rien dans
+  /// le projet n'en fournissait, et une liste courte couvre l'essentiel sans
+  /// ajouter de dépendance. Les emojis sont du TEXTE — ils partent dans un
+  /// message normal, sans rien changer au protocole.
+  static const List<String> _emojisCourants = [
+    "😀", "😂", "🙂", "😍", "😘", "😎", "🤔", "😴",
+    "😢", "😭", "😡", "🥳", "👍", "👎", "👏", "🙏",
+    "❤️", "🔥", "✨", "🎉", "💯", "✅", "❌", "📞",
+  ];
+
+  Widget _emojiPanel() {
+    return Container(
+      height: 180,
+      margin: const EdgeInsets.only(top: 6),
+      child: GridView.count(
+        crossAxisCount: 8,
+        children: [
+          for (final e in _emojisCourants)
+            InkWell(
+              onTap: () => _insereEmoji(e),
+              child: Center(child: Text(e, style: const TextStyle(fontSize: 24))),
+            ),
+        ],
+      ),
+    );
   }
 
   Widget _recordingBar() {
