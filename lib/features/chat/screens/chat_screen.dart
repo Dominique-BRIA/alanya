@@ -2186,24 +2186,10 @@ class _ChatScreenState extends State<ChatScreen>
       Container(padding: const EdgeInsets.all(8), color: _composerBg, child: Column(mainAxisSize: MainAxisSize.min, children: [
         _formatBar(),
         Row(children: [
-        // Ordre repris de la maquette : smiley HORS du champ à gauche, puis le
-        // champ, qui porte « A » et le trombone contre son bord droit, puis le
-        // bouton rond. Le trombone était auparavant à gauche, hors du champ.
-        Offstage(offstage: _recording, child: IconButton(
-          tooltip: "Emojis",
-          icon: Icon(_emojiPanelOpen ? Icons.keyboard : Icons.emoji_emotions_outlined, color: _emojiPanelOpen ? _accent : _iconNeutral),
-          onPressed: () {
-            setState(() => _emojiPanelOpen = !_emojiPanelOpen);
-            // Le panneau et le clavier système se disputent le bas de l'écran :
-            // ouvrir l'un doit refermer l'autre, sinon le composeur remonte
-            // deux fois et la moitié de la conversation disparaît.
-            if (_emojiPanelOpen) {
-              FocusScope.of(context).unfocus();
-            } else {
-              _inputFocus.requestFocus();
-            }
-          },
-        )),
+        // Ordre repris de la maquette : TOUT est dans le champ — smiley contre
+        // le bord gauche, « A » et trombone contre le bord droit. Seul le
+        // bouton rond reste à l'extérieur. Le smiley et le trombone étaient
+        // auparavant posés hors du champ, où ils lui volaient de la largeur.
         Expanded(child: _recording ? _recordingBar() : TextField(
           controller: _inputCtrl,
           focusNode: _inputFocus,
@@ -2236,7 +2222,26 @@ class _ChatScreenState extends State<ChatScreen>
           ),
           decoration: InputDecoration(
             hintText: tr(context, 'write_message'),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+            // Smiley À L'INTÉRIEUR du champ, contre le bord gauche.
+            prefixIcon: IconButton(
+              tooltip: "Emojis",
+              icon: Icon(_emojiPanelOpen ? Icons.keyboard : Icons.emoji_emotions_outlined, color: _emojiPanelOpen ? _accent : _iconNeutral),
+              onPressed: () {
+                setState(() => _emojiPanelOpen = !_emojiPanelOpen);
+                // Le panneau et le clavier système se disputent le bas de
+                // l'écran : ouvrir l'un doit refermer l'autre, sinon le
+                // composeur remonte deux fois et masque la conversation.
+                if (_emojiPanelOpen) {
+                  FocusScope.of(context).unfocus();
+                } else {
+                  _inputFocus.requestFocus();
+                }
+              },
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+            ),
+            prefixIconConstraints: const BoxConstraints(minWidth: 44, minHeight: 40),
             // Bouton « A » À L'INTÉRIEUR du champ, contre le bord droit. Il
             // était auparavant posé à côté du trombone, hors du champ : il
             // volait de la largeur à la saisie et se lisait comme une action
@@ -2247,7 +2252,7 @@ class _ChatScreenState extends State<ChatScreen>
             suffixIcon: Row(mainAxisSize: MainAxisSize.min, children: [
               IconButton(
                 tooltip: "Mise en forme",
-                icon: Icon(Icons.text_format, color: _formatBarOpen ? _accent : _iconNeutral),
+                icon: _iconeFormatA(_formatBarOpen ? _accent : _iconNeutral),
                 onPressed: () => setState(() => _formatBarOpen = !_formatBarOpen),
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
@@ -2279,6 +2284,32 @@ class _ChatScreenState extends State<ChatScreen>
         if (_emojiPanelOpen && !_recording) _emojiPanel(),
       ])),
     ]));
+  }
+
+  /// « A » souligné d'une barre épaisse, symbole de la mise en forme.
+  ///
+  /// Dessiné plutôt que pris dans `Icons.text_format` : le glyphe Material
+  /// porte un trait d'un pixel qui se perd à cette taille. Ici la barre fait
+  /// 3 px et toute la largeur de la lettre, comme sur la maquette. Elle prend
+  /// la couleur de la lettre, donc elle vire à l'accent quand la barre de mise
+  /// en forme est dépliée.
+  Widget _iconeFormatA(Color couleur) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          "A",
+          style: TextStyle(
+            color: couleur,
+            fontSize: 17,
+            fontWeight: FontWeight.w600,
+            height: 1.05,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Container(width: 17, height: 3, color: couleur),
+      ],
+    );
   }
 
   /// Emojis les plus courants, insérés dans le champ au clic.
