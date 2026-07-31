@@ -339,10 +339,16 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
       canPop: false,
       onPopInvokedWithResult: (didPop, _) async {
         if (didPop) return;
+        // Le retour RÉDUIT l'appel, il ne le coupe plus : l'écran se ferme,
+        // l'appel continue et le bandeau global prend le relais pour y revenir
+        // — exactement ce que fait déjà le bouton « chat ». Pour raccrocher, il
+        // reste le bouton rouge, qui est le seul geste explicite.
+        //
+        // Un appel ENTRANT fait exception : il n'y a rien à réduire tant qu'on
+        // n'a pas décroché, et laisser sonner un écran fermé serait pire que
+        // refuser. Le retour continue donc d'y valoir refus.
         if (showIncoming) {
           await _reject(cc);
-        } else if (showActive) {
-          await _hangUp(cc);
         } else {
           _popScreen();
         }
@@ -381,14 +387,21 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                     children: [
                       Align(
                         alignment: Alignment.centerLeft,
+                        // Aligné sur le bouton retour : ce bouton RÉDUIT
+                        // l'appel au lieu de le couper. Une croix « Fermer »
+                        // qui raccroche, à côté d'un retour qui réduit, disait
+                        // deux choses différentes du même geste.
                         child: IconButton(
-                          icon: const Icon(Icons.close, color: Colors.white70),
-                          tooltip: "Fermer",
+                          icon: Icon(
+                            showIncoming
+                                ? Icons.close
+                                : Icons.keyboard_arrow_down,
+                            color: Colors.white70,
+                          ),
+                          tooltip: showIncoming ? "Refuser" : "Réduire",
                           onPressed: () async {
                             if (showIncoming) {
                               await _reject(cc);
-                            } else if (showActive) {
-                              await _hangUp(cc);
                             } else {
                               _popScreen();
                             }

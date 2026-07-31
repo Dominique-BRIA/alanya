@@ -15,6 +15,7 @@ import '../../core/ringtone_service.dart';
 import '../../core/notification_settings.dart';
 import '../../core/realtime_client.dart';
 import '../../models/ai_message.dart';
+import '../../models/auth_user.dart';
 import '../../models/conversation.dart';
 import '../../models/status.dart';
 import '../../theme/alanya_theme.dart';
@@ -32,6 +33,7 @@ import '../ai/ai_repository.dart';
 import '../auth/auth_controller.dart';
 import '../chat/chat_repository.dart';
 import '../chat/screens/chat_screen.dart';
+import '../calls/screens/dialer_screen.dart';
 import '../contacts/screens/contacts_screen.dart';
 import '../chat/screens/new_group_screen.dart';
 import '../contacts/screens/add_contact_screen.dart';
@@ -417,52 +419,17 @@ class _ConversationsTabState extends State<_ConversationsTab>
         child: Column(
         children: [
           if (user != null)
-            Container(
-              width: double.infinity,
-              margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: themed(context,
-                    light: Colors.white, dark: surfacesOf(context).surface),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                    color: themed(context,
-                        light: AlanyaColors.grey200, dark: AlanyaColors.ligne),
-                    width: 0.5),
-              ),
+            // IntrinsicHeight + stretch : sans lui, la Row centrerait le
+            // bouton sur sa hauteur et il ne s'alignerait ni en haut ni en bas
+            // avec la carte. Ici les deux blocs font exactement la même
+            // hauteur, celle imposée par la carte de profil.
+            IntrinsicHeight(
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  AvatarCircle(
-                    name: user.nom ?? user.pseudo ?? "?",
-                    avatarUrl: user.avatarUrl,
-                    radius: 22,
-                    backgroundColor: AlanyaColors.terracotta,
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => AvatarViewerScreen(
-                          name: user.nom ?? user.pseudo ?? "Moi",
-                          avatarUrl: user.avatarUrl,
-                        ),
-                      ),
-                    ),
-                  ),
+                  Expanded(child: _carteProfil(context, user)),
+                  _boutonSaisirId(context),
                   const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // La carte identifie l'utilisateur par son nom. `nom` est
-                        // nullable : repli sur le pseudo pour les comptes qui
-                        // n'en ont pas encore, plutôt qu'un « Moi » anonyme.
-                        Text(user.nom ?? user.pseudo ?? "Moi",
-                            style: const TextStyle(fontWeight: FontWeight.bold)),
-                        Text("Alanya ID : ${formatAlanyaId(user.publicNumber)}",
-                            style: TextStyle(
-                                color: alanyaIdOf(context, Colors.black54),
-                                fontSize: 13)),
-                      ],
-                    ),
-                  ),
                 ],
               ),
             ),
@@ -531,6 +498,112 @@ class _ConversationsTabState extends State<_ConversationsTab>
       ),
     ),
   );
+  }
+
+  /// Carte d'identité de l'utilisateur : avatar, nom, Alanya ID.
+  ///
+  /// Extraite du `build` pour partager sa ligne avec le bouton « Saisir ID ».
+  /// La marge droite tombe de 12 à 8 : l'écart avec le bouton est repris par le
+  /// `SizedBox` de la ligne, sinon les deux se toucheraient.
+  Widget _carteProfil(BuildContext context, AuthUser user) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 12, 8, 0),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: themed(context,
+            light: Colors.white, dark: surfacesOf(context).surface),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+            color: themed(context,
+                light: AlanyaColors.grey200, dark: AlanyaColors.ligne),
+            width: 0.5),
+      ),
+      child: Row(
+        children: [
+          AvatarCircle(
+            name: user.nom ?? user.pseudo ?? "?",
+            avatarUrl: user.avatarUrl,
+            radius: 22,
+            backgroundColor: AlanyaColors.terracotta,
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => AvatarViewerScreen(
+                  name: user.nom ?? user.pseudo ?? "Moi",
+                  avatarUrl: user.avatarUrl,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // La carte identifie l'utilisateur par son nom. `nom` est
+                // nullable : repli sur le pseudo pour les comptes qui
+                // n'en ont pas encore, plutôt qu'un « Moi » anonyme.
+                Text(user.nom ?? user.pseudo ?? "Moi",
+                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                Text("Alanya ID : ${formatAlanyaId(user.publicNumber)}",
+                    style: TextStyle(
+                        color: alanyaIdOf(context, Colors.black54),
+                        fontSize: 13)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Bouton « Saisir ID » : ouvre le clavier d'appel, exactement comme le
+  /// bouton de l'écran Appels. Même symbole des deux côtés — ici avec son
+  /// libellé, là-bas sans.
+  ///
+  /// Sa hauteur n'est pas fixée : l'`IntrinsicHeight` de la ligne l'étire sur
+  /// celle de la carte de profil. La marge haute reprend celle de la carte,
+  /// pour que les deux blocs commencent au même niveau.
+  Widget _boutonSaisirId(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      child: Material(
+        color: themed(context,
+            light: Colors.white, dark: surfacesOf(context).surface),
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const DialerScreen()),
+          ),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                  color: themed(context,
+                      light: AlanyaColors.grey200, dark: AlanyaColors.ligne),
+                  width: 0.5),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.phone, color: accentOf(context), size: 24),
+                const SizedBox(height: 2),
+                Text(
+                  "Saisir ID",
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: mutedOf(context, Colors.black54),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildList() {

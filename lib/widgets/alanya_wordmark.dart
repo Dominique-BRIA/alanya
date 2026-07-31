@@ -1,13 +1,18 @@
 import 'package:flutter/material.dart';
 import '../theme/alanya_theme.dart';
 
-/// Logotype « ALANYA WORK » : le dernier A d'ALANYA et le mot WORK portent
-/// l'accent terre cuite, comme dans le système visuel de référence.
+/// Logotype « ALANYA WORK » : « ALANY » porte le vert du logo, le dernier A
+/// d'ALANYA et le mot WORK portent l'accent terre cuite.
 ///
-/// L'accent suit le thème — terre cuite en clair, terre cuite claire en Nuit,
-/// où le `#C1663F` manquerait de contraste sur le fond nuit. La couleur des
-/// lettres non accentuées est héritée du contexte (`AppBar`, dialogue…), donc
-/// rien à passer pour l'aligner sur l'écran qui l'accueille.
+/// « ALANY » est écrit dans [AlanyaColors.logoVert], la couleur relevée sur le
+/// « W » de l'icône : le logotype et l'icône disent alors la même chose. Cette
+/// couleur ne suit PAS le thème — elle appartient à la marque, et elle reste
+/// lisible sur les quatre fonds. Le paramètre [color] ne s'applique donc plus
+/// qu'aux lettres non colorées, c'est-à-dire à aucune aujourd'hui ; il est
+/// conservé pour les appelants qui le passent encore.
+///
+/// L'accent terre cuite, lui, suit le thème — terre cuite en clair, terre cuite
+/// claire en Nuit, où le `#C1663F` manquerait de contraste sur le fond nuit.
 class AlanyaWordmark extends StatelessWidget {
   const AlanyaWordmark({
     super.key,
@@ -56,7 +61,10 @@ class AlanyaWordmark extends StatelessWidget {
         TextSpan(
           style: base,
           children: [
-            const TextSpan(text: "ALANY"),
+            const TextSpan(
+              text: "ALANY",
+              style: TextStyle(color: AlanyaColors.logoVert),
+            ),
             TextSpan(text: "A", style: accent),
             TextSpan(text: " WORK", style: accent),
           ],

@@ -37,6 +37,14 @@ class AlanyaColors {
   static const Color gold       = Color(0xFFD4A574);
   static const Color goldLight  = Color(0xFFF0D5B8);
 
+  /// Le vert du « W » de l'icône, **relevé sur `assets/images/logo.png`** et non
+  /// choisi : c'est la couleur dominante du glyphe (échantillon du 31/07/2026).
+  ///
+  /// Volontairement distinct de [teal] (`#008B8B`), l'accent du thème Noir :
+  /// les deux se ressemblent mais celui-ci ne doit pas dériver avec les thèmes,
+  /// il appartient à l'identité de la marque. C'est la couleur du logotype.
+  static const Color logoVert   = Color(0xFF098084);
+
   // --- Thème NUIT (mode sombre — système visuel Alanya) ---
   static const Color nuit        = Color(0xFF0B0B18); // fond page
   static const Color nuit2       = Color(0xFF14142A); // surface / cartes

@@ -159,7 +159,10 @@ class _CallsScreenState extends State<CallsScreen>
                     onPressed: () => Navigator.of(context).push(
                       MaterialPageRoute(builder: (_) => const DialerScreen()),
                     ),
-                    child: const Icon(Icons.dialpad, color: Colors.white),
+                    // Téléphone et non pavé numérique : le même symbole que le
+                    // bouton « Saisir ID » de l'écran Chat, qui ouvre le même
+                    // clavier. Ici, pas de libellé sous l'icône.
+                    child: const Icon(Icons.phone, color: Colors.white),
                   ),
                 ),
               ],
