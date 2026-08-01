@@ -4,28 +4,34 @@ import 'whatsapp_text_parser.dart';
 
 export 'whatsapp_text_parser.dart' show sansMarqueursWhatsApp;
 
-/// Rendu Flutter de la mise en forme WhatsApp.
+/// Rendu Flutter de la mise en forme Alanya Work.
 ///
 /// Toute l'analyse vit dans `whatsapp_text_parser.dart`, en Dart pur pour
 /// rester testable hors Flutter. Ce fichier ne fait que traduire l'arbre
 /// obtenu en `InlineSpan`.
 ///
-/// Le mécanisme est celui de WhatsApp : on tape les marqueurs dans le message,
-/// ils disparaissent à l'affichage et laissent place au style. Le contenu
-/// **stocké et envoyé reste le texte brut**, marqueurs compris — un client qui
-/// ne les interprète pas affiche donc un message lisible plutôt qu'un balisage
-/// perdu.
+/// Marqueurs :
+/// *gras*, _italique_, ~barré~, __souligné__, `manuscrit`
+///
+/// Le contenu **stocké et envoyé reste le texte brut**, marqueurs compris.
 
-const TextStyle _styleChasseFixe = TextStyle(
-  fontFamily: 'monospace',
-  fontFamilyFallback: ['Courier New', 'Courier'],
-);
+/// Manuscrit : style cursif/handwritten. On utilise une famille serif en
+/// italique léger pour simuler l'écriture manuscrite sans ajouter de police
+/// custom (Caveat/DancingScript nécessiteraient un asset). Reste distinct de
+/// l'italique simple par letterSpacing + poids léger.
 
 const Map<StyleWhatsApp, TextStyle> _styles = {
   StyleWhatsApp.gras: TextStyle(fontWeight: FontWeight.bold),
   StyleWhatsApp.italique: TextStyle(fontStyle: FontStyle.italic),
   StyleWhatsApp.barre: TextStyle(decoration: TextDecoration.lineThrough),
-  StyleWhatsApp.chasseFixe: _styleChasseFixe,
+  StyleWhatsApp.souligne: TextStyle(decoration: TextDecoration.underline),
+  StyleWhatsApp.manuscrit: TextStyle(
+    fontStyle: FontStyle.italic,
+    fontFamily: 'serif',
+    fontFamilyFallback: ['Georgia', 'Times New Roman', 'serif'],
+    letterSpacing: 0.4,
+    fontWeight: FontWeight.w400,
+  ),
 };
 
 List<InlineSpan> _versSpans(List<NoeudTexte> noeuds) {

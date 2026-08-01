@@ -5,17 +5,22 @@
 /// `flutter test` n'est pas disponible. Le rendu en `InlineSpan` vit dans
 /// `whatsapp_text.dart`, qui ne fait plus que traduire l'arbre produit ici.
 ///
-/// Marqueurs, identiques à WhatsApp :
+/// Marqueurs Alanya Work (évolution WhatsApp) :
 ///
-/// | Saisie          | Rendu       |
-/// |-----------------|-------------|
-/// | `*texte*`       | gras        |
-/// | `_texte_`       | italique    |
-/// | `~texte~`       | barré       |
-/// | ` ```texte``` ` | chasse fixe |
+/// | Saisie          | Rendu       | Icône    |
+/// |-----------------|-------------|----------|
+/// | `*texte*`       | gras        | B        |
+/// | `_texte_`       | italique    | I        |
+/// | `~texte~`       | barré       | S        |
+/// | `__texte__`     | souligné    | U        |
+/// | `` `texte` ``   | manuscrit   | ✍️       |
+///
+/// Le chasse fixe ```...``` (ancien <> ) a été retiré sur demande.
+/// L'ordre de priorité est important : `__` (2 chars) avant `_` (1 char),
+/// sinon `__hello__` serait vu comme `_` + `_hello_` + `_`.
 library;
 
-enum StyleWhatsApp { gras, italique, barre, chasseFixe }
+enum StyleWhatsApp { gras, italique, barre, souligne, manuscrit }
 
 /// Un fragment de texte : soit une feuille ([texte] non nul), soit un style
 /// appliqué à des [enfants].
@@ -30,37 +35,46 @@ class NoeudTexte {
   final StyleWhatsApp? style;
   final List<NoeudTexte> enfants;
 
-  /// Représentation de débogage, volontairement en ASCII : elle sert de forme
-  /// attendue dans les tests, et des guillemets typographiques y seraient à la
-  /// merci du moindre ré-encodage de fichier.
   @override
   String toString() =>
       texte != null ? '[$texte]' : '${style!.name}(${enfants.join()})';
 }
 
-const Map<String, StyleWhatsApp> _marqueurs = {
-  '*': StyleWhatsApp.gras,
-  '_': StyleWhatsApp.italique,
-  '~': StyleWhatsApp.barre,
-};
+class _DefMarqueur {
+  const _DefMarqueur(this.code, this.style);
+  final String code;
+  final StyleWhatsApp style;
+}
 
-const String _chasseFixe = '```';
+/// Ordre = priorité : plus long d'abord (__ avant _)
+const List<_DefMarqueur> _defs = [
+  _DefMarqueur('__', StyleWhatsApp.souligne),
+  _DefMarqueur('*', StyleWhatsApp.gras),
+  _DefMarqueur('_', StyleWhatsApp.italique),
+  _DefMarqueur('~', StyleWhatsApp.barre),
+  _DefMarqueur('`', StyleWhatsApp.manuscrit),
+];
 
 bool _estBlanc(String c) => c == ' ' || c == '\n' || c == '\t' || c == '\r';
 
 /// Cherche le marqueur fermant correspondant à celui ouvert en [ouverture].
 ///
-/// Renvoie -1 s'il n'y en a pas de valide : le marqueur ouvrant est alors
-/// traité comme un caractère ordinaire, et reste donc visible.
-///
-/// Deux règles reprises de WhatsApp, qui évitent les faux positifs du langage
-/// courant : le caractère suivant l'ouverture ne doit pas être un blanc — sans
-/// quoi « 5 * 3 = 15 » passerait en gras — et celui précédant la fermeture non
-/// plus. Le départ à +2 écarte le contenu vide (`**`).
-int _chercheFermeture(String s, String marqueur, int ouverture, int fin) {
-  if (ouverture + 1 >= fin || _estBlanc(s[ouverture + 1])) return -1;
-  for (var j = ouverture + 2; j < fin; j++) {
-    if (s[j] == marqueur && !_estBlanc(s[j - 1])) return j;
+/// - [code] peut faire 1 ou 2 caractères (__ , *, _, ~, `)
+/// - Le caractère juste après l'ouvrant ne doit pas être un blanc
+/// - Le caractère juste avant le fermant ne doit pas être un blanc
+/// - Contenu vide interdit (ex. ** ou ____)
+int _chercheFermetureMulti(String s, String code, int ouverture, int fin) {
+  final n = code.length;
+  if (ouverture + n >= fin) return -1;
+  // caractère après l'ouvrant = blanc → pas un formatage
+  if (_estBlanc(s[ouverture + n])) return -1;
+
+  // On cherche à partir de ouverture + n + 1 pour garantir au moins 1 char intérieur
+  for (var j = ouverture + n + 1; j <= fin - n; j++) {
+    if (s.startsWith(code, j) && !_estBlanc(s[j - 1])) {
+      // contenu non vide déjà garanti par le +1 ci-dessus
+      return j;
+    }
   }
   return -1;
 }
@@ -78,32 +92,25 @@ List<NoeudTexte> _analyse(String s, int debut, int fin) {
 
   var i = debut;
   while (i < fin) {
-    // La chasse fixe prime : son contenu est pris littéralement, sinon un
-    // extrait de code contenant une étoile partirait en gras.
-    if (i + 3 <= fin && s.startsWith(_chasseFixe, i)) {
-      final fermeture = s.indexOf(_chasseFixe, i + 3);
-      if (fermeture != -1 && fermeture + 3 <= fin && fermeture > i + 3) {
-        vider();
-        noeuds.add(NoeudTexte.style(
-          StyleWhatsApp.chasseFixe,
-          [NoeudTexte.feuille(s.substring(i + 3, fermeture))],
-        ));
-        i = fermeture + 3;
-        continue;
+    bool matched = false;
+    for (final def in _defs) {
+      final code = def.code;
+      if (i + code.length <= fin && s.startsWith(code, i)) {
+        final fermeture = _chercheFermetureMulti(s, code, i, fin);
+        if (fermeture != -1) {
+          vider();
+          // Récursion : les styles s'imbriquent *_gras italique_* etc.
+          noeuds.add(NoeudTexte.style(
+            def.style,
+            _analyse(s, i + code.length, fermeture),
+          ));
+          i = fermeture + code.length;
+          matched = true;
+          break;
+        }
       }
     }
-
-    final style = _marqueurs[s[i]];
-    if (style != null) {
-      final fermeture = _chercheFermeture(s, s[i], i, fin);
-      if (fermeture != -1) {
-        vider();
-        // Récursion : les styles s'imbriquent.
-        noeuds.add(NoeudTexte.style(style, _analyse(s, i + 1, fermeture)));
-        i = fermeture + 1;
-        continue;
-      }
-    }
+    if (matched) continue;
 
     tampon.write(s[i]);
     i++;
