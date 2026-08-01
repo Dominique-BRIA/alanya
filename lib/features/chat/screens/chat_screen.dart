@@ -11,6 +11,7 @@ import '../../../core/whatsapp_format_input.dart';
 import '../../../core/whatsapp_editing_controller.dart';
 import '../../../core/outbox.dart';
 import '../../../core/call_cache.dart';
+import '../../../core/call_status.dart';
 import '../../../models/call_record.dart';
 import '../../calls/calls_repository.dart';
 import 'package:flutter/material.dart';
@@ -725,96 +726,24 @@ class _ChatScreenState extends State<ChatScreen>
     } catch (_) {}
   }
 
-  String _preciseCallStatus(CallRecord c) {
-    switch (c.status) {
-      case "MISSED":
-        return c.isOutgoing ? "Appel sans réponse" : "Appel manqué";
-      case "REJECTED":
-      case "DECLINED":
-        return c.isOutgoing ? "Appel refusé" : "Appel rejeté";
-      case "BUSY":
-        return "Occupé";
-      case "NO_ANSWER":
-        return c.isOutgoing ? "Appel sans réponse" : "Appel manqué";
-      case "ENDED":
-        if (c.durationSec != null && c.durationSec! > 0) {
-          return c.isOutgoing ? "Appel sortant" : "Appel entrant";
-        } else {
-          return c.isOutgoing ? "Appel sans réponse" : "Appel manqué";
-        }
-      default:
-        return c.status;
-    }
-  }
+  // ── Formalisme centralisé (lib/core/call_status.dart) ──
+  // Respecte : MISSED=entrant sans réponse, REJECTED=entrant refusé par moi,
+  // NO_ANSWER/Refusé=sortant non décroché/rejeté par autre, BUSY=occupé
+  // Nuance A->B : B ne décroche pas => A "Appel sans réponse", B "Appel manqué"
+  //               B rejette => A "Appel refusé", B "Appel rejeté"
+  String _preciseCallStatus(CallRecord c) => CallStatusFormalisme.preciseLabel(c);
 
-  String _callTitleInChat(CallRecord c) {
-    final typeLabel = c.type == "VIDEO" ? "Appel vidéo" : "Appel vocal";
-    if (c.isGroup) return "$typeLabel de groupe";
-    return c.isOutgoing ? "$typeLabel sortant" : "$typeLabel entrant";
-  }
+  String _callTitleInChat(CallRecord c) => CallStatusFormalisme.titleInChat(c);
 
-  String _callDetailInChat(CallRecord c) {
-    switch (c.status) {
-      case "MISSED":
-      case "NO_ANSWER":
-        return "Sans réponse";
-      case "REJECTED":
-      case "DECLINED":
-        return "Rejeté";
-      case "BUSY":
-        return "Occupé";
-      case "ENDED":
-        if (c.durationSec != null && c.durationSec! > 0) {
-          return "Répondu";
-        } else {
-          return "Sans réponse";
-        }
-      default:
-        return c.status;
-    }
-  }
+  String _callDetailInChat(CallRecord c) => CallStatusFormalisme.detailInChat(c);
 
-  IconData _callIconFor(CallRecord c) {
-    final detail = _callDetailInChat(c);
-    if (detail == "Sans réponse") {
-      return c.isOutgoing ? Icons.call_made : Icons.call_missed;
-    }
-    if (detail == "Rejeté" || detail == "Occupé") {
-      return c.isOutgoing ? Icons.call_made : Icons.call_received;
-    }
-    // Répondu
-    return c.isOutgoing ? Icons.call_made : Icons.call_received;
-  }
+  IconData _callIconFor(CallRecord c) => CallStatusFormalisme.iconFor(c);
 
-  Color _callColorFor(CallRecord c) {
-    final s = c.status;
-    final isFailed = s == "MISSED" ||
-        s == "NO_ANSWER" ||
-        s == "REJECTED" ||
-        s == "DECLINED" ||
-        s == "BUSY" ||
-        (s == "ENDED" && (c.durationSec == null || c.durationSec == 0));
-    if (isFailed) return _danger; // rouge pour manqué/rejeté
-    // Réussi
-    if (c.isOutgoing) {
-      return _positive; // vert pour sortant réussi
-    } else {
-      return const Color(0xFF2196F3); // bleu pour entrant réussi
-    }
-  }
+  Color _callColorFor(CallRecord c) => CallStatusFormalisme.colorFor(c, danger: _danger, positive: _positive);
 
-  String _formatCallDateTime(DateTime dt) {
-    final l = dt.toLocal();
-    String two(int n) => n.toString().padLeft(2, '0');
-    return "${two(l.day)}/${two(l.month)}/${l.year} ${two(l.hour)}:${two(l.minute)}";
-  }
+  String _formatCallDateTime(DateTime dt) => CallStatusFormalisme.formatDateTime(dt);
 
-  String _formatCallDuration(int? sec) {
-    if (sec == null || sec <= 0) return "";
-    final m = sec ~/ 60;
-    final s = sec % 60;
-    return "${m.toString().padLeft(2, "0")}:${s.toString().padLeft(2, "0")}";
-  }
+  String _formatCallDuration(int? sec) => CallStatusFormalisme.formatDuration(sec);
 
   Widget _callBubbleInChat(CallRecord c) {
     final title = _callTitleInChat(c); // ex: Appel vocal entrant / sortant

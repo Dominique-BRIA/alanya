@@ -15,6 +15,7 @@ import '../../core/ringtone_service.dart';
 import '../../core/notification_settings.dart';
 import '../../core/realtime_client.dart';
 import '../../core/call_cache.dart';
+import '../../core/call_status.dart';
 import '../../models/call_record.dart';
 import '../../models/ai_message.dart';
 import '../../models/auth_user.dart';
@@ -217,63 +218,11 @@ class _ConversationsTabState extends State<_ConversationsTab>
   String _searchQuery = '';
   int _tabFilter = 0;
 
-  String _preciseCallStatus(CallRecord c) {
-    switch (c.status) {
-      case "MISSED":
-        return c.isOutgoing ? "Appel sans réponse" : "Appel manqué";
-      case "REJECTED":
-      case "DECLINED":
-        return c.isOutgoing ? "Appel refusé" : "Appel rejeté";
-      case "BUSY":
-        return "Occupé";
-      case "NO_ANSWER":
-        return c.isOutgoing ? "Appel sans réponse" : "Appel manqué";
-      case "ENDED":
-        if (c.durationSec != null && c.durationSec! > 0) {
-          return c.isOutgoing ? "Appel sortant" : "Appel entrant";
-        } else {
-          return c.isOutgoing ? "Appel sans réponse" : "Appel manqué";
-        }
-      default:
-        return c.status;
-    }
-  }
-
-  IconData _callIconFor(CallRecord c) {
-    if (c.status == "MISSED" || c.status == "NO_ANSWER") {
-      return c.isOutgoing ? Icons.call_made : Icons.call_missed;
-    }
-    if (c.status == "REJECTED" || c.status == "DECLINED") {
-      return c.isOutgoing ? Icons.call_made : Icons.call_received;
-    }
-    if (c.status == "BUSY") return Icons.block;
-    if (c.status == "ENDED" && c.durationSec != null && c.durationSec! > 0) {
-      return c.isOutgoing ? Icons.call_made : Icons.call_received;
-    }
-    return c.isOutgoing ? Icons.call_made : Icons.call_received;
-  }
-
-  Color _callColorFor(CallRecord c, BuildContext context) {
-    final s = c.status;
-    final isMissedOrRejected = s == "MISSED" ||
-        s == "NO_ANSWER" ||
-        s == "REJECTED" ||
-        s == "DECLINED" ||
-        s == "BUSY";
-    if (isMissedOrRejected) return dangerOf(context);
-    if (s == "ENDED" && c.durationSec != null && c.durationSec! > 0) {
-      return c.isOutgoing
-          ? positiveOf(context) // vert pour sortant réussi
-          : const Color(0xFF2196F3); // bleu pour entrant réussi
-    }
-    return mutedOf(context, Colors.black54);
-  }
-
-  String _formatDateTimeShort(DateTime dt) {
-    final l = dt.toLocal();
-    String two(int n) => n.toString().padLeft(2, '0');
-    return "${two(l.day)}/${two(l.month)} ${two(l.hour)}:${two(l.minute)}";
-  }
+  // Formalisme centralisé – voir lib/core/call_status.dart
+  String _preciseCallStatus(CallRecord c) => CallStatusFormalisme.preciseLabel(c);
+  IconData _callIconFor(CallRecord c) => CallStatusFormalisme.iconFor(c);
+  Color _callColorFor(CallRecord c, BuildContext context) => CallStatusFormalisme.colorFor(c, danger: dangerOf(context), positive: positiveOf(context));
+  String _formatDateTimeShort(DateTime dt) => CallStatusFormalisme.formatDateTime(dt);
 
   Future<void> _loadCalls() async {
     try {

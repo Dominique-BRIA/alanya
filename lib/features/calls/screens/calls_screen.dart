@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/call_cache.dart';
+import '../../../core/call_status.dart';
 import '../../../models/call_record.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
@@ -48,7 +49,7 @@ class _CallsScreenState extends State<CallsScreen>
     final cached = await CallCache.getAll();
     if (cached.isNotEmpty && mounted) {
       setState(() {
-        _calls = _sortAndLimit(cached);
+        _calls = CallStatusFormalisme.sortAndLimit20(cached);
         _error = false;
       });
     }
@@ -56,7 +57,7 @@ class _CallsScreenState extends State<CallsScreen>
       final calls = await context.read<CallsRepository>().history();
       if (!mounted) return;
       setState(() {
-        _calls = _sortAndLimit(calls);
+        _calls = CallStatusFormalisme.sortAndLimit20(calls);
         _error = false;
       });
       await CallCache.putAll(calls);
@@ -67,108 +68,12 @@ class _CallsScreenState extends State<CallsScreen>
     }
   }
 
-  List<CallRecord> _sortAndLimit(List<CallRecord> calls) {
-    final sorted = List<CallRecord>.from(calls);
-    sorted.sort((a, b) => b.startedAt.compareTo(a.startedAt));
-    if (sorted.length > 20) return sorted.take(20).toList();
-    return sorted;
-  }
-
-  /// Statut précis selon la nuance demandée :
-  /// - A appelle B, B ne décroche pas : chez A "Appel sans réponse", chez B "Appel manqué"
-  /// - B rejette : chez A "Appel refusé", chez B "Appel rejeté"
-  String _preciseStatus(CallRecord c) {
-    final s = c.status;
-    final outgoing = c.isOutgoing;
-
-    switch (s) {
-      case "MISSED":
-        // Backend MISSED : si sortant = pas de réponse, si entrant = manqué
-        return outgoing ? "Appel sans réponse" : "Appel manqué";
-      case "REJECTED":
-      case "DECLINED":
-        // Si j'ai rejeté (entrant) vs on m'a refusé (sortant)
-        return outgoing ? "Appel refusé" : "Appel rejeté";
-      case "NO_ANSWER":
-        return outgoing ? "Appel sans réponse" : "Appel manqué";
-      case "BUSY":
-        return "Occupé";
-      case "ENDED":
-        if (c.durationSec != null && c.durationSec! > 0) {
-          return outgoing ? "Appel sortant" : "Appel entrant";
-        } else {
-          // Terminé sans durée = souvent sans réponse
-          return outgoing ? "Appel sans réponse" : "Appel manqué";
-        }
-      case "RINGING":
-        return outgoing ? "Appel sortant" : "Appel entrant";
-      case "ONGOING":
-        return "En cours";
-      default:
-        return s;
-    }
-  }
-
-  IconData _iconFor(CallRecord c) {
-    final s = c.status;
-    final outgoing = c.isOutgoing;
-
-    if (s == "MISSED") {
-      return outgoing ? Icons.call_made : Icons.call_missed;
-    }
-    if (s == "REJECTED" || s == "DECLINED") {
-      return outgoing ? Icons.call_made : Icons.call_received;
-    }
-    if (s == "BUSY") {
-      return Icons.block;
-    }
-    if (s == "NO_ANSWER") {
-      return outgoing ? Icons.call_made : Icons.call_missed;
-    }
-    // ENDED
-    if (s == "ENDED") {
-      if (c.durationSec != null && c.durationSec! > 0) {
-        return outgoing ? Icons.call_made : Icons.call_received;
-      } else {
-        return outgoing ? Icons.call_made : Icons.call_missed;
-      }
-    }
-    // RINGING, ONGOING
-    return outgoing ? Icons.call_made : Icons.call_received;
-  }
-
-  Color _colorFor(CallRecord c, BuildContext context) {
-    final s = c.status;
-    final isMissedOrRejected = s == "MISSED" ||
-        s == "NO_ANSWER" ||
-        s == "REJECTED" ||
-        s == "DECLINED" ||
-        s == "BUSY" ||
-        (s == "ENDED" && (c.durationSec == null || c.durationSec == 0));
-    if (isMissedOrRejected) {
-      return dangerOf(context); // rouge pour manqué/rejeté
-    }
-    if (s == "ENDED" && c.durationSec != null && c.durationSec! > 0) {
-      // sortant réussi = vert, entrant réussi = bleu (demande utilisateur)
-      return c.isOutgoing
-          ? positiveOf(context)
-          : const Color(0xFF2196F3);
-    }
-    return mutedOf(context, Colors.black54);
-  }
-
-  String _formatDateTime(DateTime dt) {
-    final l = dt.toLocal();
-    String two(int n) => n.toString().padLeft(2, '0');
-    return "${two(l.day)}/${two(l.month)}/${l.year} ${two(l.hour)}:${two(l.minute)}";
-  }
-
-  String _formatDuration(int? sec) {
-    if (sec == null || sec <= 0) return "";
-    final m = sec ~/ 60;
-    final s = sec % 60;
-    return "${m.toString().padLeft(2, "0")}:${s.toString().padLeft(2, "0")}";
-  }
+  // Formalisme standard centralisé
+  String _preciseStatus(CallRecord c) => CallStatusFormalisme.preciseLabel(c);
+  IconData _iconFor(CallRecord c) => CallStatusFormalisme.iconFor(c);
+  Color _colorFor(CallRecord c, BuildContext context) => CallStatusFormalisme.colorFor(c, danger: dangerOf(context), positive: positiveOf(context));
+  String _formatDateTime(DateTime dt) => CallStatusFormalisme.formatDateTime(dt);
+  String _formatDuration(int? sec) => CallStatusFormalisme.formatDuration(sec);
 
   Future<void> _deleteSelected() async {
     final count = selectedCount;
@@ -297,7 +202,6 @@ class _CallsScreenState extends State<CallsScreen>
     final dateStr = _formatDateTime(c.startedAt);
     final dur = _formatDuration(c.durationSec);
 
-    // Pour les appels sans réponse / manqués, pas de durée
     final subtitleText = StringBuffer()
       ..write(status)
       ..write(" · $dateStr");
