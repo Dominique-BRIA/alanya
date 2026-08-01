@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'whatsapp_text_parser.dart';
 
-/// Controller qui affiche le formatage en **direct** dans le champ de saisie.
+/// Controller WYSIWYG pour le champ de saisie Alanya Work.
 ///
-/// - `*gras*`, `_italique_`, `~barré~`, `__souligné__`, `` `manuscrit` ``
-/// - Marqueurs atténués (35%) + contenu stylé
-/// - Imbrication supportée
+/// Affiche `*gras*`, `_italique_`, `~barré~`, `__souligné__`, `` `manuscrit` ``
+/// **en direct** dans le TextField, y compris pendant la phase de composition
+/// IME (fond gris + souligné Android). Ancienne version perdait le style pendant
+/// la composition car elle remplaçait le mot en cours par un span uni.
 class WhatsappFormattingController extends TextEditingController {
   WhatsappFormattingController({super.text});
 
@@ -23,9 +24,8 @@ class WhatsappFormattingController extends TextEditingController {
     ),
   };
 
-  // Priorité : __ avant _
   static const List<_DefEdit> _defs = [
-    _DefEdit('__', StyleWhatsApp.souligne),
+    _DefEdit('__', StyleWhatsApp.souligne), // prioritaire sur _
     _DefEdit('*', StyleWhatsApp.gras),
     _DefEdit('_', StyleWhatsApp.italique),
     _DefEdit('~', StyleWhatsApp.barre),
@@ -53,21 +53,83 @@ class WhatsappFormattingController extends TextEditingController {
     return base.merge(extra);
   }
 
-  List<InlineSpan> _build(
+  /// Découpe un segment texte [txt] qui couvre [txtStart, txtStart+len) dans
+  /// le document original en 1 à 3 spans selon qu'il chevauche la zone de
+  /// composition [compStart, compEnd). Le style de la partie en composition
+  /// reçoit en plus [compStyle] (underline + fond gris).
+  List<InlineSpan> _spansWithComposing(
+    String txt,
+    int txtStart,
+    TextStyle style,
+    int? compStart,
+    int? compEnd,
+    TextStyle? compStyle,
+  ) {
+    if (txt.isEmpty) return const [];
+    if (compStart == null ||
+        compEnd == null ||
+        compStyle == null ||
+        txtStart >= compEnd ||
+        txtStart + txt.length <= compStart) {
+      return [TextSpan(text: txt, style: style)];
+    }
+
+    final res = <InlineSpan>[];
+    final txtEnd = txtStart + txt.length;
+
+    // avant composition
+    if (txtStart < compStart) {
+      final beforeLen = (compStart - txtStart).clamp(0, txt.length);
+      if (beforeLen > 0) {
+        res.add(TextSpan(
+            text: txt.substring(0, beforeLen), style: style));
+      }
+    }
+
+    // chevauchement
+    final overlapStart = txtStart < compStart ? compStart : txtStart;
+    final overlapEnd = txtEnd > compEnd ? compEnd : txtEnd;
+    if (overlapStart < overlapEnd) {
+      final off = overlapStart - txtStart;
+      final len = overlapEnd - overlapStart;
+      res.add(TextSpan(
+        text: txt.substring(off, off + len),
+        style: style.merge(compStyle),
+      ));
+    }
+
+    // après composition
+    if (txtEnd > compEnd) {
+      final afterOff = compEnd - txtStart;
+      if (afterOff < txt.length && afterOff >= 0) {
+        res.add(TextSpan(
+            text: txt.substring(afterOff), style: style));
+      }
+    }
+
+    return res;
+  }
+
+  List<InlineSpan> _buildWithComposing(
     String s,
     int debut,
     int fin,
     TextStyle courant,
     TextStyle faint,
+    int? compStart,
+    int? compEnd,
+    TextStyle? compStyle,
   ) {
     final spans = <InlineSpan>[];
     final buffer = StringBuffer();
+    int bufferStart = debut;
 
-    void flush() {
-      if (buffer.isNotEmpty) {
-        spans.add(TextSpan(text: buffer.toString(), style: courant));
-        buffer.clear();
-      }
+    void flushBuffer() {
+      if (buffer.isEmpty) return;
+      final txt = buffer.toString();
+      spans.addAll(_spansWithComposing(
+          txt, bufferStart, courant, compStart, compEnd, compStyle));
+      buffer.clear();
     }
 
     var i = debut;
@@ -78,14 +140,31 @@ class WhatsappFormattingController extends TextEditingController {
         if (i + code.length <= fin && s.startsWith(code, i)) {
           final fermeture = _chercheFermetureMulti(s, code, i, fin);
           if (fermeture != -1) {
-            flush();
-            spans.add(TextSpan(text: code, style: faint));
-            final nouveauCourant = _fusion(courant, def.style);
-            final interieurs =
-                _build(s, i + code.length, fermeture, nouveauCourant, faint);
-            spans.addAll(interieurs);
-            spans.add(TextSpan(text: code, style: faint));
+            flushBuffer();
+
+            // ouvrant atténué
+            spans.addAll(_spansWithComposing(
+                code, i, faint, compStart, compEnd, compStyle));
+
+            // intérieur récursif
+            final newCourant = _fusion(courant, def.style);
+            spans.addAll(_buildWithComposing(
+              s,
+              i + code.length,
+              fermeture,
+              newCourant,
+              faint,
+              compStart,
+              compEnd,
+              compStyle,
+            ));
+
+            // fermant atténué
+            spans.addAll(_spansWithComposing(code, fermeture, faint,
+                compStart, compEnd, compStyle));
+
             i = fermeture + code.length;
+            bufferStart = i;
             matched = true;
             break;
           }
@@ -93,11 +172,12 @@ class WhatsappFormattingController extends TextEditingController {
       }
       if (matched) continue;
 
+      if (buffer.isEmpty) bufferStart = i;
       buffer.write(s[i]);
       i++;
     }
 
-    flush();
+    flushBuffer();
     return spans;
   }
 
@@ -120,36 +200,44 @@ class WhatsappFormattingController extends TextEditingController {
       decoration: TextDecoration.none,
     );
 
-    var children = _build(text, 0, text.length, base, faint);
+    int? compStart;
+    int? compEnd;
+    TextStyle? compStyle;
 
     if (withComposing &&
         value.composing.isValid &&
         !value.composing.isCollapsed) {
-      final compStart = value.composing.start;
-      final compEnd = value.composing.end;
-      if (compStart >= 0 && compEnd <= text.length && compStart < compEnd) {
-        final plain = text;
-        final before = plain.substring(0, compStart);
-        final composingText = plain.substring(compStart, compEnd);
-        final after = plain.substring(compEnd);
-
-        children = [
-          if (before.isNotEmpty)
-            ..._build(before, 0, before.length, base, faint),
-          TextSpan(
-            text: composingText,
-            style: base.copyWith(
-              decoration: TextDecoration.underline,
-              decorationStyle: TextDecorationStyle.solid,
-              backgroundColor: base.color?.withOpacity(0.08) ??
-                  Colors.grey.withOpacity(0.15),
-            ),
-          ),
-          if (after.isNotEmpty)
-            ..._build(after, 0, after.length, base, faint),
-        ];
+      compStart = value.composing.start;
+      compEnd = value.composing.end;
+      // On garde le fond très léger + souligné pour signaler la composition
+      // mais on le fusionne avec le style formaté existant (gras, etc.)
+      compStyle = TextStyle(
+        backgroundColor:
+            (base.color ?? Colors.black).withOpacity(0.08),
+        decoration: TextDecoration.underline,
+        decorationStyle: TextDecorationStyle.dotted,
+        decorationColor: base.color?.withOpacity(0.4),
+      );
+      // bornes défensives
+      if (compStart < 0) compStart = 0;
+      if (compEnd > text.length) compEnd = text.length;
+      if (compStart >= compEnd) {
+        compStart = null;
+        compEnd = null;
+        compStyle = null;
       }
     }
+
+    final children = _buildWithComposing(
+      text,
+      0,
+      text.length,
+      base,
+      faint,
+      compStart,
+      compEnd,
+      compStyle,
+    );
 
     return TextSpan(style: base, children: children);
   }
