@@ -825,101 +825,122 @@ class _ChatScreenState extends State<ChatScreen>
     final dur = _formatCallDuration(c.durationSec);
     final mine = c.isOutgoing;
 
-    // Forme WhatsApp alignée gauche/droite pour savoir qui a appelé
-    // Fond conservé d'origine (_cardBg) sur demande — seules les couleurs
-    // du texte/icône changent : rouge manqué/rejeté, vert sortant réussi, bleu entrant réussi
+    // Bulle fine type WhatsApp (demande : épaisseur trop grosse, on réduit)
+    // Fond conservé d'origine (_cardBg), alignée gauche/droite
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        constraints: const BoxConstraints(maxWidth: 280),
-        decoration: BoxDecoration(
-          color: _cardBg,
-          borderRadius: BorderRadius.only(
-            topLeft: Radius.circular(mine ? 12 : 0),
-            topRight: Radius.circular(mine ? 0 : 12),
-            bottomLeft: const Radius.circular(12),
-            bottomRight: const Radius.circular(12),
-          ),
-          border: Border.all(color: _hairline),
+      child: InkWell(
+        onTap: () => _showCallChoice(c),
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(mine ? 10 : 0),
+          topRight: Radius.circular(mine ? 0 : 10),
+          bottomLeft: const Radius.circular(10),
+          bottomRight: const Radius.circular(10),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.12),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(Icons.call, size: 16, color: color),
-                ),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: Text(
-                    title,
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: _dark ? AlanyaColors.craie : AlanyaColors.ink,
-                    ),
-                  ),
-                ),
-              ],
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 2),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          constraints: const BoxConstraints(maxWidth: 260),
+          decoration: BoxDecoration(
+            color: _cardBg,
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(mine ? 10 : 0),
+              topRight: Radius.circular(mine ? 0 : 10),
+              bottomLeft: const Radius.circular(10),
+              bottomRight: const Radius.circular(10),
             ),
-            const SizedBox(height: 4),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, size: 12, color: color),
-                const SizedBox(width: 4),
-                Flexible(
-                  child: Text(
-                    dur.isNotEmpty ? "$detail · $time · $dur" : "$detail · $time",
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: color, // rouge / vert / bleu comme demandé
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
+            border: Border.all(color: _hairline),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(5),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
                 ),
-              ],
-            ),
-            const SizedBox(height: 2),
-            Align(
-              alignment: Alignment.centerRight,
-              child: InkWell(
-                onTap: () => _startCall(c.type),
-                borderRadius: BorderRadius.circular(12),
-                child: Padding(
-                  padding: const EdgeInsets.all(4),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.call, size: 14, color: _positive),
-                      const SizedBox(width: 4),
-                      Text(
-                        "Rappeler",
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: _positive,
-                        ),
+                child: Icon(Icons.call, size: 14, color: color),
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: _dark ? AlanyaColors.craie : AlanyaColors.ink,
                       ),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(height: 1),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(icon, size: 10, color: color),
+                        const SizedBox(width: 3),
+                        Flexible(
+                          child: Text(
+                            dur.isNotEmpty ? "$detail · $time · $dur" : "$detail · $time",
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                              color: color,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showCallChoice(CallRecord c) async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                c.isGroup ? "Rappeler le groupe ?" : "Rappeler ${widget.title} ?",
+                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+              ),
             ),
+            const Divider(height: 1),
+            ListTile(
+              leading: Icon(Icons.call, color: _positive),
+              title: const Text("Appel audio"),
+              onTap: () => Navigator.pop(ctx, "AUDIO"),
+            ),
+            ListTile(
+              leading: Icon(Icons.videocam, color: _positive),
+              title: const Text("Appel vidéo"),
+              onTap: () => Navigator.pop(ctx, "VIDEO"),
+            ),
+            const SizedBox(height: 8),
           ],
         ),
       ),
     );
+    if (choice != null) {
+      _startCall(choice);
+    }
   }
 
   bool _needsDateSeparatorCombined(int index) {
