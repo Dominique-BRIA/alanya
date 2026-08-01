@@ -825,10 +825,9 @@ class _ChatScreenState extends State<ChatScreen>
     final dur = _formatCallDuration(c.durationSec);
     final mine = c.isOutgoing;
 
-    // Forme WhatsApp + couleurs demandées :
-    // - manqué/rejeté en rouge
-    // - sortant réussi en vert
-    // - entrant réussi en bleu
+    // Forme WhatsApp alignée gauche/droite pour savoir qui a appelé
+    // Fond conservé d'origine (_cardBg) sur demande — seules les couleurs
+    // du texte/icône changent : rouge manqué/rejeté, vert sortant réussi, bleu entrant réussi
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
@@ -836,14 +835,14 @@ class _ChatScreenState extends State<ChatScreen>
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         constraints: const BoxConstraints(maxWidth: 280),
         decoration: BoxDecoration(
-          color: mine ? _sentBubbleColor : _recvBubbleColor,
+          color: _cardBg,
           borderRadius: BorderRadius.only(
             topLeft: Radius.circular(mine ? 12 : 0),
             topRight: Radius.circular(mine ? 0 : 12),
             bottomLeft: const Radius.circular(12),
             bottomRight: const Radius.circular(12),
           ),
-          border: mine ? null : Border.all(color: _hairline),
+          border: Border.all(color: _hairline),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -854,13 +853,10 @@ class _ChatScreenState extends State<ChatScreen>
                 Container(
                   padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
-                    color: (mine ? Colors.white : color)
-                        .withValues(alpha: mine ? 0.22 : 0.12),
+                    color: color.withValues(alpha: 0.12),
                     shape: BoxShape.circle,
                   ),
-                  child: Icon(Icons.call,
-                      size: 16,
-                      color: mine ? Colors.white : color),
+                  child: Icon(Icons.call, size: 16, color: color),
                 ),
                 const SizedBox(width: 8),
                 Flexible(
@@ -869,7 +865,7 @@ class _ChatScreenState extends State<ChatScreen>
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color: _bubbleTextColor(mine),
+                      color: _dark ? AlanyaColors.craie : AlanyaColors.ink,
                     ),
                   ),
                 ),
@@ -905,16 +901,14 @@ class _ChatScreenState extends State<ChatScreen>
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.call,
-                          size: 14,
-                          color: mine ? Colors.white70 : _positive),
+                      Icon(Icons.call, size: 14, color: _positive),
                       const SizedBox(width: 4),
                       Text(
                         "Rappeler",
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
-                          color: mine ? Colors.white70 : _positive,
+                          color: _positive,
                         ),
                       ),
                     ],
