@@ -278,11 +278,24 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
             ? cc.participantAvatars[primaryId]
             : cc.activePeerAvatarUrl);
 
-    final String name = widget.incoming
-        ? (cc.incoming?.displayTitle ?? "Appel")
-        : (primaryId != null
-            ? (cc.participantNames[primaryId] ?? cc.activePeerName ?? "Contact")
-            : (cc.activePeerName ?? "Contact"));
+    // FIX appel entrant : après décroché, cc.incoming repasse à null (acceptIncoming)
+    // alors que widget.incoming reste true. L'ancien code faisait
+    // `cc.incoming?.displayTitle ?? "Appel"` → retombait sur "Appel" juste après
+    // avoir décroché chez B. On utilise désormais activePeerName / participantNames
+    // dès que l'appel n'est plus en sonnerie.
+    final String name;
+    if (widget.incoming && cc.incoming != null) {
+      name = cc.incoming!.displayTitle;
+    } else if (primaryId != null) {
+      name = cc.participantNames[primaryId] ??
+          cc.activePeerName ??
+          cc.incoming?.displayTitle ??
+          "Contact";
+    } else {
+      name = cc.activePeerName ??
+          cc.incoming?.displayTitle ??
+          "Contact";
+    }
     // Après acceptation d'un appel entrant, cc.incoming repasse à null alors que
     // widget.incoming reste true : l'ancien code lisait donc cc.incoming?.callType
     // == null → isVideo=false → l'UI masquait la vidéo (distante ET auto-vue) même
