@@ -201,21 +201,22 @@ class WhatsappFormattingController extends TextEditingController {
     int? compEnd;
     TextStyle? compStyle;
 
-    if (withComposing &&
-        value.composing.isValid &&
-        !value.composing.isCollapsed) {
+    // Désactivé sur demande utilisateur : fond gris + souligné pendant la frappe
+    // causait "background gris et message souligné" dans le champ.
+    // On ignore volontairement la zone de composition IME pour ne pas afficher
+    // de background ni de underline, tout en conservant le formatage WYSIWYG
+    // (gras, italique, souligné, manuscrit). Le split _spansWithComposing reste
+    // là pour garder le style courant même en composition, mais sans compStyle.
+    // Si besoin de réactiver le signal IME, recréer compStyle avec background 0.08 + underline dotted.
+    if (false && withComposing && value.composing.isValid && !value.composing.isCollapsed) {
       compStart = value.composing.start;
       compEnd = value.composing.end;
-      // On garde le fond très léger + souligné pour signaler la composition
-      // mais on le fusionne avec le style formaté existant (gras, etc.)
       compStyle = TextStyle(
-        backgroundColor:
-            (base.color ?? Colors.black).withOpacity(0.08),
+        backgroundColor: (base.color ?? Colors.black).withOpacity(0.08),
         decoration: TextDecoration.underline,
         decorationStyle: TextDecorationStyle.dotted,
         decorationColor: base.color?.withOpacity(0.4),
       );
-      // bornes défensives
       if (compStart < 0) compStart = 0;
       if (compEnd > text.length) compEnd = text.length;
       if (compStart >= compEnd) {
