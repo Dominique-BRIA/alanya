@@ -187,6 +187,14 @@ class CallController extends ChangeNotifier {
     if (inc.callerAvatarUrl != null) {
       participantAvatars[inc.callerId] = inc.callerAvatarUrl!;
     }
+    // Sécurité : le nom de l'appelant doit survivre après la nullification de incoming
+    // (écran ActiveCallScreen lisait incoming?.displayTitle ?? "Appel" et retombait sur "Appel")
+    participantNames[inc.callerId] = inc.callerName;
+    _initialMemberIds.clear();
+    _initialMemberIds.add(myUserId!);
+    _initialMemberIds.add(inc.callerId);
+    joinedParticipantIds.add(inc.callerId);
+
     activeType = inc.callType;
     activeRole = ActiveCallRole.ongoing;
     incoming = null; // incoming mis à null APRÈS
@@ -198,8 +206,6 @@ class CallController extends ChangeNotifier {
       displayName: myDisplayName,
     );
 
-    _initialMemberIds.clear();
-    _initialMemberIds.add(myUserId!);
     for (final p in result.activeParticipants) {
       participantNames[p.userId] = p.displayName;
       joinedParticipantIds.add(p.userId);
