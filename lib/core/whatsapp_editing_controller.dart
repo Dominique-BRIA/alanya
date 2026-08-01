@@ -32,15 +32,12 @@ class WhatsappFormattingController extends TextEditingController {
     _DefEdit('`', StyleWhatsApp.manuscrit),
   ];
 
-  bool _estBlanc(String c) =>
-      c == ' ' || c == '\n' || c == '\t' || c == '\r';
-
   int _chercheFermetureMulti(String s, String code, int ouverture, int fin) {
     final n = code.length;
-    if (ouverture + n >= fin) return -1;
-    if (_estBlanc(s[ouverture + n])) return -1;
+    // au moins 1 char entre ouvrant et fermant
+    if (ouverture + n + 1 > fin - n) return -1;
     for (var j = ouverture + n + 1; j <= fin - n; j++) {
-      if (s.startsWith(code, j) && !_estBlanc(s[j - 1])) {
+      if (s.startsWith(code, j)) {
         return j;
       }
     }

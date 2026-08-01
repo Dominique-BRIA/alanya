@@ -55,24 +55,22 @@ const List<_DefMarqueur> _defs = [
   _DefMarqueur('`', StyleWhatsApp.manuscrit),
 ];
 
-bool _estBlanc(String c) => c == ' ' || c == '\n' || c == '\t' || c == '\r';
-
 /// Cherche le marqueur fermant correspondant à celui ouvert en [ouverture].
 ///
+/// Historiquement on refusait les blancs juste après l'ouvrant et juste avant
+/// le fermant pour éviter « 5 * 3 ». Sur demande utilisateur on autorise
+/// désormais les espaces : `* hello *` doit devenir gras.
 /// - [code] peut faire 1 ou 2 caractères (__ , *, _, ~, `)
-/// - Le caractère juste après l'ouvrant ne doit pas être un blanc
-/// - Le caractère juste avant le fermant ne doit pas être un blanc
-/// - Contenu vide interdit (ex. ** ou ____)
+/// - Contenu vide interdit (ex. ** ou ____) → on exige au moins 1 char
 int _chercheFermetureMulti(String s, String code, int ouverture, int fin) {
   final n = code.length;
-  if (ouverture + n >= fin) return -1;
-  // caractère après l'ouvrant = blanc → pas un formatage
-  if (_estBlanc(s[ouverture + n])) return -1;
+  // besoin d'au moins 1 char entre ouvrant et fermant
+  if (ouverture + n + 1 > fin - n) return -1;
 
-  // On cherche à partir de ouverture + n + 1 pour garantir au moins 1 char intérieur
+  // Cherche le premier fermant valide après au moins 1 caractère intérieur.
+  // On autorise les espaces autour du contenu.
   for (var j = ouverture + n + 1; j <= fin - n; j++) {
-    if (s.startsWith(code, j) && !_estBlanc(s[j - 1])) {
-      // contenu non vide déjà garanti par le +1 ci-dessus
+    if (s.startsWith(code, j)) {
       return j;
     }
   }
