@@ -48,7 +48,7 @@ class _CallsScreenState extends State<CallsScreen>
     final cached = await CallCache.getAll();
     if (cached.isNotEmpty && mounted) {
       setState(() {
-        _calls = cached;
+        _calls = _sortAndLimit(cached);
         _error = false;
       });
     }
@@ -56,7 +56,7 @@ class _CallsScreenState extends State<CallsScreen>
       final calls = await context.read<CallsRepository>().history();
       if (!mounted) return;
       setState(() {
-        _calls = calls;
+        _calls = _sortAndLimit(calls);
         _error = false;
       });
       await CallCache.putAll(calls);
@@ -67,30 +67,101 @@ class _CallsScreenState extends State<CallsScreen>
     }
   }
 
-  String _statusLabel(String s) {
+  List<CallRecord> _sortAndLimit(List<CallRecord> calls) {
+    final sorted = List<CallRecord>.from(calls);
+    sorted.sort((a, b) => b.startedAt.compareTo(a.startedAt));
+    if (sorted.length > 20) return sorted.take(20).toList();
+    return sorted;
+  }
+
+  /// Statut précis selon la nuance demandée :
+  /// - A appelle B, B ne décroche pas : chez A "Appel sans réponse", chez B "Appel manqué"
+  /// - B rejette : chez A "Appel refusé", chez B "Appel rejeté"
+  String _preciseStatus(CallRecord c) {
+    final s = c.status;
+    final outgoing = c.isOutgoing;
+
     switch (s) {
+      case "MISSED":
+        // Backend MISSED : si sortant = pas de réponse, si entrant = manqué
+        return outgoing ? "Appel sans réponse" : "Appel manqué";
+      case "REJECTED":
+      case "DECLINED":
+        // Si j'ai rejeté (entrant) vs on m'a refusé (sortant)
+        return outgoing ? "Appel refusé" : "Appel rejeté";
+      case "NO_ANSWER":
+        return outgoing ? "Appel sans réponse" : "Appel manqué";
+      case "BUSY":
+        return "Occupé";
+      case "ENDED":
+        if (c.durationSec != null && c.durationSec! > 0) {
+          return outgoing ? "Appel sortant" : "Appel entrant";
+        } else {
+          // Terminé sans durée = souvent sans réponse
+          return outgoing ? "Appel sans réponse" : "Appel manqué";
+        }
       case "RINGING":
-        return "Sonnerie";
+        return outgoing ? "Appel sortant" : "Appel entrant";
       case "ONGOING":
         return "En cours";
-      case "ENDED":
-        return "Terminé";
-      case "MISSED":
-        return "Manqué";
-      case "REJECTED":
-        return "Refusé";
       default:
         return s;
     }
   }
 
-  String _duration(CallRecord c) {
-    if (c.durationSec != null && c.durationSec! > 0) {
-      final m = c.durationSec! ~/ 60;
-      final s = c.durationSec! % 60;
-      return "${m.toString().padLeft(2, "0")}:${s.toString().padLeft(2, "0")}";
+  IconData _iconFor(CallRecord c) {
+    final s = c.status;
+    final outgoing = c.isOutgoing;
+
+    if (s == "MISSED") {
+      return outgoing ? Icons.call_made : Icons.call_missed;
     }
-    return _statusLabel(c.status);
+    if (s == "REJECTED" || s == "DECLINED") {
+      return outgoing ? Icons.call_made : Icons.call_received;
+    }
+    if (s == "BUSY") {
+      return Icons.block;
+    }
+    if (s == "NO_ANSWER") {
+      return outgoing ? Icons.call_made : Icons.call_missed;
+    }
+    // ENDED
+    if (s == "ENDED") {
+      if (c.durationSec != null && c.durationSec! > 0) {
+        return outgoing ? Icons.call_made : Icons.call_received;
+      } else {
+        return outgoing ? Icons.call_made : Icons.call_missed;
+      }
+    }
+    // RINGING, ONGOING
+    return outgoing ? Icons.call_made : Icons.call_received;
+  }
+
+  Color _colorFor(CallRecord c, BuildContext context) {
+    final s = c.status;
+    if (s == "MISSED" || s == "NO_ANSWER") {
+      return dangerOf(context);
+    }
+    if (s == "REJECTED" || s == "DECLINED" || s == "BUSY") {
+      // Refusé / Occupé en rouge si entrant manqué/rejeté, sinon neutre ?
+      // On met rouge pour tout ce qui n'est pas abouti côté receveur
+      if (!c.isOutgoing) return dangerOf(context);
+      return mutedOf(context, Colors.black54);
+    }
+    return positiveOf(context);
+  }
+
+  String _formatDateTime(DateTime dt) {
+    final l = dt.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return "${two(l.day)}/${two(l.month)}/${l.year} ${two(l.hour)}:${two(l.minute)}";
+  }
+
+  String _formatDuration(int? sec) {
+    if (sec == null || sec <= 0) return "";
+    final m = sec ~/ 60;
+    final s = sec % 60;
+    return "${m.toString().padLeft(2, "0")}:${s.toString().padLeft(2, "0")}";
   }
 
   Future<void> _deleteSelected() async {
@@ -127,6 +198,7 @@ class _CallsScreenState extends State<CallsScreen>
   Widget build(BuildContext context) {
     return MotifBackground(
       overlayOpacity: 0.92,
+      plainInDark: true,
       child: isSelecting
           ? Scaffold(
               appBar: selectAppBar(
@@ -144,34 +216,31 @@ class _CallsScreenState extends State<CallsScreen>
           : Scaffold(
               appBar: AppBar(
                 title: const Text("Appels"),
+                subtitle: _calls != null
+                    ? Text("${_calls!.length} derniers appels",
+                        style: const TextStyle(fontSize: 12))
+                    : null,
               ),
               body: Stack(
-              children: [
-                RefreshIndicator(
-                  onRefresh: _load,
-                  child: _buildBody(),
-                ),
-                Positioned(
-                  right: 16,
-                  bottom: 16,
-                  child: FloatingActionButton(
-                    // Même vert que le bouton « Saisir ID » de l'écran Chat et
-                    // que le logotype : les deux ouvrent le même clavier, ils
-                    // se reconnaissent à la couleur. Constante sur les quatre
-                    // thèmes, c'est une couleur de marque.
-                    backgroundColor: AlanyaColors.logoVert,
-                    onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const DialerScreen()),
-                    ),
-                    // Téléphone et non pavé numérique : le même symbole que le
-                    // bouton « Saisir ID » de l'écran Chat, qui ouvre le même
-                    // clavier. Ici, pas de libellé sous l'icône.
-                    child: const Icon(Icons.phone, color: Colors.white),
+                children: [
+                  RefreshIndicator(
+                    onRefresh: _load,
+                    child: _buildBody(),
                   ),
-                ),
-              ],
+                  Positioned(
+                    right: 16,
+                    bottom: 16,
+                    child: FloatingActionButton(
+                      backgroundColor: AlanyaColors.logoVert,
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const DialerScreen()),
+                      ),
+                      child: const Icon(Icons.phone, color: Colors.white),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
     );
   }
 
@@ -212,17 +281,31 @@ class _CallsScreenState extends State<CallsScreen>
   }
 
   Widget _tile(CallRecord c) {
-    final icon = c.isOutgoing
-        ? Icons.call_made
-        : (c.status == "MISSED" ? Icons.call_missed : Icons.call_received);
-    final color = c.status == "MISSED" ? dangerOf(context) : positiveOf(context);
+    final icon = _iconFor(c);
+    final color = _colorFor(c, context);
+    final status = _preciseStatus(c);
+    final dateStr = _formatDateTime(c.startedAt);
+    final dur = _formatDuration(c.durationSec);
+
+    // Pour les appels sans réponse / manqués, pas de durée
+    final subtitleText = StringBuffer()
+      ..write(status)
+      ..write(" · $dateStr");
+    if (dur.isNotEmpty) {
+      subtitleText.write(" · $dur");
+    }
+    if (c.isGroup) {
+      subtitleText.write(" · Groupe");
+    }
+
     return ListTile(
       leading: isSelecting
           ? selectCheckbox(c.id)
           : (c.isGroup
               ? CircleAvatar(
                   backgroundColor: AlanyaColors.gold,
-                  child: const Icon(Icons.groups, color: Colors.white, size: 20),
+                  child: const Icon(Icons.groups,
+                      color: Colors.white, size: 20),
                 )
               : AvatarCircle(
                   name: c.peerName,
@@ -230,16 +313,54 @@ class _CallsScreenState extends State<CallsScreen>
                   radius: 22,
                   backgroundColor: AlanyaColors.gold,
                 )),
-      title: Text(c.peerName,
-          style: const TextStyle(fontWeight: FontWeight.w600)),
-      subtitle: Text(
-        "${c.isGroup ? "Groupe · " : ""}${c.isOutgoing ? "Sortant" : "Entrant"} · ${_duration(c)}",
-        style: TextStyle(
-            color: c.status == "MISSED" ? dangerOf(context, Colors.red.shade700) : mutedOf(context, Colors.black54)),
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(c.peerName,
+                style: const TextStyle(fontWeight: FontWeight.w600)),
+          ),
+          if (c.type == "VIDEO")
+            Padding(
+              padding: const EdgeInsets.only(left: 4),
+              child: Icon(Icons.videocam,
+                  size: 14,
+                  color: themed(context,
+                      light: AlanyaColors.grey400,
+                      dark: AlanyaColors.craie2)),
+            ),
+        ],
+      ),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            subtitleText.toString(),
+            style: TextStyle(
+              color: (c.status == "MISSED" ||
+                      (c.status == "ENDED" && (c.durationSec == null || c.durationSec == 0) && !c.isOutgoing))
+                  ? dangerOf(context, Colors.red.shade700)
+                  : mutedOf(context, Colors.black54),
+              fontSize: 12,
+            ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
       ),
       trailing: isSelecting
           ? null
-          : Icon(icon, color: color, size: 20),
+          : Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, color: color, size: 20),
+                const SizedBox(width: 8),
+                Icon(Icons.call,
+                    color: themed(context,
+                        light: AlanyaColors.terracotta,
+                        dark: AlanyaColors.terracottaNuit),
+                    size: 18),
+              ],
+            ),
       onLongPress: () => startSelecting(c.id),
       onTap: isSelecting
           ? () => toggleSelect(c.id)

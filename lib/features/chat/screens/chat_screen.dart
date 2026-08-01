@@ -10,6 +10,9 @@ import '../../../core/whatsapp_text.dart';
 import '../../../core/whatsapp_format_input.dart';
 import '../../../core/whatsapp_editing_controller.dart';
 import '../../../core/outbox.dart';
+import '../../../core/call_cache.dart';
+import '../../../models/call_record.dart';
+import '../../calls/calls_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -110,6 +113,8 @@ class _ChatScreenState extends State<ChatScreen>
   final _inputFocus = FocusNode();
   final _scrollCtrl = ScrollController();
   List<Message> _messages = [];
+  List<CallRecord> _callsForConv = [];
+  List<dynamic> _combined = [];
   bool _loading = true;
   bool _sending = false;
   /// Barre de mise en forme dépliée par le bouton « A » du composeur.
@@ -456,8 +461,12 @@ class _ChatScreenState extends State<ChatScreen>
       final tempId = e["tempId"] as String?;
       setState(() {
         final idx = tempId != null ? _messages.indexWhere((m) => m.id == tempId) : -1;
-        if (idx >= 0) { _messages[idx] = msg; }
-        else if (!_messages.any((m) => m.id == msg.id)) { _messages = [..._messages, msg]; }
+        if (idx >= 0) {
+          _messages[idx] = msg;
+        } else if (!_messages.any((m) => m.id == msg.id)) {
+          _messages = [..._messages, msg];
+        }
+        _rebuildCombined();
       });
       if (msg.senderId != _myId) {
         _markReadRemote();
@@ -581,8 +590,14 @@ class _ChatScreenState extends State<ChatScreen>
     _token = await context.read<TokenStorage>().accessToken;
     final cached = await MessageCache.getConv(widget.convId);
     if (cached.isNotEmpty && mounted) {
-      setState(() { _messages = cached; _loading = false; });
-      for (final m in _messages) { _cacheMsg(m); }
+      setState(() {
+        _messages = cached;
+        _rebuildCombined();
+        _loading = false;
+      });
+      for (final m in _messages) {
+        _cacheMsg(m);
+      }
       _scrollToBottom();
     }
     try {
@@ -591,11 +606,21 @@ class _ChatScreenState extends State<ChatScreen>
       if (!mounted) return;
       final reversed = msgs.reversed.toList();
       await MessageCache.putConv(widget.convId, reversed);
-      setState(() { _messages = reversed; _loading = false; });
-      for (final m in _messages) { _cacheMsg(m); }
+      setState(() {
+        _messages = reversed;
+        _rebuildCombined();
+        _loading = false;
+      });
+      for (final m in _messages) {
+        _cacheMsg(m);
+      }
       _markReadRemote();
       _scrollToBottom();
-    } catch (_) { if (mounted) setState(() => _loading = false); }
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+    // Charge aussi les appels de cette conversation pour les afficher façon WhatsApp
+    _loadCalls();
   }
 
   // Scroll infini : proche du haut → charge les messages plus anciens.
@@ -622,7 +647,10 @@ class _ChatScreenState extends State<ChatScreen>
         final before =
             _scrollCtrl.hasClients ? _scrollCtrl.position.maxScrollExtent : 0.0;
         _loadedOlder = true;
-        setState(() => _messages = [...newMsgs, ..._messages]);
+        setState(() {
+          _messages = [...newMsgs, ..._messages];
+          _rebuildCombined();
+        });
         for (final m in newMsgs) {
           _cacheMsg(m);
           MessageCache.upsert(m, widget.convId);
@@ -652,7 +680,10 @@ class _ChatScreenState extends State<ChatScreen>
       if (_signature(latest) == _signature(_messages)) return;
       final hadMore = latest.length > _messages.length;
       final atBottom = !_scrollCtrl.hasClients || _scrollCtrl.position.pixels >= _scrollCtrl.position.maxScrollExtent - 60;
-      setState(() => _messages = latest);
+      setState(() {
+        _messages = latest;
+        _rebuildCombined();
+      });
       for (final m in latest) { _cacheMsg(m); }
       if (hadMore) repo.markRead(widget.convId);
       if (hadMore && atBottom) _scrollToBottom();
@@ -660,6 +691,208 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   String _signature(List<Message> msgs) => msgs.map((m) => "${m.id}:${m.status}").join("|");
+
+  // ══════════════════════════════════════════════
+  // APPELS DANS LE FIL (WhatsApp-like)
+  // ══════════════════════════════════════════════
+  DateTime _dateOfCombined(dynamic item) {
+    if (item is Message) return item.createdAt;
+    if (item is CallRecord) return item.startedAt;
+    return DateTime.now();
+  }
+
+  void _rebuildCombined() {
+    final all = <dynamic>[..._messages, ..._callsForConv];
+    all.sort((a, b) => _dateOfCombined(a).compareTo(_dateOfCombined(b)));
+    _combined = all;
+  }
+
+  Future<void> _loadCalls() async {
+    try {
+      List<CallRecord> calls = await CallCache.getAll();
+      if (calls.isEmpty) {
+        try {
+          final repo = context.read<CallsRepository>();
+          calls = await repo.history();
+        } catch (_) {}
+      }
+      final filtered = calls.where((c) => c.convId == widget.convId).toList();
+      if (!mounted) return;
+      setState(() {
+        _callsForConv = filtered;
+        _rebuildCombined();
+      });
+    } catch (_) {}
+  }
+
+  String _preciseCallStatus(CallRecord c) {
+    switch (c.status) {
+      case "MISSED":
+        return c.isOutgoing ? "Appel sans réponse" : "Appel manqué";
+      case "REJECTED":
+      case "DECLINED":
+        return c.isOutgoing ? "Appel refusé" : "Appel rejeté";
+      case "BUSY":
+        return "Occupé";
+      case "NO_ANSWER":
+        return c.isOutgoing ? "Appel sans réponse" : "Appel manqué";
+      case "ENDED":
+        if (c.durationSec != null && c.durationSec! > 0) {
+          return c.isOutgoing ? "Appel sortant" : "Appel entrant";
+        } else {
+          return c.isOutgoing ? "Appel sans réponse" : "Appel manqué";
+        }
+      default:
+        return c.status;
+    }
+  }
+
+  IconData _callIconFor(CallRecord c) {
+    if (c.status == "MISSED" || c.status == "NO_ANSWER") {
+      return c.isOutgoing ? Icons.call_made : Icons.call_missed;
+    }
+    if (c.status == "REJECTED" || c.status == "DECLINED") {
+      return c.isOutgoing ? Icons.call_made : Icons.call_received;
+    }
+    if (c.status == "BUSY") return Icons.block;
+    return c.isOutgoing ? Icons.call_made : Icons.call_received;
+  }
+
+  Color _callColorFor(CallRecord c) {
+    if (c.status == "MISSED" || c.status == "NO_ANSWER") {
+      return _danger;
+    }
+    if ((c.status == "REJECTED" || c.status == "DECLINED") && !c.isOutgoing) {
+      return _danger;
+    }
+    return _positive;
+  }
+
+  String _formatCallDateTime(DateTime dt) {
+    final l = dt.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return "${two(l.day)}/${two(l.month)}/${l.year} ${two(l.hour)}:${two(l.minute)}";
+  }
+
+  String _formatCallDuration(int? sec) {
+    if (sec == null || sec <= 0) return "";
+    final m = sec ~/ 60;
+    final s = sec % 60;
+    return "${m.toString().padLeft(2, "0")}:${s.toString().padLeft(2, "0")}";
+  }
+
+  Widget _callBubbleInChat(CallRecord c) {
+    final isMissed = c.status == "MISSED" ||
+        (c.status == "ENDED" &&
+            (c.durationSec == null || c.durationSec == 0) &&
+            !c.isOutgoing);
+    final status = _preciseCallStatus(c);
+    final icon = _callIconFor(c);
+    final color = _callColorFor(c);
+    final dateStr = _formatCallDateTime(c.startedAt);
+    final dur = _formatCallDuration(c.durationSec);
+
+    return Center(
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: _cardBg,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: _hairline),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 4,
+              offset: const Offset(0, 1),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, size: 18, color: color),
+            ),
+            const SizedBox(width: 10),
+            Flexible(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    status,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: _dark ? AlanyaColors.craie : AlanyaColors.ink,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.access_time,
+                          size: 12, color: _muted45),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          dur.isNotEmpty
+                              ? "$dateStr · $dur"
+                              : dateStr,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: _muted,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        c.type == "VIDEO" ? "Vidéo" : "Audio",
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: _muted45,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            InkWell(
+              onTap: () => _startCall(c.type),
+              borderRadius: BorderRadius.circular(20),
+              child: Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: _positive.withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.call,
+                    size: 16, color: _positive),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  bool _needsDateSeparatorCombined(int index) {
+    if (index == 0) return true;
+    final prev = _dateOfCombined(_combined[index - 1]).toLocal();
+    final curr = _dateOfCombined(_combined[index]).toLocal();
+    return prev.year != curr.year ||
+        prev.month != curr.month ||
+        prev.day != curr.day;
+  }
 
   // ══════════════════════════════════════════════
   // SEND
@@ -681,7 +914,11 @@ class _ChatScreenState extends State<ChatScreen>
       final replyMsg = _replyTo;
       final replySnapshot = replyMsg != null ? ReplyPreview(id: replyMsg.id, senderId: replyMsg.senderId, type: replyMsg.type, content: replyMsg.isDeleted ? null : replyMsg.content, isDeleted: replyMsg.isDeleted) : null;
       final optimistic = Message(id: tempId, convId: widget.convId, senderId: _myId ?? "", content: text, type: "TEXT", status: "SENT", replyToId: replyId, replyTo: replySnapshot, media: const [], createdAt: DateTime.now());
-      setState(() { _messages = [..._messages, optimistic]; _replyTo = null; });
+      setState(() {
+        _messages = [..._messages, optimistic];
+        _rebuildCombined();
+        _replyTo = null;
+      });
       _inputCtrl.clear();
       rt.sendMessage(widget.convId, text, tempId, replyToId: replyId);
       _scrollToBottom();
@@ -692,14 +929,22 @@ class _ChatScreenState extends State<ChatScreen>
       final msg = await context.read<ChatRepository>().sendText(widget.convId, text, replyToId: replyId);
       _cacheMsg(msg);
       _inputCtrl.clear();
-      setState(() { _messages = [..._messages, msg]; _replyTo = null; });
+      setState(() {
+        _messages = [..._messages, msg];
+        _rebuildCombined();
+        _replyTo = null;
+      });
       _scrollToBottom();
     } on ApiException catch (e) { _showError(e.message); } catch (_) {
       final tempId = "out-${DateTime.now().microsecondsSinceEpoch}";
       final optimistic = Message(id: tempId, convId: widget.convId, senderId: _myId ?? "", content: text, type: "TEXT", status: "PENDING", replyToId: replyId, replyTo: null, media: const [], createdAt: DateTime.now());
       _cacheMsg(optimistic);
       _inputCtrl.clear();
-      setState(() { _messages = [..._messages, optimistic]; _replyTo = null; });
+      setState(() {
+        _messages = [..._messages, optimistic];
+        _rebuildCombined();
+        _replyTo = null;
+      });
       _scrollToBottom();
       await context.read<Outbox>().enqueue(tempId: tempId, convId: widget.convId, content: text, replyToId: replyId);
     } finally { if (mounted) setState(() => _sending = false); }
@@ -1810,14 +2055,27 @@ class _ChatScreenState extends State<ChatScreen>
           _pinnedBanner(),
           Expanded(child: _loading
               ? Center(child: CircularProgressIndicator(color: _accent))
-              : _messages.isEmpty
+              : _combined.isEmpty
                   ? Center(child: Text(tr(context, 'no_messages')))
-                  : ListView.builder(controller: _scrollCtrl, padding: const EdgeInsets.all(12), itemCount: _messages.length, itemBuilder: (_, i) {
-                    final widgets = <Widget>[];
-                    if (_needsDateSeparator(i)) widgets.add(_dateChip(_dateLabel(_messages[i].createdAt)));
-                    widgets.add(_bubble(_messages[i], _messages[i].senderId == myId));
-                    return Column(children: widgets);
-                  })),
+                  : ListView.builder(
+                      controller: _scrollCtrl,
+                      padding: const EdgeInsets.all(12),
+                      itemCount: _combined.length,
+                      itemBuilder: (_, i) {
+                        final item = _combined[i];
+                        final widgets = <Widget>[];
+                        if (_needsDateSeparatorCombined(i)) {
+                          widgets.add(_dateChip(
+                              _dateLabel(_dateOfCombined(item))));
+                        }
+                        if (item is Message) {
+                          widgets.add(
+                              _bubble(item, item.senderId == myId));
+                        } else if (item is CallRecord) {
+                          widgets.add(_callBubbleInChat(item));
+                        }
+                        return Column(children: widgets);
+                      })),
           if (!widget.isGroup)
             ActivityIndicatorBar(typing: _peerTyping, recording: _peerRecording),
           _composer(),

@@ -14,6 +14,8 @@ import '../../core/in_app_notifier.dart';
 import '../../core/ringtone_service.dart';
 import '../../core/notification_settings.dart';
 import '../../core/realtime_client.dart';
+import '../../core/call_cache.dart';
+import '../../models/call_record.dart';
 import '../../models/ai_message.dart';
 import '../../models/auth_user.dart';
 import '../../models/conversation.dart';
@@ -40,6 +42,7 @@ import '../contacts/screens/add_contact_screen.dart';
 import '../contacts/screens/new_chat_screen.dart';
 import '../calls/call_controller.dart';
 import '../calls/call_listener.dart';
+import '../calls/calls_repository.dart';
 import '../calls/screens/calls_screen.dart';
 import '../meetings/screens/meetings_screen.dart';
 import '../status/screens/create_status_screen.dart';
@@ -206,6 +209,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
     with MultiSelectMixin<_ConversationsTab> {
   List<Conversation>? _convs;
   List<Conversation>? _archivedConvs;
+  Map<String, CallRecord> _lastCallPerConv = {};
   bool _error = false;
   Timer? _pollTimer;
   StreamSubscription<Map<String, dynamic>>? _rtSub;
@@ -213,10 +217,72 @@ class _ConversationsTabState extends State<_ConversationsTab>
   String _searchQuery = '';
   int _tabFilter = 0;
 
+  String _preciseCallStatus(CallRecord c) {
+    switch (c.status) {
+      case "MISSED":
+        return c.isOutgoing ? "Appel sans réponse" : "Appel manqué";
+      case "REJECTED":
+      case "DECLINED":
+        return c.isOutgoing ? "Appel refusé" : "Appel rejeté";
+      case "BUSY":
+        return "Occupé";
+      case "NO_ANSWER":
+        return c.isOutgoing ? "Appel sans réponse" : "Appel manqué";
+      case "ENDED":
+        if (c.durationSec != null && c.durationSec! > 0) {
+          return c.isOutgoing ? "Appel sortant" : "Appel entrant";
+        } else {
+          return c.isOutgoing ? "Appel sans réponse" : "Appel manqué";
+        }
+      default:
+        return c.status;
+    }
+  }
+
+  IconData _callIconFor(CallRecord c) {
+    if (c.status == "MISSED" || c.status == "NO_ANSWER") {
+      return c.isOutgoing ? Icons.call_made : Icons.call_missed;
+    }
+    if (c.status == "REJECTED" || c.status == "DECLINED") {
+      return c.isOutgoing ? Icons.call_made : Icons.call_received;
+    }
+    if (c.status == "BUSY") return Icons.block;
+    return c.isOutgoing ? Icons.call_made : Icons.call_received;
+  }
+
+  String _formatDateTimeShort(DateTime dt) {
+    final l = dt.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return "${two(l.day)}/${two(l.month)} ${two(l.hour)}:${two(l.minute)}";
+  }
+
+  Future<void> _loadCalls() async {
+    try {
+      List<CallRecord> calls = await CallCache.getAll();
+      if (calls.isEmpty) {
+        try {
+          calls = await context.read<CallsRepository>().history();
+        } catch (_) {}
+      }
+      if (!mounted) return;
+      final map = <String, CallRecord>{};
+      for (final call in calls) {
+        final convId = call.convId;
+        if (convId == null) continue;
+        final existing = map[convId];
+        if (existing == null || call.startedAt.isAfter(existing.startedAt)) {
+          map[convId] = call;
+        }
+      }
+      setState(() => _lastCallPerConv = map);
+    } catch (_) {}
+  }
+
   @override
   void initState() {
     super.initState();
     _load();
+    _loadCalls();
     // Rafraîchit la liste + affiche une notification locale pour les nouveaux messages.
     _rtSub = context.read<RealtimeClient>().events.listen((e) {
       final t = e["type"];
@@ -361,6 +427,8 @@ class _ConversationsTabState extends State<_ConversationsTab>
         setState(() => _error = _convs == null || _convs!.isEmpty);
       }
     }
+    // Charge les appels pour l'aperçu type WhatsApp
+    _loadCalls();
   }
 
   Future<void> _poll() async {
@@ -378,12 +446,18 @@ class _ConversationsTabState extends State<_ConversationsTab>
         final archived = await context.read<ChatRepository>().listArchived();
         if (mounted) setState(() => _archivedConvs = archived);
       } catch (_) {}
+
+      // Rafraîchit les appels pour l'aperçu
+      _loadCalls();
     } catch (_) {
       if (mounted) context.read<ConnectivityService>().markHttpFailed();
     }
   }
 
-  Future<void> _refresh() => _load();
+  Future<void> _refresh() async {
+    await _load();
+    await _loadCalls();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -733,6 +807,23 @@ class _ConversationsTabState extends State<_ConversationsTab>
   Widget _tile(Conversation c) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final last = c.lastMessage;
+    final lastCall = _lastCallPerConv[c.id];
+
+    // Détermine si l'appel est plus récent que le dernier message
+    bool useCallPreview = false;
+    if (lastCall != null) {
+      if (last == null) {
+        useCallPreview = true;
+      } else {
+        // Compare dates : si l'appel est après le dernier message, on affiche l'appel
+        try {
+          if (lastCall.startedAt.isAfter(last.createdAt)) {
+            useCallPreview = true;
+          }
+        } catch (_) {}
+      }
+    }
+
     // Libellés pour les types non-texte
     String typeLabel() {
       if (last == null) return "—";
@@ -752,6 +843,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
 
     // Construit l'aperçu formaté : si TEXT on affiche en formaté (sans *),
     // sinon libellé simple. Pour les groupes on préfixe avec le compteur.
+    // Si un appel est plus récent, on affiche le statut d'appel façon WhatsApp.
     Widget buildPreview({required TextStyle? style}) {
       final baseStyle = style ??
           TextStyle(
@@ -759,6 +851,40 @@ class _ConversationsTabState extends State<_ConversationsTab>
             color: themed(context,
                 light: AlanyaColors.grey600, dark: AlanyaColors.craie2),
           );
+
+      // Si on doit afficher l'appel comme dernier événement (WhatsApp-like)
+      if (useCallPreview && lastCall != null) {
+        final callStatus = _preciseCallStatus(lastCall);
+        final icon = _callIconFor(lastCall);
+        final time = _formatDateTimeShort(lastCall.startedAt);
+        final isMissed = lastCall.status == "MISSED" ||
+            (lastCall.status == "ENDED" &&
+                (lastCall.durationSec == null || lastCall.durationSec == 0) &&
+                !lastCall.isOutgoing);
+        return Row(
+          children: [
+            Icon(icon,
+                size: 14,
+                color: isMissed
+                    ? dangerOf(context)
+                    : mutedOf(context, Colors.black54)),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                "$callStatus · $time",
+                style: baseStyle.copyWith(
+                  color: isMissed
+                      ? dangerOf(context)
+                      : baseStyle.color,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        );
+      }
+
       if (last == null) {
         return Text("—", style: baseStyle, maxLines: 1, overflow: TextOverflow.ellipsis);
       }
