@@ -791,6 +791,7 @@ class _ChatScreenState extends State<ChatScreen>
 
     // Aligné gauche/droite comme un message normal (demande utilisateur)
     // pour savoir qui a appelé : sortant = à droite (moi), entrant = à gauche
+    // Forme WhatsApp : queue en haut du côté de l'expéditeur
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
@@ -799,7 +800,12 @@ class _ChatScreenState extends State<ChatScreen>
         constraints: const BoxConstraints(maxWidth: 280),
         decoration: BoxDecoration(
           color: mine ? _sentBubbleColor : _recvBubbleColor,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(mine ? 12 : 0),
+            topRight: Radius.circular(mine ? 0 : 12),
+            bottomLeft: const Radius.circular(12),
+            bottomRight: const Radius.circular(12),
+          ),
           border: mine ? null : Border.all(color: _hairline),
         ),
         child: Column(
@@ -2164,7 +2170,13 @@ class _ChatScreenState extends State<ChatScreen>
               constraints: const BoxConstraints(maxWidth: 280),
               decoration: BoxDecoration(
                 color: isHighlighted ? AlanyaColors.gold.withValues(alpha: _dark ? 0.22 : 0.3) : (mine ? _sentBubbleColor : _recvBubbleColor),
-                borderRadius: BorderRadius.circular(14),
+                // Forme WhatsApp : petite queue en haut du côté de l'expéditeur
+                borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(mine ? 12 : 0),
+                  topRight: Radius.circular(mine ? 0 : 12),
+                  bottomLeft: const Radius.circular(12),
+                  bottomRight: const Radius.circular(12),
+                ),
                 border: mine ? null : Border.all(color: isHighlighted ? AlanyaColors.gold : _hairline),
               ),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
