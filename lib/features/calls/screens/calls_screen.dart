@@ -215,11 +215,15 @@ class _CallsScreenState extends State<CallsScreen>
             )
           : Scaffold(
               appBar: AppBar(
-                title: const Text("Appels"),
-                subtitle: _calls != null
-                    ? Text("${_calls!.length} derniers appels",
-                        style: const TextStyle(fontSize: 12))
-                    : null,
+                title: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text("Appels"),
+                    if (_calls != null)
+                      Text("${_calls!.length} derniers appels",
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w400)),
+                  ],
+                ),
               ),
               body: Stack(
                 children: [
