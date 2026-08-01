@@ -1,47 +1,55 @@
 workflows:
   android-build:
     name: Build Android APK
-    max_build_duration: 60
+    max_build_duration: 90
 
     environment:
-      flutter: 3.24.5   # Version stable fixe
+      flutter: 3.35.3
       java: 17
+      vars:
+        GRADLE_OPTS: "-Xmx6g -Dfile.encoding=UTF-8"
+        JAVA_OPTS: "-Xmx6g"
+
+    cache:
+      cache_paths:
+        - $HOME/.gradle/caches
+        - $HOME/.gradle/wrapper
+        - $PUB_CACHE
 
     scripts:
-      - name: Get dependencies
+      - name: Clean & Get dependencies
         script: |
+          set -e
+          flutter --version
+          flutter clean
+          rm -rf android/.gradle android/app/build android/build build/ .dart_tool/
+          find . -type d -name ".dart_tool" -prune -exec rm -rf {} + 2>/dev/null || true
           flutter pub get
 
       - name: Patch Plugins SDK Overrides
         script: |
-          echo "=== Modification des plugins dans le pub cache ==="
-          
-          # Force compileSdkVersion 36 dans les fichiers build.gradle (Groovy) des plugins tiers
-          find $PUB_CACHE -name "build.gradle" -exec sed -i '' 's/compileSdkVersion .*/compileSdkVersion 36/g' {} + 2>/dev/null || \
-          find $PUB_CACHE -name "build.gradle" -exec sed -i 's/compileSdkVersion .*/compileSdkVersion 36/g' {} +
-          
-          # Force compileSdk/compileSdkVersion dans les fichiers build.gradle.kts (Kotlin) des plugins tiers
-          find $PUB_CACHE -name "build.gradle.kts" -exec sed -i '' 's/compileSdk = .*/compileSdk = 36/g' {} + 2>/dev/null || \
-          find $PUB_CACHE -name "build.gradle.kts" -exec sed -i 's/compileSdk = .*/compileSdk = 36/g' {} +
-          find $PUB_CACHE -name "build.gradle.kts" -exec sed -i '' 's/compileSdkVersion = .*/compileSdkVersion = 36/g' {} + 2>/dev/null || \
-          find $PUB_CACHE -name "build.gradle.kts" -exec sed -i 's/compileSdkVersion = .*/compileSdkVersion = 36/g' {} +
+          set -e
+          echo "=== Patch compileSdk 36 ==="
+          find $PUB_CACHE -name "build.gradle" -exec sed -i 's/compileSdkVersion .*/compileSdkVersion 36/g' {} + 2>/dev/null || true
+          find $PUB_CACHE -name "build.gradle.kts" -exec sed -i 's/compileSdk = .*/compileSdk = 36/g' {} + 2>/dev/null || true
+          find $PUB_CACHE -name "build.gradle.kts" -exec sed -i 's/compileSdkVersion = .*/compileSdkVersion = 36/g' {} + 2>/dev/null || true
+          sed -i 's/compileSdk = .*/compileSdk = 36/g' android/app/build.gradle.kts 2>/dev/null || true
 
-          echo "=== Vérification et alignement de l'application principale ==="
-          # S'assure que ton application utilise bien compileSdk = 36
-          sed -i '' 's/compileSdk = .*/compileSdk = 36/g' android/app/build.gradle.kts 2>/dev/null || \
-          sed -i 's/compileSdk = .*/compileSdk = 36/g' android/app/build.gradle.kts
+          echo "=== Désactive R8 minify pour CI rapide (évite OOM exit 143 après 876s) ==="
+          sed -i 's/isMinifyEnabled = true/isMinifyEnabled = false/g' android/app/build.gradle.kts 2>/dev/null || true
+          sed -i 's/isShrinkResources = true/isShrinkResources = false/g' android/app/build.gradle.kts 2>/dev/null || true
 
-      - name: Build APK release
+      - name: Build APK release (single ABI arm64 rapide)
         script: |
-          # --split-per-abi : produit 3 APKs séparés (arm64-v8a, armeabi-v7a,
-          # x86_64) au lieu d'un fat APK. Chaque APK ne contient les binaires
-          # natifs (flutter_webrtc, PdfiumAndroid, ExoPlayer...) que pour SA
-          # cible → économie de ~60 Mo sur l'APK distribué.
-          # → arm64-v8a couvre 95% des téléphones du marché (à privilégier).
-          flutter build apk --release --split-per-abi \
+          set -e
+          # Build arm64 seul = 3x plus rapide, évite R8 3 fois + Already watching path
+          flutter build apk --release \
+            --target-platform android-arm64 \
             --android-skip-build-dependency-validation \
             --dart-define=API_URL=https://backend-alanya.vercel.app \
             --dart-define=WS_URL=wss://alanya-ws.d-bria00.workers.dev
+          echo "=== Si besoin prod split-per-abi, décommente ==="
+          # flutter build apk --release --split-per-abi --android-skip-build-dependency-validation --dart-define=API_URL=https://backend-alanya.vercel.app --dart-define=WS_URL=wss://alanya-ws.d-bria00.workers.dev || true
 
     artifacts:
       - build/app/outputs/flutter-apk/*.apk
