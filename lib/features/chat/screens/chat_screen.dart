@@ -782,102 +782,120 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Widget _callBubbleInChat(CallRecord c) {
-    final isMissed = c.status == "MISSED" ||
-        (c.status == "ENDED" &&
-            (c.durationSec == null || c.durationSec == 0) &&
-            !c.isOutgoing);
     final status = _preciseCallStatus(c);
     final icon = _callIconFor(c);
     final color = _callColorFor(c);
     final dateStr = _formatCallDateTime(c.startedAt);
     final dur = _formatCallDuration(c.durationSec);
+    final mine = c.isOutgoing;
 
-    return Center(
+    // Aligné gauche/droite comme un message normal (demande utilisateur)
+    // pour savoir qui a appelé : sortant = à droite (moi), entrant = à gauche
+    return Align(
+      alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 16),
+        margin: const EdgeInsets.symmetric(vertical: 4),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        constraints: const BoxConstraints(maxWidth: 280),
         decoration: BoxDecoration(
-          color: _cardBg,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: _hairline),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
-              blurRadius: 4,
-              offset: const Offset(0, 1),
-            ),
-          ],
+          color: mine ? _sentBubbleColor : _recvBubbleColor,
+          borderRadius: BorderRadius.circular(14),
+          border: mine ? null : Border.all(color: _hairline),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.12),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, size: 18, color: color),
-            ),
-            const SizedBox(width: 10),
-            Flexible(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: (mine ? Colors.white : color)
+                        .withValues(alpha: mine ? 0.22 : 0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icon,
+                      size: 16,
+                      color: mine ? Colors.white : color),
+                ),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
                     status,
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color: _dark ? AlanyaColors.craie : AlanyaColors.ink,
+                      color: _bubbleTextColor(mine),
                     ),
                   ),
-                  const SizedBox(height: 2),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.access_time,
-                          size: 12, color: _muted45),
-                      const SizedBox(width: 4),
-                      Flexible(
-                        child: Text(
-                          dur.isNotEmpty
-                              ? "$dateStr · $dur"
-                              : dateStr,
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.access_time,
+                    size: 11,
+                    color: mine ? Colors.white70 : _muted45),
+                const SizedBox(width: 4),
+                Flexible(
+                  child: Text(
+                    dur.isNotEmpty ? "$dateStr · $dur" : dateStr,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: mine ? Colors.white70 : _muted,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 2),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  c.type == "VIDEO" ? Icons.videocam : Icons.call,
+                  size: 12,
+                  color: mine ? Colors.white70 : _muted45,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  c.type == "VIDEO" ? "Vidéo" : "Audio",
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: mine ? Colors.white70 : _muted45,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const Spacer(),
+                InkWell(
+                  onTap: () => _startCall(c.type),
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.call,
+                            size: 14,
+                            color: mine ? Colors.white : _positive),
+                        const SizedBox(width: 4),
+                        Text(
+                          "Rappeler",
                           style: TextStyle(
                             fontSize: 11,
-                            color: _muted,
+                            fontWeight: FontWeight.w600,
+                            color: mine ? Colors.white : _positive,
                           ),
-                          overflow: TextOverflow.ellipsis,
                         ),
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        c.type == "VIDEO" ? "Vidéo" : "Audio",
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: _muted45,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            InkWell(
-              onTap: () => _startCall(c.type),
-              borderRadius: BorderRadius.circular(20),
-              child: Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: _positive.withValues(alpha: 0.15),
-                  shape: BoxShape.circle,
                 ),
-                child: Icon(Icons.call,
-                    size: 16, color: _positive),
-              ),
+              ],
             ),
           ],
         ),
