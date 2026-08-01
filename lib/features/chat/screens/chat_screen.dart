@@ -130,7 +130,9 @@ class _ChatScreenState extends State<ChatScreen>
   /// répondre à l'appui, pas attendre l'ouverture du fichier audio.
   bool _micHeld = false;
   Timer? _pollTimer;
+  Timer? _callsPollTimer;
   StreamSubscription<Map<String, dynamic>>? _rtSub;
+  bool _wasBusy = false;
   // _myId reflète TOUJOURS l'utilisateur courant. Un getter (au lieu d'un champ
   // figé au chargement) évite un état périmé/null : si l'auth se charge en
   // différé, l'ancien code laissait _myId = null, ce qui inversait l'alignement
@@ -294,6 +296,9 @@ class _ChatScreenState extends State<ChatScreen>
     rt.connect();
     _rtSub = rt.events.listen(_onRealtimeEvent);
     _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) => _poll());
+    // Auto-refresh des appels : toutes les 4s + dès qu'un appel se termine
+    _callsPollTimer = Timer.periodic(const Duration(seconds: 4), (_) => _loadCalls());
+    context.read<CallController>().addListener(_onCallActivity);
     WidgetsBinding.instance.addObserver(this);
   }
 
@@ -360,6 +365,17 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
+  void _onCallActivity() {
+    // Quand un appel se termine (était busy -> plus busy), on recharge instantanément les bulles d'appel
+    try {
+      final busy = context.read<CallController>().isBusy;
+      if (_wasBusy && !busy) {
+        _loadCalls();
+      }
+      _wasBusy = busy;
+    } catch (_) {}
+  }
+
   @override
   void dispose() {
     ChatScreen.activeConvId = null;
@@ -371,8 +387,12 @@ class _ChatScreenState extends State<ChatScreen>
     _emitTyping(false);
     _emitRecording(false);
     _pollTimer?.cancel();
+    _callsPollTimer?.cancel();
     _recordTimer?.cancel();
     _rtSub?.cancel();
+    try {
+      context.read<CallController>().removeListener(_onCallActivity);
+    } catch (_) {}
     _lockPulse.dispose();
     _voiceRecorder.cancel();
     _translateService.dispose();
@@ -548,6 +568,19 @@ class _ChatScreenState extends State<ChatScreen>
     } else if (type == "disappearing_updated") {
       if (e["convId"] != widget.convId) return;
       setState(() => _disappearingSeconds = (e["seconds"] as num?)?.toInt() ?? 0);
+    } else if (type == "call_state") {
+      // Un appel de cette conversation vient de changer d'état (ended/missed/rejected) -> recharge
+      final callId = e["callId"] as String?;
+      if (callId != null) {
+        Future.delayed(const Duration(milliseconds: 800), () {
+          if (mounted) _loadCalls();
+        });
+      }
+    } else if (type == "incoming_call") {
+      // Nouvel appel entrant pendant que le chat est ouvert
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted) _loadCalls();
+      });
     }
   }
 

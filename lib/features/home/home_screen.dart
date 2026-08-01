@@ -217,6 +217,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
   final _searchCtrl = TextEditingController();
   String _searchQuery = '';
   int _tabFilter = 0;
+  bool _wasBusy = false;
 
   // Formalisme centralisé – voir lib/core/call_status.dart
   String _preciseCallStatus(CallRecord c) => CallStatusFormalisme.preciseLabel(c);
@@ -246,6 +247,18 @@ class _ConversationsTabState extends State<_ConversationsTab>
     } catch (_) {}
   }
 
+  void _onCallActivity() {
+    try {
+      final busy = context.read<CallController>().isBusy;
+      if (_wasBusy && !busy) {
+        // Un appel vient de se terminer => l'historique contient un nouveau MISSED/ENDED
+        _loadCalls();
+        _poll();
+      }
+      _wasBusy = busy;
+    } catch (_) {}
+  }
+
   @override
   void initState() {
     super.initState();
@@ -267,10 +280,22 @@ class _ConversationsTabState extends State<_ConversationsTab>
         }
       } else if (t == "read") {
         _poll();
+      } else if (t == "call_state" || t == "incoming_call") {
+        // Nouvel appel ou changement d'état -> recharge instantanée des appels manqués/sortants
+        Future.delayed(const Duration(milliseconds: 800), () {
+          if (mounted) _loadCalls();
+        });
       }
     });
     // Rafraîchissement de repli (dernier message, non-lus) si le WS est coupé.
     _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) => _poll());
+    // Ecoute fin d'appel pour auto-refresh sans pull-to-refresh
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      try {
+        context.read<CallController>().addListener(_onCallActivity);
+      } catch (_) {}
+    });
   }
 
   /// Affiche une notification locale pour un message entrant.
@@ -361,6 +386,9 @@ class _ConversationsTabState extends State<_ConversationsTab>
   void dispose() {
     _pollTimer?.cancel();
     _rtSub?.cancel();
+    try {
+      context.read<CallController>().removeListener(_onCallActivity);
+    } catch (_) {}
     _searchCtrl.dispose();
     super.dispose();
   }
