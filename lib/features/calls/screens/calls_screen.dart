@@ -139,16 +139,22 @@ class _CallsScreenState extends State<CallsScreen>
 
   Color _colorFor(CallRecord c, BuildContext context) {
     final s = c.status;
-    if (s == "MISSED" || s == "NO_ANSWER") {
-      return dangerOf(context);
+    final isMissedOrRejected = s == "MISSED" ||
+        s == "NO_ANSWER" ||
+        s == "REJECTED" ||
+        s == "DECLINED" ||
+        s == "BUSY" ||
+        (s == "ENDED" && (c.durationSec == null || c.durationSec == 0));
+    if (isMissedOrRejected) {
+      return dangerOf(context); // rouge pour manqué/rejeté
     }
-    if (s == "REJECTED" || s == "DECLINED" || s == "BUSY") {
-      // Refusé / Occupé en rouge si entrant manqué/rejeté, sinon neutre ?
-      // On met rouge pour tout ce qui n'est pas abouti côté receveur
-      if (!c.isOutgoing) return dangerOf(context);
-      return mutedOf(context, Colors.black54);
+    if (s == "ENDED" && c.durationSec != null && c.durationSec! > 0) {
+      // sortant réussi = vert, entrant réussi = bleu (demande utilisateur)
+      return c.isOutgoing
+          ? positiveOf(context)
+          : const Color(0xFF2196F3);
     }
-    return positiveOf(context);
+    return mutedOf(context, Colors.black54);
   }
 
   String _formatDateTime(DateTime dt) {
@@ -340,10 +346,7 @@ class _CallsScreenState extends State<CallsScreen>
           Text(
             subtitleText.toString(),
             style: TextStyle(
-              color: (c.status == "MISSED" ||
-                      (c.status == "ENDED" && (c.durationSec == null || c.durationSec == 0) && !c.isOutgoing))
-                  ? dangerOf(context, Colors.red.shade700)
-                  : mutedOf(context, Colors.black54),
+              color: color,
               fontSize: 12,
             ),
             maxLines: 2,

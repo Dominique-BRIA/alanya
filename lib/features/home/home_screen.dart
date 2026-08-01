@@ -247,7 +247,26 @@ class _ConversationsTabState extends State<_ConversationsTab>
       return c.isOutgoing ? Icons.call_made : Icons.call_received;
     }
     if (c.status == "BUSY") return Icons.block;
+    if (c.status == "ENDED" && c.durationSec != null && c.durationSec! > 0) {
+      return c.isOutgoing ? Icons.call_made : Icons.call_received;
+    }
     return c.isOutgoing ? Icons.call_made : Icons.call_received;
+  }
+
+  Color _callColorFor(CallRecord c, BuildContext context) {
+    final s = c.status;
+    final isMissedOrRejected = s == "MISSED" ||
+        s == "NO_ANSWER" ||
+        s == "REJECTED" ||
+        s == "DECLINED" ||
+        s == "BUSY";
+    if (isMissedOrRejected) return dangerOf(context);
+    if (s == "ENDED" && c.durationSec != null && c.durationSec! > 0) {
+      return c.isOutgoing
+          ? positiveOf(context) // vert pour sortant réussi
+          : const Color(0xFF2196F3); // bleu pour entrant réussi
+    }
+    return mutedOf(context, Colors.black54);
   }
 
   String _formatDateTimeShort(DateTime dt) {
@@ -857,25 +876,16 @@ class _ConversationsTabState extends State<_ConversationsTab>
         final callStatus = _preciseCallStatus(lastCall);
         final icon = _callIconFor(lastCall);
         final time = _formatDateTimeShort(lastCall.startedAt);
-        final isMissed = lastCall.status == "MISSED" ||
-            (lastCall.status == "ENDED" &&
-                (lastCall.durationSec == null || lastCall.durationSec == 0) &&
-                !lastCall.isOutgoing);
+        final color = _callColorFor(lastCall, context);
         return Row(
           children: [
-            Icon(icon,
-                size: 14,
-                color: isMissed
-                    ? dangerOf(context)
-                    : mutedOf(context, Colors.black54)),
+            Icon(icon, size: 14, color: color),
             const SizedBox(width: 4),
             Expanded(
               child: Text(
                 "$callStatus · $time",
                 style: baseStyle.copyWith(
-                  color: isMissed
-                      ? dangerOf(context)
-                      : baseStyle.color,
+                  color: color,
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,

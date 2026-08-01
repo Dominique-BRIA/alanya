@@ -747,25 +747,60 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
+  String _callTitleInChat(CallRecord c) {
+    final typeLabel = c.type == "VIDEO" ? "Appel vidéo" : "Appel vocal";
+    if (c.isGroup) return "$typeLabel de groupe";
+    return c.isOutgoing ? "$typeLabel sortant" : "$typeLabel entrant";
+  }
+
+  String _callDetailInChat(CallRecord c) {
+    switch (c.status) {
+      case "MISSED":
+      case "NO_ANSWER":
+        return "Sans réponse";
+      case "REJECTED":
+      case "DECLINED":
+        return "Rejeté";
+      case "BUSY":
+        return "Occupé";
+      case "ENDED":
+        if (c.durationSec != null && c.durationSec! > 0) {
+          return "Répondu";
+        } else {
+          return "Sans réponse";
+        }
+      default:
+        return c.status;
+    }
+  }
+
   IconData _callIconFor(CallRecord c) {
-    if (c.status == "MISSED" || c.status == "NO_ANSWER") {
+    final detail = _callDetailInChat(c);
+    if (detail == "Sans réponse") {
       return c.isOutgoing ? Icons.call_made : Icons.call_missed;
     }
-    if (c.status == "REJECTED" || c.status == "DECLINED") {
+    if (detail == "Rejeté" || detail == "Occupé") {
       return c.isOutgoing ? Icons.call_made : Icons.call_received;
     }
-    if (c.status == "BUSY") return Icons.block;
+    // Répondu
     return c.isOutgoing ? Icons.call_made : Icons.call_received;
   }
 
   Color _callColorFor(CallRecord c) {
-    if (c.status == "MISSED" || c.status == "NO_ANSWER") {
-      return _danger;
+    final s = c.status;
+    final isFailed = s == "MISSED" ||
+        s == "NO_ANSWER" ||
+        s == "REJECTED" ||
+        s == "DECLINED" ||
+        s == "BUSY" ||
+        (s == "ENDED" && (c.durationSec == null || c.durationSec == 0));
+    if (isFailed) return _danger; // rouge pour manqué/rejeté
+    // Réussi
+    if (c.isOutgoing) {
+      return _positive; // vert pour sortant réussi
+    } else {
+      return const Color(0xFF2196F3); // bleu pour entrant réussi
     }
-    if ((c.status == "REJECTED" || c.status == "DECLINED") && !c.isOutgoing) {
-      return _danger;
-    }
-    return _positive;
   }
 
   String _formatCallDateTime(DateTime dt) {
@@ -782,16 +817,18 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Widget _callBubbleInChat(CallRecord c) {
-    final status = _preciseCallStatus(c);
+    final title = _callTitleInChat(c); // ex: Appel vocal entrant / sortant
+    final detail = _callDetailInChat(c); // Rejeté / Sans réponse / Répondu / Occupé
     final icon = _callIconFor(c);
-    final color = _callColorFor(c);
-    final dateStr = _formatCallDateTime(c.startedAt);
+    final color = _callColorFor(c); // rouge / vert / bleu selon demande
+    final time = _time(c.startedAt); // HH:mm comme dans l'image
     final dur = _formatCallDuration(c.durationSec);
     final mine = c.isOutgoing;
 
-    // Aligné gauche/droite comme un message normal (demande utilisateur)
-    // pour savoir qui a appelé : sortant = à droite (moi), entrant = à gauche
-    // Forme WhatsApp : queue en haut du côté de l'expéditeur
+    // Forme WhatsApp + couleurs demandées :
+    // - manqué/rejeté en rouge
+    // - sortant réussi en vert
+    // - entrant réussi en bleu
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
@@ -821,14 +858,14 @@ class _ChatScreenState extends State<ChatScreen>
                         .withValues(alpha: mine ? 0.22 : 0.12),
                     shape: BoxShape.circle,
                   ),
-                  child: Icon(icon,
+                  child: Icon(Icons.call,
                       size: 16,
                       color: mine ? Colors.white : color),
                 ),
                 const SizedBox(width: 8),
                 Flexible(
                   child: Text(
-                    status,
+                    title,
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
@@ -842,16 +879,15 @@ class _ChatScreenState extends State<ChatScreen>
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.access_time,
-                    size: 11,
-                    color: mine ? Colors.white70 : _muted45),
+                Icon(icon, size: 12, color: color),
                 const SizedBox(width: 4),
                 Flexible(
                   child: Text(
-                    dur.isNotEmpty ? "$dateStr · $dur" : dateStr,
+                    dur.isNotEmpty ? "$detail · $time · $dur" : "$detail · $time",
                     style: TextStyle(
-                      fontSize: 11,
-                      color: mine ? Colors.white70 : _muted,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: color, // rouge / vert / bleu comme demandé
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -859,49 +895,32 @@ class _ChatScreenState extends State<ChatScreen>
               ],
             ),
             const SizedBox(height: 2),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  c.type == "VIDEO" ? Icons.videocam : Icons.call,
-                  size: 12,
-                  color: mine ? Colors.white70 : _muted45,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  c.type == "VIDEO" ? "Vidéo" : "Audio",
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: mine ? Colors.white70 : _muted45,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const Spacer(),
-                InkWell(
-                  onTap: () => _startCall(c.type),
-                  borderRadius: BorderRadius.circular(12),
-                  child: Padding(
-                    padding: const EdgeInsets.all(4),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.call,
-                            size: 14,
-                            color: mine ? Colors.white : _positive),
-                        const SizedBox(width: 4),
-                        Text(
-                          "Rappeler",
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: mine ? Colors.white : _positive,
-                          ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: InkWell(
+                onTap: () => _startCall(c.type),
+                borderRadius: BorderRadius.circular(12),
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.call,
+                          size: 14,
+                          color: mine ? Colors.white70 : _positive),
+                      const SizedBox(width: 4),
+                      Text(
+                        "Rappeler",
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: mine ? Colors.white70 : _positive,
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
+              ),
             ),
           ],
         ),
