@@ -130,7 +130,6 @@ class _ChatScreenState extends State<ChatScreen>
   /// répondre à l'appui, pas attendre l'ouverture du fichier audio.
   bool _micHeld = false;
   Timer? _pollTimer;
-  Timer? _callsPollTimer;
   StreamSubscription<Map<String, dynamic>>? _rtSub;
   bool _wasBusy = false;
   // _myId reflète TOUJOURS l'utilisateur courant. Un getter (au lieu d'un champ
@@ -296,8 +295,8 @@ class _ChatScreenState extends State<ChatScreen>
     rt.connect();
     _rtSub = rt.events.listen(_onRealtimeEvent);
     _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) => _poll());
-    // Auto-refresh des appels : toutes les 4s + dès qu'un appel se termine
-    _callsPollTimer = Timer.periodic(const Duration(seconds: 4), (_) => _loadCalls());
+    // Comme pour les messages : on utilise le serveur temps réel (WebSocket / WebRTC signaling)
+    // pas de Timer polling pour les appels, juste event-driven
     context.read<CallController>().addListener(_onCallActivity);
     WidgetsBinding.instance.addObserver(this);
   }
@@ -366,11 +365,14 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   void _onCallActivity() {
-    // Quand un appel se termine (était busy -> plus busy), on recharge instantanément les bulles d'appel
+    // Fin d'appel local (busy->!busy) : serveur va émettre call_state, on recharge via WS
+    // + reload immédiat au cas où WS a un léger délai
     try {
       final busy = context.read<CallController>().isBusy;
       if (_wasBusy && !busy) {
-        _loadCalls();
+        Future.delayed(const Duration(milliseconds: 600), () {
+          if (mounted) _loadCalls();
+        });
       }
       _wasBusy = busy;
     } catch (_) {}
@@ -380,14 +382,12 @@ class _ChatScreenState extends State<ChatScreen>
   void dispose() {
     ChatScreen.activeConvId = null;
     WidgetsBinding.instance.removeObserver(this);
-    // Coupe les indicateurs si on quitte la conversation en pleine saisie/enreg.
     _typingDebounce?.cancel();
     _typingTimeout?.cancel();
     _recordingTimeout?.cancel();
     _emitTyping(false);
     _emitRecording(false);
     _pollTimer?.cancel();
-    _callsPollTimer?.cancel();
     _recordTimer?.cancel();
     _rtSub?.cancel();
     try {
