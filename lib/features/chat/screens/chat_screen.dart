@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import '../../../core/message_cache.dart';
 import '../../../core/whatsapp_text.dart';
 import '../../../core/whatsapp_format_input.dart';
+import '../../../core/whatsapp_editing_controller.dart';
 import '../../../core/outbox.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -105,7 +106,7 @@ class _ChatScreenState extends State<ChatScreen>
   /// accès serait `dispose()` — qui créerait alors un ticker sur un State en
   /// cours de destruction.
   late final AnimationController _lockPulse;
-  final _inputCtrl = TextEditingController();
+  final _inputCtrl = WhatsappFormattingController();
   final _inputFocus = FocusNode();
   final _scrollCtrl = ScrollController();
   List<Message> _messages = [];

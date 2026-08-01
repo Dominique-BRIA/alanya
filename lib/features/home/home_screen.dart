@@ -266,7 +266,8 @@ class _ConversationsTabState extends State<_ConversationsTab>
     }
     final title = conv?.title ?? "Nouveau message";
 
-    // Aperçu du message selon le type
+    // Aperçu du message selon le type — on retire les marqueurs pour les
+    // notifications système, qui ne peuvent pas afficher de rich text.
     String body;
     switch (type) {
       case "IMAGE":
@@ -282,7 +283,9 @@ class _ConversationsTabState extends State<_ConversationsTab>
         body = "Vidéo";
         break;
       default:
-        body = content ?? "Nouveau message";
+        // Si c'est un message formaté, on n'affiche pas les * _ ~ dans la notif
+        body = content == null ? "Nouveau message" : sansMarqueursWhatsApp(content);
+        if (body.trim().isEmpty) body = "Nouveau message";
     }
 
     // Aperçu désactivé → texte générique (dans le bandeau ET la notif système).
@@ -730,15 +733,70 @@ class _ConversationsTabState extends State<_ConversationsTab>
   Widget _tile(Conversation c) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final last = c.lastMessage;
-    final preview = last == null
-        ? "—"
-        : (last.type == "AUDIO"
-            ? "Message vocal"
-            : last.type == "IMAGE"
-                ? "Photo"
-                : last.type == "FILE"
-                    ? "Fichier"
-                    : (last.content ?? "[${last.type}]"));
+    // Libellés pour les types non-texte
+    String typeLabel() {
+      if (last == null) return "—";
+      switch (last.type) {
+        case "AUDIO":
+          return "Message vocal";
+        case "IMAGE":
+          return "Photo";
+        case "VIDEO":
+          return "Vidéo";
+        case "FILE":
+          return "Fichier";
+        default:
+          return last.content ?? "[${last.type}]";
+      }
+    }
+
+    // Construit l'aperçu formaté : si TEXT on affiche en formaté (sans *),
+    // sinon libellé simple. Pour les groupes on préfixe avec le compteur.
+    Widget buildPreview({required TextStyle? style}) {
+      final baseStyle = style ??
+          TextStyle(
+            fontSize: 13,
+            color: themed(context,
+                light: AlanyaColors.grey600, dark: AlanyaColors.craie2),
+          );
+      if (last == null) {
+        return Text("—", style: baseStyle, maxLines: 1, overflow: TextOverflow.ellipsis);
+      }
+      final isText = last.type == "TEXT" && (last.content?.isNotEmpty ?? false);
+      if (!isText) {
+        final label = typeLabel();
+        final full = c.isGroup && c.members.isNotEmpty
+            ? "${c.members.length} membres · $label"
+            : label;
+        return Text(full,
+            style: baseStyle, maxLines: 1, overflow: TextOverflow.ellipsis);
+      }
+      // TEXT formaté
+      final raw = last.content!.trim();
+      // Coupe à 120 char pour ne pas surcharger le ListTile avec un pavé
+      final trimmed = raw.length > 120 ? "${raw.substring(0, 120)}…" : raw;
+      final spans = spansWhatsApp(trimmed);
+      if (c.isGroup && c.members.isNotEmpty) {
+        final prefix = "${c.members.length} membres · ";
+        return Text.rich(
+          TextSpan(
+            style: baseStyle,
+            children: [
+              TextSpan(text: prefix),
+              ...spans,
+            ],
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        );
+      }
+      return Text.rich(
+        TextSpan(style: baseStyle, children: spans),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      );
+    }
+
     final title = c.title ?? "Discussion";
     final myId = context.read<AuthController>().user?.id;
     final other = c.isGroup
@@ -747,6 +805,12 @@ class _ConversationsTabState extends State<_ConversationsTab>
             (m) => m.id != myId,
             orElse: () => c.members.isNotEmpty ? c.members.first : c.members.first,
           );
+
+    final subtitleStyle = TextStyle(
+      fontSize: 13,
+      color: themed(context,
+          light: AlanyaColors.grey600, dark: AlanyaColors.craie2),
+    );
 
     return ListTile(
       leading: isSelecting
@@ -780,13 +844,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
             ),
         ],
       ),
-      subtitle: Text(
-        c.isGroup && c.members.isNotEmpty
-            ? "${c.members.length} membres · $preview"
-            : preview,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
+      subtitle: buildPreview(style: subtitleStyle),
       trailing: isSelecting
           ? null
           : (c.unread > 0
@@ -952,6 +1010,43 @@ class _ConversationsTabState extends State<_ConversationsTab>
                 itemBuilder: (_, i) {
                   final c = _archivedConvs![i];
                   final title = c.title ?? "Discussion";
+                  // Aperçu formaté également dans les archivées : on affiche
+                  // le style réel (gras/italique) et plus les marqueurs.
+                  Widget archivedPreview() {
+                    final last = c.lastMessage;
+                    if (last == null || (last.content?.isEmpty ?? true)) {
+                      return Text("—",
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 12, color: muted2));
+                    }
+                    if (last.type != "TEXT") {
+                      return Text(
+                        last.type == "AUDIO"
+                            ? "Message vocal"
+                            : last.type == "IMAGE"
+                                ? "Photo"
+                                : last.type == "VIDEO"
+                                    ? "Vidéo"
+                                    : "Fichier",
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 12, color: muted2),
+                      );
+                    }
+                    final trimmed = last.content!.length > 100
+                        ? "${last.content!.substring(0, 100)}…"
+                        : last.content!;
+                    return Text.rich(
+                      TextSpan(
+                        style: TextStyle(fontSize: 12, color: muted2),
+                        children: spansWhatsApp(trimmed),
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    );
+                  }
+
                   return ListTile(
                     leading: AvatarCircle(
                       name: title,
@@ -961,16 +1056,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
                     ),
                     title: Text(title,
                         style: const TextStyle(fontWeight: FontWeight.w500)),
-                    subtitle: Text(
-                      // Marqueurs retirés : l'aperçu n'applique pas les
-                      // styles, y laisser « *coucou* » exposerait la mécanique.
-                      c.lastMessage?.content == null
-                          ? "—"
-                          : sansMarqueursWhatsApp(c.lastMessage!.content!),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 12, color: muted2),
-                    ),
+                    subtitle: archivedPreview(),
                     trailing: TextButton(
                       onPressed: () async {
                         await repo.archiveConversation(c.id, false);
