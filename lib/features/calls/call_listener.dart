@@ -5,6 +5,7 @@ import 'package:flutter_callkit_incoming/entities/call_event.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/app_snackbar.dart';
 import '../../core/call_ui_native.dart';
 import '../../core/debug_overlay.dart';
 import '../../core/in_app_notifier.dart';
@@ -128,11 +129,29 @@ class _CallListenerState extends State<CallListener> {
         cc.acceptIncoming().then((_) {
           if (mounted) _openCallScreen();
         });
+      } else if (callId != null && callId.isNotEmpty) {
+        // Décrocher a DÉMARRÉ l'application : `incoming` est encore vide, la
+        // trame WebSocket n'étant pas arrivée. On accepte avec le seul
+        // identifiant plutôt que d'attendre — attendre laissait l'utilisateur
+        // sur l'accueil, sans rien qui indique qu'un appel venait d'être pris.
+        _accepteEtOuvre(cc, callId);
       } else {
-        // L'app vient de se lancer : la trame d'appel bufferisée va arriver
-        // (buffer serveur 60 s) → on accepte dès qu'elle est là.
+        // Aucun identifiant : il ne reste qu'à attendre la trame.
         _pendingAccept = true;
       }
+    }
+  }
+
+  Future<void> _accepteEtOuvre(CallController cc, String callId) async {
+    final ok = await cc.acceptById(callId);
+    if (!mounted) return;
+    if (ok) {
+      _openCallScreen();
+    } else {
+      // L'appel s'est terminé pendant le démarrage de l'application. On le dit,
+      // plutôt que de laisser l'utilisateur devant un accueil muet après avoir
+      // appuyé sur Répondre.
+      showAppSnackBar("Cet appel n'est plus disponible");
     }
   }
 

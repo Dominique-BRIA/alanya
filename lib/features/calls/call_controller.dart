@@ -225,6 +225,74 @@ class CallController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Accepte un appel dont on ne connaît QUE l'identifiant.
+  ///
+  /// C'est le cas quand l'utilisateur décroche depuis l'écran natif ou la
+  /// notification alors que l'application était fermée : décrocher la démarre,
+  /// et à cet instant `incoming` est vide — la trame WebSocket n'est pas encore
+  /// arrivée. [acceptIncoming] sortirait donc sans rien faire.
+  ///
+  /// Attendre cette trame était l'ancienne approche, et elle est fragile : si
+  /// elle tarde ou ne vient pas, l'application s'ouvre sur l'accueil et l'appel
+  /// semble perdu. Ici le serveur est appelé directement, avec le seul
+  /// identifiant. Les informations d'affichage manquantes — nom, avatar —
+  /// viennent de ce que le serveur renvoie, et la trame WebSocket, si elle
+  /// arrive ensuite, ne fait que confirmer un état déjà établi.
+  Future<bool> acceptById(String callId, {String? nomAffiche}) async {
+    if (myUserId == null) return false;
+    // Un appel déjà en cours signifie que la trame est arrivée entre-temps et
+    // que le chemin normal a fait le travail : ne rien refaire.
+    if (activeCallId == callId) return true;
+
+    await RingtoneService.instance.stop();
+    PushService.instance.cancelIncomingCall(callId);
+
+    try {
+      final result = await _calls.accept(callId);
+      isGroupCall = result.isGroup;
+      isCallInitiator = false;
+      activeCallId = callId;
+      activePeerName = result.groupName ?? nomAffiche ?? activePeerName ?? "Appel";
+      activeRole = ActiveCallRole.ongoing;
+      incoming = null;
+
+      _initialMemberIds
+        ..clear()
+        ..add(myUserId!);
+      joinedParticipantIds
+        ..clear()
+        ..add(myUserId!);
+      for (final p in result.activeParticipants) {
+        participantNames[p.userId] = p.displayName;
+        joinedParticipantIds.add(p.userId);
+        _initialMemberIds.add(p.userId);
+        // Sans correspondant nommé, l'écran afficherait « Appel » : le premier
+        // participant actif qui n'est pas moi est l'interlocuteur.
+        if (p.userId != myUserId && nomAffiche == null && !result.isGroup) {
+          activePeerName = p.displayName;
+        }
+      }
+
+      _rt.callState(callId, "joined",
+          userId: myUserId, displayName: myDisplayName);
+      notifyListeners();
+
+      await _ensureMesh();
+      for (final p in result.activeParticipants) {
+        if (p.userId != myUserId) await _mesh?.connectToPeer(p.userId);
+      }
+      notifyListeners();
+      return true;
+    } catch (e) {
+      // 409 : l'appel n'est plus disponible — l'appelant a renoncé pendant que
+      // l'application démarrait, ou le délai a expiré.
+      lastError = "Cet appel n'est plus disponible";
+      _clear();
+      notifyListeners();
+      return false;
+    }
+  }
+
   Future<void> rejectIncoming() async {
     final inc = incoming;
     if (inc == null) return;
