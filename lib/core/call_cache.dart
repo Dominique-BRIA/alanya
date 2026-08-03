@@ -39,7 +39,11 @@ class CallCache {
     for (final c in calls) {
       batch.insert('calls', {
         'id': c.id,
-        'payload': jsonEncode(_toJson(c)),
+        // `CallRecord.toJson` et non une copie locale : cette classe avait sa
+        // propre liste de champs, qu'il fallait penser à compléter à chaque
+        // ajout au modèle. Les libellés venus du serveur y auraient été perdus,
+        // et un appel relu du cache aurait changé de texte.
+        'payload': jsonEncode(c.toJson()),
         'started_at': c.startedAt.millisecondsSinceEpoch,
       });
     }
@@ -73,21 +77,4 @@ class CallCache {
       await db.delete('calls');
     } catch (_) {}
   }
-
-  static Map<String, dynamic> _toJson(CallRecord c) => {
-        'id': c.id,
-        'convId': c.convId,
-        'type': c.type,
-        'status': c.status,
-        'isOutgoing': c.isOutgoing,
-        'isGroup': c.isGroup,
-        'peerName': c.peerName,
-        'peerNumber': c.peerNumber,
-        'peerAvatarUrl': c.peerAvatarUrl,
-        'participantCount': c.participantCount,
-        'startedAt': c.startedAt.toIso8601String(),
-        'answeredAt': c.answeredAt?.toIso8601String(),
-        'endedAt': c.endedAt?.toIso8601String(),
-        'durationSec': c.durationSec,
-      };
 }

@@ -818,7 +818,13 @@ class _ChatScreenState extends State<ChatScreen>
     final color = _callColorFor(c); // rouge / vert / bleu selon demande
     final time = _time(c.startedAt); // HH:mm comme dans l'image
     final dur = _formatCallDuration(c.durationSec);
-    final mine = c.isOutgoing;
+    // De quel côté sortir la bulle : décidé sur `callerId`, le fait brut, et
+    // non sur le booléen `isOutgoing`. Les deux disent la même chose tant que
+    // le serveur est juste, mais `callerId` se vérifie ici même — une bulle du
+    // mauvais côté est une erreur qu'on ne peut pas rattraper à la lecture.
+    // `emisPar` retombe sur `isOutgoing` si le serveur n'envoie pas encore
+    // `callerId`.
+    final mine = c.emisPar(_myId);
 
     // Bulle fine type WhatsApp (demande : épaisseur trop grosse, on réduit)
     // Fond conservé d'origine (_cardBg), alignée gauche/droite

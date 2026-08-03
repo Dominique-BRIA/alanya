@@ -1,8 +1,24 @@
 import 'package:flutter/material.dart';
 import '../models/call_record.dart';
 
-/// Formalisme des statuts d'appel – source unique de vérité.
-/// Respecte le spec utilisateur :
+/// Formalisme des statuts d'appel.
+///
+/// ⚠️ LA SOURCE DE VÉRITÉ EST LE SERVEUR. Depuis que `GET /api/calls` renvoie
+/// `preciseStatus`, `detail`, `isFailed` et `colorHint` déjà formulés pour le
+/// destinataire, ce fichier ne fait plus que les afficher.
+///
+/// Tout ce qui suit sous le nom de « repli » n'existe que pour un cas : un
+/// mobile à jour face à un serveur qui n'a pas encore été déployé. Les champs
+/// valent alors nul et l'ancien calcul reprend la main, le temps de la
+/// transition. Ce n'est pas une seconde implémentation à maintenir en parallèle
+/// — dès que la prod est à jour, plus personne ne devrait passer par là.
+///
+/// ⚠️ NE PAS y rajouter de règle. Une divergence entre les deux calculs se
+/// traduirait par un libellé qui change selon la version du serveur, ce qui est
+/// exactement le désordre que ce chantier corrige. Toute évolution du
+/// formalisme se fait dans `libelleAppel()` côté backend.
+///
+/// Le formalisme, pour mémoire :
 ///
 /// * Appel manqué (Missed) : entrant sans réponse de votre part
 /// * Appel rejeté (Declined/Rejected) : entrant refusé volontairement par vous
@@ -19,6 +35,13 @@ class CallStatusFormalisme {
   /// Libellé précis pour la **liste d'appels** + **aperçu conversations**
   /// Ex: "Appel manqué", "Appel rejeté", "Appel sans réponse", "Appel refusé", "Occupé", "Appel entrant", "Appel sortant"
   static String preciseLabel(CallRecord c) {
+    final duServeur = c.preciseStatus;
+    if (duServeur != null && duServeur.isNotEmpty) return duServeur;
+    return _preciseLabelRepli(c);
+  }
+
+  /// Repli — voir l'avertissement en tête de fichier.
+  static String _preciseLabelRepli(CallRecord c) {
     final s = c.status;
     final outgoing = c.isOutgoing;
 
@@ -60,6 +83,13 @@ class CallStatusFormalisme {
   /// Détail court pour bulle chat : "Manqué", "Rejeté", "Refusé", "Sans réponse", "Occupé", "Répondu"
   /// On garde la nuance Refusé vs Rejeté dans la bulle aussi.
   static String detailInChat(CallRecord c) {
+    final duServeur = c.detail;
+    if (duServeur != null && duServeur.isNotEmpty) return duServeur;
+    return _detailRepli(c);
+  }
+
+  /// Repli — voir l'avertissement en tête de fichier.
+  static String _detailRepli(CallRecord c) {
     final s = c.status;
     final outgoing = c.isOutgoing;
     final hasDuration = c.durationSec != null && c.durationSec! > 0;
@@ -88,6 +118,19 @@ class CallStatusFormalisme {
   }
 
   static IconData iconFor(CallRecord c) {
+    // L'icône reste choisie ici : c'est de la présentation, le serveur n'a pas
+    // à connaître le jeu d'icônes de Material. Mais l'ÉCHEC, lui, vient de lui
+    // quand il le dit — un entrant raté prend la flèche barrée.
+    final echec = c.isFailed;
+    if (echec != null) {
+      if (echec) return c.isOutgoing ? Icons.call_made : Icons.call_missed;
+      return c.isOutgoing ? Icons.call_made : Icons.call_received;
+    }
+    return _iconRepli(c);
+  }
+
+  /// Repli — voir l'avertissement en tête de fichier.
+  static IconData _iconRepli(CallRecord c) {
     final s = c.status;
     final outgoing = c.isOutgoing;
     final hasDuration = c.durationSec != null && c.durationSec! > 0;
@@ -108,6 +151,25 @@ class CallStatusFormalisme {
   }
 
   static Color colorFor(CallRecord c, {required Color danger, required Color positive, Color incomingAnswered = const Color(0xFF2196F3), Color muted = Colors.black54}) {
+    // `colorHint` nomme une INTENTION (« danger »), pas une couleur : le
+    // serveur ignore tout des quatre thèmes, et c'est l'appelant qui fournit
+    // les teintes correspondantes.
+    switch (c.colorHint) {
+      case "danger":
+        return danger;
+      case "positive":
+        return positive;
+      case "info":
+        return incomingAnswered;
+      case "neutral":
+        return muted;
+    }
+    return _colorRepli(c,
+        danger: danger, positive: positive, incomingAnswered: incomingAnswered);
+  }
+
+  /// Repli — voir l'avertissement en tête de fichier.
+  static Color _colorRepli(CallRecord c, {required Color danger, required Color positive, required Color incomingAnswered}) {
     final s = c.status;
     final hasDuration = c.durationSec != null && c.durationSec! > 0;
 
