@@ -359,8 +359,12 @@ class _ChatScreenState extends State<ChatScreen>
       _typingDebounce?.cancel();
       _emitTyping(false);
       _emitRecording(false);
-    } else if (_recording) {
-      _emitRecording(true);
+    } else {
+      if (_recording) _emitRecording(true);
+      // Un appel a pu se terminer pendant que l'app était en arrière-plan :
+      // l'événement WebSocket est alors passé sans que personne l'entende, et
+      // il ne sera pas rejoué. On rattrape au retour.
+      _rafraichitAppels();
     }
   }
 
@@ -581,6 +585,10 @@ class _ChatScreenState extends State<ChatScreen>
       Future.delayed(const Duration(milliseconds: 500), () {
         if (mounted) _loadCalls();
       });
+    } else if (type == "ws_connected") {
+      // Reconnexion : ce qui s'est produit pendant la coupure n'a jamais été
+      // reçu, et un événement WebSocket ne se rejoue pas. On rattrape.
+      _rafraichitAppels();
     }
   }
 
@@ -741,22 +749,47 @@ class _ChatScreenState extends State<ChatScreen>
     _combined = all;
   }
 
+  /// Recharge les appels de cette conversation : le cache pour l'affichage
+  /// immédiat, puis le serveur qui fait autorité.
+  ///
+  /// ⚠️ La version précédente n'interrogeait le serveur QUE si le cache était
+  /// vide, donc ne pouvait jamais découvrir un appel nouveau : un seul appel en
+  /// cache suffisait à ce que tous les rechargements suivants relisent ce même
+  /// cache. L'événement WebSocket arrivait bien, mais ne changeait rien.
   Future<void> _loadCalls() async {
     try {
-      List<CallRecord> calls = await CallCache.getAll();
-      if (calls.isEmpty) {
-        try {
-          final repo = context.read<CallsRepository>();
-          calls = await repo.history();
-        } catch (_) {}
-      }
-      final filtered = calls.where((c) => c.convId == widget.convId).toList();
-      if (!mounted) return;
-      setState(() {
-        _callsForConv = filtered;
-        _rebuildCombined();
-      });
+      final caches = await CallCache.getAll();
+      if (caches.isNotEmpty && mounted) _appliqueCalls(caches);
     } catch (_) {}
+    try {
+      final calls = await context.read<CallsRepository>().history();
+      if (!mounted) return;
+      _appliqueCalls(calls);
+      await CallCache.putAll(calls);
+    } catch (_) {}
+  }
+
+  void _appliqueCalls(List<CallRecord> calls) {
+    final filtered = calls.where((c) => c.convId == widget.convId).toList();
+    if (!mounted) return;
+    setState(() {
+      _callsForConv = filtered;
+      _rebuildCombined();
+    });
+  }
+
+  /// Voir l'homologue dans la liste des conversations : garde anti-rafale pour
+  /// les rafraîchissements automatiques, qui se déclenchent souvent ensemble.
+  DateTime? _dernierRafraichissementAppels;
+  void _rafraichitAppels() {
+    final maintenant = DateTime.now();
+    final dernier = _dernierRafraichissementAppels;
+    if (dernier != null &&
+        maintenant.difference(dernier) < const Duration(milliseconds: 1500)) {
+      return;
+    }
+    _dernierRafraichissementAppels = maintenant;
+    _loadCalls();
   }
 
   // ── Formalisme centralisé (lib/core/call_status.dart) ──

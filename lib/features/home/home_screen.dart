@@ -207,7 +207,7 @@ class _ConversationsTab extends StatefulWidget {
 }
 
 class _ConversationsTabState extends State<_ConversationsTab>
-    with MultiSelectMixin<_ConversationsTab> {
+    with MultiSelectMixin<_ConversationsTab>, WidgetsBindingObserver {
   List<Conversation>? _convs;
   List<Conversation>? _archivedConvs;
   Map<String, CallRecord> _lastCallPerConv = {};
@@ -225,26 +225,57 @@ class _ConversationsTabState extends State<_ConversationsTab>
   Color _callColorFor(CallRecord c, BuildContext context) => CallStatusFormalisme.colorFor(c, danger: dangerOf(context), positive: positiveOf(context));
   String _formatDateTimeShort(DateTime dt) => CallStatusFormalisme.formatDateTime(dt);
 
+  /// Recharge les appels : le cache pour l'affichage immédiat, puis le serveur
+  /// qui fait autorité.
+  ///
+  /// ⚠️ La version précédente n'interrogeait le serveur QUE si le cache était
+  /// vide. Elle ne pouvait donc jamais découvrir un appel nouveau : dès qu'un
+  /// seul appel était en cache, tous les rechargements relisaient ce même
+  /// cache. C'est ce qui rendait le rafraîchissement inopérant ici, alors même
+  /// que l'événement WebSocket arrivait bien.
   Future<void> _loadCalls() async {
     try {
-      List<CallRecord> calls = await CallCache.getAll();
-      if (calls.isEmpty) {
-        try {
-          calls = await context.read<CallsRepository>().history();
-        } catch (_) {}
-      }
-      if (!mounted) return;
-      final map = <String, CallRecord>{};
-      for (final call in calls) {
-        final convId = call.convId;
-        if (convId == null) continue;
-        final existing = map[convId];
-        if (existing == null || call.startedAt.isAfter(existing.startedAt)) {
-          map[convId] = call;
-        }
-      }
-      setState(() => _lastCallPerConv = map);
+      final caches = await CallCache.getAll();
+      if (caches.isNotEmpty && mounted) _appliqueCalls(caches);
     } catch (_) {}
+    try {
+      final calls = await context.read<CallsRepository>().history();
+      if (!mounted) return;
+      _appliqueCalls(calls);
+      // Le cache est réalimenté ici, sinon il resterait figé sur ce que
+      // l'écran Appels y a déposé la dernière fois.
+      await CallCache.putAll(calls);
+    } catch (_) {}
+  }
+
+  void _appliqueCalls(List<CallRecord> calls) {
+    final map = <String, CallRecord>{};
+    for (final call in calls) {
+      final convId = call.convId;
+      if (convId == null) continue;
+      final existing = map[convId];
+      if (existing == null || call.startedAt.isAfter(existing.startedAt)) {
+        map[convId] = call;
+      }
+    }
+    if (mounted) setState(() => _lastCallPerConv = map);
+  }
+
+  /// Point d'entrée des rafraîchissements AUTOMATIQUES (retour au premier plan,
+  /// reconnexion WebSocket, fin d'appel). Ils se déclenchent souvent ensemble —
+  /// revenir dans l'app reconnecte le WebSocket dans la foulée — d'où ce garde
+  /// qui évite deux requêtes coup sur coup. Le pull-to-refresh, lui, appelle
+  /// `_loadCalls` directement : une action explicite ne doit jamais être ignorée.
+  DateTime? _dernierRafraichissementAppels;
+  void _rafraichitAppels() {
+    final maintenant = DateTime.now();
+    final dernier = _dernierRafraichissementAppels;
+    if (dernier != null &&
+        maintenant.difference(dernier) < const Duration(milliseconds: 1500)) {
+      return;
+    }
+    _dernierRafraichissementAppels = maintenant;
+    _loadCalls();
   }
 
   void _onCallActivity() {
@@ -262,6 +293,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
     _loadCalls();
     // Rafraîchit la liste + affiche une notification locale pour les nouveaux messages.
@@ -285,6 +317,12 @@ class _ConversationsTabState extends State<_ConversationsTab>
         Future.delayed(const Duration(milliseconds: 800), () {
           if (mounted) _loadCalls();
         });
+      } else if (t == "ws_connected") {
+        // La connexion vient de se rétablir : tout ce qui s'est passé pendant
+        // la coupure n'a jamais été reçu et ne le sera jamais, un événement
+        // WebSocket ne se rejoue pas. On rattrape par une requête.
+        _rafraichitAppels();
+        _poll();
       }
     });
     // Rafraîchissement de repli (dernier message, non-lus) si le WS est coupé.
@@ -382,8 +420,24 @@ class _ConversationsTabState extends State<_ConversationsTab>
     );
   }
 
+  /// Retour au premier plan : le cas le plus fréquent pour un appel manqué,
+  /// puisqu'on n'était par définition pas devant l'écran quand il est arrivé.
+  ///
+  /// Ne fait pas doublon avec `ws_connected` : si l'app n'est restée en
+  /// arrière-plan que quelques secondes, la connexion n'est pas tombée et aucun
+  /// événement de reconnexion n'arrivera. Quand les deux se déclenchent
+  /// ensemble, le garde de `_rafraichitAppels` absorbe le second.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _rafraichitAppels();
+      _poll();
+    }
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
     _rtSub?.cancel();
     try {

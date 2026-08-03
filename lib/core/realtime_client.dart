@@ -158,6 +158,19 @@ class RealtimeClient extends ChangeNotifier {
     if (connected == v) return;
     connected = v;
     notifyListeners();
+    // Émis dans le flux d'événements, et pas seulement via notifyListeners :
+    // les écrans écoutent déjà ce flux pour `message`, `call_state`… et
+    // peuvent donc traiter la reconnexion comme un événement de plus, sans
+    // brancher un second mécanisme.
+    //
+    // À QUOI ÇA SERT — un événement WebSocket n'est jamais rejoué. Tout ce qui
+    // s'est produit pendant que la connexion était tombée (un appel manqué,
+    // typiquement, puisqu'on n'était justement pas là) n'arrivera jamais. La
+    // reconnexion est le seul moment où l'on sait qu'un trou vient de se
+    // refermer : c'est là qu'il faut rattraper l'état par une requête HTTP.
+    if (v && !_disposed && !_controller.isClosed) {
+      _controller.add({"type": "ws_connected"});
+    }
   }
 
   void _send(Map<String, dynamic> payload) {
