@@ -1,5 +1,9 @@
-import 'package:flutter/material.dart';
+import 'dart:io';
 
+import 'package:flutter/material.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+
+import '../../../core/app_snackbar.dart';
 import '../../../core/notification_settings.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
@@ -16,6 +20,25 @@ class NotificationSettingsScreen extends StatefulWidget {
 class _NotificationSettingsScreenState
     extends State<NotificationSettingsScreen> {
   final _s = NotificationSettings.instance;
+
+  /// Ouvre le réglage Android de l'autorisation « plein écran ».
+  ///
+  /// Sur Android 14 et suivants, le plugin renvoie vers la page système
+  /// correspondante : l'autorisation ne peut pas être accordée par le code, il
+  /// faut que l'utilisateur bascule l'interrupteur lui-même. En dessous
+  /// d'Android 14 elle est déjà acquise et l'appel n'a aucun effet visible,
+  /// d'où le message qui l'explique plutôt que de laisser croire à une panne.
+  Future<void> _demandeOuvertureAutomatique() async {
+    final plugin = FlutterLocalNotificationsPlugin()
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+    if (plugin == null) return;
+    final accorde = await plugin.requestFullScreenIntentPermission();
+    if (!mounted) return;
+    showAppSnackBar(accorde == true
+        ? "Autorisation déjà accordée : les appels s'ouvriront tout seuls"
+        : "Active « Applications pouvant afficher des notifications plein écran » pour Alanya");
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -64,6 +87,26 @@ class _NotificationSettingsScreenState
               setState(() {});
             },
           ),
+          // Écran d'appel qui s'ouvre TOUT SEUL, sans toucher la notification.
+          //
+          // Ce comportement dépend d'une autorisation Android à part, et c'est
+          // ce qui explique qu'il fonctionne sur un téléphone et pas sur un
+          // autre : jusqu'à Android 13 elle était accordée d'office, depuis
+          // Android 14 elle est REFUSÉE par défaut à toute application qui
+          // n'est pas le téléphone du système. La déclarer dans le manifeste ne
+          // suffit donc plus, il faut que l'utilisateur l'accorde lui-même.
+          if (Platform.isAndroid)
+            ListTile(
+              leading:
+                  const Icon(Icons.fullscreen, color: AlanyaColors.terracotta),
+              title: const Text("Ouverture automatique des appels"),
+              subtitle: const Text(
+                  "Afficher l'écran d'appel sans avoir à toucher la notification. "
+                  "Android 14 et suivants demandent une autorisation à part."),
+              trailing: const Icon(Icons.open_in_new, size: 18),
+              onTap: _demandeOuvertureAutomatique,
+            ),
+          const Divider(height: 1),
           Padding(
             padding: const EdgeInsets.all(16),
             child: Text(
