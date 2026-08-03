@@ -1,3 +1,8 @@
+// Import explicite : dans un script Gradle Kotlin, `java` désigne l'extension
+// Gradle du même nom, pas le paquet Java. Écrire `java.util.Properties` ne
+// compile donc pas.
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -6,10 +11,39 @@ plugins {
     id("com.google.gms.google-services")
 }
 
+// Clé de signature de la version publiée.
+//
+// ⚠️ POURQUOI CE FICHIER EXISTE. Le bloc `release` signait avec la clé DEBUG.
+// Or cette clé est générée automatiquement par le SDK Android sur chaque
+// machine, et un runner CI est détruit après le build : il en fabrique une
+// NOUVELLE à chaque fois. Chaque APK portait donc une signature différente, et
+// Android refuse d'installer une mise à jour dont la signature ne correspond
+// pas à celle installée — d'où l'obligation de désinstaller avant chaque essai.
+//
+// Le fichier n'est pas versionné (il contient un mot de passe). Sans lui, le
+// build retombe sur la clé debug : rien ne casse, on retrouve simplement
+// l'ancien comportement.
+val fichierCle = rootProject.file("key.properties")
+val proprietesCle = Properties().apply {
+    if (fichierCle.exists()) fichierCle.inputStream().use { load(it) }
+}
+val signatureDisponible = proprietesCle.getProperty("storeFile") != null
+
 android {
     namespace = "com.alanya237.work"
     compileSdk = 36
     ndkVersion = "28.2.13676358"
+
+    signingConfigs {
+        if (signatureDisponible) {
+            create("release") {
+                storeFile = file(proprietesCle.getProperty("storeFile"))
+                storePassword = proprietesCle.getProperty("storePassword")
+                keyAlias = proprietesCle.getProperty("keyAlias")
+                keyPassword = proprietesCle.getProperty("keyPassword")
+            }
+        }
+    }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -31,13 +65,30 @@ android {
         // apporter en échange. Choix délibéré, à ne pas « corriger ».
         minSdk = 21
         targetSdk = 36
-        versionCode = flutter.versionCode
+        // Numéro de build de la CI quand il existe, celui du pubspec sinon.
+        //
+        // `flutter.versionCode` vaut le « +1 » de `version: 0.1.0+1` : il ne
+        // change JAMAIS d'un build à l'autre. Android voit alors toujours la
+        // même version et n'a aucune raison de proposer une mise à jour. Le
+        // numéro de build, lui, s'incrémente tout seul à chaque exécution.
+        versionCode = (System.getenv("BUILD_NUMBER")            // Codemagic
+                ?: System.getenv("PROJECT_BUILD_NUMBER")        // Codemagic (autre nom)
+                ?: System.getenv("GITHUB_RUN_NUMBER"))          // GitHub Actions
+            ?.toIntOrNull()
+            ?: flutter.versionCode
         versionName = flutter.versionName
     }
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("debug")
+            // Clé stable si elle est fournie, clé debug sinon. Le repli garde
+            // le build fonctionnel sans configuration, au prix du conflit
+            // d'installation décrit plus haut.
+            signingConfig = if (signatureDisponible) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             // FIX taille APK :
             //  - isMinifyEnabled = true → active R8, retire le code Kotlin/Java
             //    mort (Firebase, WebRTC, plugins non utilisés). Gain ~15-25 Mo.

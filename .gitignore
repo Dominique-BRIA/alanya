@@ -13,6 +13,14 @@ android/.gradle/
 # dans une version périmée.
 *.bak
 
+# ⚠️ CLÉ DE SIGNATURE ET SON MOT DE PASSE — NE JAMAIS VERSIONNER.
+# Quiconque possède ce fichier peut signer un APK au nom d'Alanya, donc publier
+# une mise à jour que les téléphones installeront sans broncher. La clé se
+# transmet par les secrets de la CI, jamais par le dépôt.
+android/key.properties
+*.jks
+*.keystore
+
 # Chemins du SDK, PROPRES À CHAQUE MACHINE. Ce fichier était versionné avec
 # « /home/bria/Android/Sdk » et « /home/bria/development/flutter » : sur toute
 # autre machine, la configuration Gradle échouait sur « Included build does not
