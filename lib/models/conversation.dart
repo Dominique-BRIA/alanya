@@ -1,3 +1,5 @@
+import 'call_record.dart';
+
 class LastMessage {
   final String id;
   final String? content;
@@ -67,6 +69,22 @@ class Conversation {
   final String? avatarUrl;
   final List<ConvMember> members;
   final LastMessage? lastMessage;
+
+  /// Dernier appel de la conversation, envoyé par le serveur au même titre que
+  /// [lastMessage].
+  ///
+  /// Nullable pour deux raisons distinctes : la conversation peut n'avoir aucun
+  /// appel, et le serveur peut ne pas encore envoyer ce champ. Dans les deux
+  /// cas la liste retombe sur le chargement séparé de l'historique.
+  final CallRecord? lastCall;
+
+  /// Le serveur a-t-il ENVOYÉ le champ `lastCall` ?
+  ///
+  /// Distinct de `lastCall != null`, et cette distinction est nécessaire : une
+  /// conversation sans aucun appel renvoie légitimement `null`. Sans ce
+  /// booléen, impossible de dire si le serveur sait répondre — et donc de
+  /// décider s'il faut encore charger l'historique séparément.
+  final bool lastCallFourni;
   final int unread;
   final DateTime updatedAt;
   final bool isPinned;
@@ -81,6 +99,8 @@ class Conversation {
     required this.lastMessage,
     required this.unread,
     required this.updatedAt,
+    this.lastCall,
+    this.lastCallFourni = false,
     this.isPinned = false,
     this.isArchived = false,
   });
@@ -100,6 +120,12 @@ class Conversation {
         lastMessage: j["lastMessage"] == null
             ? null
             : LastMessage.fromJson(j["lastMessage"] as Map<String, dynamic>),
+        lastCall: j["lastCall"] == null
+            ? null
+            : CallRecord.fromJson(j["lastCall"] as Map<String, dynamic>),
+        // La présence de la CLÉ, pas de la valeur : `"lastCall": null` est une
+        // réponse valide d'un serveur à jour pour une conversation sans appel.
+        lastCallFourni: j.containsKey("lastCall"),
         unread: (j["unread"] as num?)?.toInt() ?? 0,
         updatedAt: DateTime.parse(j["updatedAt"] as String),
         isPinned: (j["isPinned"] as bool?) ?? false,

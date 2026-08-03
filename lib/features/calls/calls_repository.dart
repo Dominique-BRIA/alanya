@@ -59,6 +59,20 @@ class CallsRepository {
         .toList();
   }
 
+  /// Appels d'UNE conversation.
+  ///
+  /// Le fil de discussion utilisait [history], qui rapatrie les 50 derniers
+  /// appels toutes conversations confondues, pour n'en garder que ceux de la
+  /// conversation ouverte. Au-delà de ces 50, les appels de cette conversation
+  /// disparaissaient du fil sans que rien ne l'indique — d'autant plus vite que
+  /// l'utilisateur est actif ailleurs.
+  Future<List<CallRecord>> forConversation(String convId) async {
+    final data = await _api.get("/api/conversations/$convId/calls");
+    return ((data["calls"] as List?) ?? [])
+        .map((c) => CallRecord.fromJson(c as Map<String, dynamic>))
+        .toList();
+  }
+
   Future<StartedCall> start(String convId, String type) async {
     final data = await _api.post("/api/calls", {"convId": convId, "type": type});
     final callees = ((data["callees"] as List?) ?? [])

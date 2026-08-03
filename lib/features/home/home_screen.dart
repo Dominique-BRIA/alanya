@@ -496,6 +496,16 @@ class _ConversationsTabState extends State<_ConversationsTab>
       await ConversationCache.putAll(convs);
       // Signale à l'app qu'on est bien online.
       if (mounted) context.read<ConnectivityService>().markHttpSucceeded();
+
+      // L'aperçu d'appel arrive maintenant AVEC la conversation : plus besoin
+      // du second appel qui rapatriait tout l'historique pour le redécouper par
+      // conversation. On ne le déclenche que face à un serveur qui n'envoie pas
+      // encore le champ — d'où `lastCallFourni`, qui teste la présence de la
+      // clé et non sa valeur : une conversation sans appel renvoie
+      // légitimement nul.
+      final serveurAJour = convs.any((c) => c.lastCallFourni);
+      if (!serveurAJour) _loadCalls();
+      return;
     } catch (_) {
       // Réseau KO : on garde le cache, on n'affiche l'erreur que si on n'a
       // vraiment rien du tout à montrer.
@@ -504,7 +514,8 @@ class _ConversationsTabState extends State<_ConversationsTab>
         setState(() => _error = _convs == null || _convs!.isEmpty);
       }
     }
-    // Charge les appels pour l'aperçu type WhatsApp
+    // Chemin d'échec seulement : le cache local n'a pas d'aperçu d'appel plus
+    // récent que ce qu'il contient déjà.
     _loadCalls();
   }
 
@@ -884,7 +895,12 @@ class _ConversationsTabState extends State<_ConversationsTab>
   Widget _tile(Conversation c) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final last = c.lastMessage;
-    final lastCall = _lastCallPerConv[c.id];
+    // Le serveur fournit désormais `lastCall` avec la conversation. La table
+    // locale ne sert plus qu'à deux choses : recevoir les appels poussés en
+    // temps réel entre deux chargements, et servir de repli face à un serveur
+    // qui n'envoie pas encore le champ. Elle prime quand elle a une entrée,
+    // étant par construction plus fraîche.
+    final lastCall = _lastCallPerConv[c.id] ?? c.lastCall;
 
     // Détermine si l'appel est plus récent que le dernier message
     bool useCallPreview = false;

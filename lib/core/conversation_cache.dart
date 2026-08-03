@@ -109,6 +109,10 @@ class ConversationCache {
                 'senderId': c.lastMessage!.senderId,
                 'createdAt': c.lastMessage!.createdAt.toIso8601String(),
               },
+        // Conservé au même titre que `lastMessage` : sans lui, l'aperçu d'appel
+        // disparaîtrait de la liste au premier affichage depuis le cache, pour
+        // ne revenir qu'après la réponse du serveur.
+        'lastCall': c.lastCall?.toJson(),
         'unread': c.unread,
         'updatedAt': c.updatedAt.toIso8601String(),
       };

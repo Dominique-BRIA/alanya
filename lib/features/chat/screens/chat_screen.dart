@@ -766,16 +766,34 @@ class _ChatScreenState extends State<ChatScreen>
   /// cache suffisait à ce que tous les rechargements suivants relisent ce même
   /// cache. L'événement WebSocket arrivait bien, mais ne changeait rien.
   Future<void> _loadCalls() async {
+    // Dépôt capturé AVANT tout await : le lire après reviendrait à toucher un
+    // BuildContext qui peut avoir été démonté entre-temps.
+    final repo = context.read<CallsRepository>();
     try {
       final caches = await CallCache.getAll();
       if (caches.isNotEmpty && mounted) _appliqueCalls(caches);
     } catch (_) {}
     try {
-      final calls = await context.read<CallsRepository>().history();
+      // Endpoint dédié à CETTE conversation, au lieu des 50 derniers appels
+      // toutes conversations confondues qu'il fallait ensuite filtrer. Au-delà
+      // de ces 50, les appels de la conversation ouverte tombaient hors de la
+      // fenêtre et disparaissaient du fil sans rien indiquer.
+      final calls = await repo.forConversation(widget.convId);
       if (!mounted) return;
       _appliqueCalls(calls);
-      await CallCache.putAll(calls);
-    } catch (_) {}
+      // ⚠️ PAS de CallCache.putAll ici : ce cache porte l'historique GLOBAL,
+      // que l'écran Appels relit tel quel. Y écrire les appels d'une seule
+      // conversation effacerait tous les autres — `putAll` commence par vider
+      // la table.
+    } catch (_) {
+      // Repli : un serveur sans l'endpoint dédié répond 404. On repasse par
+      // l'historique global, filtré comme avant.
+      try {
+        final calls = await repo.history();
+        if (!mounted) return;
+        _appliqueCalls(calls);
+      } catch (_) {}
+    }
   }
 
   void _appliqueCalls(List<CallRecord> calls) {
