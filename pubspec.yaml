@@ -57,6 +57,13 @@ dependencies:
   # Notifications push FCM (Firebase Cloud Messaging)
   firebase_core: ^3.8.1
   firebase_messaging: ^15.1.6
+  # Écran d'appel NATIF, plein écran et par-dessus le verrouillage, y compris
+  # application tuée. Remplace la notification locale pour les appels entrants :
+  # flutter_local_notifications ne sait pas produire une notification de style
+  # « appel » (Notification.CallStyle d'Android 12+), celle qui affiche l'avatar
+  # et les deux gros boutons. L'écrire en Kotlin aurait demandé de reprendre la
+  # construction de la notification et sa réception dans l'isolate d'arrière-plan.
+  flutter_callkit_incoming: ^3.1.3
   # Base de données locale (cache des messages hors ligne)
   sqflite: ^2.4.1
   path: ^1.9.0

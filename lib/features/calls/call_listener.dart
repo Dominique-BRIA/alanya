@@ -1,6 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_callkit_incoming/entities/call_event.dart';
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/call_ui_native.dart';
 import '../../core/debug_overlay.dart';
 import '../../core/in_app_notifier.dart';
 import '../../core/push_service.dart';
@@ -31,17 +36,41 @@ class CallListener extends StatefulWidget {
 class _CallListenerState extends State<CallListener> {
   String? _shownCallId;
   bool _pendingAccept = false;
+  StreamSubscription<CallEvent?>? _natifSub;
 
   @override
   void initState() {
     super.initState();
     // Actions de la notification système d'appel (Répondre / Refuser).
     PushService.onCallAction = _onCallAction;
+
+    // Boutons de l'ÉCRAN D'APPEL NATIF. Ils n'arrivent pas par le même chemin
+    // que ceux de la notification locale : c'est un flux propre au paquet, et
+    // c'est lui qui compte désormais pour un appel reçu application fermée.
+    _natifSub = FlutterCallkitIncoming.onEvent.listen((event) {
+      if (!mounted || event == null) return;
+      switch (event.event) {
+        case Event.actionCallAccept:
+          _onCallAction('call_accept', event.body['id']?.toString());
+          break;
+        case Event.actionCallDecline:
+        case Event.actionCallTimeout:
+          _onCallAction('call_reject', event.body['id']?.toString());
+          break;
+        default:
+          break;
+      }
+    });
+
+    // Un écran d'appel laissé affiché par un arrêt brutal sonnerait dans le
+    // vide au redémarrage : on repart d'une ardoise propre.
+    CallUiNative.toutMasquer();
   }
 
   @override
   void dispose() {
     PushService.onCallAction = null;
+    _natifSub?.cancel();
     // Nettoie un éventuel heads-up d'appel encore affiché.
     InAppNotifier.instance.dismissCall();
     super.dispose();

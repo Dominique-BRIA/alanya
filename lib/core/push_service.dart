@@ -12,6 +12,7 @@ import 'package:flutter_local_notifications/src/platform_specifics/android/notif
 
 import '../core/api_client.dart';
 // Préfixe : firebase_messaging exporte aussi un type `NotificationSettings`.
+import '../core/call_ui_native.dart';
 import '../core/notification_settings.dart' as notif;
 import '../core/server_config.dart';
 import '../core/token_storage.dart';
@@ -468,11 +469,31 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
     return;
   }
 
-  // Appel entrant (app fermée/arrière-plan) → notification PLEIN ÉCRAN.
+  // Appel entrant (app fermée/arrière-plan) → ÉCRAN d'appel natif.
   // Ne se déclenche que si le push est data-only (pas de bloc notification).
   if (message.data['type'] == 'incoming_call') {
     // Réglage : notifications d'appels désactivées → on n'affiche rien.
     if (!await notif.NotificationSettings.callsEnabledFresh()) return;
+
+    final data = message.data;
+    final callId = data['callId']?.toString();
+    if (callId != null && callId.isNotEmpty) {
+      // Vrai écran d'appel — avatar, nom, deux gros boutons — posé par-dessus
+      // le verrouillage. Remplace le bandeau de texte que produisait
+      // flutter_local_notifications, qui ne sait pas construire une
+      // notification de style « appel ».
+      await CallUiNative.afficherAppelEntrant(
+        callId: callId,
+        nom: data['callerName']?.toString() ?? 'Appel entrant',
+        avatarUrl: data['callerAvatarUrl']?.toString(),
+        video: data['callType'] == 'VIDEO',
+      );
+      return;
+    }
+
+    // Repli : sans identifiant d'appel, l'écran natif ne pourrait être ni
+    // refermé ni rattaché à un appel. On retombe sur l'ancienne notification,
+    // moins belle mais qui prévient au moins l'utilisateur.
     final plugin = FlutterLocalNotificationsPlugin();
     await plugin.initialize(const InitializationSettings(
       android: AndroidInitializationSettings('@mipmap/ic_launcher'),

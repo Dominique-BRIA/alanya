@@ -5,6 +5,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import '../../core/call_permissions.dart';
 import '../../core/debug_overlay.dart';
+import '../../core/call_ui_native.dart';
 import '../../core/lock_screen_call.dart';
 import '../../core/push_service.dart';
 import '../../core/realtime_client.dart';
@@ -295,8 +296,12 @@ class CallController extends ChangeNotifier {
     // Filet de sécurité : coupe toute sonnerie encore en cours.
     // (Doublon sûr des stop() éparpillés — mieux vaut couper 2 fois que 0.)
     RingtoneService.instance.stop();
-    PushService.instance.cancelIncomingCall(
-        activeCallId ?? incoming?.callId); // retire la notif
+    final idAFermer = activeCallId ?? incoming?.callId;
+    PushService.instance.cancelIncomingCall(idAFermer); // retire la notif
+    // Referme aussi l'ÉCRAN D'APPEL NATIF. Sans cela il continuerait de sonner
+    // par-dessus le verrouillage alors que l'appelant a déjà raccroché : le
+    // paquet ne sait pas que l'appel est terminé, personne ne le lui a dit.
+    if (idAFermer != null) CallUiNative.masquer(idAFermer);
     // Rend la main au verrouillage : sans ce retour, l'application resterait
     // accessible écran verrouillé bien après la fin de l'appel.
     LockScreenCall.desactiver();
