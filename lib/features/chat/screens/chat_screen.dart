@@ -572,12 +572,21 @@ class _ChatScreenState extends State<ChatScreen>
     } else if (type == "disappearing_updated") {
       if (e["convId"] != widget.convId) return;
       setState(() => _disappearingSeconds = (e["seconds"] as num?)?.toInt() ?? 0);
+    } else if (type == "call_ended") {
+      // Le serveur pousse l'appel COMPLET : on l'insère, sans rien recharger.
+      final brut = e["call"];
+      if (brut is Map) {
+        _integreAppel(CallRecord.fromJson(Map<String, dynamic>.from(brut)));
+      }
     } else if (type == "call_state") {
-      // Un appel de cette conversation vient de changer d'état (ended/missed/rejected) -> recharge
+      // Repli : un serveur qui n'envoie pas encore `call_ended` ne signale que
+      // le changement d'état, il faut alors aller chercher l'appel. Le garde de
+      // `_rafraichitAppels` évite de doubler l'insertion directe quand les deux
+      // arrivent — `_integreAppel` le réarme.
       final callId = e["callId"] as String?;
       if (callId != null) {
         Future.delayed(const Duration(milliseconds: 800), () {
-          if (mounted) _loadCalls();
+          if (mounted) _rafraichitAppels();
         });
       }
     } else if (type == "incoming_call") {
@@ -774,6 +783,30 @@ class _ChatScreenState extends State<ChatScreen>
     if (!mounted) return;
     setState(() {
       _callsForConv = filtered;
+      _rebuildCombined();
+    });
+  }
+
+  /// Insère (ou remplace) un appel poussé par le serveur, sans requête.
+  ///
+  /// Remplace par le même identifiant plutôt que d'ajouter : un appel passe par
+  /// plusieurs états, et le même arriverait deux fois dans le fil.
+  ///
+  /// Réarme le garde anti-rafale : l'appel étant déjà à jour, le
+  /// `call_state` qui l'accompagne n'a plus rien à aller chercher.
+  void _integreAppel(CallRecord c) {
+    if (c.convId != widget.convId) return;
+    _dernierRafraichissementAppels = DateTime.now();
+    final liste = List<CallRecord>.from(_callsForConv);
+    final i = liste.indexWhere((x) => x.id == c.id);
+    if (i >= 0) {
+      liste[i] = c;
+    } else {
+      liste.add(c);
+    }
+    if (!mounted) return;
+    setState(() {
+      _callsForConv = liste;
       _rebuildCombined();
     });
   }

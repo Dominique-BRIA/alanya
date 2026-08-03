@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/call_cache.dart';
 import '../../../core/call_status.dart';
+import '../../../core/realtime_client.dart';
 import '../../../models/call_record.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
@@ -26,15 +29,48 @@ class _CallsScreenState extends State<CallsScreen>
   bool _error = false;
   bool _wasBusy = false;
 
+  StreamSubscription<Map<String, dynamic>>? _rtSub;
+
   @override
   void initState() {
     super.initState();
     _load();
     context.read<CallController>().addListener(_onCallActivity);
+    // Cet écran ne suivait QUE le CallController, donc uniquement les appels
+    // passés depuis cet appareil. Un appel manqué pendant qu'on regardait la
+    // liste n'y apparaissait jamais de lui-même.
+    _rtSub = context.read<RealtimeClient>().events.listen((e) {
+      if (!mounted) return;
+      final t = e["type"];
+      if (t == "call_ended") {
+        final brut = e["call"];
+        if (brut is Map) {
+          _integreAppel(CallRecord.fromJson(Map<String, dynamic>.from(brut)));
+        }
+      } else if (t == "ws_connected") {
+        // La coupure a pu masquer des appels : les événements ne se rejouent pas.
+        _load();
+      }
+    });
+  }
+
+  /// Insère un appel poussé par le serveur, sans requête. Remplace par
+  /// identifiant : le même appel change d'état plusieurs fois.
+  void _integreAppel(CallRecord c) {
+    final liste = List<CallRecord>.from(_calls ?? []);
+    final i = liste.indexWhere((x) => x.id == c.id);
+    if (i >= 0) {
+      liste[i] = c;
+    } else {
+      liste.add(c);
+    }
+    setState(() => _calls = CallStatusFormalisme.sortAndLimit20(liste));
+    CallCache.putAll(liste);
   }
 
   @override
   void dispose() {
+    _rtSub?.cancel();
     context.read<CallController>().removeListener(_onCallActivity);
     super.dispose();
   }

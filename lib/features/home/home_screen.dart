@@ -261,6 +261,25 @@ class _ConversationsTabState extends State<_ConversationsTab>
     if (mounted) setState(() => _lastCallPerConv = map);
   }
 
+  /// Insère un appel poussé par le serveur, sans requête.
+  ///
+  /// N'écrase l'aperçu de la conversation que si cet appel est plus RÉCENT que
+  /// celui déjà retenu : un appel clos tardivement ne doit pas repasser devant
+  /// un appel plus frais.
+  ///
+  /// Réarme le garde anti-rafale, l'état étant déjà à jour.
+  void _integreAppel(CallRecord c) {
+    final convId = c.convId;
+    if (convId == null) return;
+    _dernierRafraichissementAppels = DateTime.now();
+    final connu = _lastCallPerConv[convId];
+    if (connu != null && connu.startedAt.isAfter(c.startedAt)) return;
+    if (!mounted) return;
+    setState(() {
+      _lastCallPerConv = {..._lastCallPerConv, convId: c};
+    });
+  }
+
   /// Point d'entrée des rafraîchissements AUTOMATIQUES (retour au premier plan,
   /// reconnexion WebSocket, fin d'appel). Ils se déclenchent souvent ensemble —
   /// revenir dans l'app reconnecte le WebSocket dans la foulée — d'où ce garde
@@ -312,10 +331,18 @@ class _ConversationsTabState extends State<_ConversationsTab>
         }
       } else if (t == "read") {
         _poll();
+      } else if (t == "call_ended") {
+        // Le serveur pousse l'appel COMPLET : on l'insère, sans rien recharger.
+        final brut = e["call"];
+        if (brut is Map) {
+          _integreAppel(CallRecord.fromJson(Map<String, dynamic>.from(brut)));
+        }
       } else if (t == "call_state" || t == "incoming_call") {
-        // Nouvel appel ou changement d'état -> recharge instantanée des appels manqués/sortants
+        // Repli : un serveur qui n'envoie pas encore `call_ended` ne signale que
+        // le changement d'état, il faut alors aller chercher l'appel. Le garde
+        // de `_rafraichitAppels` absorbe le doublon quand les deux arrivent.
         Future.delayed(const Duration(milliseconds: 800), () {
-          if (mounted) _loadCalls();
+          if (mounted) _rafraichitAppels();
         });
       } else if (t == "ws_connected") {
         // La connexion vient de se rétablir : tout ce qui s'est passé pendant
