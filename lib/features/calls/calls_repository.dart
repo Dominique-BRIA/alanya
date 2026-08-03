@@ -59,6 +59,22 @@ class CallsRepository {
         .toList();
   }
 
+  /// Nombre d'appels manqués depuis [since], pour la pastille de l'onglet.
+  ///
+  /// Renvoie 0 plutôt que de lever : un serveur qui ne connaît pas encore la
+  /// route répond 404, et une pastille absente vaut mieux qu'une erreur pour un
+  /// compteur d'affichage.
+  Future<int> missedCount({String? since}) async {
+    try {
+      final data = await _api.get(
+        "/api/calls/missed${since != null ? "?since=$since" : ""}",
+      );
+      return (data["count"] as num?)?.toInt() ?? 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
   /// Appels d'UNE conversation.
   ///
   /// Le fil de discussion utilisait [history], qui rapatrie les 50 derniers

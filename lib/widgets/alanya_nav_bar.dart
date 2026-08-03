@@ -59,11 +59,55 @@ class AlanyaNavItem {
     required this.icon,
     required this.activeIcon,
     required this.label,
+    this.badge = 0,
   });
 
   final IconData icon;
   final IconData activeIcon;
   final String label;
+
+  /// Nombre affiché dans la pastille. Zéro = aucune pastille.
+  final int badge;
+}
+
+/// Pastille rouge de comptage, façon WhatsApp.
+///
+/// Rouge franc dans les quatre thèmes : c'est une alerte, pas un accent, et
+/// elle doit se lire pareil partout. Au-delà de 99 elle affiche « 99+ », sans
+/// quoi un nombre à quatre chiffres déformerait la barre.
+class _Pastille extends StatelessWidget {
+  const _Pastille({required this.nombre});
+  final int nombre;
+
+  @override
+  Widget build(BuildContext context) {
+    final texte = nombre > 99 ? "99+" : "$nombre";
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: nombre > 9 ? 5 : 0),
+      constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+      decoration: BoxDecoration(
+        color: const Color(0xFFE53935),
+        borderRadius: BorderRadius.circular(9),
+        // Liseré de la couleur de la barre : détache la pastille de l'icône
+        // quand elle la chevauche.
+        border: Border.all(
+          color: themed(context,
+              light: Colors.white, dark: surfacesOf(context).surface),
+          width: 1.5,
+        ),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        texte,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          height: 1.1,
+        ),
+      ),
+    );
+  }
 }
 
 class _NavTile extends StatefulWidget {
@@ -118,14 +162,30 @@ class _NavTileState extends State<_NavTile> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 200),
-                child: Icon(
-                  widget.isSelected ? widget.item.activeIcon : widget.item.icon,
-                  key: ValueKey(widget.isSelected),
-                  size: 22,
-                  color: widget.isSelected ? activeColor : inactiveColor,
-                ),
+              // Stack en Clip.none : la pastille déborde sur le coin de
+              // l'icône sans élargir la case, donc sans décaler les onglets
+              // voisins quand elle apparaît.
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 200),
+                    child: Icon(
+                      widget.isSelected
+                          ? widget.item.activeIcon
+                          : widget.item.icon,
+                      key: ValueKey(widget.isSelected),
+                      size: 22,
+                      color: widget.isSelected ? activeColor : inactiveColor,
+                    ),
+                  ),
+                  if (widget.item.badge > 0)
+                    Positioned(
+                      top: -4,
+                      right: -8,
+                      child: _Pastille(nombre: widget.item.badge),
+                    ),
+                ],
               ),
               const SizedBox(height: 2),
               AnimatedDefaultTextStyle(

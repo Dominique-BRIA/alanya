@@ -15,6 +15,7 @@ import '../../core/notification_settings.dart';
 import '../../core/realtime_client.dart';
 import '../../core/call_cache.dart';
 import '../../core/call_status.dart';
+import '../../core/missed_calls.dart';
 import '../../models/call_record.dart';
 import '../../models/ai_message.dart';
 import '../../models/auth_user.dart';
@@ -53,10 +54,17 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _tab = 0;
+  int _appelsManques = 0;
+
+  void _onManquesChanges() {
+    if (!mounted) return;
+    setState(() => _appelsManques = MissedCalls.instance.count);
+  }
 
   @override
   void initState() {
     super.initState();
+    MissedCalls.instance.addListener(_onManquesChanges);
     // Ouvre la connexion temps réel dès que l'utilisateur est sur l'accueil.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -68,6 +76,9 @@ class _HomeScreenState extends State<HomeScreen> {
               user.pseudo ?? user.publicNumber,
             );
       }
+      MissedCalls.instance
+        ..bind(context.read<CallsRepository>())
+        ..rafraichir();
     });
   }
 
@@ -78,6 +89,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    MissedCalls.instance.removeListener(_onManquesChanges);
     // FIX: NE PAS déconnecter la WS ici.
     // HomeScreen peut être démonté/remonté (changement de langue via
     // LocaleController.notifyListeners, rotation, hot restart, etc.).
@@ -160,14 +172,18 @@ class _HomeScreenState extends State<HomeScreen> {
             : null,
         bottomNavigationBar: AlanyaNavBar(
           currentIndex: _tab,
-          onTap: (i) => setState(() => _tab = i),
-          items: const [
-            AlanyaNavItem(
+          onTap: (i) {
+            setState(() => _tab = i);
+            // Ouvrir l'onglet Appels vaut consultation : la pastille tombe.
+            if (i == 2) MissedCalls.instance.marquerVus();
+          },
+          items: [
+            const AlanyaNavItem(
               icon: Icons.chat_bubble_outline,
               activeIcon: Icons.chat_bubble,
               label: 'Chats',
             ),
-            AlanyaNavItem(
+            const AlanyaNavItem(
               icon: Icons.radio_button_unchecked,
               activeIcon: Icons.adjust,
               label: 'Status',
@@ -176,13 +192,14 @@ class _HomeScreenState extends State<HomeScreen> {
               icon: Icons.call_outlined,
               activeIcon: Icons.call,
               label: 'Appels',
+              badge: _appelsManques,
             ),
-            AlanyaNavItem(
+            const AlanyaNavItem(
               icon: Icons.videocam_outlined,
               activeIcon: Icons.videocam,
               label: 'Réunions',
             ),
-            AlanyaNavItem(
+            const AlanyaNavItem(
               icon: Icons.auto_awesome_outlined,
               activeIcon: Icons.auto_awesome,
               label: 'IA',
@@ -331,6 +348,8 @@ class _ConversationsTabState extends State<_ConversationsTab>
         if (brut is Map) {
           _integreAppel(CallRecord.fromJson(Map<String, dynamic>.from(brut)));
         }
+        // L'appel qui vient de se clore peut être un manqué de plus.
+        MissedCalls.instance.rafraichir();
       } else if (t == "call_state" || t == "incoming_call") {
         // Repli : un serveur qui n'envoie pas encore `call_ended` ne signale que
         // le changement d'état, il faut alors aller chercher l'appel. Le garde
