@@ -12,3 +12,10 @@ android/.gradle/
 # les recherches dans le code : deux résultats pour chaque occurrence, dont un
 # dans une version périmée.
 *.bak
+
+# Chemins du SDK, PROPRES À CHAQUE MACHINE. Ce fichier était versionné avec
+# « /home/bria/Android/Sdk » et « /home/bria/development/flutter » : sur toute
+# autre machine, la configuration Gradle échouait sur « Included build does not
+# exist ». Flutter le régénère automatiquement à chaque build — c'est d'ailleurs
+# pourquoi il ressortait modifié après chaque compilation.
+android/local.properties
