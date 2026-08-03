@@ -6,7 +6,18 @@
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
     <!-- Appels entrants plein écran (Android 10+/14+) -->
+    <!-- Écran d'appel plein écran, même téléphone verrouillé.
+         Depuis Android 14, cette autorisation est REFUSÉE par défaut à toute
+         application qui n'est pas reconnue comme application d'appel — ce qui
+         explique qu'un même APK affiche l'appel sur un téléphone en Android 13
+         et pas sur un Android 14. MANAGE_OWN_CALLS ci-dessous est ce qui range
+         Alanya dans cette catégorie. -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
+    <!-- Déclare Alanya comme application gérant ses propres appels. C'est la
+         permission qu'utilisent WhatsApp et les autres messageries pour que le
+         système les traite comme un téléphone : elle conditionne l'octroi
+         automatique de USE_FULL_SCREEN_INTENT sur Android 14 et suivants. -->
+    <uses-permission android:name="android.permission.MANAGE_OWN_CALLS"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>

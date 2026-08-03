@@ -5,6 +5,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import '../../core/call_permissions.dart';
 import '../../core/debug_overlay.dart';
+import '../../core/lock_screen_call.dart';
 import '../../core/push_service.dart';
 import '../../core/realtime_client.dart';
 import '../../core/ringtone_service.dart';
@@ -296,6 +297,9 @@ class CallController extends ChangeNotifier {
     RingtoneService.instance.stop();
     PushService.instance.cancelIncomingCall(
         activeCallId ?? incoming?.callId); // retire la notif
+    // Rend la main au verrouillage : sans ce retour, l'application resterait
+    // accessible écran verrouillé bien après la fin de l'appel.
+    LockScreenCall.desactiver();
     incoming = null;
     activeCallId = null;
     activeConvId = null;
@@ -537,6 +541,11 @@ class CallController extends ChangeNotifier {
       );
       // Sonnerie entrante (loop) jusqu'à accept/reject/timeout serveur.
       RingtoneService.instance.startIncoming();
+      // Autorise l'écran d'appel à passer par-dessus le verrouillage, et allume
+      // l'écran. Activé ICI et non au montage de l'écran d'appel : quand le
+      // téléphone est verrouillé, il faut que la fenêtre porte déjà l'attribut
+      // au moment où Android l'affiche.
+      LockScreenCall.activer();
       notifyListeners();
     } else if (type == "call_signal") {
       final callId = e["callId"] as String?;
