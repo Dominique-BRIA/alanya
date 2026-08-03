@@ -47,16 +47,21 @@ class _CallListenerState extends State<CallListener> {
     // Boutons de l'ÉCRAN D'APPEL NATIF. Ils n'arrivent pas par le même chemin
     // que ceux de la notification locale : c'est un flux propre au paquet, et
     // c'est lui qui compte désormais pour un appel reçu application fermée.
+    // `CallEvent` est une classe SCELLÉE : chaque action est une sous-classe
+    // distincte, avec ses propres champs. On filtre donc sur le TYPE et non sur
+    // une chaîne — le compilateur vérifie alors que les champs lus existent.
     _natifSub = FlutterCallkitIncoming.onEvent.listen((event) {
       if (!mounted || event == null) return;
-      switch (event.event) {
-        case Event.actionCallAccept:
-          _onCallAction('call_accept', event.body['id']?.toString());
-          break;
-        case Event.actionCallDecline:
-        case Event.actionCallTimeout:
-          _onCallAction('call_reject', event.body['id']?.toString());
-          break;
+      switch (event) {
+        case CallEventActionCallAccept(:final callKitParams):
+          _onCallAction('call_accept', callKitParams.id);
+        case CallEventActionCallDecline(:final callKitParams):
+          _onCallAction('call_reject', callKitParams.id);
+        // Fin du délai de sonnerie : l'appel n'a pas été pris. Traité comme un
+        // refus pour que l'appelant cesse de sonner tout de suite, plutôt que
+        // d'attendre son propre minuteur.
+        case CallEventActionCallTimeout(:final id):
+          _onCallAction('call_reject', id);
         default:
           break;
       }

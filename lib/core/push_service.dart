@@ -505,7 +505,6 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
               AndroidFlutterLocalNotificationsPlugin>()
           ?.createNotificationChannel(PushService.callChannel);
     }
-    final data = message.data;
     final title = data['callerName']?.toString() ?? 'Appel entrant';
     final body = (data['callType'] == 'VIDEO')
         ? 'Appel vidéo entrant'

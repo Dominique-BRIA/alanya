@@ -39,14 +39,16 @@ class CallUiNative {
         // 60 s : un écran qui sonnerait plus longtemps afficherait un appel que
         // plus personne ne passe.
         duration: 60000,
-        textAccept: 'Répondre',
-        textDecline: 'Refuser',
         missedCallNotification: const NotificationParams(
           showNotification: true,
           isShowCallback: false,
           subtitle: 'Appel manqué',
         ),
         android: const AndroidParams(
+          // Libellés des boutons : ils appartiennent à AndroidParams et non à
+          // CallKitParams, l'écran étant rendu par la couche Android.
+          textAccept: 'Répondre',
+          textDecline: 'Refuser',
           isCustomNotification: true,
           isShowLogo: false,
           // Les deux réglages qui font tout le comportement recherché :
