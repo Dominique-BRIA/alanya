@@ -1,5 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui';
+
+import 'package:http/http.dart' as http;
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -10,6 +13,7 @@ import 'package:flutter_local_notifications/src/platform_specifics/android/notif
 import '../core/api_client.dart';
 // Préfixe : firebase_messaging exporte aussi un type `NotificationSettings`.
 import '../core/notification_settings.dart' as notif;
+import '../core/server_config.dart';
 import '../core/token_storage.dart';
 
 /// Service de notifications push complet (FCM + notifications locales).
@@ -161,6 +165,10 @@ class PushService {
     await _localPlugin.initialize(
       settings,
       onDidReceiveNotificationResponse: _onLocalNotificationTap,
+      // Actions tapées alors que l'application est en arrière-plan ou TUÉE.
+      // Le plugin les livre dans un isolate séparé — voir
+      // `notificationBackgroundHandler` en bas de ce fichier.
+      onDidReceiveBackgroundNotificationResponse: notificationBackgroundHandler,
     );
 
     // ⚠️ INDISPENSABLE AU DÉMARRAGE À FROID, et ce n'est pas redondant avec le
@@ -516,5 +524,83 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
       ),
       payload: jsonEncode(data),
     );
+  }
+}
+
+/// Refus d'un appel depuis la notification, **application tuée**.
+///
+/// POURQUOI UN HANDLER SÉPARÉ. Le bouton « Refuser » ne porte pas
+/// `showsUserInterface` : c'est voulu, refuser un appel ne doit pas ouvrir
+/// l'application. Mais Android ne relance alors aucun processus Flutter, donc
+/// `onDidReceiveNotificationResponse` — qui vit dans l'isolate principal — n'est
+/// jamais invoqué et le rejet ne partait jamais au serveur. L'appelant
+/// continuait de sonner jusqu'à l'expiration des 90 s, en croyant que personne
+/// ne décrochait alors que son correspondant avait explicitement refusé.
+///
+/// Ce point d'entrée est appelé par le plugin dans un isolate SANS INTERFACE.
+/// Rien de l'application n'y est disponible : ni Provider, ni navigateur, ni
+/// état en mémoire. Tout ce dont il a besoin doit être relu depuis le stockage.
+///
+/// `@pragma('vm:entry-point')` est indispensable : sans elle, la compilation
+/// AOT de la version release supprime cette fonction, que rien n'appelle depuis
+/// le code Dart. Le bug ne se verrait qu'en release, jamais en debug.
+@pragma('vm:entry-point')
+Future<void> notificationBackgroundHandler(NotificationResponse response) async {
+  if (response.actionId != 'call_reject') return;
+
+  // L'isolate démarre nu : les plugins natifs doivent être ré-enregistrés,
+  // sinon le stockage sécurisé et le réseau lèvent « MissingPluginException ».
+  WidgetsFlutterBinding.ensureInitialized();
+  DartPluginRegistrant.ensureInitialized();
+
+  String? callId;
+  final payload = response.payload;
+  if (payload != null) {
+    try {
+      callId = (jsonDecode(payload) as Map)['callId']?.toString();
+    } catch (_) {}
+  }
+  if (callId == null || callId.isEmpty) return;
+
+  try {
+    final storage = TokenStorage();
+    var token = await storage.accessToken;
+
+    // Le jeton d'accès est de courte durée et l'application peut être fermée
+    // depuis longtemps : sans ce rafraîchissement, le refus échouerait
+    // silencieusement dans le cas le plus courant.
+    if (token == null) {
+      final refresh = await storage.refreshToken;
+      if (refresh == null) return;
+      final r = await http.post(
+        Uri.parse('${ServerConfig.apiBase}/api/auth/refresh'),
+        headers: const {'Content-Type': 'application/json'},
+        body: jsonEncode({'refreshToken': refresh}),
+      );
+      if (r.statusCode != 200) return;
+      final data = jsonDecode(r.body) as Map<String, dynamic>;
+      token = data['accessToken'] as String?;
+      final nouveauRefresh = data['refreshToken'] as String?;
+      if (token == null || nouveauRefresh == null) return;
+      await storage.saveTokens(access: token, refresh: nouveauRefresh);
+    }
+
+    // `http` directement et non ApiClient : celui-ci dépend de l'arborescence
+    // de widgets et de Provider, absents de cet isolate.
+    await http.post(
+      Uri.parse('${ServerConfig.apiBase}/api/calls/$callId/reject'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      },
+    );
+    // Aucun traitement de la réponse : un 409 signifie que l'appel était déjà
+    // clos — raccroché en face, ou refusé depuis un autre appareil. C'est un
+    // résultat acceptable, l'objectif étant seulement que l'appelant cesse de
+    // sonner.
+  } catch (_) {
+    // L'isolate peut être tué à tout moment par le système. Échouer en silence
+    // est le seul comportement possible : il n'y a ni interface où signaler
+    // l'erreur, ni contexte où réessayer.
   }
 }
