@@ -28,7 +28,36 @@ class PushService {
   /// Branché par la couche appel (CallListener) : reçoit l'action tapée sur la
   /// notification d'appel — 'call_accept' | 'call_reject' — avec le callId.
   /// Passe par un hook pour éviter un import core → features.
-  static void Function(String actionId, String? callId)? onCallAction;
+  ///
+  /// L'affectation REJOUE une action restée en attente. C'est indispensable au
+  /// démarrage à froid : l'action qui a lancé l'application est lue avant que
+  /// `CallListener` n'existe, donc avant qu'il n'ait pu se brancher ici.
+  static void Function(String actionId, String? callId)? get onCallAction =>
+      _onCallAction;
+  static set onCallAction(void Function(String, String?)? cb) {
+    _onCallAction = cb;
+    final enAttente = _actionEnAttente;
+    if (cb != null && enAttente != null) {
+      _actionEnAttente = null;
+      cb(enAttente.$1, enAttente.$2);
+    }
+  }
+
+  static void Function(String actionId, String? callId)? _onCallAction;
+
+  /// Action d'appel reçue alors que personne n'écoutait encore.
+  static (String, String?)? _actionEnAttente;
+
+  /// Route une action d'appel, ou la met de côté si le destinataire n'est pas
+  /// encore là.
+  static void _emetActionAppel(String actionId, String? callId) {
+    final cb = _onCallAction;
+    if (cb != null) {
+      cb(actionId, callId);
+    } else {
+      _actionEnAttente = (actionId, callId);
+    }
+  }
 
   final _localPlugin = FlutterLocalNotificationsPlugin();
   bool _initialized = false;
@@ -133,6 +162,22 @@ class PushService {
       settings,
       onDidReceiveNotificationResponse: _onLocalNotificationTap,
     );
+
+    // ⚠️ INDISPENSABLE AU DÉMARRAGE À FROID, et ce n'est pas redondant avec le
+    // rappel ci-dessus.
+    //
+    // Quand l'application est TUÉE et que l'utilisateur appuie sur « Répondre »
+    // dans la notification d'appel, Android relance le processus. Mais
+    // `onDidReceiveNotificationResponse` ne se déclenche PAS pour l'action qui
+    // a provoqué ce lancement : elle a eu lieu avant que le plugin n'existe.
+    // Elle n'est récupérable que par cette interrogation explicite.
+    //
+    // Sans elle, tout le reste de la chaîne était pourtant en place mais restait
+    // inerte : `CallListener._pendingAccept` n'était jamais armé, l'application
+    // s'ouvrait sur l'accueil et l'appel continuait de sonner chez l'appelant
+    // jusqu'à expiration. C'est exactement le cas « app fermée », le plus
+    // fréquent pour un appel entrant.
+    await _traiteLancementParNotification();
 
     // Crée le canal Android obligatoire (Android 8+)
     if (Platform.isAndroid) {
@@ -279,10 +324,39 @@ class PushService {
     }
     // Boutons Répondre / Refuser d'une notification d'appel.
     if (actionId == 'call_accept' || actionId == 'call_reject') {
-      onCallAction?.call(actionId!, data?['callId']?.toString());
+      // Passe par `_emetActionAppel` et non plus directement par le callback :
+      // l'action peut arriver avant que `CallListener` ne soit monté, auquel
+      // cas elle est gardée puis rejouée à son branchement.
+      _emetActionAppel(actionId!, data?['callId']?.toString());
       return;
     }
     if (data != null) _navigateFromPayload(data);
+  }
+
+  /// Récupère l'action de notification qui a LANCÉ l'application, s'il y en a
+  /// une. Voir l'explication détaillée à l'appel, dans `_initLocalNotifications`.
+  Future<void> _traiteLancementParNotification() async {
+    try {
+      final details = await _localPlugin.getNotificationAppLaunchDetails();
+      if (details == null || !details.didNotificationLaunchApp) return;
+      final reponse = details.notificationResponse;
+      final actionId = reponse?.actionId;
+      if (actionId != 'call_accept' && actionId != 'call_reject') return;
+
+      String? callId;
+      final payload = reponse?.payload;
+      if (payload != null) {
+        try {
+          callId = (jsonDecode(payload) as Map)['callId']?.toString();
+        } catch (_) {}
+      }
+      debugPrint('[PushService] Lancé par la notification d\'appel: $actionId');
+      _emetActionAppel(actionId!, callId);
+    } catch (e) {
+      // Ne doit jamais empêcher le démarrage : sans cette reprise, l'app
+      // s'ouvre normalement, l'appel n'est simplement pas décroché tout seul.
+      debugPrint('[PushService] Lancement par notification illisible: $e');
+    }
   }
 
   void _navigateFromPayload(Map<String, dynamic> data) {
