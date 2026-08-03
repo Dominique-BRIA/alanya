@@ -35,7 +35,6 @@ import 'features/media/media_repository.dart';
 import 'features/blocked/blocked_repository.dart';
 import 'features/meetings/meetings_repository.dart';
 import 'features/status/status_repository.dart';
-import 'theme/alanya_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();

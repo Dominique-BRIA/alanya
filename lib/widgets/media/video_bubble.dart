@@ -3,7 +3,6 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 import '../../core/media_cache.dart';
-import '../../theme/alanya_theme.dart';
 import 'cached_media.dart';
 
 /// Bulle vidéo style WhatsApp — thumbnail auto-générée + fallback visible.

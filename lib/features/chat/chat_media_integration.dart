@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/media_helper.dart';
 import '../../widgets/media/link_bubble.dart';
-import '../../widgets/media/reply_media_preview.dart';
 
 /// Mixin pour les previews média dans chat_screen.dart
 mixin ChatMediaIntegrationMixin {

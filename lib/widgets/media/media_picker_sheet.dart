@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:file_picker/file_picker.dart';
-import '../../core/media_helper.dart';
 import '../../theme/alanya_theme.dart';
 import '../contact_picker_sheet.dart';
 

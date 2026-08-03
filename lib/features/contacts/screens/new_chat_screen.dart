@@ -4,7 +4,6 @@ import 'package:provider/provider.dart';
 import '../../../core/alanya_id_formatter.dart';
 import '../../../core/api_client.dart';
 import '../../../core/app_snackbar.dart';
-import '../../../models/contact.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../../chat/chat_repository.dart';

@@ -1,4 +1,3 @@
-import 'dart:convert';
 
 import '../../core/device_registry.dart';
 import '../../core/api_client.dart';

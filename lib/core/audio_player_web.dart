@@ -39,8 +39,15 @@ class InlineAudioPlayer {
     await _stopInternal();
 
     _currentUrl = url;
+    // Élément gardé dans une variable LOCALE non nullable, en plus du champ.
+    // Le champ `_player` est nullable — il est remis à nul à l'arrêt — et
+    // l'analyseur refusait donc d'y accéder directement, ce qui laissait six
+    // erreurs dans ce fichier. Elles ne se voyaient pas au build : cette
+    // implémentation n'est sélectionnée que sur le web, par l'export
+    // conditionnel de `audio_player.dart`, et le projet ne cible qu'Android.
     // ignore: deprecated_member_use
-    _player = html.AudioElement()..src = url;
+    final lecteur = html.AudioElement()..src = url;
+    _player = lecteur;
 
     state.value = AudioPlaybackState(
       url: url,
@@ -49,19 +56,19 @@ class InlineAudioPlayer {
       duration: totalDuration,
     );
 
-    _playingSub = _player.onPlaying.listen((_) {
+    _playingSub = lecteur.onPlaying.listen((_) {
       state.value = state.value.copyWith(isPlaying: true);
     });
 
-    _pauseSub = _player.onPause.listen((_) {
+    _pauseSub = lecteur.onPause.listen((_) {
       state.value = state.value.copyWith(isPlaying: false);
     });
 
-    _endedSub = _player.onEnded.listen((_) {
+    _endedSub = lecteur.onEnded.listen((_) {
       _stopInternal();
     });
 
-    _timeSub = _player.onTimeUpdate.listen((_) {
+    _timeSub = lecteur.onTimeUpdate.listen((_) {
       final p = _player;
       if (p == null) return;
       state.value = state.value.copyWith(
@@ -69,7 +76,7 @@ class InlineAudioPlayer {
       );
     });
 
-    _durSub = _player.onDurationChange.listen((_) {
+    _durSub = lecteur.onDurationChange.listen((_) {
       final p = _player;
       if (p == null) return;
       final d = p.duration;
@@ -81,7 +88,7 @@ class InlineAudioPlayer {
     });
 
     try {
-      await _player.play();
+      await lecteur.play();
     } catch (_) {
       // Certains navigateurs bloquent l'autoplay sans interaction utilisateur.
       // L'utilisateur devra appuyer une seconde fois.

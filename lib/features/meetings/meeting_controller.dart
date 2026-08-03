@@ -5,7 +5,6 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import '../../core/call_permissions.dart';
 import '../../core/realtime_client.dart';
-import '../../models/meeting.dart';
 import '../calls/webrtc_group_mesh.dart';
 import '../calls/webrtc_peer_session.dart';
 import 'meetings_repository.dart';

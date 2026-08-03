@@ -7,7 +7,6 @@ import 'package:video_thumbnail/video_thumbnail.dart';
 import '../../../core/downloader.dart';
 import '../../../core/media_cache.dart';
 import '../../../core/media_helper.dart';
-import '../../../theme/alanya_theme.dart';
 import '../../../widgets/media/cached_media.dart';
 import 'media_gallery_viewer.dart';
 import 'pdf_viewer_screen.dart';

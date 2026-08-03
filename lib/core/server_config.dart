@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 
 class ServerConfig {
   // URL du backend Next.js — VPS (Nginx + SSL), servi sur alanyavox.com.

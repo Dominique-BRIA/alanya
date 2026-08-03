@@ -1,3 +1,14 @@
 .idea/
 .idea/
 *.iml
+
+# Cache de build Gradle. Il était versionné : ses fichiers .lock et .bin
+# changent à chaque compilation, donc chaque build salissait `git status` et
+# risquait d'entrer dans un commit sans qu'on le veuille. Rien là-dedans n'est
+# reproductible d'une machine à l'autre.
+android/.gradle/
+
+# Sauvegardes d'éditeur. `chat_screen.dart.bak` était suivi et polluait toutes
+# les recherches dans le code : deux résultats pour chaque occurrence, dont un
+# dans une version périmée.
+*.bak

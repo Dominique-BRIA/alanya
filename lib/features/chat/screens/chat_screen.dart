@@ -2,7 +2,6 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 
 import '../../../core/message_cache.dart';
@@ -34,9 +33,7 @@ import '../../../l10n/app_localizations.dart';
 import '../../../models/message.dart';
 import '../../../models/conversation.dart';
 import '../../../theme/alanya_theme.dart';
-import '../../../widgets/auth_network_image.dart';
 import '../../../widgets/avatar_circle.dart';
-import '../../../widgets/back_app_bar.dart';
 import '../../../widgets/motif_background.dart';
 import '../../account/screens/avatar_viewer_screen.dart';
 import '../../auth/auth_controller.dart';
@@ -47,16 +44,13 @@ import '../../group/screens/group_info_screen.dart';
 import '../../media/media_repository.dart';
 import '../chat_repository.dart';
 import '../widgets/activity_indicator.dart';
-import 'image_viewer_screen.dart';
 import 'pdf_viewer_screen.dart';
-import 'video_viewer_screen.dart';
 
 // ── Imports previews WhatsApp ──
 import '../../../widgets/media/image_bubble.dart';
 import '../../../widgets/media/video_bubble.dart';
 import '../../../widgets/media/document_bubble.dart';
 import '../../../widgets/media/audio_bubble.dart';
-import '../../../widgets/media/link_bubble.dart';
 import '../../../widgets/media/reply_media_preview.dart';
 import '../../../widgets/media/media_grid.dart';
 import '../../../core/media_helper.dart';
