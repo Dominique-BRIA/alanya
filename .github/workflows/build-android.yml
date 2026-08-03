@@ -53,10 +53,17 @@ jobs:
         run: flutter pub get
 
       - name: Build APK
-        # --no-daemon : le démon Gradle sert à garder une JVM chaude entre deux
-        # builds. Un runner est détruit après le sien, donc le démon ne fait
-        # qu'occuper de la mémoire — celle-là même qui manquait.
-        run: flutter build apk --release --no-daemon
+        # Le démon Gradle sert à garder une JVM chaude entre deux builds. Un
+        # runner est détruit après le sien, donc le démon ne fait qu'occuper de
+        # la mémoire — celle-là même qui manquait.
+        #
+        # L'option passe par l'environnement et NON par la ligne de commande :
+        # `--no-daemon` appartient à Gradle, or c'est `flutter build` qui est
+        # appelé ici, et il rejette les options qu'il ne connaît pas (exit 64).
+        # GRADLE_OPTS traverse Flutter jusqu'au Gradle qu'il lance.
+        env:
+          GRADLE_OPTS: -Dorg.gradle.daemon=false
+        run: flutter build apk --release
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
