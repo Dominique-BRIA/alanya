@@ -10,6 +10,7 @@ import '../../core/debug_overlay.dart';
 import '../../core/in_app_notifier.dart';
 import '../../core/push_service.dart';
 import 'call_controller.dart';
+import 'calls_repository.dart';
 import 'screens/active_call_screen.dart';
 
 /// Écoute les appels entrants et, quand l'app est **ouverte** (premier plan),
@@ -67,9 +68,33 @@ class _CallListenerState extends State<CallListener> {
       }
     });
 
-    // Un écran d'appel laissé affiché par un arrêt brutal sonnerait dans le
-    // vide au redémarrage : on repart d'une ardoise propre.
-    CallUiNative.toutMasquer();
+    // ⚠️ NE PAS effacer les appels natifs au démarrage. La version précédente
+    // appelait `endAllCalls()` ici pour nettoyer un écran orphelin — sauf que
+    // décrocher DÉMARRE l'application : cette ligne supprimait donc l'appel que
+    // l'utilisateur venait précisément d'accepter. L'écran se refermait, le
+    // WebSocket relivrait l'appel bufferisé, et tout repartait à zéro comme
+    // s'il arrivait à l'instant. Un écran vraiment orphelin disparaît seul au
+    // bout des 60 s de sonnerie.
+    _reprendreAppelNatif();
+  }
+
+  /// Récupère une action décidée AVANT que cet écouteur n'existe.
+  ///
+  /// Décrocher depuis l'écran natif démarre l'application : l'événement part
+  /// alors que rien ne l'écoute encore, et il n'est jamais rejoué. Les appels
+  /// actifs, eux, portent l'information — un appel marqué accepté signifie que
+  /// l'utilisateur a appuyé sur Répondre.
+  Future<void> _reprendreAppelNatif() async {
+    try {
+      final actifs = await FlutterCallkitIncoming.activeCalls();
+      if (!mounted || actifs.isEmpty) return;
+      for (final appel in actifs) {
+        if (appel.isAccepted) {
+          _onCallAction('call_accept', appel.id);
+          return;
+        }
+      }
+    } catch (_) {}
   }
 
   @override
@@ -85,7 +110,18 @@ class _CallListenerState extends State<CallListener> {
     if (!mounted) return;
     final cc = context.read<CallController>();
     if (actionId == 'call_reject') {
-      cc.rejectIncoming();
+      if (cc.incoming != null) {
+        cc.rejectIncoming();
+      } else if (callId != null && callId.isNotEmpty) {
+        // Refus décidé avant que l'appel ne soit connu de l'application —
+        // typiquement au démarrage, la trame WebSocket n'étant pas encore
+        // arrivée. `rejectIncoming` ne ferait rien du tout dans ce cas : il
+        // commence par lire `incoming`, qui vaut nul. On prévient donc le
+        // serveur directement, avec l'identifiant que l'écran natif nous donne,
+        // sinon l'appelant sonnerait jusqu'à expiration.
+        context.read<CallsRepository>().reject(callId).catchError((_) {});
+        CallUiNative.masquer(callId);
+      }
       InAppNotifier.instance.dismissCall();
     } else if (actionId == 'call_accept') {
       if (cc.incoming != null) {
