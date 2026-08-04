@@ -68,8 +68,26 @@ class CallUiNative {
     );
   }
 
-  /// Retire l'écran d'appel — appelant qui renonce, appel expiré, ou décroché
-  /// depuis un autre appareil.
+  /// Signale au système que l'appel est DÉCROCHÉ et en cours.
+  ///
+  /// ⚠️ SANS CET APPEL, le paquet reste bloqué sur « appel entrant ». Sa
+  /// notification continue d'afficher Répondre / Refuser après que l'appel a
+  /// commencé, son minuteur ne démarre pas, et raccrocher depuis l'application
+  /// ne la fait pas disparaître : le paquet n'a jamais été informé que l'état
+  /// avait changé. C'était l'origine commune de la plupart des incohérences
+  /// entre la notification et l'écran d'appel.
+  static Future<void> marquerConnecte(String callId) async {
+    try {
+      await FlutterCallkitIncoming.setCallConnected(callId);
+    } catch (_) {}
+  }
+
+  /// Retire l'écran d'appel — appelant qui renonce, appel expiré, décroché
+  /// depuis un autre appareil, ou raccroché depuis l'application.
+  ///
+  /// Termine AUSSI tout autre appel resté affiché : après un raccrochage, une
+  /// notification orpheline continuerait d'égrener son minuteur pour un appel
+  /// qui n'existe plus, et rien ne permettrait de la faire partir.
   static Future<void> masquer(String callId) async {
     try {
       await FlutterCallkitIncoming.endCall(callId);
@@ -77,6 +95,9 @@ class CallUiNative {
       // L'écran a pu être fermé par l'utilisateur entre-temps : il n'y a alors
       // rien à retirer, et l'échec n'a aucune conséquence.
     }
+    try {
+      await FlutterCallkitIncoming.endAllCalls();
+    } catch (_) {}
   }
 
   /// Ferme tout écran d'appel encore affiché. Utile au démarrage : un appel

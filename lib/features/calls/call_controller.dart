@@ -179,6 +179,10 @@ class CallController extends ChangeNotifier {
     // Coupe la sonnerie entrante dès qu'on accepte.
     await RingtoneService.instance.stop();
     PushService.instance.cancelIncomingCall(inc.callId); // retire la notif
+    // Fait passer l'écran natif de « appel entrant » à « appel en cours ».
+    // Sans cela il garde ses boutons Répondre / Refuser pendant toute la
+    // communication et ne réagit plus à rien.
+    CallUiNative.marquerConnecte(inc.callId);
 
     final result = await _calls.accept(inc.callId);
     isGroupCall = result.isGroup || inc.isGroup;
@@ -256,6 +260,9 @@ class CallController extends ChangeNotifier {
       activePeerName = result.groupName ?? nomAffiche ?? activePeerName ?? "Appel";
       activeRole = ActiveCallRole.ongoing;
       incoming = null;
+      // Même raison que dans `acceptIncoming` : sans ce signal, l'écran natif
+      // reste sur « appel entrant » pendant toute la communication.
+      CallUiNative.marquerConnecte(callId);
 
       _initialMemberIds
         ..clear()

@@ -117,11 +117,8 @@ class _CallListenerState extends State<CallListener> {
         // Refus décidé avant que l'appel ne soit connu de l'application —
         // typiquement au démarrage, la trame WebSocket n'étant pas encore
         // arrivée. `rejectIncoming` ne ferait rien du tout dans ce cas : il
-        // commence par lire `incoming`, qui vaut nul. On prévient donc le
-        // serveur directement, avec l'identifiant que l'écran natif nous donne,
-        // sinon l'appelant sonnerait jusqu'à expiration.
-        context.read<CallsRepository>().reject(callId).catchError((_) {});
-        CallUiNative.masquer(callId);
+        // commence par lire `incoming`, qui vaut nul.
+        _refuseParId(callId);
       }
       InAppNotifier.instance.dismissCall();
     } else if (actionId == 'call_accept') {
@@ -142,6 +139,31 @@ class _CallListenerState extends State<CallListener> {
     }
   }
 
+  /// Refuse un appel dont on ne connaît que l'identifiant, et VÉRIFIE que le
+  /// serveur l'a bien enregistré.
+  ///
+  /// ⚠️ L'échec était avalé par un `catchError` muet. Conséquence observée : la
+  /// notification disparaissait puis revenait sans cesse. Le serveur ne rejoue
+  /// un appel bufferisé que s'il est encore en sonnerie — donc son retour
+  /// signifiait, sans que rien ne le dise, que le refus n'était jamais parvenu.
+  ///
+  /// L'écran natif est fermé AVANT l'appel réseau : l'utilisateur a refusé, sa
+  /// décision doit se voir tout de suite, même si le serveur met du temps.
+  Future<void> _refuseParId(String callId) async {
+    // Dépôt capturé AVANT tout await : le lire après reviendrait à toucher un
+    // BuildContext qui peut avoir été démonté entre-temps.
+    final repo = context.read<CallsRepository>();
+    await CallUiNative.masquer(callId);
+    try {
+      await repo.reject(callId);
+      DebugOverlay.log("CL ✅ refus transmis ($callId)");
+    } catch (e) {
+      // L'appelant continuera de sonner jusqu'à expiration. On le trace pour
+      // que le journal de débogage le montre au lieu d'un silence.
+      DebugOverlay.log("CL ❌ refus NON transmis : $e");
+    }
+  }
+
   Future<void> _accepteEtOuvre(CallController cc, String callId) async {
     final ok = await cc.acceptById(callId);
     if (!mounted) return;
@@ -155,12 +177,32 @@ class _CallListenerState extends State<CallListener> {
     }
   }
 
-  void _openCallScreen() {
-    final nav = Navigator.of(context, rootNavigator: true);
-    nav.push(MaterialPageRoute(
-      fullscreenDialog: true,
-      builder: (_) => const ActiveCallScreen(incoming: true),
-    ));
+  /// Ouvre l'écran d'appel, en attendant que le navigateur existe.
+  ///
+  /// ⚠️ AU DÉMARRAGE À FROID, l'application vient d'être lancée par « Répondre »
+  /// et son interface n'est pas encore construite : `Navigator.of(context)`
+  /// échouait alors sans bruit. L'appel démarrait bel et bien, mais aucun écran
+  /// ne s'ouvrait — d'où l'impression d'un appel invisible, poursuivi en
+  /// arrière-plan sans moyen d'en connaître l'état.
+  ///
+  /// Le navigateur GLOBAL est utilisé plutôt que celui du contexte local, et on
+  /// lui laisse le temps d'apparaître : une seconde par pas de 100 ms, largement
+  /// au-delà du temps de construction observé.
+  Future<void> _openCallScreen() async {
+    for (var essai = 0; essai < 10; essai++) {
+      final nav = PushService.navigatorKey.currentState;
+      if (nav != null) {
+        nav.push(MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) => const ActiveCallScreen(incoming: true),
+        ));
+        return;
+      }
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+    // Navigateur toujours absent : l'appel reste actif et le bandeau global
+    // permet d'y revenir. Mieux vaut ça qu'une exception qui coupe tout.
+    DebugOverlay.log("CL ⚠️ navigateur indisponible, écran d'appel non ouvert");
   }
 
   void _showHeadsUp(CallController cc, String callId, String title, bool isVideo,
