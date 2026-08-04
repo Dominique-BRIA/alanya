@@ -177,6 +177,16 @@ class CallController extends ChangeNotifier {
     final inc = incoming;
     if (inc == null || myUserId == null) return;
 
+    // ⚠️ MÊME GARDE QUE `acceptById`, et pour la même raison. Ces deux méthodes
+    // acceptent le même appel par des chemins différents — l'interface pour
+    // celle-ci, l'écran natif pour l'autre — et peuvent partir presque en même
+    // temps au démarrage. Le garde n'existait que dans `acceptById` : ce chemin
+    // -ci restait donc exposé au 409 ALREADY_JOINED qui détruisait un appel
+    // pourtant établi.
+    if (activeCallId == inc.callId) return;
+    if (_acceptationEnCours == inc.callId) return;
+    _acceptationEnCours = inc.callId;
+
     // Coupe la sonnerie entrante dès qu'on accepte.
     await RingtoneService.instance.stop();
     PushService.instance.cancelIncomingCall(inc.callId); // retire la notif
@@ -185,7 +195,42 @@ class CallController extends ChangeNotifier {
     // communication et ne réagit plus à rien.
     CallUiNative.marquerConnecte(inc.callId);
 
-    final result = await _calls.accept(inc.callId);
+    final AcceptCallResult result;
+    try {
+      result = await _calls.accept(inc.callId);
+    } on ApiException catch (e) {
+      _acceptationEnCours = null;
+      // Déjà accepté par l'autre chemin : la communication EST établie. On
+      // aligne l'état local et on laisse la suite se faire — surtout pas de
+      // `_clear()`, qui couperait un appel en cours.
+      if (e.code == "ALREADY_JOINED") {
+        activeCallId = inc.callId;
+        activeConvId = inc.convId;
+        activePeerName = inc.displayTitle;
+        activeType = inc.callType;
+        activeRole = ActiveCallRole.ongoing;
+        incoming = null;
+        notifyListeners();
+        await _ensureMesh();
+        notifyListeners();
+        return;
+      }
+      // Vraie fin : appelant qui a renoncé, délai expiré, appel déjà clos.
+      lastError = "Cet appel n'est plus disponible";
+      _clear();
+      notifyListeners();
+      return;
+    } catch (_) {
+      // Réseau coupé pendant la requête. Sans ce filet, l'exception remontait
+      // et laissait l'état à mi-chemin : sonnerie coupée, notification retirée,
+      // mais ni appel actif ni appel entrant — plus aucun moyen d'en sortir.
+      _acceptationEnCours = null;
+      lastError = "Impossible de rejoindre l'appel";
+      _clear();
+      notifyListeners();
+      return;
+    }
+    _acceptationEnCours = null;
     isGroupCall = result.isGroup || inc.isGroup;
     isCallInitiator = false;
     activeCallId = inc.callId; // activeCallId défini AVANT incoming = null
@@ -338,8 +383,18 @@ class CallController extends ChangeNotifier {
     if (inc == null) return;
     // Coupe la sonnerie entrante dès qu'on rejette.
     await RingtoneService.instance.stop();
-    PushService.instance.cancelIncomingCall(inc.callId); // retire la notif
-    await _calls.reject(inc.callId);
+
+    // ⚠️ L'ÉCHEC NE DOIT PAS INTERROMPRE LA SORTIE. Sans ce try/catch, une
+    // coupure réseau ou un appel déjà expiré faisait remonter l'exception AVANT
+    // la remise à zéro : la sonnerie était coupée, la notification retirée,
+    // mais `incoming` restait posé — l'appel semblait figé, sans moyen d'en
+    // sortir. Refuser est une décision de l'utilisateur : elle s'applique
+    // localement même si le serveur ne répond pas.
+    try {
+      await _calls.reject(inc.callId);
+    } catch (e) {
+      DebugOverlay.log("CC ❌ refus non transmis : $e");
+    }
     _rt.callState(
       inc.callId,
       inc.isGroup ? "declined" : "rejected",
@@ -347,7 +402,13 @@ class CallController extends ChangeNotifier {
       displayName: myDisplayName,
     );
     _signalBuffer.remove(inc.callId);
-    incoming = null;
+    // `_clear()` plutôt qu'un `incoming = null` isolé : c'est LE point de sortie
+    // commun à toutes les fins d'appel. Il coupe la sonnerie, retire la
+    // notification, ferme l'écran natif, rend la main au verrouillage et arrête
+    // le service de premier plan. En s'en passant, ce chemin laissait
+    // l'application accessible écran verrouillé et l'écran natif affiché après
+    // un refus.
+    _clear();
     notifyListeners();
   }
 
