@@ -169,14 +169,62 @@ class RealtimeClient extends ChangeNotifier {
     // reconnexion est le seul moment où l'on sait qu'un trou vient de se
     // refermer : c'est là qu'il faut rattraper l'état par une requête HTTP.
     if (v && !_disposed && !_controller.isClosed) {
+      // AVANT de prévenir les écrans : une trame d'appel restée en attente doit
+      // partir en premier, sinon l'appelant apprend l'état trop tard.
+      _videLaFile();
       _controller.add({"type": "ws_connected"});
     }
   }
 
+  /// Trames de SIGNALISATION D'APPEL mises en attente si la connexion n'est pas
+  /// encore établie.
+  ///
+  /// ⚠️ POURQUOI SEULEMENT CELLES-LÀ. Rejouer un « est en train d'écrire » vieux
+  /// de dix secondes n'aurait aucun sens ; perdre un « j'ai décroché » casse
+  /// l'appel. Ces trois types décident de l'état d'un appel des DEUX côtés :
+  /// ils doivent arriver, même en retard.
+  static const _typesCritiques = {"call_state", "call_ring", "call_signal"};
+
+  final List<({Map<String, dynamic> payload, DateTime expire})> _enAttente = [];
+
   void _send(Map<String, dynamic> payload) {
     final ch = _channel;
-    if (ch == null || !connected) return;
+    if (ch == null || !connected) {
+      // ⚠️ CE CHEMIN ÉTAIT UN `return` MUET, et c'est ce qui cassait
+      // l'acceptation depuis la notification : décrocher DÉMARRE
+      // l'application, donc le « joined » partait avant que la connexion ne
+      // soit ouverte. La trame disparaissait, l'appelant n'apprenait jamais que
+      // son correspondant avait décroché — il continuait de sonner pendant que
+      // l'autre restait sur « connexion en cours ».
+      if (_typesCritiques.contains(payload["type"])) {
+        // 30 s : au-delà, l'appel est de toute façon terminé côté serveur, et
+        // rejouer une trame périmée ferait plus de mal que de bien.
+        _enAttente.add((
+          payload: payload,
+          expire: DateTime.now().add(const Duration(seconds: 30)),
+        ));
+        DebugOverlay.log("WS ⏸️ ${payload["type"]} en attente de connexion");
+      }
+      return;
+    }
     ch.sink.add(jsonEncode(payload));
+  }
+
+  /// Vide la file dès que la connexion est là. Les trames périmées sont
+  /// écartées plutôt qu'envoyées.
+  void _videLaFile() {
+    if (_enAttente.isEmpty) return;
+    final maintenant = DateTime.now();
+    final aEnvoyer = _enAttente.where((e) => e.expire.isAfter(maintenant)).toList();
+    _enAttente.clear();
+    final ch = _channel;
+    if (ch == null || !connected) return;
+    for (final e in aEnvoyer) {
+      try {
+        ch.sink.add(jsonEncode(e.payload));
+        DebugOverlay.log("WS ▶️ ${e.payload["type"]} envoyé après reconnexion");
+      } catch (_) {}
+    }
   }
 
   void sendMessage(String convId, String content, String tempId,

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
+import '../../core/api_client.dart';
 import '../../core/call_permissions.dart';
 import '../../core/debug_overlay.dart';
 import '../../core/call_foreground_service.dart';
@@ -243,11 +244,21 @@ class CallController extends ChangeNotifier {
   /// identifiant. Les informations d'affichage manquantes — nom, avatar —
   /// viennent de ce que le serveur renvoie, et la trame WebSocket, si elle
   /// arrive ensuite, ne fait que confirmer un état déjà établi.
+  /// Acceptation en cours, pour empêcher deux tentatives simultanées.
+  ///
+  /// ⚠️ DEUX CHEMINS acceptent le même appel au démarrage : la reprise qui lit
+  /// les appels natifs actifs, et l'événement du paquet. Les deux partent
+  /// presque en même temps, si bien que le garde `activeCallId == callId` ne
+  /// suffit pas — aucun des deux n'a encore eu le temps de le renseigner.
+  String? _acceptationEnCours;
+
   Future<bool> acceptById(String callId, {String? nomAffiche}) async {
     if (myUserId == null) return false;
     // Un appel déjà en cours signifie que la trame est arrivée entre-temps et
     // que le chemin normal a fait le travail : ne rien refaire.
     if (activeCallId == callId) return true;
+    if (_acceptationEnCours == callId) return true;
+    _acceptationEnCours = callId;
 
     await RingtoneService.instance.stop();
     PushService.instance.cancelIncomingCall(callId);
@@ -291,13 +302,34 @@ class CallController extends ChangeNotifier {
       }
       notifyListeners();
       return true;
-    } catch (e) {
-      // 409 : l'appel n'est plus disponible — l'appelant a renoncé pendant que
-      // l'application démarrait, ou le délai a expiré.
+    } on ApiException catch (e) {
+      // ⚠️ ALREADY_JOINED N'EST PAS UN ÉCHEC. Il signifie que l'autre chemin a
+      // déjà accepté cet appel — la communication est donc ÉTABLIE. La version
+      // précédente traitait tout 409 comme une perte et appelait `_clear()`,
+      // ce qui détruisait un appel en cours : l'audio passait, le minuteur
+      // tournait dans la notification, et l'application annonçait pourtant
+      // « Cet appel n'est plus disponible » sans ouvrir l'écran.
+      if (e.code == "ALREADY_JOINED") {
+        activeCallId = callId;
+        activeRole = ActiveCallRole.ongoing;
+        incoming = null;
+        CallUiNative.marquerConnecte(callId);
+        notifyListeners();
+        return true;
+      }
+      // Les autres 409 sont de vraies fins : appelant qui a renoncé pendant le
+      // démarrage, délai expiré, appel déjà clos.
       lastError = "Cet appel n'est plus disponible";
       _clear();
       notifyListeners();
       return false;
+    } catch (_) {
+      lastError = "Cet appel n'est plus disponible";
+      _clear();
+      notifyListeners();
+      return false;
+    } finally {
+      _acceptationEnCours = null;
     }
   }
 
