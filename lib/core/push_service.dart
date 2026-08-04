@@ -481,6 +481,22 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
     if (!await notif.NotificationSettings.callsEnabledFresh()) return;
 
     final data = message.data;
+
+    // Appel PÉRIMÉ : le serveur pose un TTL, mais un push déjà en transit peut
+    // malgré tout arriver en retard — téléphone rallumé, réseau rétabli. Sans
+    // ce contrôle, la sonnerie repartait pour un appel terminé depuis
+    // longtemps, et l'annulation, envoyée avant, avait déjà été consommée.
+    final envoiBrut = data['sentAt']?.toString();
+    if (envoiBrut != null) {
+      final envoi = DateTime.tryParse(envoiBrut);
+      if (envoi != null &&
+          DateTime.now().toUtc().difference(envoi.toUtc()) >
+              const Duration(seconds: 90)) {
+        debugPrint('[PushService] appel périmé ignoré (émis à $envoiBrut)');
+        return;
+      }
+    }
+
     final callId = data['callId']?.toString();
     if (callId != null && callId.isNotEmpty) {
       // Vrai écran d'appel — avatar, nom, deux gros boutons — posé par-dessus

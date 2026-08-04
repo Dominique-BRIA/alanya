@@ -69,7 +69,8 @@ class CallController extends ChangeNotifier {
 
   // Lot 2b — minimisation : l'écran plein-écran d'appel est-il affiché ?
   // Quand false pendant un appel actif, on montre le bandeau global.
-  bool callScreenVisible = false;
+  // Dérivé du compteur `_ecransAppelOuverts` — voir `setCallScreenVisible`.
+  bool get callScreenVisible => _ecransAppelOuverts > 0;
   // Début de la connexion média (source unique pour le minuteur, écran + bandeau).
   DateTime? connectedSince;
 
@@ -79,9 +80,25 @@ class CallController extends ChangeNotifier {
   String? _transferTargetId;
   bool get isTransferring => _pendingTransfer;
 
+  /// Nombre d'écrans d'appel affichés, et non un simple booléen.
+  ///
+  /// ⚠️ L'écran d'appel peut être empilé deux fois — l'utilisateur revient par
+  /// le bandeau pendant qu'une ouverture automatique est en cours, par exemple.
+  /// Avec un booléen, le `dispose` du premier écran remettait `false` alors que
+  /// le second était toujours affiché : le bandeau global réapparaissait
+  /// PAR-DESSUS l'écran d'appel.
+  ///
+  /// Un compteur ne retombe à zéro que lorsque le dernier écran est parti.
+  int _ecransAppelOuverts = 0;
+
   void setCallScreenVisible(bool v) {
-    if (callScreenVisible == v) return;
-    callScreenVisible = v;
+    final avant = callScreenVisible;
+    if (v) {
+      _ecransAppelOuverts++;
+    } else if (_ecransAppelOuverts > 0) {
+      _ecransAppelOuverts--;
+    }
+    if (callScreenVisible == avant) return;
     notifyListeners();
   }
 
@@ -495,7 +512,10 @@ class CallController extends ChangeNotifier {
     remoteRinging = false;
     isSpeakerOn = false;
     connectedSince = null;
-    callScreenVisible = false;
+    // Remise à zéro du compteur : l'appel est fini, plus aucun écran ne le
+    // concerne. Les `dispose` qui suivront décrémenteraient dans le vide, ce
+    // que `setCallScreenVisible` absorbe en ne descendant jamais sous zéro.
+    _ecransAppelOuverts = 0;
     _pendingTransfer = false;
     _transferTargetId = null;
     notifyListeners();

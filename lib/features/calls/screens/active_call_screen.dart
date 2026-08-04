@@ -148,11 +148,29 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     if (mounted) setState(() {});
   }
 
+  /// Ferme CET écran, et lui seul.
+  ///
+  /// ⚠️ `Navigator.pop()` ferme la route DU DESSUS de la pile, qui n'est pas
+  /// forcément celle-ci : une feuille de contacts, un menu ou une boîte de
+  /// dialogue ouverte par-dessus l'appel se faisait fermer à sa place, et
+  /// l'écran d'appel restait affiché sur un appel déjà terminé.
+  ///
+  /// `_popping` n'était par ailleurs jamais relâché : si la fermeture ne se
+  /// produisait pas, l'écran devenait définitivement impossible à refermer.
+  /// Il n'est désormais posé qu'une fois la fermeture réellement demandée.
   void _popScreen() {
     if (_popping || !mounted) return;
-    _popping = true;
-    if (Navigator.of(context).canPop()) {
-      Navigator.of(context).pop();
+    final route = ModalRoute.of(context);
+    if (route == null) return;
+    final nav = Navigator.of(context);
+    if (route.isCurrent) {
+      _popping = true;
+      nav.pop();
+    } else if (route.isActive) {
+      // Une autre route est passée par-dessus : on retire la nôtre de la pile
+      // sans toucher à celle qui est au-dessus.
+      _popping = true;
+      nav.removeRoute(route);
     }
   }
 
@@ -208,10 +226,40 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     super.dispose();
   }
 
-  String _formatElapsed() {
-    final m = _elapsed ~/ 60;
-    final s = _elapsed % 60;
+  /// Durée écoulée, calculée depuis `connectedSince` du contrôleur.
+  ///
+  /// ⚠️ UN COMPTEUR LOCAL REPART À ZÉRO à chaque construction de l'écran. Or
+  /// l'écran se referme et se rouvre en cours d'appel — on le réduit, on
+  /// revient par le bandeau — et le minuteur recommençait alors à 00:00 tandis
+  /// que le bandeau, lui, affichait la vraie durée. Deux chiffres différents
+  /// pour le même appel.
+  ///
+  /// `connectedSince` est la source unique documentée dans le contrôleur : la
+  /// lire garantit que les deux affichages concordent toujours.
+  String _formatElapsed(CallController cc) {
+    final depuis = cc.connectedSince;
+    final secondes =
+        depuis == null ? 0 : DateTime.now().difference(depuis).inSeconds;
+    final m = secondes ~/ 60;
+    final s = secondes % 60;
     return "${m.toString().padLeft(2, "0")}:${s.toString().padLeft(2, "0")}";
+  }
+
+  /// L'appel AFFICHÉ ICI est-il un appel vidéo ?
+  ///
+  /// ⚠️ La règle lisait `cc.incoming?.callType ?? cc.activeType`. Or `incoming`
+  /// désigne l'appel qui SONNE, pas celui qui est affiché : si un second appel
+  /// arrivait pendant une communication audio, son type prenait le dessus et
+  /// l'interface basculait en vidéo pour l'appel en cours — caméra allumée
+  /// comprise.
+  ///
+  /// `incoming` n'est donc consulté que tant qu'aucun appel n'est actif, c'est-
+  /// à-dire pendant la sonnerie, qui est le cas qu'il servait à couvrir.
+  bool _estVideo(CallController cc) {
+    final enSonnerie =
+        cc.activeRole != ActiveCallRole.ongoing && cc.incoming != null;
+    final type = enSonnerie ? cc.incoming!.callType : cc.activeType;
+    return type == "VIDEO";
   }
 
   String _statusText(CallController cc) {
@@ -225,7 +273,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
       return cc.remoteRinging ? "En train de sonner…" : "Sonnerie…";
     }
     if (cc.activeRole == ActiveCallRole.ongoing) {
-      if (cc.mediaConnected) return _formatElapsed();
+      if (cc.mediaConnected) return _formatElapsed(cc);
       return "Connexion en cours…";
     }
     return "Connexion en cours…";
@@ -301,7 +349,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     // == null → isVideo=false → l'UI masquait la vidéo (distante ET auto-vue) même
     // pour un appel vidéo. On lit incoming.callType pendant la sonnerie, puis on
     // retombe sur activeType une fois l'appel actif.
-    final isVideo = (cc.incoming?.callType ?? cc.activeType) == "VIDEO";
+    final isVideo = _estVideo(cc);
     final remotes = cc.remoteStreams;
     final showVideo = isVideo &&
         cc.activeRole == ActiveCallRole.ongoing &&
@@ -825,7 +873,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
       );
     }
     // Appel actif (en connexion ou connecté) : barre de contrôles + raccrocher.
-    final isVideo = (cc.incoming?.callType ?? cc.activeType) == "VIDEO";
+    final isVideo = _estVideo(cc);
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [

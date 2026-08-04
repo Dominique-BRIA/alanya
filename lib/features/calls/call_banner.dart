@@ -54,9 +54,24 @@ class _CallBannerState extends State<CallBanner> {
     final visible = cc.activeRole != null && !cc.callScreenVisible;
     if (!visible) return const SizedBox.shrink();
 
+    // Le libellé suit la PHASE réelle de l'appel.
+    //
+    // ⚠️ Il annonçait « Appel en cours » dès qu'un appel existait, y compris
+    // pendant la sonnerie : l'appelant lisait donc que la communication était
+    // établie alors que personne n'avait décroché, et se demandait pourquoi il
+    // n'entendait rien. `connectedSince` n'est renseigné qu'au premier flux
+    // média reçu — c'est le seul critère fiable pour dire « en cours ».
     final elapsed = _elapsed(cc.connectedSince);
-    final label =
-        elapsed.isEmpty ? "Appel en cours" : "Appel en cours · $elapsed";
+    final String label;
+    if (elapsed.isNotEmpty) {
+      label = "Appel en cours · $elapsed";
+    } else if (cc.activeRole == ActiveCallRole.outgoing) {
+      label = "Appel en cours d'établissement…";
+    } else if (cc.incoming != null) {
+      label = "Appel entrant…";
+    } else {
+      label = "Connexion…";
+    }
 
     return Positioned(
       top: 0,
