@@ -46,19 +46,26 @@ class AuthRepository {
     );
   }
 
-  /// Étape 3 : choix du pseudo + mot de passe (avec le setupToken).
+  /// Étape 3 : nom, téléphone et mot de passe (avec le setupToken).
+  ///
+  /// Le formulaire ne demande plus de pseudo — c'est le nom qui s'affiche
+  /// partout. Il est recopié ici pour que le contrat d'API reste inchangé, et
+  /// TRONQUÉ À 50 caractères : la colonne `users.pseudo` s'arrête là, alors que
+  /// `nom` va jusqu'à 100. Sans cette coupe, un nom long passerait la
+  /// validation du formulaire puis serait refusé par le serveur.
   Future<AuthSession> setup({
     required String setupToken,
-    required String pseudo,
     required String password,
-    String? nom,
+    required String nom,
+    String? mobile,
     int? idPays,
   }) async {
     final body = <String, dynamic>{
-      "pseudo": pseudo,
+      "pseudo": nom.length > 50 ? nom.substring(0, 50) : nom,
       "password": password,
+      "nom": nom,
     };
-    if (nom != null) body["nom"] = nom;
+    if (mobile != null && mobile.isNotEmpty) body["mobile"] = mobile;
     if (idPays != null) body["idPays"] = idPays;
     body["deviceId"] = await DeviceRegistry.instance.deviceId();
 

@@ -60,7 +60,7 @@ class SetupScreen extends StatefulWidget {
 class _SetupScreenState extends State<SetupScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nomCtrl = TextEditingController();
-  final _pseudoCtrl = TextEditingController();
+  final _mobileCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
   final _confirmCtrl = TextEditingController();
   int? _selectedPaysId;
@@ -71,7 +71,7 @@ class _SetupScreenState extends State<SetupScreen> {
   @override
   void dispose() {
     _nomCtrl.dispose();
-    _pseudoCtrl.dispose();
+    _mobileCtrl.dispose();
     _passwordCtrl.dispose();
     _confirmCtrl.dispose();
     super.dispose();
@@ -83,9 +83,9 @@ class _SetupScreenState extends State<SetupScreen> {
     try {
       final session = await context.read<AuthRepository>().setup(
             setupToken: widget.setupToken,
-            pseudo: _pseudoCtrl.text.trim(),
             password: _passwordCtrl.text,
-            nom: _nomCtrl.text.trim().isNotEmpty ? _nomCtrl.text.trim() : null,
+            nom: _nomCtrl.text.trim(),
+            mobile: _mobileCtrl.text.trim(),
             idPays: _selectedPaysId,
           );
       if (!mounted) return;
@@ -152,28 +152,50 @@ class _SetupScreenState extends State<SetupScreen> {
                 const SizedBox(height: 24),
 
                 // --- Nom ---
+                // C'est ce nom qui s'affiche partout : dans les contacts, les
+                // conversations et les appels. Le pseudo n'est plus demandé —
+                // le nom y est recopié à l'envoi, tronqué à 50 caractères.
                 TextFormField(
                   controller: _nomCtrl,
                   textCapitalization: TextCapitalization.words,
+                  maxLength: 100,
                   decoration: const InputDecoration(
                     labelText: "Nom",
-                    hintText: "Ex: BRIA",
+                    hintText: "Ex: BRIA Dominique",
+                    counterText: "",
                     prefixIcon: Icon(Icons.badge_outlined),
                   ),
+                  // Minimum 2 caractères, et non 1 : le nom sert de pseudo au
+                  // serveur, qui en exige deux. Un nom d'une seule lettre
+                  // passerait ici puis serait rejeté à l'envoi.
+                  validator: (v) => (v ?? "").trim().length < 2
+                      ? "Entre ton nom (2 caractères minimum)"
+                      : null,
                 ),
                 const SizedBox(height: 16),
 
-                // --- Pseudo ---
+                // --- Téléphone ---
                 TextFormField(
-                  controller: _pseudoCtrl,
-                  // Aligné sur la colonne users.pseudo, en VARCHAR(50).
-                  maxLength: 50,
-                  decoration: InputDecoration(
-                    labelText: tr(context, 'pseudo'),
-                    prefixIcon: const Icon(Icons.person_outline),
+                  controller: _mobileCtrl,
+                  keyboardType: TextInputType.phone,
+                  // Aligné sur la colonne users.mobile, en VARCHAR(20).
+                  maxLength: 20,
+                  decoration: const InputDecoration(
+                    labelText: "Téléphone",
+                    hintText: "Ex: 690 00 00 00",
+                    counterText: "",
+                    prefixIcon: Icon(Icons.phone_outlined),
                   ),
-                  validator: (v) =>
-                      (v ?? "").trim().length < 2 ? "Pseudo trop court" : null,
+                  validator: (v) {
+                    final t = (v ?? "").trim();
+                    if (t.isEmpty) return "Entre ton numéro de téléphone";
+                    // Au moins six chiffres : accepte les espaces, tirets et
+                    // indicatifs, sans imposer un format qui varie d'un pays à
+                    // l'autre.
+                    final chiffres = t.replaceAll(RegExp(r'\D'), '');
+                    if (chiffres.length < 6) return "Numéro de téléphone invalide";
+                    return null;
+                  },
                 ),
                 const SizedBox(height: 16),
 
@@ -237,6 +259,7 @@ class _SetupScreenState extends State<SetupScreen> {
                     );
                   }).toList(),
                   onChanged: (v) => setState(() => _selectedPaysId = v),
+                  validator: (v) => v == null ? "Choisis ton pays" : null,
                 ),
                 const SizedBox(height: 24),
 
