@@ -459,6 +459,11 @@ class PushService {
 @pragma('vm:entry-point')
 Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
+  // ⚠️ INDISPENSABLE AVANT TOUT APPEL DE PLUGIN. Cet isolate démarre nu :
+  // sans ce réenregistrement, le premier plugin sollicité lève une
+  // MissingPluginException qui interrompt TOUT le handler — donc plus aucune
+  // notification d'appel, ni écran natif ni bandeau de repli.
+  DartPluginRegistrant.ensureInitialized();
   debugPrint('[PushService] Message background: ${message.data['type']}');
 
   // Appel annulé/terminé par l'appelant → retire la notif d'appel plein écran
@@ -482,18 +487,26 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
       // le verrouillage. Remplace le bandeau de texte que produisait
       // flutter_local_notifications, qui ne sait pas construire une
       // notification de style « appel ».
-      await CallUiNative.afficherAppelEntrant(
-        callId: callId,
-        nom: data['callerName']?.toString() ?? 'Appel entrant',
-        avatarUrl: data['callerAvatarUrl']?.toString(),
-        video: data['callType'] == 'VIDEO',
-      );
-      return;
+      try {
+        await CallUiNative.afficherAppelEntrant(
+          callId: callId,
+          nom: data['callerName']?.toString() ?? 'Appel entrant',
+          avatarUrl: data['callerAvatarUrl']?.toString(),
+          video: data['callType'] == 'VIDEO',
+        );
+        return;
+      } catch (e) {
+        // ⚠️ NE PAS LAISSER REMONTER. Un échec ici — plugin indisponible,
+        // constructeur récalcitrant — faisait disparaître l'appel entrant sans
+        // aucune trace : l'exception interrompait le handler avant le repli.
+        // Mieux vaut un bandeau ordinaire qu'un appel jamais signalé.
+        debugPrint('[PushService] écran d\'appel natif indisponible: $e');
+      }
     }
 
-    // Repli : sans identifiant d'appel, l'écran natif ne pourrait être ni
-    // refermé ni rattaché à un appel. On retombe sur l'ancienne notification,
-    // moins belle mais qui prévient au moins l'utilisateur.
+    // Repli : écran natif indisponible, ou push sans identifiant d'appel —
+    // celui-ci ne pourrait alors être ni refermé ni rattaché à un appel. On
+    // retombe sur l'ancienne notification, moins belle mais qui prévient.
     final plugin = FlutterLocalNotificationsPlugin();
     await plugin.initialize(const InitializationSettings(
       android: AndroidInitializationSettings('@mipmap/ic_launcher'),
