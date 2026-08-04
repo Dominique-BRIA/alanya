@@ -2,6 +2,7 @@ package com.alanya237.work
 
 import android.app.KeyguardManager
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
@@ -37,6 +38,33 @@ class MainActivity : FlutterActivity() {
                     "afficherParDessusVerrouillage" -> {
                         val actif = appel.argument<Boolean>("actif") ?: false
                         afficherParDessusVerrouillage(actif)
+                        resultat.success(true)
+                    }
+                    // Service de premier plan qui maintient l'appel vivant
+                    // quand l'application quitte l'écran. Voir
+                    // CallForegroundService pour le détail des verrous.
+                    "demarrerServiceAppel" -> {
+                        val titre = appel.argument<String>("titre") ?: "Appel en cours"
+                        val i = Intent(this, CallForegroundService::class.java).apply {
+                            action = CallForegroundService.ACTION_DEMARRER
+                            putExtra(CallForegroundService.EXTRA_TITRE, titre)
+                        }
+                        // startForegroundService à partir d'Android 8 : le
+                        // service doit alors appeler startForeground() dans les
+                        // 5 s, sinon le système le tue avec une ANR.
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            startForegroundService(i)
+                        } else {
+                            startService(i)
+                        }
+                        resultat.success(true)
+                    }
+                    "arreterServiceAppel" -> {
+                        startService(
+                            Intent(this, CallForegroundService::class.java).apply {
+                                action = CallForegroundService.ACTION_ARRETER
+                            },
+                        )
                         resultat.success(true)
                     }
                     else -> resultat.notImplemented()

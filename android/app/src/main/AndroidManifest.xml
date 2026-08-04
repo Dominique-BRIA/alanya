@@ -30,7 +30,16 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
     <!-- Requis pour maintenir l'appel en arrière-plan -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <!-- Depuis Android 14, FOREGROUND_SERVICE ne suffit plus : chaque type de
+         service exige SA permission. Sans celle-ci, démarrer le service d'appel
+         lève une SecurityException et l'appel se coupe dès que l'application
+         passe en arrière-plan. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <!-- Empêche la mise en veille de la puce Wi-Fi pendant un appel : c'est elle
+         qui coupe les connexions WebRTC quand l'écran s'éteint. -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE"/>
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
     <!-- Notifications (Android 13+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
@@ -62,6 +71,16 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Service qui maintient l'appel actif quand l'application quitte le
+             premier plan. `foregroundServiceType` est OBLIGATOIRE depuis
+             Android 10 pour capter le micro en arrière-plan, et doit
+             correspondre au type passé à startForeground().
+             `exported=false` : il n'est démarré que par l'application. -->
+        <service
+            android:name=".CallForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

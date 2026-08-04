@@ -5,6 +5,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import '../../core/call_permissions.dart';
 import '../../core/debug_overlay.dart';
+import '../../core/call_foreground_service.dart';
 import '../../core/call_ui_native.dart';
 import '../../core/lock_screen_call.dart';
 import '../../core/push_service.dart';
@@ -373,6 +374,11 @@ class CallController extends ChangeNotifier {
     // Rend la main au verrouillage : sans ce retour, l'application resterait
     // accessible écran verrouillé bien après la fin de l'appel.
     LockScreenCall.desactiver();
+    // Relâche les verrous CPU et Wi-Fi, et retire la notification persistante.
+    // `_clear` est le point de passage de TOUTES les fins d'appel — raccroché,
+    // refusé, expiré, terminé d'en face : c'est le seul endroit où l'arrêt ne
+    // peut pas être oublié.
+    CallForegroundService.arreter();
     incoming = null;
     activeCallId = null;
     activeConvId = null;
@@ -399,6 +405,14 @@ class CallController extends ChangeNotifier {
   void _onMeshUpdated() {
     if (mediaConnected && connectedSince == null) {
       connectedSince = DateTime.now();
+      // Le média circule : à partir d'ici, l'appel doit survivre à un écran
+      // éteint ou à un passage en arrière-plan. Démarré ICI et non à
+      // l'acceptation — tant qu'aucun flux n'est établi, il n'y a rien à
+      // protéger, et la notification persistante ferait doublon avec celle de
+      // l'appel entrant.
+      CallForegroundService.demarrer(
+        titre: activePeerName ?? "Appel en cours",
+      );
     }
     notifyListeners();
   }
