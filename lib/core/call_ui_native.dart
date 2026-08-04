@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_callkit_incoming/entities/entities.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 
@@ -105,6 +107,36 @@ class CallUiNative {
   static Future<void> toutMasquer() async {
     try {
       await FlutterCallkitIncoming.endAllCalls();
+    } catch (_) {}
+  }
+
+  /// L'écran d'appel peut-il s'ouvrir par-dessus le verrouillage ?
+  ///
+  /// Renvoie vrai sous Android 14, où l'autorisation est acquise d'office, et
+  /// sur les plateformes qui ignorent la question. Ne renvoie faux que dans le
+  /// cas réellement problématique : Android 14 ou plus avec une autorisation
+  /// refusée.
+  static Future<bool> peutAfficherPleinEcran() async {
+    if (!Platform.isAndroid) return true;
+    try {
+      return await FlutterCallkitIncoming.canUseFullScreenIntent();
+    } catch (_) {
+      // Méthode absente sur une version plus ancienne du canal : on suppose que
+      // c'est bon plutôt que d'alarmer sans raison.
+      return true;
+    }
+  }
+
+  /// Ouvre la page système où l'utilisateur accorde l'autorisation.
+  ///
+  /// Android n'offre AUCUNE boîte de dialogue pour celle-ci, contrairement aux
+  /// notifications : la seule voie possible est de renvoyer vers les réglages.
+  /// C'est pourquoi elle est présentée dans une explication maison — sans quoi
+  /// l'utilisateur atterrirait sur une page système sans savoir pourquoi.
+  static Future<void> demanderPleinEcran() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await FlutterCallkitIncoming.requestFullIntentPermission();
     } catch (_) {}
   }
 }

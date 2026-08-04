@@ -39,6 +39,7 @@ import '../calls/screens/dialer_screen.dart';
 import '../contacts/screens/contacts_screen.dart';
 import '../calls/call_controller.dart';
 import '../calls/calls_repository.dart';
+import '../calls/full_screen_permission.dart';
 import '../calls/screens/calls_screen.dart';
 import '../meetings/screens/meetings_screen.dart';
 import '../status/screens/create_status_screen.dart';
@@ -79,6 +80,10 @@ class _HomeScreenState extends State<HomeScreen> {
       MissedCalls.instance
         ..bind(context.read<CallsRepository>())
         ..rafraichir();
+      // Autorisation d'afficher l'appel par-dessus le verrouillage. Demandée
+      // ICI et non au tout premier écran : la question n'a de sens qu'une fois
+      // l'utilisateur connecté, donc susceptible de recevoir un appel.
+      FullScreenPermission.demanderSiNecessaire(context);
     });
   }
 
