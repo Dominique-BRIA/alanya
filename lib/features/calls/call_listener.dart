@@ -243,7 +243,10 @@ class _CallListenerState extends State<CallListener> {
           // Accepté depuis le bouton « Répondre » de la notification système.
           await cc.acceptIncoming();
           if (mounted) _openCallScreen();
-        } else {
+        } else if (!cc.ecranNatifAffiche) {
+          // Repli seulement : quand l'écran natif porte l'appel, ce bandeau
+          // ferait doublon — et c'est lui qu'on prenait pour une notification
+          // de message, faute de sonnerie et de plein écran.
           _showHeadsUp(cc, inc.callId, title, isVideo,
               avatarUrl: inc.callerAvatarUrl);
         }

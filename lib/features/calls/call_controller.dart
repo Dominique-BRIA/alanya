@@ -76,6 +76,13 @@ class CallController extends ChangeNotifier {
   // Passe à true quand l'écran d'appel s'affiche chez le correspondant (Lot 2).
   bool remoteRinging = false;
 
+  /// Vrai quand l'appel entrant est porté par l'ÉCRAN NATIF plein écran.
+  ///
+  /// L'interface s'en sert pour ne pas superposer son bandeau interne : celui-ci
+  /// n'est plus qu'un repli, pour les appareils où la déclaration au système
+  /// échoue. Mieux vaut un bandeau que pas d'appel du tout.
+  bool ecranNatifAffiche = false;
+
   // Lot 2b — minimisation : l'écran plein-écran d'appel est-il affiché ?
   // Quand false pendant un appel actif, on montre le bandeau global.
   // Dérivé du compteur `_ecransAppelOuverts` — voir `setCallScreenVisible`.
@@ -842,8 +849,37 @@ class CallController extends ChangeNotifier {
         groupName: e["groupName"] as String?,
         memberCount: (e["memberCount"] as num?)?.toInt() ?? 2,
       );
-      // Sonnerie entrante (loop) jusqu'à accept/reject/timeout serveur.
-      RingtoneService.instance.startIncoming();
+      // ÉCRAN D'APPEL NATIF, quel que soit l'état de l'application.
+      //
+      // Le WebSocket se contentait de poser l'état et de sonner : l'interface
+      // affichait alors un bandeau interne, qui ressemble à une notification de
+      // message et ne sonne pas comme un téléphone. L'écran plein écran
+      // n'apparaissait que pour les appels reçus application FERMÉE, seul cas
+      // où le push d'arrière-plan le déclarait.
+      //
+      // On le déclare donc ici aussi. Le paquet déduplique sur l'identifiant
+      // (`CallKitParams.id`), si bien qu'un appel déjà annoncé par le push ne
+      // produit pas un second écran — c'est la règle du modèle : toujours
+      // déclarer, laisser la déduplication faire son travail.
+      var natifAffiche = false;
+      try {
+        await CallUiNative.afficherAppelEntrant(
+          callId: callId,
+          nom: incoming!.displayTitle,
+          avatarUrl: incoming!.callerAvatarUrl,
+          video: incoming!.callType == "VIDEO",
+        );
+        natifAffiche = true;
+      } catch (e) {
+        debugPrint("[CallController] écran d'appel natif indisponible: $e");
+      }
+      ecranNatifAffiche = natifAffiche;
+
+      // Sonnerie entrante SEULEMENT en repli : l'écran natif porte la sienne,
+      // et les deux ensemble donnaient une double sonnerie.
+      if (!natifAffiche) {
+        RingtoneService.instance.startIncoming();
+      }
       // Autorise l'écran d'appel à passer par-dessus le verrouillage, et allume
       // l'écran. Activé ICI et non au montage de l'écran d'appel : quand le
       // téléphone est verrouillé, il faut que la fenêtre porte déjà l'attribut
