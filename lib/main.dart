@@ -155,17 +155,22 @@ class AlanyaApp extends StatelessWidget {
       ],
       // Bandeau global « appel en cours » superposé à toutes les pages (Lot 2b).
       builder: (context, child) {
-        final contenu = Directionality(
-          textDirection: TextDirection.ltr,
-          child: Stack(
-            children: [
-              if (child != null) Positioned.fill(child: child),
-              const CallBanner(),
-            ],
-          ),
+        final pile = Stack(
+          children: [
+            if (child != null) Positioned.fill(child: child),
+            const CallBanner(),
+          ],
         );
-        // DIAGNOSTIC TEMPORAIRE — voir `tracesAppelsVisibles`.
-        return tracesAppelsVisibles ? DebugOverlay(child: contenu) : contenu;
+        // ⚠️ L'overlay se place SOUS le `Directionality`, jamais au-dessus.
+        // Ce `Directionality` est ici parce qu'il n'en existe pas encore à ce
+        // niveau de l'arbre, et le `Stack` interne de l'overlay en exige un :
+        // l'envelopper par-dessus levait une exception de rendu, et l'écran
+        // restait noir.
+        return Directionality(
+          textDirection: TextDirection.ltr,
+          // DIAGNOSTIC TEMPORAIRE — voir `tracesAppelsVisibles`.
+          child: tracesAppelsVisibles ? DebugOverlay(child: pile) : pile,
+        );
       },
       home: const AuthGate(),
     );

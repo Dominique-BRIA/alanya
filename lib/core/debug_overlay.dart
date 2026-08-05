@@ -64,7 +64,10 @@ class _DebugOverlayState extends State<DebugOverlay> {
   Widget build(BuildContext context) {
     return Stack(
       children: [
-        widget.child,
+        // `Positioned.fill` et non l'enfant nu : dans un `Stack`, un enfant
+        // non positionné se dimensionne sur son propre contenu. L'application
+        // entière doit occuper toute la surface, quoi qu'affiche l'overlay.
+        Positioned.fill(child: widget.child),
         Positioned(
           top: MediaQuery.of(context).padding.top + 4,
           right: 4,
