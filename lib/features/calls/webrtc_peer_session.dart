@@ -153,25 +153,22 @@ class WebrtcPeerSession {
   // NB : les identifiants TURN statiques ci-dessous ne fonctionnent que si le
   // Coturn accepte aussi une auth statique ; sinon seuls les STUN servent de
   // secours. Le vrai chemin TURN passe par /api/calls/ice (HMAC).
+  /// Secours STUN UNIQUEMENT, sur les domaines réellement en service.
+  ///
+  /// Les entrées TURN qui figuraient ici visaient `open.alanya.cloud` avec un
+  /// identifiant statique : ce serveur répond `401 Unauthorized`, vérification
+  /// faite. Elles ne fournissaient donc aucun relais — juste des candidats que
+  /// la négociation essayait en vain avant d'abandonner.
+  ///
+  /// Il ne peut pas en aller autrement : les identifiants TURN sont des HMAC
+  /// temporaires, ils ne peuvent venir que de `/api/calls/ice`. Un secours codé
+  /// en dur ne sait donc offrir que du STUN — l'appel reste possible en direct,
+  /// pas derrière un NAT symétrique. C'est le choix qu'a fait le modèle, et il
+  /// vaut mieux qu'un relais qui prétend exister.
   static const fallbackIce = [
+    {"urls": "stun:alanya226.com:3478"},
+    {"urls": "stun:kemita.eu:3478"},
     {"urls": "stun:stun.l.google.com:19302"},
-    {"urls": "stun:stun1.l.google.com:19302"},
-    {"urls": "stun:open.alanya.cloud:3478"},
-    {
-      "urls": "turn:open.alanya.cloud:3478?transport=udp",
-      "username": "alanya",
-      "credential": "alanya2026",
-    },
-    {
-      "urls": "turn:open.alanya.cloud:3478?transport=tcp",
-      "username": "alanya",
-      "credential": "alanya2026",
-    },
-    {
-      "urls": "turns:open.alanya.cloud:5349?transport=tcp",
-      "username": "alanya",
-      "credential": "alanya2026",
-    },
   ];
   /// Normalise la liste ICE avant de la passer à WebRTC :
   ///  - éclate un objet à `urls` multiples en une entrée par URL,
