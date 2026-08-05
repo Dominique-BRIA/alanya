@@ -418,12 +418,12 @@ class CallController extends ChangeNotifier {
       // Les autres 409 sont de vraies fins : appelant qui a renoncé pendant le
       // démarrage, délai expiré, appel déjà clos.
       lastError = "Cet appel n'est plus disponible";
-      _clear();
+      _clear(idAppel: callId);
       notifyListeners();
       return false;
     } catch (_) {
       lastError = "Cet appel n'est plus disponible";
-      _clear();
+      _clear(idAppel: callId);
       notifyListeners();
       return false;
     } finally {
@@ -490,7 +490,8 @@ class CallController extends ChangeNotifier {
     } catch (_) {
     } finally {
       await _stopMesh();
-      _clear();
+      // `id` explicitement : `activeCallId` vient d'être neutralisé ci-dessus.
+      _clear(idAppel: id);
     }
   }
 
@@ -512,14 +513,23 @@ class CallController extends ChangeNotifier {
     return true;
   }
 
-  void _clear() {
+  /// [idAppel] : identifiant à refermer, quand l'appelant l'a déjà neutralisé.
+  ///
+  /// ⚠️ `hangUp` met `activeCallId` à `null` AVANT d'appeler ce nettoyage, pour
+  /// bloquer les échos entrants. `incoming` étant lui aussi nul sur un appel
+  /// décroché, il ne restait ici plus aucun identifiant : l'écran natif n'était
+  /// jamais refermé. La notification d'appel survivait donc au raccrochage,
+  /// minuteur compris, et le paquet gardait l'appel dans ses « appels actifs ».
+  /// La reprise au démarrage y retrouvait alors un appel fantôme et tentait de
+  /// l'accepter — d'où « Cet appel n'est plus disponible » à l'appel suivant.
+  void _clear({String? idAppel}) {
     _ringTimeout?.cancel();
     _ringTimeout = null;
     _annulerMinuteurConnexion();
     // Filet de sécurité : coupe toute sonnerie encore en cours.
     // (Doublon sûr des stop() éparpillés — mieux vaut couper 2 fois que 0.)
     RingtoneService.instance.stop();
-    final idAFermer = activeCallId ?? incoming?.callId;
+    final idAFermer = idAppel ?? activeCallId ?? incoming?.callId;
     PushService.instance.cancelIncomingCall(idAFermer); // retire la notif
     // Referme aussi l'ÉCRAN D'APPEL NATIF. Sans cela il continuerait de sonner
     // par-dessus le verrouillage alors que l'appelant a déjà raccroché : le
@@ -645,7 +655,9 @@ class CallController extends ChangeNotifier {
     } catch (_) {}
     _rt.callState(callId, "left", userId: myUserId, displayName: myDisplayName);
     await _stopMesh();
-    _clear();
+    // Même raison que dans `hangUp` : `activeCallId` vient d'être neutralisé,
+    // sans cet identifiant l'écran natif resterait affiché après le transfert.
+    _clear(idAppel: callId);
   }
 
   Future<void> _ensureMesh() async {
@@ -1007,7 +1019,9 @@ class CallController extends ChangeNotifier {
         if (isOurCall) {
           await _stopMesh();
           _signalBuffer.remove(callId);
-          _clear();
+          // L'identifiant vient de l'événement : le troisième cas de
+          // `isOurCall` couvre justement un `activeCallId` déjà nul.
+          _clear(idAppel: callId);
         }
       }
     }
