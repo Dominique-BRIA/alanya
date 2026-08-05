@@ -302,28 +302,10 @@ class PushService {
   void _handleForegroundMessage(RemoteMessage message) {
     debugPrint('[PushService] Message foreground: ${message.notification?.title}');
 
-    // Appel entrant reçu alors que l'application est ouverte.
-    //
-    // Il était simplement ignoré, au motif que le WebSocket s'en charge. C'est
-    // le pari que le socket délivre toujours — or s'il est en train de se
-    // reconnecter, l'appel ne sonnait jamais et ne laissait qu'un « appel
-    // manqué ». On déclare donc l'écran natif ici aussi ; le paquet déduplique
-    // sur l'identifiant d'appel, un appel déjà annoncé par le WebSocket ne
-    // produit donc pas un second écran.
-    if (message.data['type'] == 'incoming_call') {
-      final callId = message.data['callId']?.toString();
-      if (callId == null || callId.isEmpty) return;
-      if (!notif.NotificationSettings.instance.callsOn) return;
-      CallUiNative.afficherAppelEntrant(
-        callId: callId,
-        nom: message.data['callerName']?.toString() ?? 'Appel entrant',
-        avatarUrl: message.data['callerAvatarUrl']?.toString(),
-        video: message.data['callType'] == 'VIDEO',
-      ).catchError((e) {
-        debugPrint('[PushService] écran d\'appel natif (foreground) : $e');
-      });
-      return;
-    }
+    // Appel entrant, application ouverte : c'est le WebSocket qui l'annonce,
+    // avec le bandeau interne et la sonnerie de l'application. Déclarer ici
+    // l'écran natif ferait doublon avec ce bandeau.
+    if (message.data['type'] == 'incoming_call') return;
 
     // Réglage : notifications de messages désactivées → on n'affiche rien.
     if (!notif.NotificationSettings.instance.messagesOn) return;

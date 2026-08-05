@@ -1,6 +1,9 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
+// `widgets.dart` plutôt que `foundation.dart`, qu'il réexporte :
+// `WidgetsBinding.lifecycleState` sert à distinguer l'application ouverte
+// (bandeau interne) de l'application réduite ou fermée (écran d'appel natif).
+import 'package:flutter/widgets.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import '../../core/api_client.dart';
@@ -849,34 +852,38 @@ class CallController extends ChangeNotifier {
         groupName: e["groupName"] as String?,
         memberCount: (e["memberCount"] as num?)?.toInt() ?? 2,
       );
-      // ÉCRAN D'APPEL NATIF, quel que soit l'état de l'application.
+      // COMMENT ANNONCER L'APPEL — cela dépend de l'état de l'application.
       //
-      // Le WebSocket se contentait de poser l'état et de sonner : l'interface
-      // affichait alors un bandeau interne, qui ressemble à une notification de
-      // message et ne sonne pas comme un téléphone. L'écran plein écran
-      // n'apparaissait que pour les appels reçus application FERMÉE, seul cas
-      // où le push d'arrière-plan le déclarait.
+      // Application OUVERTE : son bandeau interne et sa sonnerie, comme
+      // toujours. L'utilisateur regarde déjà l'écran, il n'y a rien à réveiller
+      // et l'interface de l'application est plus soignée que celle du système.
       //
-      // On le déclare donc ici aussi. Le paquet déduplique sur l'identifiant
-      // (`CallKitParams.id`), si bien qu'un appel déjà annoncé par le push ne
-      // produit pas un second écran — c'est la règle du modèle : toujours
-      // déclarer, laisser la déduplication faire son travail.
+      // Application EN ARRIÈRE-PLAN OU FERMÉE : écran d'appel natif. C'est le
+      // cas qui manquait — le bandeau interne y était invisible, et seul le
+      // push d'arrière-plan déclarait cet écran, donc uniquement application
+      // fermée. Un appel reçu application simplement réduite n'arrivait alors
+      // que sous la forme d'une notification ordinaire.
+      final auPremierPlan =
+          WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
+
       var natifAffiche = false;
-      try {
-        await CallUiNative.afficherAppelEntrant(
-          callId: callId,
-          nom: incoming!.displayTitle,
-          avatarUrl: incoming!.callerAvatarUrl,
-          video: incoming!.callType == "VIDEO",
-        );
-        natifAffiche = true;
-      } catch (e) {
-        debugPrint("[CallController] écran d'appel natif indisponible: $e");
+      if (!auPremierPlan) {
+        try {
+          await CallUiNative.afficherAppelEntrant(
+            callId: callId,
+            nom: incoming!.displayTitle,
+            avatarUrl: incoming!.callerAvatarUrl,
+            video: incoming!.callType == "VIDEO",
+          );
+          natifAffiche = true;
+        } catch (e) {
+          debugPrint("[CallController] écran d'appel natif indisponible: $e");
+        }
       }
       ecranNatifAffiche = natifAffiche;
 
-      // Sonnerie entrante SEULEMENT en repli : l'écran natif porte la sienne,
-      // et les deux ensemble donnaient une double sonnerie.
+      // Sonnerie interne dès que l'écran natif ne porte pas l'appel : il joue
+      // la sienne, et les deux ensemble donneraient une double sonnerie.
       if (!natifAffiche) {
         RingtoneService.instance.startIncoming();
       }
