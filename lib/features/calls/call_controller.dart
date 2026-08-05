@@ -764,8 +764,11 @@ class CallController extends ChangeNotifier {
         _bufferSignal(callId, from, signal);
         return;
       }
-      if (_mesh != null) {
-        _mesh!.handleSignal(from, signal);
+      final mesh = _mesh;
+      if (mesh != null) {
+        // `await` : deux signaux qui se suivent (offre puis candidats ICE)
+        // doivent être appliqués dans leur ordre d'arrivée.
+        await mesh.handleSignal(from, signal);
       } else {
         _bufferSignal(callId, from, signal);
       }
@@ -787,13 +790,25 @@ class CallController extends ChangeNotifier {
           return;
         }
         if (callId == activeCallId || callId == incoming?.callId) {
-          _onPeerJoined(userId ?? "", displayName);
-          // Flushe les signaux bufferisés pour ce callId
-          final bufferedForCall = _signalBuffer.remove(callId);
-          if (bufferedForCall != null && _mesh != null) {
-            for (final peerEntry in bufferedForCall.entries) {
+          // ⚠️ ATTENDRE la fin de `_onPeerJoined` avant de toucher au tampon.
+          // C'est elle qui construit la mesh (`_ensureMesh`) et ouvre la session
+          // du pair. Sans `await`, la ligne suivante s'exécutait alors que
+          // `_mesh` était encore nul : le tampon était vidé par `remove` puis
+          // abandonné faute de mesh où le rejouer, et l'offre SDP disparaissait
+          // définitivement. C'est ce qui rendait un sens d'appel systématique-
+          // ment muet — l'offreur étant fixé par comparaison d'identifiants,
+          // la paire échouait toujours dans le même sens.
+          await _onPeerJoined(userId ?? "", displayName);
+
+          // Ne retirer du tampon que ce qu'on est réellement capable de
+          // rejouer : si la mesh n'a pas pu être créée (permission refusée,
+          // micro indisponible), les signaux restent en attente.
+          final mesh = _mesh;
+          if (mesh != null) {
+            final bufferedForCall = _signalBuffer.remove(callId);
+            for (final peerEntry in bufferedForCall?.entries ?? const <MapEntry<String, List<Map<String, dynamic>>>>[]) {
               for (final sig in peerEntry.value) {
-                _mesh!.handleSignal(peerEntry.key, sig);
+                await mesh.handleSignal(peerEntry.key, sig);
               }
             }
           }
