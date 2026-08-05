@@ -9,7 +9,6 @@ import '../../core/whatsapp_text.dart';
 import '../../core/connectivity_service.dart';
 import '../../core/conversation_cache.dart';
 import '../../core/push_service.dart';
-import '../../core/in_app_notifier.dart';
 import '../../core/ringtone_service.dart';
 import '../../core/notification_settings.dart';
 import '../../core/realtime_client.dart';
@@ -435,32 +434,19 @@ class _ConversationsTabState extends State<_ConversationsTab>
       body = "Nouveau message";
     }
 
-    // Bandeau in-app (heads-up custom glassmorphism) au-dessus de toutes les
-    // pages : regroupement par conversation (groupKey) + réponse rapide inline.
-    final conversation = conv;
-    final chat = context.read<ChatRepository>();
-    InAppNotifier.instance.showMessage(
-      title: title,
-      body: body,
-      avatarUrl: conversation?.avatarUrl,
-      groupKey: convId,
-      onQuickReply: convId.isEmpty ? null : (text) => chat.sendText(convId, text),
-      onTap: () {
-        PushService.navigatorKey.currentState?.push(MaterialPageRoute(
-          builder: (_) => ChatScreen(
-            convId: convId,
-            title: title,
-            isGroup: conversation?.isGroup ?? false,
-          ),
-        ));
-      },
-    );
-
-    // Affiche aussi la notification système.
+    // Le bandeau interne a été retiré : il faisait DOUBLON avec la notification
+    // système, annoncée juste en dessous et par le push. Trois annonces pour un
+    // même message, dont deux simultanées à l'écran.
+    //
+    // C'est la notification système qui reste, parce qu'elle est la seule à
+    // fonctionner application fermée. Elle a reçu en échange ce qui faisait
+    // l'intérêt du bandeau : l'avatar de l'expéditeur et le regroupement par
+    // conversation (voir `PushService.show`).
     PushService.instance.show(
       title: title,
       body: body,
-      id: convId.hashCode,
+      convId: convId,
+      avatarUrl: conv?.avatarUrl,
       payload: {"type": "message", "convId": convId},
     );
   }

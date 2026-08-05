@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:http/http.dart' as http;
@@ -333,25 +334,18 @@ class PushService {
     final body =
         notif.NotificationSettings.instance.previewOn ? (notification.body ?? '') : 'Nouveau message';
 
-    _localPlugin.show(
-      DateTime.now().millisecondsSinceEpoch.remainder(100000),
-      notification.title ?? 'Alanya',
-      body,
-      const NotificationDetails(
-        android: AndroidNotificationDetails(
-          'messages',
-          'Messages',
-          channelDescription: 'Notifications des nouveaux messages et appels',
-          importance: Importance.high,
-          priority: Priority.high,
-          icon: '@mipmap/ic_launcher',
-          color: Color(0xFFB85C38),
-          sound: RawResourceAndroidNotificationSound("notification"),
-          playSound: true,
-        ),
-        iOS: DarwinNotificationDetails(),
-      ),
-      payload: jsonEncode(message.data),
+    // Même construction que le chemin WebSocket, et surtout MÊME identité.
+    //
+    // L'ancien identifiant était horodaté, donc différent à chaque annonce :
+    // le message arrivant par les deux canaux — WebSocket et push — produisait
+    // deux notifications distinctes qui s'empilaient. Les faire porter le même
+    // `convId` suffit : la seconde remplace la première.
+    show(
+      title: notification.title ?? 'Alanya',
+      body: body,
+      convId: message.data['convId']?.toString(),
+      avatarUrl: message.data['avatarUrl']?.toString(),
+      payload: message.data,
     );
   }
 
@@ -411,32 +405,89 @@ class PushService {
   }
 
   /// Affiche une notification locale.
+  /// Notification de message, au style « messagerie » d'Android.
+  ///
+  /// [convId] sert d'identité : deux annonces du même fil se REMPLACENT au lieu
+  /// de s'empiler. C'est ce qui déduplique le WebSocket et le push, qui
+  /// arrivent tous deux quand l'application est ouverte — et l'ancien `id = 0`
+  /// faisait pire, en écrasant les fils entre eux.
+  ///
+  /// [avatarUrl] donne la pastille ronde de l'expéditeur. `MessagingStyle` est
+  /// ce qu'Android offre de plus proche du bandeau interne de l'application :
+  /// une notification système ne peut pas reproduire un widget Flutter, mais
+  /// elle porte le même avatar, le même nom et la même couleur.
   Future<void> show({
     required String title,
     required String body,
     int id = 0,
+    String? convId,
+    String? avatarUrl,
     Map<String, dynamic>? payload,
   }) async {
+    // Les deux API n'acceptent pas le même type pour la même image : `Person`
+    // veut une icône, `largeIcon` une bitmap. On télécharge une seule fois.
+    final octets = await _avatarPourNotification(avatarUrl);
+    final avatar = octets == null ? null : ByteArrayAndroidBitmap(octets);
+    final personne = Person(
+      name: title,
+      key: convId,
+      icon: octets == null ? null : ByteArrayAndroidIcon(octets),
+    );
+
+    final details = AndroidNotificationDetails(
+      'messages',
+      'Messages',
+      channelDescription: 'Notifications des nouveaux messages et appels',
+      importance: Importance.high,
+      priority: Priority.high,
+      icon: '@mipmap/ic_launcher',
+      color: const Color(0xFFB85C38),
+      sound: const RawResourceAndroidNotificationSound("notification"),
+      playSound: true,
+      largeIcon: avatar,
+      // Regroupe les annonces d'un même fil, comme le bandeau le faisait.
+      groupKey: convId,
+      styleInformation: MessagingStyleInformation(
+        personne,
+        conversationTitle: title,
+        messages: [
+          Message(body, DateTime.now(), personne),
+        ],
+      ),
+    );
+
     await _localPlugin.show(
-      id,
+      convId != null && convId.isNotEmpty ? convId.hashCode & 0x7fffffff : id,
       title,
       body,
-      const NotificationDetails(
-        android: AndroidNotificationDetails(
-          'messages',
-          'Messages',
-          channelDescription: 'Notifications des nouveaux messages et appels',
-          importance: Importance.high,
-          priority: Priority.high,
-          icon: '@mipmap/ic_launcher',
-          color: Color(0xFFB85C38),
-          sound: RawResourceAndroidNotificationSound("notification"),
-          playSound: true,
-        ),
-        iOS: DarwinNotificationDetails(),
+      NotificationDetails(
+        android: details,
+        iOS: const DarwinNotificationDetails(),
       ),
-      payload: payload?.toString(),
+      // `jsonEncode` et non `toString()` : le tap relit ce payload avec
+      // `jsonDecode`, et la représentation Dart d'une Map n'est pas du JSON
+      // (clés sans guillemets). Le chemin WebSocket produisait donc un payload
+      // illisible, et toucher la notification n'ouvrait pas la conversation.
+      payload: payload == null ? null : jsonEncode(payload),
     );
+  }
+
+  /// Télécharge l'avatar pour la notification, ou renvoie `null`.
+  ///
+  /// Une notification ne doit jamais attendre le réseau : au-delà de trois
+  /// secondes on s'en passe, l'annonce partant sans pastille plutôt qu'en
+  /// retard — ou pas du tout.
+  Future<Uint8List?> _avatarPourNotification(String? url) async {
+    if (url == null || url.isEmpty) return null;
+    try {
+      final r = await http
+          .get(Uri.parse(url))
+          .timeout(const Duration(seconds: 3));
+      if (r.statusCode != 200 || r.bodyBytes.isEmpty) return null;
+      return r.bodyBytes;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Désenregistre le token FCM (à la déconnexion).
