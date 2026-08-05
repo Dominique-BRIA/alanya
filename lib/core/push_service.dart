@@ -7,6 +7,8 @@ import 'package:http/http.dart' as http;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_callkit_incoming/entities/entities.dart';
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_local_notifications/src/platform_specifics/android/notification_sound.dart';
 
@@ -90,6 +92,21 @@ class PushService {
 
       // 3) Configure le callback d'arrière-plan (top-level function)
       FirebaseMessaging.onBackgroundMessage(_firebaseBackgroundHandler);
+
+      // 3 bis) Même chose pour l'ÉCRAN D'APPEL NATIF. Sans cet enregistrement,
+      // refuser un appel application tuée n'atteignait jamais le serveur :
+      // l'écouteur du premier plan vit dans un widget qui n'existe pas alors,
+      // et refuser n'ouvre pas l'application. L'appelant sonnait dans le vide
+      // jusqu'à l'expiration du minuteur.
+      try {
+        await FlutterCallkitIncoming.onBackgroundMessage(
+          callkitBackgroundHandler,
+        );
+      } catch (e) {
+        // Enregistrement refusé (plateforme sans support) : le premier plan
+        // continue de fonctionner, seul le cas « application tuée » est perdu.
+        debugPrint('[PushService] handler d\'appel en arrière-plan absent: $e');
+      }
 
       // 4) Demande la permission
       await _requestPermission();
@@ -611,6 +628,47 @@ Future<void> notificationBackgroundHandler(NotificationResponse response) async 
   }
   if (callId == null || callId.isEmpty) return;
 
+  await refuserAppelDepuisIsolate(callId);
+}
+
+/// Refus déclenché depuis l'ÉCRAN D'APPEL NATIF, application en arrière-plan
+/// ou TUÉE.
+///
+/// L'écouteur `FlutterCallkitIncoming.onEvent` de `CallListener` vit dans un
+/// widget : application tuée, il n'existe pas. Refuser depuis l'écran natif
+/// n'ouvre pas l'application — personne n'écoutait donc l'événement, et le
+/// serveur n'apprenait jamais le refus. L'appelant continuait de sonner
+/// jusqu'au minuteur des 90 s alors que son correspondant avait dit non.
+///
+/// C'est le chemin que le paquet prévoit exactement pour ce cas
+/// (`onBackgroundMessage`, « background or terminated ») : le pendant Dart du
+/// POST natif que fait le modèle de référence depuis Kotlin.
+///
+/// Le délai de sonnerie compte comme un refus, pour la même raison qu'au
+/// premier plan : mieux vaut que l'appelant cesse de sonner tout de suite.
+@pragma('vm:entry-point')
+Future<void> callkitBackgroundHandler(CallEvent event) async {
+  final String? callId = switch (event) {
+    CallEventActionCallDecline(:final callKitParams) => callKitParams.id,
+    CallEventActionCallTimeout(:final id) => id,
+    _ => null,
+  };
+  if (callId == null || callId.isEmpty) return;
+
+  WidgetsFlutterBinding.ensureInitialized();
+  DartPluginRegistrant.ensureInitialized();
+
+  await refuserAppelDepuisIsolate(callId);
+}
+
+/// Prévient le serveur qu'un appel est refusé, depuis un isolate SANS INTERFACE.
+///
+/// Partagée par les deux chemins d'arrière-plan — la notification locale et
+/// l'écran d'appel natif — parce que la difficulté est la même dans les deux
+/// cas : aucun état en mémoire, aucun `ApiClient`, et un jeton d'accès qui a
+/// toutes les chances d'être périmé.
+@pragma('vm:entry-point')
+Future<void> refuserAppelDepuisIsolate(String callId) async {
   try {
     final storage = TokenStorage();
     var token = await storage.accessToken;
