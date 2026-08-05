@@ -148,7 +148,8 @@ class MeetingController extends ChangeNotifier {
     // Connecte WebRTC aux participants déjà présents
     for (final peerId in participants) {
       if (peerId != myUserId) {
-        _mesh?.connectToPeer(peerId);
+        // J'entre dans la salle : les présents sont là avant moi, ils offrent.
+        _mesh?.connectToPeer(peerId, asOfferer: false);
         _connectedPeerIds.add(peerId);
       }
     }
@@ -165,7 +166,9 @@ class MeetingController extends ChangeNotifier {
 
     _participantNames[userId] = displayName;
     _connectedPeerIds.add(userId);
-    _mesh?.connectToPeer(userId);
+    // Il entre après moi : j'offre. Les deux rôles étant portés par deux
+    // événements distincts, deux pairs ne peuvent jamais s'offrir mutuellement.
+    _mesh?.connectToPeer(userId, asOfferer: true);
     notifyListeners();
   }
 

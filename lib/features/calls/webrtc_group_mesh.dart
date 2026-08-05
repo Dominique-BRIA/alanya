@@ -64,7 +64,20 @@ class WebrtcGroupMesh {
     await Helper.switchCamera(tracks.first);
   }
 
-  static bool shouldOffer(String myId, String peerId) => myId.compareTo(peerId) < 0;
+  // NOTE — le rôle d'offreur ne se déduit PLUS des identifiants.
+  //
+  // L'ancienne règle (`myId.compareTo(peerId) < 0`) désignait toujours le même
+  // offreur pour une paire donnée, quel que soit le sens de l'appel. Quand elle
+  // désignait l'appelé, l'offre dépendait de la liste renvoyée par `/accept` et
+  // du vidage d'un tampon, là où l'appelant, lui, l'émet directement. Résultat :
+  // pour deux personnes données, un sens marchait toujours et l'autre jamais.
+  //
+  // La règle retenue est POSITIONNELLE : celui qui est DÉJÀ dans l'appel offre
+  // à celui qui ARRIVE. Elle se lit directement dans l'événement reçu — je
+  // découvre les présents en entrant (je n'offre pas, ils m'offriront) ou je
+  // vois quelqu'un entrer (j'offre). En 1-à-1 cela revient à « l'appelant
+  // offre », et aucune collision n'est possible puisque les deux rôles sont
+  // toujours attribués par des événements différents.
 
   Future<void> ensureLocal() async {
     _local ??= await navigator.mediaDevices.getUserMedia({
@@ -74,19 +87,23 @@ class WebrtcGroupMesh {
     onUpdated();
   }
 
-  Future<void> connectToPeer(String peerId) async {
+  /// Ouvre la connexion vers [peerId].
+  ///
+  /// [asOfferer] dit qui émet l'offre, et ce choix appartient à l'appelant :
+  /// `false` quand je découvre quelqu'un déjà présent (il m'offrira), `true`
+  /// quand je le vois arriver après moi.
+  Future<void> connectToPeer(String peerId, {required bool asOfferer}) async {
     if (peerId == myUserId || _peers.containsKey(peerId)) {
       debugPrint(
           "[APPEL] connectToPeer($peerId) IGNORE — moi=${peerId == myUserId} dejaConnu=${_peers.containsKey(peerId)}");
       return;
     }
-    debugPrint(
-        "[APPEL] connectToPeer($peerId) — jeSuisOffreur=${shouldOffer(myUserId, peerId)}");
+    debugPrint("[APPEL] connectToPeer($peerId) — jeSuisOffreur=$asOfferer");
     await ensureLocal();
     final session = WebrtcPeerSession(
       peerId: peerId,
       isVideo: isVideo,
-      isOfferer: shouldOffer(myUserId, peerId),
+      isOfferer: asOfferer,
       localStream: _local!,
       iceServers: iceServers,
       onSendSignal: (sig) => onSendSignal(peerId, sig),
@@ -108,7 +125,21 @@ class WebrtcGroupMesh {
   }
 
   Future<void> handleSignal(String fromPeerId, Map<String, dynamic> signal) async {
-    final session = _peers[fromPeerId];
+    var session = _peers[fromPeerId];
+
+    // Une OFFRE reçue d'un inconnu ouvre la connexion séance tenante, au lieu
+    // d'attendre l'événement d'adhésion qui devait la créer. Cette attente
+    // était le maillon fragile : si l'événement se perdait, arrivait trop tôt
+    // ou trouvait le tampon déjà vidé, l'offre n'était jamais traitée et la
+    // négociation ne démarrait pas. Recevoir une offre suffit à savoir quoi
+    // faire — je réponds, donc je n'offre pas.
+    if (session == null && signal["kind"] == "offer") {
+      debugPrint(
+          "[APPEL] OFFRE de $fromPeerId sans session → ouverture immediate");
+      await connectToPeer(fromPeerId, asOfferer: false);
+      session = _peers[fromPeerId];
+    }
+
     if (session == null) {
       debugPrint(
           "[APPEL] mesh.handleSignal ${signal["kind"]} de $fromPeerId → MIS EN ATTENTE (pas de session)");

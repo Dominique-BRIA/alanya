@@ -290,7 +290,8 @@ class CallController extends ChangeNotifier {
         "${result.activeParticipants.map((p) => p.userId).toList()}, mesh=${_mesh != null ? "pret" : "ABSENT"}");
     for (final p in result.activeParticipants) {
       if (p.userId != myUserId) {
-        await _mesh?.connectToPeer(p.userId);
+        // J'ARRIVE dans l'appel : ceux qui y sont déjà m'enverront leur offre.
+        await _mesh?.connectToPeer(p.userId, asOfferer: false);
       }
     }
     notifyListeners();
@@ -366,7 +367,11 @@ class CallController extends ChangeNotifier {
           "[APPEL] acceptById — moi=$myUserId, participants actifs renvoyes par /accept : "
           "${result.activeParticipants.map((p) => p.userId).toList()}, mesh=${_mesh != null ? "pret" : "ABSENT"}");
       for (final p in result.activeParticipants) {
-        if (p.userId != myUserId) await _mesh?.connectToPeer(p.userId);
+        // Même règle que dans `acceptIncoming` : j'arrive, je ne suis pas
+        // l'offreur — ceux déjà présents m'offriront.
+        if (p.userId != myUserId) {
+          await _mesh?.connectToPeer(p.userId, asOfferer: false);
+        }
       }
       notifyListeners();
       return true;
@@ -705,7 +710,10 @@ class CallController extends ChangeNotifier {
     }
     notifyListeners();
     await _ensureMesh();
-    await _mesh?.connectToPeer(userId);
+    // QUELQU'UN ARRIVE alors que je suis déjà là : c'est à moi d'offrir.
+    // En 1-à-1 cet événement est le décrochage de l'appelé, et c'est donc
+    // l'appelant qui offre — le chemin direct, celui qui a toujours marché.
+    await _mesh?.connectToPeer(userId, asOfferer: true);
     notifyListeners();
   }
 
