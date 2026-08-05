@@ -81,6 +81,21 @@ flutter:
     - assets/images/
     - assets/sounds/
 
+  # Police du style « manuscrit » du formatage de texte (marqueur `).
+  #
+  # Il était jusqu'ici simulé par du serif en italique — Georgia et Times New
+  # Roman, ses replis, n'existent pas sur Android, si bien que le rendu réel
+  # était du Noto Serif penché : lisiblement pas de l'écriture manuscrite.
+  #
+  # Caveat est une vraie cursive, dessinée pour rester lisible en texte courant
+  # (contrairement à Pacifico ou Dancing Script, plus décoratives). Fichier à
+  # graisse variable, licence SIL OFL 1.1 — voir Caveat-OFL.txt, que la licence
+  # impose de distribuer avec la police.
+  fonts:
+    - family: Caveat
+      fonts:
+        - asset: assets/fonts/Caveat-Variable.ttf
+
 # Icône Android / iOS — source : assets/images/app_icon.png
 # Génération : bash ../scripts/setup-app-icon.sh
 flutter_launcher_icons:

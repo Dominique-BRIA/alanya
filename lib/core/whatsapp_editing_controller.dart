@@ -15,13 +15,11 @@ class WhatsappFormattingController extends TextEditingController {
     StyleWhatsApp.italique: TextStyle(fontStyle: FontStyle.italic),
     StyleWhatsApp.barre: TextStyle(decoration: TextDecoration.lineThrough),
     StyleWhatsApp.souligne: TextStyle(decoration: TextDecoration.underline),
-    StyleWhatsApp.manuscrit: TextStyle(
-      fontStyle: FontStyle.italic,
-      fontFamily: 'serif',
-      fontFamilyFallback: ['Georgia', 'serif'],
-      letterSpacing: 0.4,
-      fontWeight: FontWeight.w400,
-    ),
+    // Doit rester identique au style de rendu de `whatsapp_text.dart` : la
+    // frappe et le message envoyé s'écrivent alors de la même façon. Les deux
+    // avaient d'ailleurs divergé du temps de la simulation, cette version-ci
+    // ayant un repli et un espacement différents.
+    StyleWhatsApp.manuscrit: TextStyle(fontFamily: 'Caveat'),
   };
 
   static const List<_DefEdit> _defs = [

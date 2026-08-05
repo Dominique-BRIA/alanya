@@ -15,23 +15,24 @@ export 'whatsapp_text_parser.dart' show sansMarqueursWhatsApp;
 ///
 /// Le contenu **stocké et envoyé reste le texte brut**, marqueurs compris.
 
-/// Manuscrit : style cursif/handwritten. On utilise une famille serif en
-/// italique léger pour simuler l'écriture manuscrite sans ajouter de police
-/// custom (Caveat/DancingScript nécessiteraient un asset). Reste distinct de
-/// l'italique simple par letterSpacing + poids léger.
-
+/// Manuscrit : vraie écriture cursive, la police Caveat étant embarquée avec
+/// l'application (voir `pubspec.yaml`).
+///
+/// Ce style était auparavant SIMULÉ — du serif en italique, avec Georgia et
+/// Times New Roman en replis. Aucune de ces deux polices n'existant sur
+/// Android, le rendu réel était du Noto Serif penché : visiblement pas de
+/// l'écriture manuscrite.
+///
+/// Ni `fontStyle`, ni `letterSpacing`, ni `fontWeight` ne sont repris : ils ne
+/// servaient qu'à éloigner la simulation de l'italique simple. Pencher une
+/// cursive la déforme, et l'espacer rompt la liaison entre ses lettres — c'est
+/// précisément ce qui fait qu'on la lit comme une écriture.
 const Map<StyleWhatsApp, TextStyle> _styles = {
   StyleWhatsApp.gras: TextStyle(fontWeight: FontWeight.bold),
   StyleWhatsApp.italique: TextStyle(fontStyle: FontStyle.italic),
   StyleWhatsApp.barre: TextStyle(decoration: TextDecoration.lineThrough),
   StyleWhatsApp.souligne: TextStyle(decoration: TextDecoration.underline),
-  StyleWhatsApp.manuscrit: TextStyle(
-    fontStyle: FontStyle.italic,
-    fontFamily: 'serif',
-    fontFamilyFallback: ['Georgia', 'Times New Roman', 'serif'],
-    letterSpacing: 0.4,
-    fontWeight: FontWeight.w400,
-  ),
+  StyleWhatsApp.manuscrit: TextStyle(fontFamily: 'Caveat'),
 };
 
 List<InlineSpan> _versSpans(List<NoeudTexte> noeuds) {
