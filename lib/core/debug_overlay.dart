@@ -1,14 +1,14 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 
-/// DIAGNOSTIC TEMPORAIRE — affiche les traces d'appel par-dessus l'application.
+/// Affiche les traces d'appel par-dessus l'application.
 ///
-/// L'overlay existait déjà mais n'était monté nulle part : `DebugOverlay.log`
-/// remplissait une liste que personne n'affichait. Le laisser branché permet de
-/// lire, sur le téléphone et sans `adb`, où la négociation s'interrompt.
-///
-/// ⚠️ À REPASSER À `false` une fois le problème d'appel réglé.
-const bool tracesAppelsVisibles = true;
+/// Laissé à `false` : c'est un outil de diagnostic, pas une fonctionnalité.
+/// Le repasser à `true` rebranche l'overlay sans rien toucher d'autre — il a
+/// permis d'identifier, en une seule capture d'écran, une course que plusieurs
+/// correctifs raisonnés n'avaient pas su trouver. Les traces continuent de
+/// partir dans le journal système (`adb logcat`), où elles ne coûtent rien.
+const bool tracesAppelsVisibles = false;
 
 /// Trace de négociation d'appel : journal système ET overlay à l'écran.
 ///
