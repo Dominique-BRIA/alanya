@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
+import '../../core/debug_overlay.dart';
+
 import 'webrtc_peer_session.dart';
 
 /// Mesh WebRTC : une connexion par participant distant, flux local partagé.
@@ -98,11 +100,10 @@ class WebrtcGroupMesh {
   /// quand je le vois arriver après moi.
   Future<void> connectToPeer(String peerId, {required bool asOfferer}) async {
     if (peerId == myUserId || _peers.containsKey(peerId)) {
-      debugPrint(
-          "[APPEL] connectToPeer($peerId) IGNORE — moi=${peerId == myUserId} dejaConnu=${_peers.containsKey(peerId)}");
+      traceAppel("connectToPeer($peerId) IGNORE — moi=${peerId == myUserId} dejaConnu=${_peers.containsKey(peerId)}");
       return;
     }
-    debugPrint("[APPEL] connectToPeer($peerId) — jeSuisOffreur=$asOfferer");
+    traceAppel("connectToPeer($peerId) — jeSuisOffreur=$asOfferer");
     await ensureLocal();
     final session = WebrtcPeerSession(
       peerId: peerId,
@@ -139,19 +140,17 @@ class WebrtcGroupMesh {
     // négociation ne démarrait pas. Recevoir une offre suffit à savoir quoi
     // faire — je réponds, donc je n'offre pas.
     if (session == null && signal["kind"] == "offer") {
-      debugPrint(
-          "[APPEL] OFFRE de $fromPeerId sans session → ouverture immediate");
+      traceAppel("OFFRE de $fromPeerId sans session → ouverture immediate");
       await connectToPeer(fromPeerId, asOfferer: false);
       session = _peers[fromPeerId];
     }
 
     if (session == null) {
-      debugPrint(
-          "[APPEL] mesh.handleSignal ${signal["kind"]} de $fromPeerId → MIS EN ATTENTE (pas de session)");
+      traceAppel("mesh.handleSignal ${signal["kind"]} de $fromPeerId → MIS EN ATTENTE (pas de session)");
       _pendingByPeer.putIfAbsent(fromPeerId, () => []).add(signal);
       return;
     }
-    debugPrint("[APPEL] mesh.handleSignal ${signal["kind"]} de $fromPeerId → session");
+    traceAppel("mesh.handleSignal ${signal["kind"]} de $fromPeerId → session");
     await session.handleSignal(signal);
   }
 

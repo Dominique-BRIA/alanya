@@ -1,6 +1,25 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 
+/// DIAGNOSTIC TEMPORAIRE — affiche les traces d'appel par-dessus l'application.
+///
+/// L'overlay existait déjà mais n'était monté nulle part : `DebugOverlay.log`
+/// remplissait une liste que personne n'affichait. Le laisser branché permet de
+/// lire, sur le téléphone et sans `adb`, où la négociation s'interrompt.
+///
+/// ⚠️ À REPASSER À `false` une fois le problème d'appel réglé.
+const bool tracesAppelsVisibles = true;
+
+/// Trace de négociation d'appel : journal système ET overlay à l'écran.
+///
+/// Les deux, parce qu'ils ne servent pas au même moment : `adb logcat` donne
+/// l'horodatage précis et l'historique complet, l'overlay permet de constater
+/// sur le téléphone, sans câble, où la négociation s'arrête.
+void traceAppel(String ligne) {
+  debugPrint("[APPEL] $ligne");
+  DebugOverlay.log("📞 $ligne");
+}
+
 /// Overlay de debug pour voir en live les événements WS et l'état du CallController.
 /// À afficher au-dessus du Scaffold pendant le débogage des appels.
 /// Retire ce widget en production.

@@ -149,6 +149,7 @@ class CallController extends ChangeNotifier {
     final started = await _calls.start(convId, type);
     debugPrint(
         "[CallController] Appel créé sur le backend, envoi du signal call_ring...");
+    traceAppel("APPEL SORTANT cree ${started.id} — moi=$myUserId");
     _rt.callRing(started.id);
     activeCallId = started.id;
     activeConvId = convId;
@@ -294,8 +295,7 @@ class CallController extends ChangeNotifier {
     notifyListeners();
 
     await _ensureMesh();
-    debugPrint(
-        "[APPEL] acceptIncoming — moi=$myUserId, participants actifs renvoyes par /accept : "
+    traceAppel("acceptIncoming — moi=$myUserId, participants actifs renvoyes par /accept : "
         "${result.activeParticipants.map((p) => p.userId).toList()}, mesh=${_mesh != null ? "pret" : "ABSENT"}");
     for (final p in result.activeParticipants) {
       if (p.userId != myUserId) {
@@ -373,8 +373,7 @@ class CallController extends ChangeNotifier {
       notifyListeners();
 
       await _ensureMesh();
-      debugPrint(
-          "[APPEL] acceptById — moi=$myUserId, participants actifs renvoyes par /accept : "
+      traceAppel("acceptById — moi=$myUserId, participants actifs renvoyes par /accept : "
           "${result.activeParticipants.map((p) => p.userId).toList()}, mesh=${_mesh != null ? "pret" : "ABSENT"}");
       for (final p in result.activeParticipants) {
         // Même règle que dans `acceptIncoming` : j'arrive, je ne suis pas
@@ -735,11 +734,12 @@ class CallController extends ChangeNotifier {
 
   /// Arme le délai de négociation. Sans effet si le média circule déjà.
   void _armerMinuteurConnexion() {
+    traceAppel("minuteur 30s ARME (media=${mediaConnected ? "deja ok" : "absent"})");
     if (mediaConnected) return;
     _connectingTimeout?.cancel();
     _connectingTimeout = Timer(const Duration(seconds: 30), () {
       if (mediaConnected || activeCallId == null) return;
-      debugPrint("[APPEL] 30 s sans media etabli → echec de connexion");
+      traceAppel("30 s sans media etabli → echec de connexion");
       lastError = "Connexion impossible";
       hangUp();
     });
@@ -760,12 +760,12 @@ class CallController extends ChangeNotifier {
     if (activeCallId == null) return;
     final autres = joinedParticipantIds.where((id) => id != myUserId).toSet();
     if (autres.length <= 1) {
-      debugPrint("[APPEL] perte du dernier pair ($userId) → raccrochage");
+      traceAppel("perte du dernier pair ($userId) → raccrochage");
       lastError = "Connexion perdue";
       await hangUp();
       return;
     }
-    debugPrint("[APPEL] perte du pair $userId → l'appel continue a ${autres.length - 1}");
+    traceAppel("perte du pair $userId → l'appel continue a ${autres.length - 1}");
     await _onPeerLeft(userId);
   }
 
@@ -831,8 +831,7 @@ class CallController extends ChangeNotifier {
         return;
       }
       final mesh = _mesh;
-      debugPrint(
-          "[APPEL] call_signal ${signal["kind"]} recu de $from — mesh=${mesh != null ? "pret" : "ABSENT → tampon"}");
+      traceAppel("call_signal ${signal["kind"]} recu de $from — mesh=${mesh != null ? "pret" : "ABSENT → tampon"}");
       if (mesh != null) {
         // `await` : deux signaux qui se suivent (offre puis candidats ICE)
         // doivent être appliqués dans leur ordre d'arrivée.
@@ -849,11 +848,18 @@ class CallController extends ChangeNotifier {
 
       if (callId == null) return;
 
+      // Trace posée AVANT toute garde : c'est le point où l'on saura si
+      // l'appelant apprend, ou non, que son correspondant a décroché.
+      traceAppel(
+          "call_state '$state' de ${userId ?? "?"} — moi=$myUserId, "
+          "actif=${callId == activeCallId}, entrant=${callId == incoming?.callId}");
+
       if (state == "joined" || state == "accepted") {
         // Notre propre identifiant : soit l'écho de notre « joined », soit un
         // autre appareil du même compte qui vient de décrocher — auquel cas il
         // faut couper la sonnerie ici.
         if (userId == myUserId) {
+          traceAppel("→ ignore : c'est mon propre identifiant");
           _takenByAnotherDevice(callId);
           return;
         }
@@ -872,8 +878,7 @@ class CallController extends ChangeNotifier {
           // rejouer : si la mesh n'a pas pu être créée (permission refusée,
           // micro indisponible), les signaux restent en attente.
           final mesh = _mesh;
-          debugPrint(
-              "[APPEL] peer_joined de $userId traite — mesh=${mesh != null ? "pret" : "ABSENT"} tampon=${_signalBuffer[callId]?.length ?? 0} pair(s)");
+          traceAppel("peer_joined de $userId traite — mesh=${mesh != null ? "pret" : "ABSENT"} tampon=${_signalBuffer[callId]?.length ?? 0} pair(s)");
           if (mesh != null) {
             final bufferedForCall = _signalBuffer.remove(callId);
             for (final peerEntry in bufferedForCall?.entries ?? const <MapEntry<String, List<Map<String, dynamic>>>>[]) {

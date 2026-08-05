@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
+import '../../core/debug_overlay.dart';
+
 /// Connexion WebRTC vers un seul pair (utilisée par le mesh de groupe).
 class WebrtcPeerSession {
   WebrtcPeerSession({
@@ -90,14 +92,14 @@ class WebrtcPeerSession {
           // Peut se rétablir seul : on laisse un sursis avant de conclure.
           _graceTimer?.cancel();
           _graceTimer = Timer(const Duration(seconds: 6), () {
-            debugPrint("[APPEL] $peerId : sursis expire → connexion perdue");
+            traceAppel("$peerId : sursis expire → connexion perdue");
             onConnectionLost?.call();
           });
           break;
         case RTCIceConnectionState.RTCIceConnectionStateFailed:
           // Échec définitif : inutile d'attendre.
           _graceTimer?.cancel();
-          debugPrint("[APPEL] $peerId : ICE failed → connexion perdue");
+          traceAppel("$peerId : ICE failed → connexion perdue");
           onConnectionLost?.call();
           break;
         case RTCIceConnectionState.RTCIceConnectionStateConnected:
@@ -216,7 +218,7 @@ class WebrtcPeerSession {
       "optional": [],
     });
     await pc.setLocalDescription(offer);
-    debugPrint("[APPEL] OFFRE creee et envoyee vers $peerId");
+    traceAppel("OFFRE creee et envoyee vers $peerId");
     onSendSignal({"kind": "offer", "sdp": offer.sdp, "type": offer.type});
   }
 
@@ -240,7 +242,7 @@ class WebrtcPeerSession {
       await _flushIceQueue();
       final answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
-      debugPrint("[APPEL] OFFRE recue de $peerId → ANSWER renvoyee");
+      traceAppel("OFFRE recue de $peerId → ANSWER renvoyee");
       onSendSignal({"kind": "answer", "sdp": answer.sdp, "type": answer.type});
     } else if (kind == "answer") {
       final sdp = signal["sdp"] as String?;
@@ -248,7 +250,7 @@ class WebrtcPeerSession {
       final type = signal["type"] as String? ?? "answer";
       await pc.setRemoteDescription(RTCSessionDescription(sdp, type));
       _remoteReady = true;
-      debugPrint("[APPEL] ANSWER recue de $peerId → negociation complete");
+      traceAppel("ANSWER recue de $peerId → negociation complete");
       await _flushIceQueue();
     } else if (kind == "ice") {
       final raw = signal["candidate"];

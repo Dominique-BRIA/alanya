@@ -8,6 +8,7 @@ import 'core/api_client.dart';
 import 'core/authed_api.dart';
 import 'core/connectivity_service.dart';
 import 'core/data_saver_service.dart';
+import 'core/debug_overlay.dart';
 import 'core/notification_settings.dart';
 import 'core/locale_controller.dart';
 import 'core/outbox.dart';
@@ -38,6 +39,11 @@ import 'features/status/status_repository.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // TÉMOIN DE VERSION. Si cette ligne n'apparaît pas dans l'overlay au
+  // lancement, l'APK installé ne contient pas les correctifs d'appel — et il
+  // est inutile d'interpréter quoi que ce soit d'autre.
+  traceAppel("build diagnostic appels — traces actives");
 
   if (!kIsWeb) {
     try {
@@ -149,7 +155,7 @@ class AlanyaApp extends StatelessWidget {
       ],
       // Bandeau global « appel en cours » superposé à toutes les pages (Lot 2b).
       builder: (context, child) {
-        return Directionality(
+        final contenu = Directionality(
           textDirection: TextDirection.ltr,
           child: Stack(
             children: [
@@ -158,6 +164,8 @@ class AlanyaApp extends StatelessWidget {
             ],
           ),
         );
+        // DIAGNOSTIC TEMPORAIRE — voir `tracesAppelsVisibles`.
+        return tracesAppelsVisibles ? DebugOverlay(child: contenu) : contenu;
       },
       home: const AuthGate(),
     );
