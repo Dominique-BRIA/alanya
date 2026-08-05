@@ -87,11 +87,18 @@ class WebrtcGroupMesh {
       onUpdated: onUpdated,
     );
     _peers[peerId] = session;
-    await session.start();
+
+    // Les signaux reçus AVANT l'existence de la session sont les plus anciens :
+    // on les redonne avant `start()`, pas après. La session n'étant pas encore
+    // prête, ils rejoignent sa file et seront rejoués dans l'ordre d'arrivée,
+    // devant ceux qui tomberont pendant le démarrage. Les injecter après
+    // inversait l'ordre et pouvait présenter un candidat ICE avant son offre.
     final buffered = _pendingByPeer.remove(peerId) ?? [];
     for (final sig in buffered) {
       await session.handleSignal(sig);
     }
+
+    await session.start();
   }
 
   Future<void> handleSignal(String fromPeerId, Map<String, dynamic> signal) async {

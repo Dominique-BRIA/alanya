@@ -24,6 +24,19 @@ class WebrtcPeerSession {
   RTCPeerConnection? _pc;
   MediaStream? _remote;
   bool _started = false;
+
+  /// Vrai seulement quand la session peut RÉELLEMENT traiter un signal :
+  /// `_pc` créé ET pistes locales ajoutées.
+  ///
+  /// À ne pas confondre avec `_started`, qui marque l'entrée dans `start()`.
+  /// Entre les deux il y a plusieurs `await` (création de la connexion,
+  /// résolution des serveurs ICE, ajout des pistes) pendant lesquels des
+  /// signaux arrivent : le WebSocket appelle `handleSignal` sans l'attendre,
+  /// et le mesh publie la session dans `_peers` AVANT d'appeler `start()`.
+  /// Se fier à `_started` faisait passer ces signaux dans `_applySignal` avec
+  /// `_pc` encore nul : l'offre était jetée en silence, aucune answer n'était
+  /// produite, et l'appel restait « Connexion en cours… » jusqu'à l'échec.
+  bool _ready = false;
   bool _remoteReady = false;
   final _pendingSignals = <Map<String, dynamic>>[];
   final _iceQueue = <RTCIceCandidate>[];
@@ -77,6 +90,11 @@ class WebrtcPeerSession {
     if (isOfferer) {
       await _createOffer();
     }
+
+    // La session n'est déclarée prête qu'ici : les pistes locales sont posées,
+    // donc l'answer produite en réponse à une offre en attente portera bien le
+    // média. Ouvrir plus tôt renverrait une answer sans piste.
+    _ready = true;
     await _flushPendingSignals();
   }
 
@@ -147,7 +165,7 @@ class WebrtcPeerSession {
   }
 
   Future<void> handleSignal(Map<String, dynamic> signal) async {
-    if (!_started) {
+    if (!_ready) {
       _pendingSignals.add(signal);
       return;
     }
@@ -170,7 +188,13 @@ class WebrtcPeerSession {
 
   Future<void> _applySignal(Map<String, dynamic> signal) async {
     final pc = _pc;
-    if (pc == null) return;
+    // Ceinture et bretelles : plus aucun signal ne doit être perdu en silence.
+    // S'il arrive alors que la connexion n'existe pas (ou plus), il retourne
+    // dans la file — `_flushPendingSignals` le rejouera quand elle sera prête.
+    if (pc == null) {
+      _pendingSignals.add(signal);
+      return;
+    }
     final kind = signal["kind"] as String?;
 
     if (kind == "offer") {
@@ -228,6 +252,7 @@ class WebrtcPeerSession {
     await _pc?.close();
     _pc = null;
     _started = false;
+    _ready = false;
     _remoteReady = false;
     _pendingSignals.clear();
     _iceQueue.clear();
