@@ -34,7 +34,10 @@ class DebugOverlay extends StatefulWidget {
   static void log(String line) {
     final ts = DateTime.now().toIso8601String().substring(11, 19);
     _log.insert(0, '$ts $line');
-    if (_log.length > 20) _log.removeLast();
+    // 60 et non 20 : une négociation produit une rafale de candidats ICE qui
+    // chassait du journal les lignes décisives — dont l'offre elle-même, la
+    // seule qu'on cherchait.
+    if (_log.length > 60) _log.removeLast();
     _controller.add(null);
   }
 

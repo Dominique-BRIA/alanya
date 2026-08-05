@@ -303,6 +303,8 @@ class CallController extends ChangeNotifier {
         await _mesh?.connectToPeer(p.userId, asOfferer: false);
       }
     }
+    // La mesh existe enfin : rejouer l'offre arrivée pendant sa construction.
+    await _viderTamponSignaux(inc.callId);
     _armerMinuteurConnexion();
     notifyListeners();
   }
@@ -382,6 +384,9 @@ class CallController extends ChangeNotifier {
           await _mesh?.connectToPeer(p.userId, asOfferer: false);
         }
       }
+      // Même raison que dans `acceptIncoming` : l'offre de l'appelant est déjà
+      // arrivée, et elle attend dans le tampon.
+      await _viderTamponSignaux(callId);
       _armerMinuteurConnexion();
       notifyListeners();
       return true;
@@ -730,6 +735,31 @@ class CallController extends ChangeNotifier {
     await _mesh?.connectToPeer(userId, asOfferer: true);
     _armerMinuteurConnexion();
     notifyListeners();
+  }
+
+  /// Rejoue les signaux arrivés AVANT que la mesh n'existe.
+  ///
+  /// ⚠️ C'est le chemin de l'APPELÉ, et il n'en existait aucun. L'appelant émet
+  /// son offre dès qu'il apprend le décrochage, or à cet instant l'appelé est
+  /// encore dans `acceptIncoming` : sa mesh n'est pas construite, et l'offre
+  /// tombe dans `_signalBuffer`. Le seul vidage écrit jusqu'ici se trouvait
+  /// dans le handler de `call_state 'joined'` — inaccessible ici, puisque le
+  /// « joined » que reçoit l'appelé est LE SIEN et ressort aussitôt par
+  /// `_takenByAnotherDevice`. L'offre restait donc dans le tampon pour
+  /// toujours ; les candidats ICE, arrivant plus tard, trouvaient la mesh prête
+  /// et passaient — d'où un appel qui semblait négocier alors que rien ne
+  /// répondait.
+  Future<void> _viderTamponSignaux(String callId) async {
+    final mesh = _mesh;
+    final tampon = _signalBuffer[callId];
+    if (mesh == null || tampon == null || tampon.isEmpty) return;
+    _signalBuffer.remove(callId);
+    traceAppel("tampon rejoue — ${tampon.length} pair(s)");
+    for (final parPair in tampon.entries) {
+      for (final sig in parPair.value) {
+        await mesh.handleSignal(parPair.key, sig);
+      }
+    }
   }
 
   /// Arme le délai de négociation. Sans effet si le média circule déjà.
