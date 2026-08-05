@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
@@ -11,6 +13,7 @@ class WebrtcPeerSession {
     required this.iceServers,
     required this.onSendSignal,
     required this.onUpdated,
+    this.onConnectionLost,
   });
 
   final String peerId;
@@ -20,6 +23,17 @@ class WebrtcPeerSession {
   final List<Map<String, dynamic>> iceServers;
   final void Function(Map<String, dynamic> signal) onSendSignal;
   final VoidCallback onUpdated;
+
+  /// Connexion avec ce pair définitivement perdue. Au contrôleur de décider :
+  /// dernier pair → fin d'appel ; sinon simple retrait du participant.
+  final VoidCallback? onConnectionLost;
+
+  /// Sursis accordé à un `disconnected` avant de le déclarer perdu.
+  ///
+  /// Un réseau mobile qui change de cellule passe régulièrement par cet état
+  /// puis revient de lui-même. Raccrocher aussitôt couperait des appels qui
+  /// allaient se rétablir ; `failed`, lui, est définitif et n'attend pas.
+  Timer? _graceTimer;
 
   RTCPeerConnection? _pc;
   MediaStream? _remote;
@@ -71,6 +85,28 @@ class WebrtcPeerSession {
     };
     _pc!.onIceConnectionState = (RTCIceConnectionState state) {
       debugPrint("[webrtc/$peerId] ICE state: $state");
+      switch (state) {
+        case RTCIceConnectionState.RTCIceConnectionStateDisconnected:
+          // Peut se rétablir seul : on laisse un sursis avant de conclure.
+          _graceTimer?.cancel();
+          _graceTimer = Timer(const Duration(seconds: 6), () {
+            debugPrint("[APPEL] $peerId : sursis expire → connexion perdue");
+            onConnectionLost?.call();
+          });
+          break;
+        case RTCIceConnectionState.RTCIceConnectionStateFailed:
+          // Échec définitif : inutile d'attendre.
+          _graceTimer?.cancel();
+          debugPrint("[APPEL] $peerId : ICE failed → connexion perdue");
+          onConnectionLost?.call();
+          break;
+        case RTCIceConnectionState.RTCIceConnectionStateConnected:
+        case RTCIceConnectionState.RTCIceConnectionStateCompleted:
+          _graceTimer?.cancel();
+          break;
+        default:
+          break;
+      }
     };
     _pc!.onConnectionState = (RTCPeerConnectionState state) {
       debugPrint("[webrtc/$peerId] Connection state: $state");
@@ -251,6 +287,8 @@ class WebrtcPeerSession {
   }
 
   Future<void> close() async {
+    _graceTimer?.cancel();
+    _graceTimer = null;
     _remote = null;
     await _pc?.close();
     _pc = null;

@@ -11,6 +11,7 @@ class WebrtcGroupMesh {
     required this.iceServers,
     required this.onSendSignal,
     required this.onUpdated,
+    this.onPeerLost,
   });
 
   final String myUserId;
@@ -18,6 +19,9 @@ class WebrtcGroupMesh {
   final List<Map<String, dynamic>> iceServers;
   final void Function(String peerId, Map<String, dynamic> signal) onSendSignal;
   final VoidCallback onUpdated;
+
+  /// Connexion média définitivement perdue avec ce pair.
+  final void Function(String peerId)? onPeerLost;
 
   MediaStream? _local;
   final Map<String, WebrtcPeerSession> _peers = {};
@@ -108,6 +112,7 @@ class WebrtcGroupMesh {
       iceServers: iceServers,
       onSendSignal: (sig) => onSendSignal(peerId, sig),
       onUpdated: onUpdated,
+      onConnectionLost: () => onPeerLost?.call(peerId),
     );
     _peers[peerId] = session;
 

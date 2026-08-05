@@ -30,6 +30,15 @@ class CallController extends ChangeNotifier {
   StreamSubscription<Map<String, dynamic>>? _sub;
   Timer? _ringTimeout;
 
+  /// Délai accordé à la négociation UNE FOIS l'appel décroché.
+  ///
+  /// `_ringTimeout` ne couvre que la sonnerie : passé le décrochage, plus rien
+  /// ne bornait l'attente et un appel dont le média ne s'établissait pas
+  /// affichait « Connexion en cours… » indéfiniment. Le modèle de référence
+  /// borne cette phase à 30 s puis annonce l'échec — mieux vaut une fin claire
+  /// qu'un écran qui ment.
+  Timer? _connectingTimeout;
+
   String? myUserId;
   String? myDisplayName;
 
@@ -294,6 +303,7 @@ class CallController extends ChangeNotifier {
         await _mesh?.connectToPeer(p.userId, asOfferer: false);
       }
     }
+    _armerMinuteurConnexion();
     notifyListeners();
   }
 
@@ -373,6 +383,7 @@ class CallController extends ChangeNotifier {
           await _mesh?.connectToPeer(p.userId, asOfferer: false);
         }
       }
+      _armerMinuteurConnexion();
       notifyListeners();
       return true;
     } on ApiException catch (e) {
@@ -490,6 +501,7 @@ class CallController extends ChangeNotifier {
   void _clear() {
     _ringTimeout?.cancel();
     _ringTimeout = null;
+    _annulerMinuteurConnexion();
     // Filet de sécurité : coupe toute sonnerie encore en cours.
     // (Doublon sûr des stop() éparpillés — mieux vaut couper 2 fois que 0.)
     RingtoneService.instance.stop();
@@ -536,6 +548,8 @@ class CallController extends ChangeNotifier {
   void _onMeshUpdated() {
     if (mediaConnected && connectedSince == null) {
       connectedSince = DateTime.now();
+      // Le média circule : la négociation a abouti, le délai n'a plus lieu d'être.
+      _annulerMinuteurConnexion();
       // Le média circule : à partir d'ici, l'appel doit survivre à un écran
       // éteint ou à un passage en arrière-plan. Démarré ICI et non à
       // l'acceptation — tant qu'aucun flux n'est établi, il n'y a rien à
@@ -659,6 +673,7 @@ class CallController extends ChangeNotifier {
         iceServers: ice,
         onSendSignal: (peerId, sig) => _rt.callSignal(callId, peerId, sig),
         onUpdated: _onMeshUpdated,
+        onPeerLost: _onPeerConnectionLost,
       );
     }
 
@@ -714,7 +729,44 @@ class CallController extends ChangeNotifier {
     // En 1-à-1 cet événement est le décrochage de l'appelé, et c'est donc
     // l'appelant qui offre — le chemin direct, celui qui a toujours marché.
     await _mesh?.connectToPeer(userId, asOfferer: true);
+    _armerMinuteurConnexion();
     notifyListeners();
+  }
+
+  /// Arme le délai de négociation. Sans effet si le média circule déjà.
+  void _armerMinuteurConnexion() {
+    if (mediaConnected) return;
+    _connectingTimeout?.cancel();
+    _connectingTimeout = Timer(const Duration(seconds: 30), () {
+      if (mediaConnected || activeCallId == null) return;
+      debugPrint("[APPEL] 30 s sans media etabli → echec de connexion");
+      lastError = "Connexion impossible";
+      hangUp();
+    });
+  }
+
+  void _annulerMinuteurConnexion() {
+    _connectingTimeout?.cancel();
+    _connectingTimeout = null;
+  }
+
+  /// Connexion média définitivement perdue avec un pair.
+  ///
+  /// Le serveur finira par le confirmer quand sa socket tombera, mais il peut
+  /// s'écouler des dizaines de secondes : sans cette réaction locale, l'appel
+  /// restait affiché alors que plus rien ne circulait. Dernier pair → l'appel
+  /// est fini ; sinon on retire ce participant et la communication continue.
+  Future<void> _onPeerConnectionLost(String userId) async {
+    if (activeCallId == null) return;
+    final autres = joinedParticipantIds.where((id) => id != myUserId).toSet();
+    if (autres.length <= 1) {
+      debugPrint("[APPEL] perte du dernier pair ($userId) → raccrochage");
+      lastError = "Connexion perdue";
+      await hangUp();
+      return;
+    }
+    debugPrint("[APPEL] perte du pair $userId → l'appel continue a ${autres.length - 1}");
+    await _onPeerLeft(userId);
   }
 
   Future<void> _onPeerLeft(String userId) async {
@@ -886,6 +938,8 @@ class CallController extends ChangeNotifier {
   @override
   void dispose() {
     _sub?.cancel();
+    _ringTimeout?.cancel();
+    _annulerMinuteurConnexion();
     _stopMesh();
     super.dispose();
   }
