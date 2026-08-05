@@ -75,7 +75,13 @@ class WebrtcGroupMesh {
   }
 
   Future<void> connectToPeer(String peerId) async {
-    if (peerId == myUserId || _peers.containsKey(peerId)) return;
+    if (peerId == myUserId || _peers.containsKey(peerId)) {
+      debugPrint(
+          "[APPEL] connectToPeer($peerId) IGNORE — moi=${peerId == myUserId} dejaConnu=${_peers.containsKey(peerId)}");
+      return;
+    }
+    debugPrint(
+        "[APPEL] connectToPeer($peerId) — jeSuisOffreur=${shouldOffer(myUserId, peerId)}");
     await ensureLocal();
     final session = WebrtcPeerSession(
       peerId: peerId,
@@ -104,9 +110,12 @@ class WebrtcGroupMesh {
   Future<void> handleSignal(String fromPeerId, Map<String, dynamic> signal) async {
     final session = _peers[fromPeerId];
     if (session == null) {
+      debugPrint(
+          "[APPEL] mesh.handleSignal ${signal["kind"]} de $fromPeerId → MIS EN ATTENTE (pas de session)");
       _pendingByPeer.putIfAbsent(fromPeerId, () => []).add(signal);
       return;
     }
+    debugPrint("[APPEL] mesh.handleSignal ${signal["kind"]} de $fromPeerId → session");
     await session.handleSignal(signal);
   }
 

@@ -183,6 +183,7 @@ class WebrtcPeerSession {
       "optional": [],
     });
     await pc.setLocalDescription(offer);
+    debugPrint("[APPEL] OFFRE creee et envoyee vers $peerId");
     onSendSignal({"kind": "offer", "sdp": offer.sdp, "type": offer.type});
   }
 
@@ -206,6 +207,7 @@ class WebrtcPeerSession {
       await _flushIceQueue();
       final answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
+      debugPrint("[APPEL] OFFRE recue de $peerId → ANSWER renvoyee");
       onSendSignal({"kind": "answer", "sdp": answer.sdp, "type": answer.type});
     } else if (kind == "answer") {
       final sdp = signal["sdp"] as String?;
@@ -213,6 +215,7 @@ class WebrtcPeerSession {
       final type = signal["type"] as String? ?? "answer";
       await pc.setRemoteDescription(RTCSessionDescription(sdp, type));
       _remoteReady = true;
+      debugPrint("[APPEL] ANSWER recue de $peerId → negociation complete");
       await _flushIceQueue();
     } else if (kind == "ice") {
       final raw = signal["candidate"];

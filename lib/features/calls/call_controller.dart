@@ -285,6 +285,9 @@ class CallController extends ChangeNotifier {
     notifyListeners();
 
     await _ensureMesh();
+    debugPrint(
+        "[APPEL] acceptIncoming — moi=$myUserId, participants actifs renvoyes par /accept : "
+        "${result.activeParticipants.map((p) => p.userId).toList()}, mesh=${_mesh != null ? "pret" : "ABSENT"}");
     for (final p in result.activeParticipants) {
       if (p.userId != myUserId) {
         await _mesh?.connectToPeer(p.userId);
@@ -359,6 +362,9 @@ class CallController extends ChangeNotifier {
       notifyListeners();
 
       await _ensureMesh();
+      debugPrint(
+          "[APPEL] acceptById — moi=$myUserId, participants actifs renvoyes par /accept : "
+          "${result.activeParticipants.map((p) => p.userId).toList()}, mesh=${_mesh != null ? "pret" : "ABSENT"}");
       for (final p in result.activeParticipants) {
         if (p.userId != myUserId) await _mesh?.connectToPeer(p.userId);
       }
@@ -765,6 +771,8 @@ class CallController extends ChangeNotifier {
         return;
       }
       final mesh = _mesh;
+      debugPrint(
+          "[APPEL] call_signal ${signal["kind"]} recu de $from — mesh=${mesh != null ? "pret" : "ABSENT → tampon"}");
       if (mesh != null) {
         // `await` : deux signaux qui se suivent (offre puis candidats ICE)
         // doivent être appliqués dans leur ordre d'arrivée.
@@ -804,6 +812,8 @@ class CallController extends ChangeNotifier {
           // rejouer : si la mesh n'a pas pu être créée (permission refusée,
           // micro indisponible), les signaux restent en attente.
           final mesh = _mesh;
+          debugPrint(
+              "[APPEL] peer_joined de $userId traite — mesh=${mesh != null ? "pret" : "ABSENT"} tampon=${_signalBuffer[callId]?.length ?? 0} pair(s)");
           if (mesh != null) {
             final bufferedForCall = _signalBuffer.remove(callId);
             for (final peerEntry in bufferedForCall?.entries ?? const <MapEntry<String, List<Map<String, dynamic>>>>[]) {
