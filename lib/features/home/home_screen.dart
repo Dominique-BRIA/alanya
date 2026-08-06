@@ -9,7 +9,6 @@ import '../../core/whatsapp_text.dart';
 import '../../core/connectivity_service.dart';
 import '../../core/conversation_cache.dart';
 import '../../core/push_service.dart';
-import '../../core/ringtone_service.dart';
 import '../../core/notification_settings.dart';
 import '../../core/realtime_client.dart';
 import '../../core/call_cache.dart';
@@ -392,10 +391,16 @@ class _ConversationsTabState extends State<_ConversationsTab>
     final type = msg["type"] as String? ?? "TEXT";
     if (type == "SYSTEM") return; // pas de notif pour les messages système
 
-    // Le bandeau interne est muet : sans ce son, un message reçu alors que
-    // l'app est ouverte sur un autre écran passait totalement inaperçu.
-    // L'anti-rafale est dans RingtoneService.
-    RingtoneService.instance.playMessageReceived();
+    // Aucun son joué ici : c'est la notification système, affichée plus bas,
+    // qui le porte désormais (`playSound: true`).
+    //
+    // Il y en avait un tant que l'annonce passait par le bandeau interne, qui
+    // était muet. Le bandeau retiré, ce son s'ajoutait à celui de la
+    // notification — deux sonneries pour un seul message.
+    //
+    // La conversation OUVERTE reste le seul cas où l'application sonne
+    // elle-même : aucune notification n'y est affichée, le son y est donc le
+    // seul signal (voir `chat_screen`).
 
     // Trouve la conversation (titre + avatar)
     Conversation? conv;

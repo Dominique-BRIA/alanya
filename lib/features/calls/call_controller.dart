@@ -371,12 +371,23 @@ class CallController extends ChangeNotifier {
         ..add(myUserId!);
       for (final p in result.activeParticipants) {
         participantNames[p.userId] = p.displayName;
+        // La photo ne pouvait venir que de l'événement WebSocket d'appel
+        // entrant — jamais reçu quand on décroche application fermée. L'écran
+        // restait donc sans avatar dans ce cas précis, alors qu'il en affiche
+        // un quand l'application était ouverte. `/accept` la fournit désormais.
+        final avatar = p.avatarUrl;
+        if (avatar != null && avatar.isNotEmpty) {
+          participantAvatars[p.userId] = avatar;
+        }
         joinedParticipantIds.add(p.userId);
         _initialMemberIds.add(p.userId);
         // Sans correspondant nommé, l'écran afficherait « Appel » : le premier
         // participant actif qui n'est pas moi est l'interlocuteur.
-        if (p.userId != myUserId && nomAffiche == null && !result.isGroup) {
-          activePeerName = p.displayName;
+        if (p.userId != myUserId && !result.isGroup) {
+          if (nomAffiche == null) activePeerName = p.displayName;
+          // L'avatar principal suit le correspondant, que son nom vienne du
+          // serveur ou de l'écran natif.
+          if (avatar != null && avatar.isNotEmpty) activePeerAvatarUrl = avatar;
         }
       }
 
@@ -410,6 +421,17 @@ class CallController extends ChangeNotifier {
       if (e.code == "ALREADY_JOINED") {
         activeCallId = callId;
         activeRole = ActiveCallRole.ongoing;
+        // ⚠️ Ce chemin ne renseignait AUCUN nom, et c'est ce qui affichait
+        // « Contact » à la place du correspondant. La cascade de l'écran
+        // d'appel — `participantNames`, puis `activePeerName`, puis
+        // `incoming.displayTitle` — ne trouvait rien et retombait sur son
+        // dernier repli.
+        //
+        // Le nom est pourtant disponible : l'écran d'appel natif nous l'a
+        // passé dans `nomAffiche`. On le retient donc AVANT d'effacer
+        // `incoming`, dont le titre sert de second recours.
+        activePeerName = nomAffiche ?? incoming?.displayTitle ?? activePeerName;
+        activePeerAvatarUrl ??= incoming?.callerAvatarUrl;
         incoming = null;
         CallUiNative.marquerConnecte(callId);
         notifyListeners();

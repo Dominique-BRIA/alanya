@@ -115,11 +115,22 @@ class CallRecord {
 class CallParticipantInfo {
   final String userId;
   final String displayName;
-  CallParticipantInfo({required this.userId, required this.displayName});
+
+  /// Photo du participant. Seule source disponible quand on décroche
+  /// APPLICATION FERMÉE : l'événement WebSocket d'appel entrant, qui la
+  /// portait, n'a alors jamais été reçu.
+  final String? avatarUrl;
+
+  CallParticipantInfo({
+    required this.userId,
+    required this.displayName,
+    this.avatarUrl,
+  });
 
   factory CallParticipantInfo.fromJson(Map<String, dynamic> j) => CallParticipantInfo(
         userId: j["userId"] as String,
         displayName: j["displayName"] as String? ?? "Membre",
+        avatarUrl: j["avatarUrl"] as String?,
       );
 }
 
