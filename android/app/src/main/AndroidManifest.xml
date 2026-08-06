@@ -49,11 +49,27 @@
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true">
+        <!-- `singleTask` et NON `singleTop` : une seule instance de
+             l'application peut exister, quel que soit le point d'entrée.
+             `singleTop` ne dédoublonne que si l'activité est déjà EN HAUT DE LA
+             MÊME PILE ; lancée depuis une notification ou l'écran d'appel
+             natif, elle atterrissait dans une pile distincte et une seconde
+             copie démarrait.
+
+             ⚠️ `android:taskAffinity=""` a été RETIRÉ, et c'est le cœur du
+             correctif. Une affinité vide détache l'activité de la tâche par
+             défaut : l'icône du lanceur et un `PendingIntent` de notification
+             ouvraient alors DEUX tâches. D'où les deux copies de l'application
+             observées en arrière-plan — et le signal doublé, chacune tenant sa
+             propre connexion WebSocket, ce qui coupait la sonnerie et bloquait
+             sur « connexion en cours ».
+
+             Cet attribut était là depuis le commit initial et ne figure PAS
+             dans le gabarit Flutter standard. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:launchMode="singleTop"
-            android:taskAffinity=""
+            android:launchMode="singleTask"
             android:theme="@style/LaunchTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
