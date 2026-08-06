@@ -20,6 +20,11 @@ dependencies:
   any_link_preview: ^3.0.3
   open_filex: ^4.7.0
   pdfx: ^2.7.0
+  # Rendu SVG. Flutter n'en affiche AUCUN nativement : `Image.memory` ne
+  # reconnaît que JPEG, PNG, GIF et WebP. Les avatars générés que l'équipe pose
+  # depuis son backend (api.dicebear.com/…/svg) étaient donc invisibles chez
+  # nous — rejetés avant même d'être décodés.
+  flutter_svg: ^2.0.10
   # Réseau / API
   http: ^1.2.2
   http_parser: ^4.0.2

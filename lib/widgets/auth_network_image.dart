@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
+import 'image_octets.dart';
 import 'media/cached_media.dart';
 
 /// Charge une image protégée par JWT (Bearer) puis l'affiche en mémoire.
@@ -51,10 +52,17 @@ class _AuthNetworkImageState extends State<AuthNetworkImage> {
   static bool _looksLikeImage(Uint8List bytes, String? contentType) {
     if (contentType != null && contentType.startsWith("image/")) return true;
     if (bytes.length < 4) return false;
+    // Le SVG n'a pas de nombre magique : il est reconnu a part, sur sa
+    // balise racine. Sans ce cas, les avatars generes par l'equipe
+    // (dicebear renvoie du SVG) etaient rejetes ici meme, avant affichage.
+    if (estSvg(bytes)) return true;
     // JPEG
     if (bytes[0] == 0xFF && bytes[1] == 0xD8) return true;
     // PNG
-    if (bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47) {
+    if (bytes[0] == 0x89 &&
+        bytes[1] == 0x50 &&
+        bytes[2] == 0x4E &&
+        bytes[3] == 0x47) {
       return true;
     }
     // GIF
@@ -116,12 +124,12 @@ class _AuthNetworkImageState extends State<AuthNetworkImage> {
   Widget build(BuildContext context) {
     Widget child;
     if (_bytes != null) {
-      child = Image.memory(
+      child = imageDepuisOctets(
         _bytes!,
         width: widget.width,
         height: widget.height,
         fit: widget.fit,
-        errorBuilder: (_, __, ___) => _errorPlaceholder(),
+        surErreur: _errorPlaceholder,
       );
     } else if (_error) {
       child = _errorPlaceholder();

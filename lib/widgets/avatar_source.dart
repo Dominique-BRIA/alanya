@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../core/server_config.dart';
+import 'image_octets.dart';
 import 'auth_network_image.dart';
 
 /// Interprète la valeur brute de `avatarUrl` telle qu'elle arrive du serveur.
@@ -70,7 +71,9 @@ class AvatarSource {
     BoxFit fit = BoxFit.cover,
   }) {
     if (bytes != null) {
-      return Image.memory(bytes!, width: width, height: height, fit: fit);
+      // Passe par le rendu commun : la valeur peut etre un SVG encode en
+      // base64, que `Image.memory` ne saurait pas afficher.
+      return imageDepuisOctets(bytes!, width: width, height: height, fit: fit);
     }
     if (url != null && token != null) {
       return AuthNetworkImage(
