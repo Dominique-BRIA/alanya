@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../core/api_client.dart';
 import '../../core/call_cache.dart';
+import '../../core/call_ui_native.dart';
 import '../../core/contact_cache.dart';
 import '../../core/conversation_cache.dart';
 import '../../core/message_cache.dart';
@@ -144,6 +145,18 @@ class AuthController extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    // Ferme tout écran d'appel natif encore affiché.
+    //
+    // CallKit vit HORS de l'application : ses écrans survivent à la
+    // déconnexion, et même à la fermeture. Sans ce nettoyage, un appel du
+    // compte qu'on vient de quitter continuait de sonner sur le téléphone
+    // après connexion avec un AUTRE compte — l'écran natif ne sait pas qu'on a
+    // changé d'utilisateur.
+    //
+    // En premier, avant même le jeton push : si la suite échoue, l'écran
+    // fantôme aura au moins disparu.
+    await CallUiNative.toutMasquer();
+
     // Désenregistre le token FCM avant de nettoyer les tokens locaux
     await PushService.instance.unregister();
     final refresh = await _storage.refreshToken;
