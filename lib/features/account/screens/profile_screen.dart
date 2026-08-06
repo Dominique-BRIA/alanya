@@ -6,11 +6,10 @@ import 'package:provider/provider.dart';
 
 import '../../../core/alanya_id_formatter.dart';
 import '../../../core/api_client.dart';
-import '../../../core/server_config.dart';
 import '../../../core/token_storage.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../theme/alanya_theme.dart';
-import '../../../widgets/auth_network_image.dart';
+import '../../../widgets/avatar_source.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../../../widgets/motif_background.dart';
 import '../../auth/auth_controller.dart';
@@ -130,11 +129,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   String? _mimeFromBytes(Uint8List bytes) {
     if (bytes.length < 12) return null;
-    if (bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) return "image/jpeg";
-    if (bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47) return "image/png";
-    if (bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x38) return "image/gif";
-    if (bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46 &&
-        bytes[8] == 0x57 && bytes[9] == 0x45 && bytes[10] == 0x42 && bytes[11] == 0x50) {
+    if (bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF)
+      return "image/jpeg";
+    if (bytes[0] == 0x89 &&
+        bytes[1] == 0x50 &&
+        bytes[2] == 0x4E &&
+        bytes[3] == 0x47) return "image/png";
+    if (bytes[0] == 0x47 &&
+        bytes[1] == 0x49 &&
+        bytes[2] == 0x46 &&
+        bytes[3] == 0x38) return "image/gif";
+    if (bytes[0] == 0x52 &&
+        bytes[1] == 0x49 &&
+        bytes[2] == 0x46 &&
+        bytes[3] == 0x46 &&
+        bytes[8] == 0x57 &&
+        bytes[9] == 0x45 &&
+        bytes[10] == 0x42 &&
+        bytes[11] == 0x50) {
       return "image/webp";
     }
     return null;
@@ -234,7 +246,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: themed(context, light: Colors.white, dark: surfacesOf(context).surface),
+        color: themed(context,
+            light: Colors.white, dark: surfacesOf(context).surface),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
             color: themed(context,
@@ -288,14 +301,16 @@ class _AvatarWithEdit extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final initial = (pseudo?.isNotEmpty ?? false) ? pseudo![0].toUpperCase() : "?";
+    final initial =
+        (pseudo?.isNotEmpty ?? false) ? pseudo![0].toUpperCase() : "?";
 
-    String? fullUrl;
-    if (avatarUrl != null && avatarUrl!.isNotEmpty) {
-      fullUrl = avatarUrl!.startsWith("http")
-          ? avatarUrl!
-          : "${ServerConfig.apiBase}$avatarUrl";
-    }
+    // Trois formes coexistent en base, dont des images base64 ecrites par
+    // l'application de l'equipe sur la base partagee. Voir [AvatarSource].
+    final photo = AvatarSource.depuis(avatarUrl).image(
+      width: 100,
+      height: 100,
+      token: token,
+    );
 
     return GestureDetector(
       onTap: uploading ? null : onTap,
@@ -324,24 +339,17 @@ class _AvatarWithEdit extends StatelessWidget {
               ],
             ),
             child: ClipOval(
-              child: fullUrl != null && token != null
-                  ? AuthNetworkImage(
-                      url: fullUrl,
-                      token: token,
-                      width: 100,
-                      height: 100,
-                      fit: BoxFit.cover,
-                    )
-                  : Center(
-                      child: Text(
-                        initial,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 40,
-                          fontWeight: FontWeight.w600,
-                        ),
+              child: photo ??
+                  Center(
+                    child: Text(
+                      initial,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 40,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
+                  ),
             ),
           ),
           Positioned(

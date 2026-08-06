@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../core/server_config.dart';
 import '../core/token_storage.dart';
 import '../../theme/alanya_theme.dart';
-import 'auth_network_image.dart';
+import 'avatar_source.dart';
 
 /// Avatar circulaire réutilisable partout dans l'app.
 ///
@@ -62,16 +61,18 @@ class _AvatarCircleState extends State<AvatarCircle> {
 
   @override
   Widget build(BuildContext context) {
-    final initial =
-        (widget.name?.trim().isNotEmpty ?? false) ? widget.name!.trim()[0].toUpperCase() : "?";
+    final initial = (widget.name?.trim().isNotEmpty ?? false)
+        ? widget.name!.trim()[0].toUpperCase()
+        : "?";
     final size = widget.radius * 2;
 
-    // Reconstruit l'URL absolue si avatarUrl est un chemin relatif.
-    String? fullUrl;
-    final raw = widget.avatarUrl;
-    if (raw != null && raw.isNotEmpty) {
-      fullUrl = raw.startsWith("http") ? raw : "${ServerConfig.apiBase}$raw";
-    }
+    // Trois formes coexistent en base — chemin relatif, URL absolue, et image
+    // base64 écrite par l'application de l'équipe. Voir [AvatarSource].
+    final photo = AvatarSource.depuis(widget.avatarUrl).image(
+      width: size,
+      height: size,
+      token: _token,
+    );
 
     Widget content = Container(
       width: size,
@@ -84,24 +85,17 @@ class _AvatarCircleState extends State<AvatarCircle> {
             : null,
       ),
       child: ClipOval(
-        child: fullUrl != null && _token != null
-            ? AuthNetworkImage(
-                url: fullUrl,
-                token: _token,
-                width: size,
-                height: size,
-                fit: BoxFit.cover,
-              )
-            : Center(
-                child: Text(
-                  initial,
-                  style: TextStyle(
-                    color: widget.textColor,
-                    fontSize: widget.radius * 0.9,
-                    fontWeight: FontWeight.w600,
-                  ),
+        child: photo ??
+            Center(
+              child: Text(
+                initial,
+                style: TextStyle(
+                  color: widget.textColor,
+                  fontSize: widget.radius * 0.9,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
+            ),
       ),
     );
 
