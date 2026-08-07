@@ -70,10 +70,27 @@ workflows:
           # natifs (flutter_webrtc, PdfiumAndroid, ExoPlayer...) que pour SA
           # cible → économie de ~60 Mo sur l'APK distribué.
           # → arm64-v8a couvre 95% des téléphones du marché (à privilégier).
+          #
+          # AUCUN --dart-define d'adresse ici, et c'est délibéré.
+          #
+          # Ce fichier en portait deux, figées sur des serveurs abandonnés
+          # depuis la bascule vers le VPS : `backend-alanya.vercel.app` et le
+          # worker Cloudflare, qui ne répond plus du tout. Tout APK sorti d'ici
+          # parlait donc dans le vide — alors que `server_config.dart` avait,
+          # lui, les bonnes valeurs, que ces options ÉCRASAIENT.
+          #
+          # Les corriger n'aurait fait que repousser le problème : deux endroits
+          # décrivant la même chose finissent toujours par diverger, et celui
+          # qu'on oublie est celui qui n'échoue pas bruyamment. Le seul endroit
+          # qui fait foi est désormais `lib/core/server_config.dart`, dont les
+          # valeurs par défaut pointent sur alanyavox.com. GitHub Actions ne
+          # passe déjà aucune adresse.
+          #
+          # Pour compiler contre un autre serveur — une préproduction, une
+          # machine locale — ajouter les `--dart-define` À CE MOMENT-LÀ, dans un
+          # workflow dédié. Un remplacement doit rester une exception visible.
           flutter build apk --release --split-per-abi \
-            --android-skip-build-dependency-validation \
-            --dart-define=API_URL=https://alanyavox.com \
-            --dart-define=WS_URL=wss://alanyavox.com/ws
+            --android-skip-build-dependency-validation
 
     artifacts:
       - build/app/outputs/flutter-apk/*.apk
