@@ -644,7 +644,7 @@ class _ChatScreenState extends State<ChatScreen>
       for (final m in _messages) {
         _cacheMsg(m);
       }
-      _scrollToBottom();
+      _scrollToBottom(immediat: true);
     }
     try {
       final repo = context.read<ChatRepository>();
@@ -661,7 +661,7 @@ class _ChatScreenState extends State<ChatScreen>
         _cacheMsg(m);
       }
       _markReadRemote();
-      _scrollToBottom();
+      _scrollToBottom(immediat: true);
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
@@ -1474,8 +1474,51 @@ class _ChatScreenState extends State<ChatScreen>
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => PdfViewerScreen(pdfUrl: "$_baseUrl${media.url}?token=$token", downloadUrl: "$_baseUrl${media.url}?download=1&token=$token", filename: media.filename ?? "document-${media.id}.pdf")));
   }
 
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) { if (_scrollCtrl.hasClients) _scrollCtrl.animateTo(_scrollCtrl.position.maxScrollExtent, duration: const Duration(milliseconds: 250), curve: Curves.easeOut); });
+  /// Amène le fil sur le dernier message.
+  ///
+  /// [immediat] sert à l'OUVERTURE de la conversation : on se pose en bas sans
+  /// animation, et on recommence tant que le fond bouge encore.
+  ///
+  /// ⚠️ Une seule tentative ne suffit pas — c'est ce qui faisait ouvrir la
+  /// conversation AU MILIEU du fil. `ListView.builder` construit ses éléments
+  /// paresseusement : au premier frame, `maxScrollExtent` ne décrit que les
+  /// quelques messages déjà bâtis, et on visait donc un fond provisoire. Le
+  /// chargement des médias déplace ensuite le vrai fond une seconde fois.
+  ///
+  /// Sans animation à l'ouverture, volontairement : dérouler tout l'historique
+  /// sous les yeux de l'utilisateur à chaque entrée n'apporte rien et donne
+  /// l'impression que l'écran part tout seul.
+  void _scrollToBottom({bool immediat = false}) {
+    if (!immediat) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _scrollCtrl.hasClients) {
+          _scrollCtrl.animateTo(_scrollCtrl.position.maxScrollExtent,
+              duration: const Duration(milliseconds: 250),
+              curve: Curves.easeOut);
+        }
+      });
+      return;
+    }
+
+    var essais = 0;
+    double precedent = -1;
+    void poser() {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_scrollCtrl.hasClients) return;
+        final fond = _scrollCtrl.position.maxScrollExtent;
+        _scrollCtrl.jumpTo(fond);
+        essais++;
+        // On s'arrête dès que le fond cesse de bouger, et dans tous les cas au
+        // bout de 10 frames (~160 ms) : un fil dont la hauteur n'arrêterait
+        // jamais de croître ne doit pas confisquer le défilement.
+        if (fond != precedent && essais < 10) {
+          precedent = fond;
+          poser();
+        }
+      });
+    }
+
+    poser();
   }
 
   void _showError(String m) => showAppSnackBar(m);
