@@ -52,6 +52,47 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Signature stable
+        # Sans cette étape, `flutter build apk --release` ne trouve pas de clé
+        # et retombe sur la clé de DÉBOGAGE. Or celle-ci est fabriquée par la
+        # machine qui compile, et un runner est détruit après son build : chaque
+        # APK portait donc une signature différente. Android refuse d'installer
+        # une mise à jour dont la signature ne correspond pas — d'où
+        # l'obligation de désinstaller avant chaque essai, qui faisait perdre la
+        # session locale ET créait un appareil de plus dans le registre du
+        # compte à chaque fois.
+        #
+        # L'étape est SANS EFFET tant que le secret n'existe pas : le build
+        # retrouve simplement l'ancien comportement. Rien ne casse le jour où
+        # quelqu'un compile depuis un fork sans accès aux secrets.
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # La garde est DANS le script et non dans un `if:` de l'étape : le
+          # contexte `secrets` n'est pas disponible dans les conditions de step.
+          if [ -z "${KEYSTORE_BASE64:-}" ]; then
+            echo "Aucune clé de signature configurée : build en signature debug."
+            exit 0
+          fi
+          # `storeFile` est résolu par `file()` DANS le module app : le chemin
+          # est donc relatif à android/app, pas à la racine du dépôt.
+          echo "$KEYSTORE_BASE64" | base64 -d > android/app/alanya-release.jks
+          # Contrôle immédiat : un secret tronqué produirait un fichier illisible
+          # et l'erreur ne sortirait que bien plus tard, dans Gradle.
+          keytool -list -keystore android/app/alanya-release.jks \
+                  -storepass "$STORE_PASSWORD" >/dev/null
+          cat > android/key.properties <<PROPS
+          storeFile=alanya-release.jks
+          storePassword=$STORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          PROPS
+          echo "Clé de signature en place."
+
       - name: Build APK
         # Le démon Gradle sert à garder une JVM chaude entre deux builds. Un
         # runner est détruit après le sien, donc le démon ne fait qu'occuper de
