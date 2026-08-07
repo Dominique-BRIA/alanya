@@ -14,6 +14,7 @@ import '../../../widgets/glass_card.dart';
 import '../../../widgets/media/cached_media.dart';
 import '../../account/screens/avatar_viewer_screen.dart';
 import '../../calls/call_controller.dart';
+import '../../calls/message_erreur_appel.dart';
 import '../../calls/screens/active_call_screen.dart';
 import '../../chat/chat_repository.dart';
 import '../../chat/screens/shared_content_screen.dart';
@@ -174,12 +175,8 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
           builder: (_) => const ActiveCallScreen(),
         ),
       );
-    } on StateError catch (_) {
-      showAppSnackBar("Tu es déjà en appel");
-    } on ApiException catch (e) {
-      showAppSnackBar(e.message);
-    } catch (_) {
-      showAppSnackBar("Impossible de lancer l'appel");
+    } catch (e) {
+      showAppSnackBar(messageErreurAppel(e));
     } finally {
       if (mounted) setState(() => _callStarting = false);
     }

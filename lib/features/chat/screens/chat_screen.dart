@@ -38,6 +38,7 @@ import '../../../widgets/motif_background.dart';
 import '../../account/screens/avatar_viewer_screen.dart';
 import '../../auth/auth_controller.dart';
 import '../../calls/call_controller.dart';
+import '../../calls/message_erreur_appel.dart';
 import '../../calls/screens/active_call_screen.dart';
 import '../../contacts/screens/contact_info_screen.dart';
 import '../../group/screens/group_info_screen.dart';
@@ -1897,11 +1898,12 @@ class _ChatScreenState extends State<ChatScreen>
       await cc.startOutgoing(widget.convId, type, widget.title);
       if (!mounted) return;
       await Navigator.of(context).push(MaterialPageRoute(fullscreenDialog: true, builder: (_) => const ActiveCallScreen()));
-    } on StateError catch (_) { _showError("Tu es déjà en appel"); } catch (e) {
-      final msg = e.toString();
-      if (msg.contains("PERMISSION_DENIED")) { _showError("Micro/caméra requis. Accorde les permissions dans les réglages."); }
-      else if (msg.contains("409") || msg.contains("BUSY")) { _showError("Impossible de démarrer l'appel. Réessaie dans un instant."); }
-      else { _showError("Erreur d'appel : vérifie ta connexion et réessaie."); }
+    } catch (e) {
+      // Le message vient de `messageErreurAppel`, partagé avec le clavier et la
+      // fiche de contact. Ici manquait la clause `on ApiException` : appeler
+      // quelqu'un déjà en ligne affichait « vérifie ta connexion » au lieu du
+      // « Le correspondant est déjà en appel » que le serveur renvoyait.
+      _showError(messageErreurAppel(e));
     }
   }
 

@@ -14,6 +14,7 @@ import '../../chat/chat_repository.dart';
 import '../../contacts/contacts_repository.dart';
 import '../../contacts/screens/add_contact_screen.dart';
 import '../call_controller.dart';
+import '../message_erreur_appel.dart';
 import 'active_call_screen.dart';
 
 /// Clavier d'appel : on compose un Alanya ID et on appelle directement.
@@ -175,22 +176,11 @@ class _DialerScreenState extends State<DialerScreen> {
           builder: (_) => const ActiveCallScreen(),
         ),
       );
-    } on StateError catch (_) {
-      showAppSnackBar("Tu es déjà en appel");
-    } on ApiException catch (e) {
-      showAppSnackBar(
-          e.statusCode == 404 ? "Aucun compte avec cet Alanya ID" : e.message);
     } catch (e) {
-      final msg = e.toString();
-      if (msg.contains("PERMISSION_DENIED")) {
-        showAppSnackBar(
-            "Micro/caméra requis. Accorde les permissions dans les réglages.");
-      } else if (msg.contains("409") || msg.contains("BUSY")) {
-        showAppSnackBar(
-            "Impossible de démarrer l'appel. Réessaie dans un instant.");
-      } else {
-        showAppSnackBar("Erreur d'appel : vérifie ta connexion et réessaie.");
-      }
+      // Le 404 est propre à cet écran : on y cherche un compte par son Alanya
+      // ID, et son absence n'a pas le même sens depuis une conversation.
+      showAppSnackBar(messageErreurAppel(e,
+          messageSi404: "Aucun compte avec cet Alanya ID"));
     } finally {
       if (mounted) setState(() => _calling = false);
     }
