@@ -83,7 +83,15 @@ jobs:
           echo "$KEYSTORE_BASE64" | base64 -d > android/app/alanya-release.jks
           # Contrôle immédiat : un secret tronqué produirait un fichier illisible
           # et l'erreur ne sortirait que bien plus tard, dans Gradle.
+          # -alias est ESSENTIEL, pas seulement -storepass : sans lui le
+          # controle passe, et Gradle echoue 17 minutes plus tard sur
+          # « No key with alias found ».
+          #
+          # ⚠️ keytool ENREGISTRE LES ALIAS EN MINUSCULES. Creer la cle avec
+          # -alias AlanyaWork la stocke sous « alanyawork », et la valeur du
+          # secret doit correspondre a l identique.
           keytool -list -keystore android/app/alanya-release.jks \
+                  -alias "$KEY_ALIAS" \
                   -storepass "$STORE_PASSWORD" >/dev/null
           cat > android/key.properties <<PROPS
           storeFile=alanya-release.jks
