@@ -6,26 +6,9 @@ workflows:
     environment:
       flutter: 3.24.5   # Version stable fixe
       java: 17
-      # Clé de signature. Sans elle, le build en release retombe sur la clé de
-      # DÉBOGAGE, fabriquée par la machine qui compile — donc différente à
-      # chaque fois. Android refuse alors d'installer par-dessus, d'où la
-      # désinstallation obligatoire avant chaque essai.
-      #
-      # ⚠️ Ce doit être LE MÊME magasin que le secret posé sur GitHub Actions
-      # et que celui utilisé en local. Trois clés différentes ramèneraient le
-      # problème dès qu'on change de source de build.
-      #
-      # Groupe de variables à créer dans Codemagic :
-      #   application > Environment variables > Group name : android_signing
-      # avec les QUATRE mêmes noms que les secrets GitHub Actions.
-      #
-      # Le magasin passe par une variable base64 plutôt que par « Code signing
-      # identities » : cette section-là vit au niveau de l'ÉQUIPE et n'apparaît
-      # pas dans les réglages d'une application. Les variables, elles, existent
-      # partout — et le mécanisme devient identique à celui de GitHub, avec les
-      # mêmes noms, donc une seule chose à retenir.
-      groups:
-        - android_signing
+      # Les variables globales (ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD,
+      # ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD) configurées dans l'IHM
+      # sont automatiquement injectées ici sans avoir besoin de la section groups.
 
     scripts:
       - name: Get dependencies
@@ -46,7 +29,7 @@ workflows:
           find $PUB_CACHE -name "build.gradle.kts" -exec sed -i '' 's/compileSdkVersion = .*/compileSdkVersion = 36/g' {} + 2>/dev/null || \
           find $PUB_CACHE -name "build.gradle.kts" -exec sed -i 's/compileSdkVersion = .*/compileSdkVersion = 36/g' {} +
 
-          echo "=== Vérification et alignement de l'application principale ===\"
+          echo "=== Vérification et alignement de l'application principale ==="
           # S'assure que ton application utilise bien compileSdk = 36
           sed -i '' 's/compileSdk = .*/compileSdk = 36/g' android/app/build.gradle.kts 2>/dev/null || \
           sed -i 's/compileSdk = .*/compileSdk = 36/g' android/app/build.gradle.kts
@@ -54,63 +37,34 @@ workflows:
       - name: Signature stable
         script: |
           set -eu
-          # Meme mecanisme et memes noms de variables que sur GitHub Actions :
-          # le magasin arrive en base64, on le decode, et on ecrit le fichier
-          # android/key.properties que Gradle attend.
+          
+          # Vérification de la présence de la clé
           if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ]; then
-            echo "Aucune cle configuree : build en signature debug."
-            exit 0
+            echo "ERREUR: La variable ANDROID_KEYSTORE_BASE64 est introuvable."
+            exit 1
           fi
+
+          # Décodage du keystore Base64 dans android/app/alanya-release.jks
           echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/alanya-release.jks
-          # Controle immediat : une variable tronquee produirait un fichier
-          # illisible dont l'erreur ne sortirait que bien plus tard, dans
-          # Gradle, sous une forme incomprehensible.
-          # -alias est ESSENTIEL, pas seulement -storepass : sans lui le
-          # controle passe, et Gradle echoue 17 minutes plus tard sur
-          # « No key with alias found ».
-          #
-          # ⚠️ L alias doit reprendre EXACTEMENT ce que renvoie
-          #   keytool -list -keystore alanya-release.jks
-          # et non ce qu on croit avoir tape a la creation. Un magasin PKCS12
-          # preserve la casse ; un JKS, lui, met tout en minuscules. Dans les
-          # deux cas, seule la sortie de keytool fait foi.
+
+          # Vérification immédiate de la validité du fichier keystore et de l'alias
           keytool -list -keystore android/app/alanya-release.jks \
-                  -alias "$ANDROID_KEY_ALIAS" \
-                  -storepass "$ANDROID_KEYSTORE_PASSWORD" > /dev/null
+            -alias "$ANDROID_KEY_ALIAS" \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" > /dev/null
+
+          # Génération du fichier key.properties lu par Gradle
           cat > android/key.properties <<PROPS
           storeFile=alanya-release.jks
           storePassword=$ANDROID_KEYSTORE_PASSWORD
           keyAlias=$ANDROID_KEY_ALIAS
           keyPassword=$ANDROID_KEY_PASSWORD
           PROPS
-          echo "Cle de signature en place."
+
+          echo "Cle de signature en place avec succès."
 
       - name: Build APK release
         script: |
-          # --split-per-abi : produit 3 APKs séparés (arm64-v8a, armeabi-v7a,
-          # x86_64) au lieu d'un fat APK. Chaque APK ne contient les binaires
-          # natifs (flutter_webrtc, PdfiumAndroid, ExoPlayer...) que pour SA
-          # cible → économie de ~60 Mo sur l'APK distribué.
-          # → arm64-v8a couvre 95% des téléphones du marché (à privilégier).
-          #
-          # AUCUN --dart-define d'adresse ici, et c'est délibéré.
-          #
-          # Ce fichier en portait deux, figées sur des serveurs abandonnés
-          # depuis la bascule vers le VPS : `backend-alanya.vercel.app` et le
-          # worker Cloudflare, qui ne répond plus du tout. Tout APK sorti d'ici
-          # parlait donc dans le vide — alors que `server_config.dart` avait,
-          # lui, les bonnes valeurs, que ces options ÉCRASAIENT.
-          #
-          # Les corriger n'aurait fait que repousser le problème : deux endroits
-          # décrivant la même chose finissent toujours par diverger, et celui
-          # qu'on oublie est celui qui n'échoue pas bruyamment. Le seul endroit
-          # qui fait foi est désormais `lib/core/server_config.dart`, dont les
-          # valeurs par défaut pointent sur alanyavox.com. GitHub Actions ne
-          # passe déjà aucune adresse.
-          #
-          # Pour compiler contre un autre serveur — une préproduction, une
-          # machine locale — ajouter les `--dart-define` À CE MOMENT-LÀ, dans un
-          # workflow dédié. Un remplacement doit rester une exception visible.
+          # --split-per-abi : produit des APKs séparés (arm64-v8a, armeabi-v7a, x86_64)
           flutter build apk --release --split-per-abi \
             --android-skip-build-dependency-validation
 
