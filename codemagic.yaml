@@ -69,9 +69,11 @@ workflows:
           # controle passe, et Gradle echoue 17 minutes plus tard sur
           # « No key with alias found ».
           #
-          # ⚠️ keytool ENREGISTRE LES ALIAS EN MINUSCULES. Creer la cle avec
-          # -alias AlanyaWork la stocke sous « alanyawork », et la valeur du
-          # secret doit correspondre a l identique.
+          # ⚠️ L alias doit reprendre EXACTEMENT ce que renvoie
+          #   keytool -list -keystore alanya-release.jks
+          # et non ce qu on croit avoir tape a la creation. Un magasin PKCS12
+          # preserve la casse ; un JKS, lui, met tout en minuscules. Dans les
+          # deux cas, seule la sortie de keytool fait foi.
           keytool -list -keystore android/app/alanya-release.jks \
                   -alias "$ANDROID_KEY_ALIAS" \
                   -storepass "$ANDROID_KEYSTORE_PASSWORD" > /dev/null
