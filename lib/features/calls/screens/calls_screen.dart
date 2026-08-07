@@ -12,6 +12,7 @@ import '../../../widgets/avatar_circle.dart';
 import '../../../widgets/motif_background.dart';
 import '../../../widgets/multi_select_mixin.dart';
 import '../call_controller.dart';
+import '../ouvrir_appel_en_cours.dart';
 import '../calls_repository.dart';
 import 'dialer_screen.dart';
 import '../../chat/screens/chat_screen.dart';
@@ -311,17 +312,23 @@ class _CallsScreenState extends State<CallsScreen>
       onLongPress: () => startSelecting(c.id),
       onTap: isSelecting
           ? () => toggleSelect(c.id)
-          : (c.convId == null
-              ? null
-              : () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => ChatScreen(
-                        convId: c.convId!,
-                        title: c.peerName,
-                        isGroup: c.isGroup,
-                      ),
-                    ),
-                  )),
+          : () {
+              // Un appel en cours ramène à son écran plutôt qu'à la
+              // conversation : c'est ce qu'on cherche en appuyant dessus.
+              if (ouvrirSiAppelEnCours(context, c.id)) return;
+              // Garde la condition d'avant : sans conversation, il n'y a rien
+              // à ouvrir. L'entrée reste alors inerte.
+              if (c.convId == null) return;
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => ChatScreen(
+                    convId: c.convId!,
+                    title: c.peerName,
+                    isGroup: c.isGroup,
+                  ),
+                ),
+              );
+            },
     );
   }
 }

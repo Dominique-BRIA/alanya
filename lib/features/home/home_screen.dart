@@ -36,6 +36,7 @@ import '../chat/screens/chat_screen.dart';
 import '../calls/screens/dialer_screen.dart';
 import '../contacts/screens/contacts_screen.dart';
 import '../calls/call_controller.dart';
+import '../calls/ouvrir_appel_en_cours.dart';
 import '../calls/calls_repository.dart';
 import '../calls/full_screen_permission.dart';
 import '../calls/screens/calls_screen.dart';
@@ -1087,6 +1088,9 @@ class _ConversationsTabState extends State<_ConversationsTab>
           toggleSelect(c.id);
           return;
         }
+        // Un appel en cours sur cette conversation ramene a son ecran : la
+        // ligne affiche « En cours », appuyer dessus doit y conduire.
+        if (ouvrirSiAppelEnCours(context, lastCall?.id)) return;
         await Navigator.of(context).push(
           MaterialPageRoute(
             builder: (_) => ChatScreen(
