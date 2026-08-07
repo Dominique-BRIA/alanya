@@ -27,6 +27,13 @@ class DeviceRegistry {
   /// identifiant, quelle que soit la plateforme.
   static const _cleId = 'cookies_WebID';
 
+  /// Identifiant de la LIGNE d'appareil, renvoyé par le serveur.
+  ///
+  /// À ne pas confondre avec `cookies_WebID`, qui identifie le téléphone : la
+  /// ligne vaut pour un couple (téléphone, compte). C'est elle que le serveur
+  /// désigne quand une conversation est réservée à un poste précis.
+  static const _cleAppareilId = 'appareil_id';
+
   void init({required ApiClient api, required TokenStorage storage}) {
     _api = api;
     _storage = storage;
@@ -101,6 +108,17 @@ class DeviceRegistry {
   ///
   /// Échec silencieux : le registre est un confort, il ne doit jamais empêcher
   /// l'utilisateur d'entrer dans l'application.
+  /// Identifiant de ligne du dernier enregistrement, ou null.
+  ///
+  /// Conservé pour survivre à un redémarrage : l'enregistrement ne repasse pas
+  /// à chaque ouverture, et le temps réel doit pouvoir s'annoncer sans
+  /// l'attendre.
+  Future<int?> appareilId() async {
+    final prefs = await SharedPreferences.getInstance();
+    final valeur = prefs.getInt(_cleAppareilId);
+    return (valeur != null && valeur > 0) ? valeur : null;
+  }
+
   Future<void> registerIfAuthenticated() async {
     final api = _api, storage = _storage;
     if (api == null || storage == null) return;
@@ -108,7 +126,7 @@ class DeviceRegistry {
       final token = await storage.accessToken;
       if (token == null) return;
 
-      await api.post(
+      final reponse = await api.post(
         '/api/appareils',
         {
           'cookiesWebId': await deviceId(),
@@ -119,6 +137,17 @@ class DeviceRegistry {
         },
         bearer: token,
       );
+
+      // On retient l'identifiant de ligne : sans lui, le serveur ne sait pas
+      // quelle socket appartient à quel poste, et ne peut pas réserver une
+      // conversation à un appareil précis.
+      // `post` renvoie déjà une Map ; seul le contenu est incertain.
+      final brut = reponse['appareil'];
+      final id = (brut is Map) ? brut['appareilId'] : null;
+      if (id is num && id > 0) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setInt(_cleAppareilId, id.toInt());
+      }
       debugPrint('[DeviceRegistry] appareil enregistré');
     } catch (e) {
       debugPrint('[DeviceRegistry] enregistrement impossible : $e');

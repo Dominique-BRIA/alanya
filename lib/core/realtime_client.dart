@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart' show ChangeNotifier, debugPrint;
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'debug_overlay.dart';
+import 'device_registry.dart';
 import 'server_config.dart';
 import 'token_storage.dart';
 
@@ -56,6 +57,18 @@ class RealtimeClient extends ChangeNotifier {
       _setConnected(true);
       DebugOverlay.log("WS ✅ CONNECTÉ");
       _reconnectAttempt = 0;
+
+      // Annonce de l'appareil, avant tout le reste.
+      //
+      // Le serveur doit savoir quelle socket appartient à quel poste : c'est ce
+      // qui lui permet de ne faire sonner que le détenteur d'une conversation
+      // réservée. Sans cette annonce, il ne peut identifier personne et fait
+      // sonner tous les appareils du compte — le repli qui existe côté serveur
+      // n'est là que tant que ce message manque.
+      //
+      // Renvoyé à CHAQUE connexion : une socket neuve ne porte aucune identité.
+      unawaited(_annoncerAppareil());
+
       _sub = channel.stream.listen(
         _onData,
         onDone: _handleDrop,
@@ -73,6 +86,11 @@ class RealtimeClient extends ChangeNotifier {
       _pingTimer = Timer.periodic(const Duration(seconds: 20), (_) {
         try {
           _channel?.sink.add(jsonEncode({"type": "ping"}));
+          // Rattrapage : l'enregistrement de l'appareil peut se terminer APRÈS
+          // l'ouverture de la socket. Tant que l'identité n'est pas connue, on
+          // retente à chaque ping — une fois annoncée, la condition ne coûte
+          // plus rien.
+          if (_appareilId == null) unawaited(_annoncerAppareil());
         } catch (_) {}
       });
     } catch (e) {
@@ -186,6 +204,17 @@ class RealtimeClient extends ChangeNotifier {
   static const _typesCritiques = {"call_state", "call_ring", "call_signal"};
 
   final List<({Map<String, dynamic> payload, DateTime expire})> _enAttente = [];
+
+  /// Dernier identifiant connu, pour réannoncer sans repasser par le disque.
+  int? _appareilId;
+
+  /// Annonce l'appareil courant, si on le connaît déjà.
+  Future<void> _annoncerAppareil() async {
+    final id = _appareilId ?? await DeviceRegistry.instance.appareilId();
+    if (id == null) return;
+    _appareilId = id;
+    _send({"type": "device", "appareilId": id});
+  }
 
   void _send(Map<String, dynamic> payload) {
     final ch = _channel;
