@@ -1002,6 +1002,23 @@ class CallController extends ChangeNotifier {
           remoteRinging = true;
           notifyListeners();
         }
+      } else if (state == "locked_elsewhere") {
+        // Verrou de conversation : un AUTRE appareil de ce compte a réservé la
+        // discussion, et le serveur refuse notre appel sortant.
+        //
+        // Sans ce cas, l'appel restait à sonner dans le vide jusqu'au délai :
+        // le serveur ne le diffusait à personne, et rien ne nous le disait. On
+        // raccroche donc tout de suite, avec une raison affichable — c'est la
+        // seule façon de comprendre pourquoi ça n'aboutit pas.
+        //
+        // La réservation ne se périme plus : elle tient jusqu'à ce que le poste
+        // qui l'a posée la rende. Inutile de laisser espérer en réessayant.
+        if (callId == activeCallId) {
+          lastError =
+              "Cette conversation est réservée par un autre appareil de ce compte";
+          notifyListeners();
+          await hangUp();
+        }
       } else if (state == "inviting") {
         // Un participant invite quelqu'un : l'inviteur mémorise l'identité de
         // l'invité (pour le transfert supervisé).
