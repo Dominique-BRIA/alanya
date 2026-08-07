@@ -6,6 +6,19 @@ workflows:
     environment:
       flutter: 3.24.5   # Version stable fixe
       java: 17
+      # Clé de signature, téléversée dans Codemagic
+      # (Settings > Code signing identities > Android keystores) sous CE nom.
+      #
+      # Sans elle, le build en release retombe sur la clé de DÉBOGAGE,
+      # fabriquée par la machine qui compile — donc différente à chaque fois.
+      # Android refuse alors d'installer par-dessus, d'où la désinstallation
+      # obligatoire avant chaque essai.
+      #
+      # ⚠️ Ce doit être LE MÊME magasin que le secret posé sur GitHub Actions
+      # et que celui utilisé en local. Trois clés différentes ramèneraient le
+      # problème dès qu'on change de source de build.
+      android_signing:
+        - alanya_keystore
 
     scripts:
       - name: Get dependencies
@@ -31,6 +44,25 @@ workflows:
           sed -i '' 's/compileSdk = .*/compileSdk = 36/g' android/app/build.gradle.kts 2>/dev/null || \
           sed -i 's/compileSdk = .*/compileSdk = 36/g' android/app/build.gradle.kts
 
+      - name: Signature stable
+        script: |
+          set -eu
+          # Codemagic expose le magasin par ces variables dès que
+          # `android_signing` est renseigné. Gradle attend, lui, un fichier
+          # android/key.properties : c'est ce pont qui manquait.
+          if [ -z "${CM_KEYSTORE_PATH:-}" ]; then
+            echo "Aucune cle configuree : build en signature debug."
+            exit 0
+          fi
+          cp "$CM_KEYSTORE_PATH" android/app/alanya-release.jks
+          cat > android/key.properties <<PROPS
+          storeFile=alanya-release.jks
+          storePassword=$CM_KEYSTORE_PASSWORD
+          keyAlias=$CM_KEY_ALIAS
+          keyPassword=$CM_KEY_PASSWORD
+          PROPS
+          echo "Cle de signature en place."
+
       - name: Build APK release
         script: |
           # --split-per-abi : produit 3 APKs séparés (arm64-v8a, armeabi-v7a,
@@ -40,8 +72,8 @@ workflows:
           # → arm64-v8a couvre 95% des téléphones du marché (à privilégier).
           flutter build apk --release --split-per-abi \
             --android-skip-build-dependency-validation \
-            --dart-define=API_URL=https://backend-alanya.vercel.app \
-            --dart-define=WS_URL=wss://alanya-ws.d-bria00.workers.dev
+            --dart-define=API_URL=https://alanyavox.com \
+            --dart-define=WS_URL=wss://alanyavox.com/ws
 
     artifacts:
       - build/app/outputs/flutter-apk/*.apk
