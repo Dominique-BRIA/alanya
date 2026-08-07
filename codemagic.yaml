@@ -17,8 +17,17 @@ workflows:
       # ⚠️ Ce doit être LE MÊME magasin que le secret posé sur GitHub Actions
       # et que celui utilisé en local. Trois clés différentes ramèneraient le
       # problème dès qu'on change de source de build.
-      android_signing:
-        - alanya_keystore
+      # Groupe de variables à créer dans Codemagic :
+      #   application > Environment variables > Group name : android_signing
+      # avec les QUATRE mêmes noms que les secrets GitHub Actions.
+      #
+      # Le magasin passe par une variable base64 plutôt que par « Code signing
+      # identities » : cette section-là vit au niveau de l'ÉQUIPE et n'apparaît
+      # pas dans les réglages d'une application. Les variables, elles, existent
+      # partout — et le mécanisme devient identique à celui de GitHub, avec les
+      # mêmes noms, donc une seule chose à retenir.
+      groups:
+        - android_signing
 
     scripts:
       - name: Get dependencies
@@ -47,19 +56,24 @@ workflows:
       - name: Signature stable
         script: |
           set -eu
-          # Codemagic expose le magasin par ces variables dès que
-          # `android_signing` est renseigné. Gradle attend, lui, un fichier
-          # android/key.properties : c'est ce pont qui manquait.
-          if [ -z "${CM_KEYSTORE_PATH:-}" ]; then
+          # Meme mecanisme et memes noms de variables que sur GitHub Actions :
+          # le magasin arrive en base64, on le decode, et on ecrit le fichier
+          # android/key.properties que Gradle attend.
+          if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ]; then
             echo "Aucune cle configuree : build en signature debug."
             exit 0
           fi
-          cp "$CM_KEYSTORE_PATH" android/app/alanya-release.jks
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/alanya-release.jks
+          # Controle immediat : une variable tronquee produirait un fichier
+          # illisible dont l'erreur ne sortirait que bien plus tard, dans
+          # Gradle, sous une forme incomprehensible.
+          keytool -list -keystore android/app/alanya-release.jks \
+                  -storepass "$ANDROID_KEYSTORE_PASSWORD" > /dev/null
           cat > android/key.properties <<PROPS
           storeFile=alanya-release.jks
-          storePassword=$CM_KEYSTORE_PASSWORD
-          keyAlias=$CM_KEY_ALIAS
-          keyPassword=$CM_KEY_PASSWORD
+          storePassword=$ANDROID_KEYSTORE_PASSWORD
+          keyAlias=$ANDROID_KEY_ALIAS
+          keyPassword=$ANDROID_KEY_PASSWORD
           PROPS
           echo "Cle de signature en place."
 
