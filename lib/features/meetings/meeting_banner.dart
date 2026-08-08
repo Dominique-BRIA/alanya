@@ -3,9 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../../core/push_service.dart';
-import '../../../theme/alanya_theme.dart';
-import '../meeting_controller.dart';
+import 'package:alanya/core/push_service.dart';
+import 'package:alanya/theme/alanya_theme.dart';
+import 'meeting_controller.dart';
 import 'meeting_room_screen.dart';
 
 /// Bandeau global « réunion en cours » affiché par-dessus toutes les pages
