@@ -6,7 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:alanya/core/push_service.dart';
 import 'package:alanya/theme/alanya_theme.dart';
 import 'meeting_controller.dart';
-import 'meeting_room_screen.dart';
+import 'screens/meeting_room_screen.dart';
 
 /// Bandeau global « réunion en cours » affiché par-dessus toutes les pages
 /// quand une réunion est active mais que l'écran de salle n'est pas affiché
