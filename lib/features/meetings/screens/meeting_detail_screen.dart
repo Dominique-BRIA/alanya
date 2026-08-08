@@ -8,6 +8,7 @@ import '../../../widgets/back_app_bar.dart';
 import '../../../widgets/motif_background.dart';
 import '../../../models/meeting.dart';
 import '../../auth/auth_controller.dart';
+import '../meeting_controller.dart';
 import '../meetings_repository.dart';
 import 'meeting_room_screen.dart';
 
@@ -50,7 +51,21 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
   }
 
   void _joinMeeting() {
-    // Ouvre l'écran de réunion (Google Meet style)
+    // Si on est déjà dans cette réunion (salle réduite, ouvre simplement la
+    // salle existante sans relancer une négociation WebRTC).
+    final mc = context.read<MeetingController>();
+    if (mc.activeMeetingId == _meeting.idMeeting && mc.isActive) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => MeetingRoomScreen(
+            meetingId: _meeting.idMeeting,
+            objet: _meeting.objet,
+            isVideo: _meeting.isVideo,
+          ),
+        ),
+      );
+      return;
+    }
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => MeetingRoomScreen(

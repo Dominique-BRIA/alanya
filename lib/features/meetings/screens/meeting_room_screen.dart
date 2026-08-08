@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:provider/provider.dart';
@@ -8,12 +6,14 @@ import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
 import '../../auth/auth_controller.dart';
 import '../meeting_controller.dart';
-import '../meetings_repository.dart';
 
 /// Écran de réunion active — style Google Meet.
 ///
-/// Affiche les flux vidéo/audio des participants, avec des contrôles
-/// pour micro, caméra, haut-parleur et quitter.
+/// Affiche les flux vidéo/audio des participants, avec des contrôles pour
+/// micro, caméra, haut-parleur et quitter. Le [MeetingController] est GLOBAL :
+/// fermer cet écran (flèche de réduction ou retour système) ne quitte pas la
+/// réunion, il la minimise — le bandeau global permet d'y revenir, et le
+/// service de premier plan garde l'audio vivant en arrière-plan.
 class MeetingRoomScreen extends StatefulWidget {
   const MeetingRoomScreen({
     super.key,
@@ -31,105 +31,139 @@ class MeetingRoomScreen extends StatefulWidget {
 }
 
 class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
-  late MeetingController _ctrl;
   bool _joining = true;
   String? _error;
+  bool _popping = false;
 
   @override
   void initState() {
     super.initState();
-    _ctrl = MeetingController(
-      context.read<MeetingsRepository>(),
-      context.read(),
-      context.read(),
-    );
-    final user = context.read<AuthController>().user;
-    if (user != null) {
-      _ctrl.bindUser(user.id, user.pseudo ?? user.publicNumber);
-    }
     _join();
   }
 
   Future<void> _join() async {
+    final ctrl = context.read<MeetingController>();
+    // Ne rejoint que si on n'est pas déjà dans cette réunion (réouverture via
+    // le bandeau) : le flux et la maille sont déjà en place.
+    if (ctrl.activeMeetingId == widget.meetingId && ctrl.isActive) {
+      if (mounted) setState(() => _joining = false);
+      return;
+    }
     try {
-      await _ctrl.join(widget.meetingId, isVideo: widget.isVideo);
-      setState(() => _joining = false);
+      await ctrl.join(
+        widget.meetingId,
+        isVideo: widget.isVideo,
+        objet: widget.objet,
+      );
+      if (mounted) setState(() => _joining = false);
     } catch (e) {
-      setState(() {
-        _joining = false;
-        _error = "Impossible de rejoindre : $e";
-      });
+      if (mounted) {
+        setState(() {
+          _joining = false;
+          _error = "Impossible de rejoindre : $e";
+        });
+      }
     }
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // La salle est affichée → masque le bandeau global. Posé en post-frame car
+    // il peut être appelé plusieurs fois au fil des dépendances.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<MeetingController>().setRoomVisible(true);
+    });
+  }
+
+  /// Réduit la salle SANS quitter : la réunion continue, le bandeau prend le
+  /// relais. C'est le geste de retour système comme du bouton dédié.
+  void _minimize() {
+    if (_popping || !mounted) return;
+    _popping = true;
+    Navigator.of(context).maybePop();
+  }
+
+  Future<void> _leave() async {
+    final ctrl = context.read<MeetingController>();
+    await ctrl.leave();
+    if (mounted) Navigator.of(context).maybePop();
+  }
+
+  @override
   void dispose() {
-    _ctrl.leave();
-    _ctrl.dispose();
+    // L'écran disparaît : le bandeau global reprend si la réunion continue.
+    // On ne quitte PAS la réunion ici — c'est le rôle du bouton rouge.
+    context.read<MeetingController>().setRoomVisible(false);
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF1A1A1A),
-      body: SafeArea(
-        child: _joining
-            ? const Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    CircularProgressIndicator(color: Colors.white),
-                    SizedBox(height: 16),
-                    Text("Connexion en cours...",
-                        style: TextStyle(color: Colors.white70)),
-                  ],
-                ),
-              )
-            : _error != null
-                ? Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.error_outline,
-                            size: 48, color: Colors.red),
-                        const SizedBox(height: 12),
-                        Text(_error!,
-                            style: const TextStyle(color: Colors.white70),
-                            textAlign: TextAlign.center),
-                        const SizedBox(height: 24),
-                        ElevatedButton(
-                          onPressed: () => Navigator.pop(context),
-                          child: const Text("Retour"),
-                        ),
-                      ],
-                    ),
-                  )
-                : Column(
+    return PopScope(
+      canPop: true,
+      // Le retour système RÉDUIT la réunion, il ne la quitte pas : l'audio doit
+      // continuer. Pour raccrocher, le bouton rouge reste le geste explicite.
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) {
+          context.read<MeetingController>().setRoomVisible(false);
+        }
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFF1A1A1A),
+        body: SafeArea(
+          child: _joining
+              ? const Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      // --- En-tête ---
-                      _buildHeader(),
-                      // --- Grille vidéo ---
-                      Expanded(child: _buildVideoGrid()),
-                      // --- Contrôles ---
-                      _buildControls(),
+                      CircularProgressIndicator(color: Colors.white),
+                      SizedBox(height: 16),
+                      Text("Connexion en cours...",
+                          style: TextStyle(color: Colors.white70)),
                     ],
                   ),
+                )
+              : _error != null
+                  ? Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.error_outline,
+                              size: 48, color: Colors.red),
+                          const SizedBox(height: 12),
+                          Text(_error!,
+                              style: const TextStyle(color: Colors.white70),
+                              textAlign: TextAlign.center),
+                          const SizedBox(height: 24),
+                          ElevatedButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: const Text("Retour"),
+                          ),
+                        ],
+                      ),
+                    )
+                  : Column(
+                      children: [
+                        _buildHeader(),
+                        Expanded(child: _buildVideoGrid()),
+                        _buildControls(),
+                      ],
+                    ),
+        ),
       ),
     );
   }
 
   Widget _buildHeader() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
       child: Row(
         children: [
           IconButton(
-            icon: const Icon(Icons.arrow_back, color: Colors.white),
-            onPressed: () {
-              _ctrl.leave();
-              Navigator.pop(context);
-            },
+            icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white),
+            tooltip: "Réduire",
+            onPressed: _minimize,
           ),
           Expanded(
             child: Column(
@@ -146,11 +180,15 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                   overflow: TextOverflow.ellipsis,
                 ),
                 ListenableBuilder(
-                  listenable: _ctrl,
-                  builder: (_, __) => Text(
-                    "${_ctrl.connectedPeerCount + 1} participant(s)",
-                    style: const TextStyle(color: Colors.white54, fontSize: 12),
-                  ),
+                  listenable: context.read<MeetingController>(),
+                  builder: (_, __) {
+                    final ctrl = context.read<MeetingController>();
+                    return Text(
+                      _subtitle(ctrl),
+                      style: const TextStyle(
+                          color: Colors.white54, fontSize: 12),
+                    );
+                  },
                 ),
               ],
             ),
@@ -165,11 +203,29 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     );
   }
 
+  /// Sous-titre d'en-tête : minuteur de participation une fois le flux local
+  /// prêt, sinon nombre de participants. Le minuteur vient du contrôleur pour
+  /// rester cohérent avec celui affiché dans le bandeau, même si l'écran est
+  /// recréé.
+  String _subtitle(MeetingController ctrl) {
+    final depuis = ctrl.connectedSince;
+    if (depuis != null) {
+      final d = DateTime.now().difference(depuis);
+      String two(int n) => n.toString().padLeft(2, '0');
+      final t = d.inHours > 0
+          ? "${two(d.inHours)}:${two(d.inMinutes.remainder(60))}:${two(d.inSeconds.remainder(60))}"
+          : "${two(d.inMinutes.remainder(60))}:${two(d.inSeconds.remainder(60))}";
+      return "${ctrl.connectedPeerCount + 1} · $t";
+    }
+    return "${ctrl.connectedPeerCount + 1} participant(s)";
+  }
+
   Widget _buildVideoGrid() {
     return ListenableBuilder(
-      listenable: _ctrl,
+      listenable: context.read<MeetingController>(),
       builder: (_, __) {
-        final remoteCount = _ctrl.remoteStreams.length;
+        final ctrl = context.read<MeetingController>();
+        final remoteCount = ctrl.remoteStreams.length;
         final total = remoteCount + 1; // +1 pour le local
 
         if (total <= 1) {
@@ -217,7 +273,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
           itemCount: total,
           itemBuilder: (_, i) {
             if (i == 0) return _localVideo(isLarge: false);
-            final peerId = _ctrl.remoteStreams.keys.elementAt(i - 1);
+            final peerId = ctrl.remoteStreams.keys.elementAt(i - 1);
             return _remoteVideoTile(peerId);
           },
         );
@@ -226,8 +282,9 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   }
 
   Widget _localVideo({required bool isLarge}) {
-    final stream = _ctrl.localStream;
-    if (stream == null || _ctrl.isCameraOff) {
+    final ctrl = context.watch<MeetingController>();
+    final stream = ctrl.localStream;
+    if (stream == null || ctrl.isCameraOff) {
       return _avatarPlaceholder(
         name: context.read<AuthController>().user?.pseudo ?? "Moi",
         isLarge: isLarge,
@@ -240,7 +297,8 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   }
 
   Widget _remoteVideoSingle() {
-    final streams = _ctrl.remoteStreams;
+    final ctrl = context.watch<MeetingController>();
+    final streams = ctrl.remoteStreams;
     if (streams.isEmpty) return const SizedBox.shrink();
     final entry = streams.entries.first;
     return ClipRRect(
@@ -250,8 +308,9 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   }
 
   Widget _remoteVideoTile(String peerId) {
-    final stream = _ctrl.remoteStreams[peerId];
-    final name = _ctrl.participantNames[peerId] ?? "Participant";
+    final ctrl = context.watch<MeetingController>();
+    final stream = ctrl.remoteStreams[peerId];
+    final name = ctrl.participantNames[peerId] ?? "Participant";
     if (stream == null) {
       return _avatarPlaceholder(name: name, isLarge: false);
     }
@@ -266,7 +325,8 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
             left: 8,
             bottom: 8,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
                 color: Colors.black54,
                 borderRadius: BorderRadius.circular(8),
@@ -299,8 +359,9 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
 
   Widget _buildControls() {
     return ListenableBuilder(
-      listenable: _ctrl,
+      listenable: context.read<MeetingController>(),
       builder: (_, __) {
+        final ctrl = context.read<MeetingController>();
         return Container(
           padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 24),
           child: Row(
@@ -308,24 +369,35 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
             children: [
               // Micro
               _controlButton(
-                icon: _ctrl.isMuted ? Icons.mic_off : Icons.mic,
-                label: _ctrl.isMuted ? "Activer" : "Muet",
-                isActive: !_ctrl.isMuted,
-                onTap: _ctrl.toggleMute,
+                icon: ctrl.isMuted ? Icons.mic_off : Icons.mic,
+                label: ctrl.isMuted ? "Activer" : "Muet",
+                isActive: !ctrl.isMuted,
+                onTap: ctrl.toggleMute,
               ),
               // Caméra
               _controlButton(
-                icon: _ctrl.isCameraOff ? Icons.videocam_off : Icons.videocam,
-                label: _ctrl.isCameraOff ? "Caméra" : "Caméra",
-                isActive: !_ctrl.isCameraOff,
-                onTap: _ctrl.toggleCamera,
+                icon: ctrl.isCameraOff
+                    ? Icons.videocam_off
+                    : Icons.videocam,
+                label: ctrl.isCameraOff ? "Caméra off" : "Caméra",
+                isActive: !ctrl.isCameraOff,
+                onTap: ctrl.toggleCamera,
               ),
+              // Bascule caméra avant/arrière (vidéo uniquement)
+              if (ctrl.activeIsVideo)
+                _controlButton(
+                  icon: Icons.cameraswitch,
+                  label: "Retourner",
+                  isActive: false,
+                  onTap: () => ctrl.switchCamera(),
+                ),
               // Haut-parleur
               _controlButton(
-                icon: _ctrl.isSpeakerOn ? Icons.volume_up : Icons.volume_off,
+                icon:
+                    ctrl.isSpeakerOn ? Icons.volume_up : Icons.volume_off,
                 label: "Haut-parleur",
-                isActive: _ctrl.isSpeakerOn,
-                onTap: _ctrl.toggleSpeaker,
+                isActive: ctrl.isSpeakerOn,
+                onTap: () => ctrl.toggleSpeaker(),
               ),
               // Quitter
               _controlButton(
@@ -333,10 +405,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                 label: "Quitter",
                 isActive: false,
                 isLeave: true,
-                onTap: () {
-                  _ctrl.leave();
-                  Navigator.pop(context);
-                },
+                onTap: _leave,
               ),
             ],
           ),
@@ -394,9 +463,10 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       ),
       builder: (ctx) {
         return ListenableBuilder(
-          listenable: _ctrl,
+          listenable: context.read<MeetingController>(),
           builder: (_, __) {
-            final peers = _ctrl.remoteStreams.keys.toList();
+            final ctrl = context.read<MeetingController>();
+            final peers = ctrl.remoteStreams.keys.toList();
             return SafeArea(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -412,22 +482,24 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                   // Moi
                   ListTile(
                     leading: AvatarCircle(
-                      name: context.read<AuthController>().user?.pseudo ?? "Moi",
+                      name: context.read<AuthController>().user?.pseudo ??
+                          "Moi",
                       avatarUrl: null,
                       radius: 18,
                       backgroundColor: AlanyaColors.terracotta,
                     ),
-                    title: const Text("Vous",
-                        style: TextStyle(color: Colors.white)),
+                    title:
+                        const Text("Vous", style: TextStyle(color: Colors.white)),
                     trailing: Icon(
-                      _ctrl.isMuted ? Icons.mic_off : Icons.mic,
-                      color: _ctrl.isMuted ? Colors.red : Colors.white54,
+                      ctrl.isMuted ? Icons.mic_off : Icons.mic,
+                      color: ctrl.isMuted ? Colors.red : Colors.white54,
                       size: 20,
                     ),
                   ),
                   // Autres
                   ...peers.map((peerId) {
-                    final name = _ctrl.participantNames[peerId] ?? "Participant";
+                    final name =
+                        ctrl.participantNames[peerId] ?? "Participant";
                     return ListTile(
                       leading: AvatarCircle(
                         name: name,
@@ -435,8 +507,8 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                         radius: 18,
                         backgroundColor: AlanyaColors.forest,
                       ),
-                      title:
-                          Text(name, style: const TextStyle(color: Colors.white)),
+                      title: Text(name,
+                          style: const TextStyle(color: Colors.white)),
                       trailing: const Icon(Icons.mic,
                           color: Colors.white54, size: 20),
                     );
@@ -488,6 +560,7 @@ class _RTCVideoRendererObjectState extends State<RTCVideoRendererObject> {
     if (!_initialized) {
       return const Center(child: CircularProgressIndicator(color: Colors.white));
     }
-    return RTCVideoView(_renderer, objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover);
+    return RTCVideoView(_renderer,
+        objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover);
   }
 }

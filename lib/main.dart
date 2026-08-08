@@ -34,6 +34,8 @@ import 'widgets/offline_banner.dart';
 import 'widgets/biometric_gate.dart';
 import 'features/media/media_repository.dart';
 import 'features/blocked/blocked_repository.dart';
+import 'features/meetings/meeting_banner.dart';
+import 'features/meetings/meeting_controller.dart';
 import 'features/meetings/meetings_repository.dart';
 import 'features/status/status_repository.dart';
 
@@ -105,6 +107,12 @@ void main() async {
             ctx.read<RealtimeClient>(),
           ),
         ),
+        ChangeNotifierProvider<MeetingController>(
+          create: (ctx) => MeetingController(
+            ctx.read<CallsRepository>(),
+            ctx.read<RealtimeClient>(),
+          ),
+        ),
         ChangeNotifierProvider<AuthController>(
           create: (ctx) => AuthController(
             repo,
@@ -159,6 +167,7 @@ class AlanyaApp extends StatelessWidget {
           children: [
             if (child != null) Positioned.fill(child: child),
             const CallBanner(),
+            const MeetingBanner(),
           ],
         );
         // ⚠️ L'overlay se place SOUS le `Directionality`, jamais au-dessus.

@@ -40,6 +40,7 @@ import '../calls/ouvrir_appel_en_cours.dart';
 import '../calls/calls_repository.dart';
 import '../calls/full_screen_permission.dart';
 import '../calls/screens/calls_screen.dart';
+import '../meetings/meeting_controller.dart';
 import '../meetings/screens/meetings_screen.dart';
 import '../status/screens/create_status_screen.dart';
 import '../status/screens/status_viewer_screen.dart';
@@ -72,6 +73,10 @@ class _HomeScreenState extends State<HomeScreen> {
       final user = context.read<AuthController>().user;
       if (user != null) {
         context.read<CallController>().bindUser(
+              user.id,
+              user.pseudo ?? user.publicNumber,
+            );
+        context.read<MeetingController>().bindUser(
               user.id,
               user.pseudo ?? user.publicNumber,
             );
