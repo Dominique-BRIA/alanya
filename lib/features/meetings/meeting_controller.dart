@@ -4,7 +4,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import '../../core/call_permissions.dart';
+import '../../core/debug_overlay.dart';
 import '../../core/realtime_client.dart';
+import '../calls/calls_repository.dart';
 import '../calls/webrtc_group_mesh.dart';
 import '../calls/webrtc_peer_session.dart';
 import 'meetings_repository.dart';
@@ -13,11 +15,12 @@ import 'meetings_repository.dart';
 ///
 /// Réutilise WebrtcGroupMesh pour les connexions WebRTC peer-to-peer.
 class MeetingController extends ChangeNotifier {
-  MeetingController(this._repo, this._rt) {
+  MeetingController(this._repo, this._calls, this._rt) {
     _sub = _rt.events.listen(_onEvent);
   }
 
   final MeetingsRepository _repo;
+  final CallsRepository _calls;
   final RealtimeClient _rt;
   StreamSubscription? _sub;
 
@@ -67,8 +70,18 @@ class MeetingController extends ChangeNotifier {
       throw Exception("PERMISSION_DENIED");
     }
 
-    // Initialise WebRTC
-    _iceServers = WebrtcPeerSession.fallbackIce;
+    // Initialise WebRTC.
+    //
+    // On tente de récupérer les serveurs ICE/TURN du backend (HMAC temporaire),
+    // comme le font les appels : sans TURN, une réunion derrière un NAT
+    // symétrique (réseaux mobiles restrictifs) n'aboutit pas. Le STUN codé en
+    // dur reste le repli si l'endpoint est indisponible.
+    try {
+      _iceServers = await _loadIceServers();
+    } catch (e) {
+      debugPrint('[MeetingController] ICE backend indisponible, fallback STUN: $e');
+      _iceServers = WebrtcPeerSession.fallbackIce;
+    }
     _mesh = WebrtcGroupMesh(
       myUserId: myUserId!,
       isVideo: isVideo,
@@ -77,6 +90,9 @@ class MeetingController extends ChangeNotifier {
         _rt.meetingSignal(meetingId, peerId, sig);
       },
       onUpdated: notifyListeners,
+      // Un participant dont la connexion média est définitivement perdue est
+      // retiré de la grille : sans ce câblage il y restait figé jusqu'à la fin.
+      onPeerLost: _onPeerLost,
     );
     await _mesh!.ensureLocal();
 
@@ -170,6 +186,29 @@ class MeetingController extends ChangeNotifier {
     // événements distincts, deux pairs ne peuvent jamais s'offrir mutuellement.
     _mesh?.connectToPeer(userId, asOfferer: true);
     notifyListeners();
+  }
+
+  /// Connexion média perdue avec un pair (coupure réseau, crash de l'app, etc.).
+  ///
+  /// Le retrait de la maille précède la confirmation éventuelle du serveur, qui
+  /// peut ne jamais arriver (socket tombée sans `meeting_leave`) : la grille
+  /// resterait figée sur un flux mort. L'état de participation côté base sera
+  /// corrigé par le prochain `meeting_user_left` ou à la prochaine synchronisation.
+  void _onPeerLost(String peerId) {
+    if (activeMeetingId == null) return;
+    traceAppel('réunion : pair $peerId perdu, retrait de la grille');
+    _participantNames.remove(peerId);
+    _connectedPeerIds.remove(peerId);
+    _mesh?.removePeer(peerId);
+    notifyListeners();
+  }
+
+  /// Récupère les serveurs ICE/TURN depuis le backend, avec cache le temps de
+  /// la réunion (les identifiants TURN sont des HMAC temporaires).
+  Future<List<Map<String, dynamic>>> _loadIceServers() async {
+    if (_iceServers != null) return _iceServers!;
+    _iceServers = await _calls.iceServers();
+    return _iceServers!;
   }
 
   void _handleUserLeft(Map<String, dynamic> e) {

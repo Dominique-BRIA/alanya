@@ -28,6 +28,9 @@ class _CreateMeetingScreenState extends State<CreateMeetingScreen> {
   int _duree = 3600; // 1h par défaut
   bool _loading = false;
 
+  /// Date/heure de début choisie. `null` = la réunion démarre immédiatement.
+  DateTime? _startTime;
+
   // Contacts sélectionnés comme participants
   final List<Contact> _selectedContacts = [];
 
@@ -83,6 +86,54 @@ class _CreateMeetingScreenState extends State<CreateMeetingScreen> {
     }
   }
 
+  /// Ouvre les sélecteurs de date puis d'heure.
+  ///
+  /// On annule toute la saisie si l'utilisateur fait retour au choix de la
+  /// date : commencer un `DateTime` sans date n'a pas de sens. L'heure est
+  /// préremplie avec l'heure courante pour gagner du temps.
+  Future<void> _pickStartTime() async {
+    final now = DateTime.now();
+    final initial = _startTime ?? now;
+    final date = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(now.year, now.month, now.day),
+      lastDate: now.add(const Duration(days: 366)),
+      helpText: "Date de la réunion",
+    );
+    if (date == null || !mounted) return;
+
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(initial),
+      helpText: "Heure de début",
+    );
+    if (time == null || !mounted) return;
+
+    final picked =
+        DateTime(date.year, date.month, date.day, time.hour, time.minute);
+    // Empêche de planifier dans le passé (au plus tôt : maintenant).
+    setState(() => _startTime = picked.isBefore(now) ? now : picked);
+  }
+
+  String _formatStart(DateTime? dt) {
+    if (dt == null) return "Maintenant";
+    final now = DateTime.now();
+    final local = dt.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    final h = "${two(local.hour)}:${two(local.minute)}";
+    final sameDay = local.year == now.year &&
+        local.month == now.month &&
+        local.day == now.day;
+    if (sameDay) return "Aujourd'hui à $h";
+    final tomorrow = now.add(const Duration(days: 1));
+    final isTomorrow = local.year == tomorrow.year &&
+        local.month == tomorrow.month &&
+        local.day == tomorrow.day;
+    if (isTomorrow) return "Demain à $h";
+    return "${two(local.day)}/${two(local.month)}/${local.year} à $h";
+  }
+
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _loading = true);
@@ -98,6 +149,7 @@ class _CreateMeetingScreenState extends State<CreateMeetingScreen> {
             typeMedia: _typeMedia,
             duree: _duree,
             participantNumbers: numbers.isEmpty ? null : numbers,
+            startTime: _startTime?.toUtc().toIso8601String(),
           );
 
       if (!mounted) return;
@@ -165,6 +217,67 @@ class _CreateMeetingScreenState extends State<CreateMeetingScreen> {
                 ),
                 validator: (v) =>
                     (v ?? "").trim().isEmpty ? "L'objet est requis" : null,
+              ),
+              const SizedBox(height: 20),
+
+              // --- Date / heure de début ---
+              const Text("Début",
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              InkWell(
+                onTap: _pickStartTime,
+                borderRadius: BorderRadius.circular(14),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: themed(
+                        context,
+                        light: Colors.white,
+                        dark: surfacesOf(context).surface),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                        color: themed(
+                            context,
+                            light: AlanyaColors.grey200,
+                            dark: AlanyaColors.ligne),
+                        width: 0.5),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.event, color: accentOf(context)),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          _formatStart(_startTime),
+                          style: TextStyle(
+                            color: _startTime == null
+                                ? mutedOf(context, AlanyaColors.grey400)
+                                : themed(
+                                    context,
+                                    light: AlanyaColors.ink,
+                                    dark: AlanyaColors.craie),
+                          ),
+                        ),
+                      ),
+                      if (_startTime != null)
+                        IconButton(
+                          icon: const Icon(Icons.close, size: 18),
+                          onPressed: () => setState(() => _startTime = null),
+                          tooltip: "Démarrer maintenant",
+                        ),
+                      Icon(Icons.chevron_right,
+                          color: mutedOf(context, AlanyaColors.grey400)),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                "Laisse vide pour démarrer la réunion immédiatement.",
+                style: TextStyle(
+                    fontSize: 12,
+                    color: mutedOf(context, AlanyaColors.grey500)),
               ),
               const SizedBox(height: 20),
 

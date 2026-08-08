@@ -41,6 +41,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     _ctrl = MeetingController(
       context.read<MeetingsRepository>(),
       context.read(),
+      context.read(),
     );
     final user = context.read<AuthController>().user;
     if (user != null) {
