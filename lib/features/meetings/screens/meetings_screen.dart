@@ -20,22 +20,66 @@ class MeetingsScreen extends StatefulWidget {
 }
 
 class _MeetingsScreenState extends State<MeetingsScreen>
-    with MultiSelectMixin<MeetingsScreen> {
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin, MultiSelectMixin<MeetingsScreen> {
   List<Meeting>? _meetings;
   bool _error = false;
   Timer? _pollTimer;
+  bool _pollingPaused = false;
+  TabController? _tabController;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
+    _pollingPaused = false;
     _pollTimer = Timer.periodic(const Duration(seconds: 10), (_) => _load());
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _tabController?.dispose();
     _pollTimer?.cancel();
     super.dispose();
+  }
+
+  /// Reprend quand l'app revient au premier plan. Met aussi en pause le
+  /// polling quand l'app passe en arrière-plan : inutile de recharger l'API
+  /// toutes les 10 s quand personne ne regarde l'écran.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _load();
+      _startPolling();
+    } else if (state == AppLifecycleState.paused) {
+      _stopPolling();
+    }
+  }
+
+  /// [visible] est faux quand l'onglet Réunions n'est pas affiché (un autre
+  /// onglet de la navigation est au premier plan). Évite de poller en arrière-
+  /// plan d'onglet.
+  // ignore: avoid_positional_boolean_parameters
+  void _setVisible(bool visible) {
+    if (visible) {
+      _startPolling();
+    } else {
+      _stopPolling();
+    }
+  }
+
+  void _startPolling() {
+    if (!_pollingPaused) return;
+    _pollingPaused = false;
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(const Duration(seconds: 10), (_) => _load());
+  }
+
+  void _stopPolling() {
+    _pollingPaused = true;
+    _pollTimer?.cancel();
+    _pollTimer = null;
   }
 
   Future<void> _load() async {
@@ -90,65 +134,69 @@ class _MeetingsScreenState extends State<MeetingsScreen>
 
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 3,
-      child: MotifBackground(
-        overlayOpacity: 0.92,
-        child: isSelecting
-            ? Scaffold(
-                appBar: selectAppBar(
-                  title: "Réunions",
-                  onDelete: _deleteSelected,
-                  onCancel: clearSelection,
-                  onSelectAll: () => selectAll(
-                      (_meetings ?? [])
-                          .where((m) => m.isFinished)
-                          .map((m) => m.idMeeting.toString())
-                          .toList()),
-                ),
-                body: RefreshIndicator(
-                  onRefresh: _load,
-                  child: TabBarView(
-                    children: [
-                      _buildTabContent("En cours"),
-                      _buildTabContent("À venir"),
-                      _buildTabContent("Terminée"),
-                    ],
-                  ),
-                ),
-              )
-            : Scaffold(
-                appBar: AppBar(
-                  title: const Text("Réunions"),
-                  bottom: const TabBar(
-                    tabs: [
-                      Tab(text: "En cours"),
-                      Tab(text: "À venir"),
-                      Tab(text: "Terminée"),
-                    ],
-                    labelColor: AlanyaColors.terracotta,
-                    unselectedLabelColor: AlanyaColors.craie2,
-                    indicatorColor: AlanyaColors.terracotta,
-                    indicatorWeight: 2.5,
-                  ),
-                ),
-                body: RefreshIndicator(
-                  onRefresh: _load,
-                  child: TabBarView(
-                    children: [
-                      _buildTabContent("En cours"),
-                      _buildTabContent("À venir"),
-                      _buildTabContent("Terminée"),
-                    ],
-                  ),
-                ),
-                floatingActionButton: FloatingActionButton(
-                  backgroundColor: accentOf(context),
-                  onPressed: _create,
-                  child: const Icon(Icons.add, color: Colors.white),
+    _tabController ??= TabController(length: 3, vsync: this);
+    return MotifBackground(
+      overlayOpacity: 0.92,
+      child: isSelecting
+          ? Scaffold(
+              appBar: selectAppBar(
+                title: "Réunions",
+                onDelete: _deleteSelected,
+                onCancel: clearSelection,
+                onSelectAll: () => selectAll(
+                    (_meetings ?? [])
+                        .where((m) => m.isFinished)
+                        .map((m) => m.idMeeting.toString())
+                        .toList()),
+              ),
+              body: RefreshIndicator(
+                onRefresh: _load,
+                child: TabBarView(
+                  controller: _tabController,
+                  children: [
+                    _buildTabContent("En cours"),
+                    _buildTabContent("À venir"),
+                    _buildTabContent("Terminée"),
+                  ],
                 ),
               ),
-      ),
+            )
+          : Scaffold(
+              appBar: AppBar(
+                title: const Text("Réunions"),
+                bottom: TabBar(
+                  controller: _tabController,
+                  tabs: const [
+                    Tab(text: "En cours"),
+                    Tab(text: "À venir"),
+                    Tab(text: "Terminée"),
+                  ],
+                  labelColor: AlanyaColors.terracotta,
+                  unselectedLabelColor: AlanyaColors.craie2,
+                  indicatorColor: AlanyaColors.terracotta,
+                  indicatorWeight: 2.5,
+                ),
+              ),
+              body: _VisibilityObserver(
+                onVisibilityChanged: _setVisible,
+                child: RefreshIndicator(
+                  onRefresh: _load,
+                  child: TabBarView(
+                    controller: _tabController,
+                    children: [
+                      _buildTabContent("En cours"),
+                      _buildTabContent("À venir"),
+                      _buildTabContent("Terminée"),
+                    ],
+                  ),
+                ),
+              ),
+              floatingActionButton: FloatingActionButton(
+                backgroundColor: accentOf(context),
+                onPressed: _create,
+                child: const Icon(Icons.add, color: Colors.white),
+              ),
+            ),
     );
   }
 
@@ -276,4 +324,36 @@ class _MeetingsScreenState extends State<MeetingsScreen>
     }
     return "${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}";
   }
+}
+
+/// Prévient [onVisibilityChanged] quand ce widget entre ou sort de l'arbre
+/// visible. Utilisé pour mettre en pause le polling de l'onglet Réunions
+/// quand un autre onglet est affiché.
+class _VisibilityObserver extends StatefulWidget {
+  const _VisibilityObserver({required this.child, required this.onVisibilityChanged});
+
+  final Widget child;
+  final ValueChanged<bool> onVisibilityChanged;
+
+  @override
+  State<_VisibilityObserver> createState() => _VisibilityObserverState();
+}
+
+class _VisibilityObserverState extends State<_VisibilityObserver> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.onVisibilityChanged(true);
+    });
+  }
+
+  @override
+  void dispose() {
+    widget.onVisibilityChanged(false);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }

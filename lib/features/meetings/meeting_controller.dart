@@ -42,7 +42,19 @@ class MeetingController extends ChangeNotifier {
 
   // Participants
   final Map<String, String> _participantNames = {}; // userId -> displayName
-  final Set<String> _connectedPeerIds = {};
+  final Map<String, String?> _participantAvatars = {}; // userId -> avatarUrl
+  final Set<String> _connectedPeerIds = {}; // participants annoncés par le serveur
+
+  /// État muet des pairs, tel qu'annoncé par eux-mêmes via la signalisation
+  /// applicative (`meeting_signal` de type `state`).
+  ///
+  /// On ne peut pas se fier à `MediaStreamTrack.muted`/`onMute` : ces valeurs
+  /// ne changent que pour des causes externes (coupure réseau), pas quand
+  /// l'autre utilisateur coupe son micro avec `track.enabled = false` — et
+  /// c'est précisément ce qu'on veut afficher. On fait donc circuler l'état
+  /// muet dans le canal de signalisation déjà relayé de pair à pair par le
+  /// serveur, qui n'en inspecte pas le contenu.
+  final Map<String, bool> _peerMuted = {};
 
   // WebRTC
   WebrtcGroupMesh? _mesh;
@@ -59,8 +71,19 @@ class MeetingController extends ChangeNotifier {
   // Getters
   MediaStream? get localStream => _mesh?.localStream;
   Map<String, MediaStream> get remoteStreams => _mesh?.remoteStreams ?? {};
+
   int get connectedPeerCount => _mesh?.connectedCount ?? 0;
   Map<String, String> get participantNames => _participantNames;
+  Map<String, String?> get participantAvatars => _participantAvatars;
+
+  /// Nombre de participants logiquement présents dans la salle (moi compris),
+  /// indépendamment de l'état de négociation WebRTC. Plus fiable que
+  /// [connectedPeerCount] + 1, qui ne compte que les pairs dont le flux média
+  /// est déjà établi (un nouveau venu y manquait pendant quelques secondes).
+  int get participantCount => _connectedPeerIds.length + 1;
+
+  /// Le pair [peerId] a-t-il son micro coupé ? Faux si on ne sait pas encore.
+  bool isPeerMuted(String peerId) => _peerMuted[peerId] ?? false;
 
   void bindUser(String userId, String displayName) {
     myUserId = userId;
@@ -153,7 +176,29 @@ class MeetingController extends ChangeNotifier {
     _mesh?.localStream?.getAudioTracks().forEach((track) {
       track.enabled = !isMuted;
     });
+    _broadcastState();
     notifyListeners();
+  }
+
+  /// Diffuse mon état (muet ou non) à tous les pairs déjà connectés, via le
+  /// canal de signalisation applicatif. Appelé après un toggle et à l'arrivée
+  /// d'un nouveau pair pour qu'il connaisse mon état courant.
+  void _broadcastState({String? onlyTo}) {
+    final id = activeMeetingId;
+    if (id == null) return;
+    final payload = {
+      "kind": "meeting_state",
+      "muted": isMuted,
+    };
+    if (onlyTo != null) {
+      _rt.meetingSignal(id, onlyTo, payload);
+    } else {
+      for (final peerId in _connectedPeerIds) {
+        if (peerId != myUserId) {
+          _rt.meetingSignal(id, peerId, payload);
+        }
+      }
+    }
   }
 
   /// Toggle caméra.
@@ -168,6 +213,31 @@ class MeetingController extends ChangeNotifier {
   /// Bascule caméra avant/arrière.
   Future<void> switchCamera() async {
     await _mesh?.switchCamera();
+  }
+
+  /// Renseigne l'avatar d'un participant (venu du détail de la réunion), pour
+  /// l'afficher en l'absence de flux vidéo.
+  void setParticipantAvatar(String userId, String? avatarUrl) {
+    if (avatarUrl == null) {
+      _participantAvatars.remove(userId);
+    } else {
+      _participantAvatars[userId] = avatarUrl;
+    }
+    notifyListeners();
+  }
+
+  /// Enregistre les avatars d'une liste de participants [ {userId, avatarUrl} ].
+  void setParticipantAvatars(Iterable<MapEntry<String, String?>> entries) {
+    var changed = false;
+    for (final e in entries) {
+      if (e.value == null) {
+        changed |= _participantAvatars.remove(e.key) != null;
+      } else if (_participantAvatars[e.key] != e.value) {
+        _participantAvatars[e.key] = e.value;
+        changed = true;
+      }
+    }
+    if (changed) notifyListeners();
   }
 
   /// Toggle haut-parleur.
@@ -209,7 +279,9 @@ class MeetingController extends ChangeNotifier {
     if (activeMeetingId == null) return;
     traceAppel('réunion : pair $peerId perdu, retrait de la grille');
     _participantNames.remove(peerId);
+    _participantAvatars.remove(peerId);
     _connectedPeerIds.remove(peerId);
+    _peerMuted.remove(peerId);
     _mesh?.removePeer(peerId);
     notifyListeners();
   }
@@ -264,6 +336,8 @@ class MeetingController extends ChangeNotifier {
         _connectedPeerIds.add(peerId);
       }
     }
+    // Annonce mon état muet courant à ceux déjà présents.
+    _broadcastState();
     notifyListeners();
   }
 
@@ -280,6 +354,9 @@ class MeetingController extends ChangeNotifier {
     // Il entre après moi : j'offre. Deux événements distincts portent les deux
     // rôles, donc deux pairs ne peuvent jamais s'offrir mutuellement.
     _mesh?.connectToPeer(userId, asOfferer: true);
+    // Lui communique mon état muet courant, sinon il m'afficherait toujours
+    // « micro actif » tant que je ne bascule pas moi-même.
+    _broadcastState(onlyTo: userId);
     notifyListeners();
   }
 
@@ -291,7 +368,9 @@ class MeetingController extends ChangeNotifier {
     if (userId == null) return;
 
     _participantNames.remove(userId);
+    _participantAvatars.remove(userId);
     _connectedPeerIds.remove(userId);
+    _peerMuted.remove(userId);
     _mesh?.removePeer(userId);
     notifyListeners();
   }
@@ -303,6 +382,17 @@ class MeetingController extends ChangeNotifier {
     final fromUserId = e["fromUserId"] as String?;
     final signal = e["signal"] as Map<String, dynamic>?;
     if (fromUserId == null || signal == null) return;
+
+    // Signal applicatif (état muet) : il transite dans le même canal que la
+    // négociation WebRTC mais n'est pas pour elle.
+    if (signal["kind"] == "meeting_state") {
+      final muted = signal["muted"] == true;
+      if (_peerMuted[fromUserId] != muted) {
+        _peerMuted[fromUserId] = muted;
+        notifyListeners();
+      }
+      return;
+    }
 
     _mesh?.handleSignal(fromUserId, signal);
   }
@@ -317,7 +407,9 @@ class MeetingController extends ChangeNotifier {
     connectedSince = null;
     _roomScreensOpen = 0;
     _participantNames.clear();
+    _participantAvatars.clear();
     _connectedPeerIds.clear();
+    _peerMuted.clear();
     notifyListeners();
   }
 

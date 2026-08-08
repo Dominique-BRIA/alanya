@@ -32,8 +32,6 @@ class MeetingRoomScreen extends StatefulWidget {
 
 class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   bool _joining = true;
-  String? _error;
-  bool _popping = false;
 
   @override
   void initState() {
@@ -57,11 +55,17 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       );
       if (mounted) setState(() => _joining = false);
     } catch (e) {
+      // Permission refusée ou autre échec : on ne reste pas planté sur un
+      // écran d'erreur sans recours. On affiche un message et on revient, car
+      // la réunion n'a pas démarré localement.
       if (mounted) {
-        setState(() {
-          _joining = false;
-          _error = "Impossible de rejoindre : $e";
-        });
+        final msg = e
+            .toString()
+            .replaceFirst("Exception: ", "");
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(msg)),
+        );
+        Navigator.of(context).maybePop();
       }
     }
   }
@@ -79,8 +83,6 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   /// Réduit la salle SANS quitter : la réunion continue, le bandeau prend le
   /// relais. C'est le geste de retour système comme du bouton dédié.
   void _minimize() {
-    if (_popping || !mounted) return;
-    _popping = true;
     Navigator.of(context).maybePop();
   }
 
@@ -124,26 +126,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                     ],
                   ),
                 )
-              : _error != null
-                  ? Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.error_outline,
-                              size: 48, color: Colors.red),
-                          const SizedBox(height: 12),
-                          Text(_error!,
-                              style: const TextStyle(color: Colors.white70),
-                              textAlign: TextAlign.center),
-                          const SizedBox(height: 24),
-                          ElevatedButton(
-                            onPressed: () => Navigator.pop(context),
-                            child: const Text("Retour"),
-                          ),
-                        ],
-                      ),
-                    )
-                  : Column(
+              : Column(
                       children: [
                         _buildHeader(),
                         Expanded(child: _buildVideoGrid()),
@@ -204,20 +187,22 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   }
 
   /// Sous-titre d'en-tête : minuteur de participation une fois le flux local
-  /// prêt, sinon nombre de participants. Le minuteur vient du contrôleur pour
-  /// rester cohérent avec celui affiché dans le bandeau, même si l'écran est
-  /// recréé.
+  /// prêt, sinon nombre de participants. Le compteur retenu est
+  /// [MeetingController.participantCount] (participants annoncés par le
+  /// serveur), pas le nombre de flux média connectés — un nouveau venu doit
+  /// être compté tout de suite, pas seulement après sa négociation WebRTC.
   String _subtitle(MeetingController ctrl) {
     final depuis = ctrl.connectedSince;
+    final compte = ctrl.participantCount;
     if (depuis != null) {
       final d = DateTime.now().difference(depuis);
       String two(int n) => n.toString().padLeft(2, '0');
       final t = d.inHours > 0
           ? "${two(d.inHours)}:${two(d.inMinutes.remainder(60))}:${two(d.inSeconds.remainder(60))}"
           : "${two(d.inMinutes.remainder(60))}:${two(d.inSeconds.remainder(60))}";
-      return "${ctrl.connectedPeerCount + 1} · $t";
+      return "$compte · $t";
     }
-    return "${ctrl.connectedPeerCount + 1} participant(s)";
+    return "$compte participant(s)";
   }
 
   Widget _buildVideoGrid() {
@@ -225,8 +210,16 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       listenable: context.read<MeetingController>(),
       builder: (_, __) {
         final ctrl = context.read<MeetingController>();
-        final remoteCount = ctrl.remoteStreams.length;
-        final total = remoteCount + 1; // +1 pour le local
+        final remoteIds = ctrl.remoteStreams.keys.toList();
+        final remoteCount = remoteIds.length;
+        // Participants logiques (y compris ceux dont le flux n'est pas encore
+        // négocié) : on leur réserve une case avec un avatar en attendant.
+        final logicalOthers = ctrl.participantNames.keys.toList();
+        // Ceux qui n'ont pas encore de flux : affichés en avatar.
+        final pending = logicalOthers
+            .where((id) => !ctrl.remoteStreams.containsKey(id))
+            .toList();
+        final total = 1 + remoteCount + pending.length;
 
         if (total <= 1) {
           // Seul dans la réunion
@@ -243,7 +236,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
           );
         }
 
-        if (total == 2) {
+        if (total == 2 && remoteCount == 1) {
           // 1v1 : local en petit coin, remote en grand
           return Stack(
             children: [
@@ -259,9 +252,15 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
           );
         }
 
-        // Grille pour 3+ participants
+        // Grille. Les tuiles sont ordonnées : soi, les flux distants, puis les
+        // participants en attente de média (avatar).
         final cols = total <= 4 ? 2 : 3;
         final rows = (total / cols).ceil();
+        final tiles = <Widget>[
+          _localVideo(isLarge: false),
+          ...remoteIds.map(_remoteVideoTile),
+          ...pending.map((id) => _remoteVideoTile(id)),
+        ];
         return GridView.builder(
           padding: const EdgeInsets.all(8),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
@@ -270,12 +269,8 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
             crossAxisSpacing: 4,
             childAspectRatio: rows == 1 ? 1.5 : 1.0,
           ),
-          itemCount: total,
-          itemBuilder: (_, i) {
-            if (i == 0) return _localVideo(isLarge: false);
-            final peerId = ctrl.remoteStreams.keys.elementAt(i - 1);
-            return _remoteVideoTile(peerId);
-          },
+          itemCount: tiles.length,
+          itemBuilder: (_, i) => tiles[i],
         );
       },
     );
@@ -311,28 +306,57 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     final ctrl = context.watch<MeetingController>();
     final stream = ctrl.remoteStreams[peerId];
     final name = ctrl.participantNames[peerId] ?? "Participant";
-    if (stream == null) {
-      return _avatarPlaceholder(name: name, isLarge: false);
-    }
+    final avatarUrl = ctrl.participantAvatars[peerId];
+    final muted = ctrl.isPeerMuted(peerId);
+    final hasVideo = stream != null;
+
     return ClipRRect(
       borderRadius: BorderRadius.circular(12),
       child: Stack(
+        fit: StackFit.expand,
         children: [
-          Positioned.fill(
-            child: RTCVideoRendererObject(stream: stream),
-          ),
+          if (hasVideo)
+            RTCVideoRendererObject(stream: stream)
+          else
+            _avatarPlaceholder(
+                name: name, isLarge: false, avatarUrl: avatarUrl),
+          // Bandeau nom + état muet
           Positioned(
             left: 8,
+            right: 8,
             bottom: 8,
-            child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.black54,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(name,
-                  style: const TextStyle(color: Colors.white, fontSize: 11)),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style:
+                          const TextStyle(color: Colors.white, fontSize: 11),
+                    ),
+                  ),
+                ),
+                if (muted) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: const BoxDecoration(
+                      color: Colors.red,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.mic_off,
+                        color: Colors.white, size: 14),
+                  ),
+                ],
+              ],
             ),
           ),
         ],
@@ -340,7 +364,11 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     );
   }
 
-  Widget _avatarPlaceholder({required String name, required bool isLarge}) {
+  Widget _avatarPlaceholder({
+    required String name,
+    required bool isLarge,
+    String? avatarUrl,
+  }) {
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF2A2A2A),
@@ -349,7 +377,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       child: Center(
         child: AvatarCircle(
           name: name,
-          avatarUrl: null,
+          avatarUrl: avatarUrl,
           radius: isLarge ? 40 : 24,
           backgroundColor: AlanyaColors.terracotta.withValues(alpha: 0.6),
         ),
@@ -455,6 +483,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   }
 
   void _showParticipants() {
+    final me = context.read<AuthController>().user;
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF1E1E1E),
@@ -466,53 +495,77 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
           listenable: context.read<MeetingController>(),
           builder: (_, __) {
             final ctrl = context.read<MeetingController>();
-            final peers = ctrl.remoteStreams.keys.toList();
+            final peerIds = ctrl.participantNames.keys.toList();
             return SafeArea(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Text("Participants",
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold)),
-                  ),
-                  // Moi
-                  ListTile(
-                    leading: AvatarCircle(
-                      name: context.read<AuthController>().user?.pseudo ??
-                          "Moi",
-                      avatarUrl: null,
-                      radius: 18,
-                      backgroundColor: AlanyaColors.terracotta,
-                    ),
-                    title:
-                        const Text("Vous", style: TextStyle(color: Colors.white)),
-                    trailing: Icon(
-                      ctrl.isMuted ? Icons.mic_off : Icons.mic,
-                      color: ctrl.isMuted ? Colors.red : Colors.white54,
-                      size: 20,
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      children: [
+                        const Expanded(
+                          child: Text("Participants",
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold)),
+                        ),
+                        Text("${ctrl.participantCount}",
+                            style: const TextStyle(color: Colors.white54)),
+                      ],
                     ),
                   ),
-                  // Autres
-                  ...peers.map((peerId) {
-                    final name =
-                        ctrl.participantNames[peerId] ?? "Participant";
-                    return ListTile(
-                      leading: AvatarCircle(
-                        name: name,
-                        avatarUrl: null,
-                        radius: 18,
-                        backgroundColor: AlanyaColors.forest,
-                      ),
-                      title: Text(name,
-                          style: const TextStyle(color: Colors.white)),
-                      trailing: const Icon(Icons.mic,
-                          color: Colors.white54, size: 20),
-                    );
-                  }),
+                  Flexible(
+                    child: ListView(
+                      shrinkWrap: true,
+                      children: [
+                        // Moi
+                        ListTile(
+                          leading: AvatarCircle(
+                            name: me?.pseudo ?? "Moi",
+                            avatarUrl: me?.avatarUrl,
+                            radius: 18,
+                            backgroundColor: AlanyaColors.terracotta,
+                          ),
+                          title: Text(
+                              me?.pseudo ?? "Vous",
+                              style: const TextStyle(color: Colors.white)),
+                          trailing: Icon(
+                            ctrl.isMuted ? Icons.mic_off : Icons.mic,
+                            color:
+                                ctrl.isMuted ? Colors.red : Colors.white54,
+                            size: 20,
+                          ),
+                        ),
+                        const Divider(color: Colors.white12, height: 1),
+                        // Autres
+                        ...peerIds.map((peerId) {
+                          final name =
+                              ctrl.participantNames[peerId] ?? "Participant";
+                          final avatar =
+                              ctrl.participantAvatars[peerId];
+                          final muted = ctrl.isPeerMuted(peerId);
+                          return ListTile(
+                            leading: AvatarCircle(
+                              name: name,
+                              avatarUrl: avatar,
+                              radius: 18,
+                              backgroundColor: AlanyaColors.forest,
+                            ),
+                            title: Text(name,
+                                style:
+                                    const TextStyle(color: Colors.white)),
+                            trailing: Icon(
+                              muted ? Icons.mic_off : Icons.mic,
+                              color: muted ? Colors.red : Colors.white54,
+                              size: 20,
+                            ),
+                          );
+                        }),
+                      ],
+                    ),
+                  ),
                   const SizedBox(height: 16),
                 ],
               ),

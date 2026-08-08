@@ -30,6 +30,15 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
   void initState() {
     super.initState();
     _meeting = widget.meeting;
+    // Partage les avatars connus avec le contrôleur de salle, pour les afficher
+    // en l'absence de flux vidéo (le serveur temps réel ne les envoie pas).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<MeetingController>().setParticipantAvatars(
+            _meeting.participants
+                .map((p) => MapEntry(p.userId, p.avatarUrl)),
+          );
+    });
   }
 
   bool get _isOrganiser {
@@ -46,7 +55,13 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
     try {
       final updated =
           await context.read<MeetingsRepository>().fetchMeeting(_meeting.idMeeting);
-      if (mounted) setState(() => _meeting = updated);
+      if (mounted) {
+        setState(() => _meeting = updated);
+        context.read<MeetingController>().setParticipantAvatars(
+              updated.participants
+                  .map((p) => MapEntry(p.userId, p.avatarUrl)),
+            );
+      }
     } catch (_) {}
   }
 
