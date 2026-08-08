@@ -205,11 +205,23 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     return "$compte participant(s)";
   }
 
+  /// Zone centrale : vignettes des participants.
+  ///
+  /// En RÉUNION AUDIO, on n'instancie AUCUN [RTCVideoRenderer] : le flux local
+  /// ne contient qu'une piste audio, et créer des renderers vidéo réveillait la
+  /// caméra sur certaines implémentations. On affiche à la place une liste
+  /// d'avatars (le même style que la fiche participants). En vidéo, on rend les
+  /// flux comme avant.
   Widget _buildVideoGrid() {
     return ListenableBuilder(
       listenable: context.read<MeetingController>(),
       builder: (_, __) {
         final ctrl = context.read<MeetingController>();
+
+        if (!ctrl.activeIsVideo) {
+          return _buildAudioGrid(ctrl);
+        }
+
         final remoteIds = ctrl.remoteStreams.keys.toList();
         final remoteCount = remoteIds.length;
         // Participants logiques (y compris ceux dont le flux n'est pas encore
@@ -273,6 +285,85 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
           itemBuilder: (_, i) => tiles[i],
         );
       },
+    );
+  }
+
+  /// Grille affichée en réunion AUDIO : avatars uniquement, pas de renderer.
+  Widget _buildAudioGrid(MeetingController ctrl) {
+    final me = context.read<AuthController>().user;
+    // Moi + participants annoncés.
+    final entries = <({String id, String name, String? avatar, bool muted, bool me})>[
+      (
+        id: "me",
+        name: me?.pseudo ?? "Vous",
+        avatar: me?.avatarUrl,
+        muted: ctrl.isMuted,
+        me: true,
+      ),
+      for (final id in ctrl.participantNames.keys)
+        (
+          id: id,
+          name: ctrl.participantNames[id] ?? "Participant",
+          avatar: ctrl.participantAvatars[id],
+          muted: ctrl.isPeerMuted(id),
+          me: false,
+        ),
+    ];
+
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Wrap(
+          spacing: 28,
+          runSpacing: 28,
+          alignment: WrapAlignment.center,
+          children: entries.map((e) {
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    AvatarCircle(
+                      name: e.name,
+                      avatarUrl: e.avatar,
+                      radius: 44,
+                      backgroundColor: e.me
+                          ? AlanyaColors.terracotta
+                          : AlanyaColors.forest,
+                    ),
+                    if (e.muted)
+                      Positioned(
+                        right: -4,
+                        bottom: -4,
+                        child: Container(
+                          padding: const EdgeInsets.all(5),
+                          decoration: const BoxDecoration(
+                            color: Colors.red,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.mic_off,
+                              color: Colors.white, size: 16),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: 96,
+                  child: Text(
+                    e.name,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white70, fontSize: 13),
+                  ),
+                ),
+              ],
+            );
+          }).toList(),
+        ),
+      ),
     );
   }
 
@@ -392,8 +483,10 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         final ctrl = context.read<MeetingController>();
         return Container(
           padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 24),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          child: Wrap(
+            alignment: WrapAlignment.spaceEvenly,
+            spacing: 16,
+            runSpacing: 12,
             children: [
               // Micro
               _controlButton(
@@ -402,15 +495,16 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                 isActive: !ctrl.isMuted,
                 onTap: ctrl.toggleMute,
               ),
-              // Caméra
-              _controlButton(
-                icon: ctrl.isCameraOff
-                    ? Icons.videocam_off
-                    : Icons.videocam,
-                label: ctrl.isCameraOff ? "Caméra off" : "Caméra",
-                isActive: !ctrl.isCameraOff,
-                onTap: ctrl.toggleCamera,
-              ),
+              // Caméra (vidéo uniquement)
+              if (ctrl.activeIsVideo)
+                _controlButton(
+                  icon: ctrl.isCameraOff
+                      ? Icons.videocam_off
+                      : Icons.videocam,
+                  label: ctrl.isCameraOff ? "Caméra off" : "Caméra",
+                  isActive: !ctrl.isCameraOff,
+                  onTap: ctrl.toggleCamera,
+                ),
               // Bascule caméra avant/arrière (vidéo uniquement)
               if (ctrl.activeIsVideo)
                 _controlButton(
