@@ -58,14 +58,12 @@ class _CallsScreenState extends State<CallsScreen>
   /// Insère un appel poussé par le serveur, sans requête. Remplace par
   /// identifiant : le même appel change d'état plusieurs fois.
   void _integreAppel(CallRecord c) {
-    final cc = context.read<CallController>();
-    final ajuste = cc.adjustCall(c);
     final liste = List<CallRecord>.from(_calls ?? []);
-    final i = liste.indexWhere((x) => x.id == ajuste.id);
+    final i = liste.indexWhere((x) => x.id == c.id);
     if (i >= 0) {
-      liste[i] = ajuste;
+      liste[i] = c;
     } else {
-      liste.add(ajuste);
+      liste.add(c);
     }
     setState(() => _calls = CallStatusFormalisme.sortAndLimit20(liste));
     CallCache.putAll(liste);
@@ -85,23 +83,21 @@ class _CallsScreenState extends State<CallsScreen>
   }
 
   Future<void> _load() async {
-    final cc = context.read<CallController>();
     final cached = await CallCache.getAll();
     if (cached.isNotEmpty && mounted) {
       setState(() {
-        _calls = CallStatusFormalisme.sortAndLimit20(cc.adjustCalls(cached));
+        _calls = CallStatusFormalisme.sortAndLimit20(cached);
         _error = false;
       });
     }
     try {
       final calls = await context.read<CallsRepository>().history();
       if (!mounted) return;
-      final ajustes = cc.adjustCalls(calls);
       setState(() {
-        _calls = CallStatusFormalisme.sortAndLimit20(ajustes);
+        _calls = CallStatusFormalisme.sortAndLimit20(calls);
         _error = false;
       });
-      await CallCache.putAll(ajustes);
+      await CallCache.putAll(calls);
     } catch (_) {
       if (mounted) {
         setState(() => _error = _calls == null || _calls!.isEmpty);

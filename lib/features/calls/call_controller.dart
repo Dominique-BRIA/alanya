@@ -100,13 +100,6 @@ class CallController extends ChangeNotifier {
   bool get isTransferring => _pendingTransfer;
   Timer? _transferTimeout;
 
-  /// Appel que l'utilisateur a quitté alors qu'il continue pour d'autres
-  /// participants (transfert / sortie de groupe). Le backend garde l'appel
-  /// globalement ONGOING, donc l'historique le dit encore « en cours ». On
-  /// le mémorise pour l'afficher comme terminé LOCALEMENT (sinon la
-  /// conversation et la liste des appels restent bloquées sur « En cours »).
-  String? leftOngoingCallId;
-
   /// Nombre d'écrans d'appel affichés, et non un simple booléen.
   ///
   /// ⚠️ L'écran d'appel peut être empilé deux fois — l'utilisateur revient par
@@ -145,38 +138,6 @@ class CallController extends ChangeNotifier {
     // Nettoie les appels bloqués en base de données (l'app a crashé pendant un appel)
     _cleanupStaleCalls();
   }
-
-  /// Remappe un appel que l'utilisateur a quitté alors qu'il continue pour
-  /// d'autres (transfert / départ de groupe). Le serveur le garde ONGOING, ce
-  /// qui l'afficherait « en cours » pour toujours dans l'historique et le fil
-  /// de discussion. On le présente ici comme un appel répondu/terminé.
-  CallRecord adjustCall(CallRecord c) {
-    if (leftOngoingCallId != null &&
-        c.id == leftOngoingCallId &&
-        c.status == "ONGOING") {
-      final ended = c.endedAt ?? DateTime.now();
-      final duration = c.answeredAt != null
-          ? ended.difference(c.answeredAt!).inSeconds
-          : c.durationSec;
-      // On écrase AUSSI les libellés précalculés par le serveur : sans ça,
-      // preciseStatus resterait « En cours » (l'appel est toujours ONGOING
-      // pour A et C) et continuerait de s'afficher comme tel. On force le
-      // repli local « appel répondu/terminé ».
-      return c.copyWith(
-        status: "ENDED",
-        endedAt: ended,
-        durationSec: duration,
-        preciseStatus: null,
-        detail: null,
-        isFailed: false,
-        colorHint: c.isOutgoing ? "positive" : "info",
-      );
-    }
-    return c;
-  }
-
-  List<CallRecord> adjustCalls(Iterable<CallRecord> calls) =>
-      calls.map(adjustCall).toList();
 
   /// Nettoie les anciens appels restés en statut RINGING/ONGOING pour cet user.
   /// Évite l'erreur "Vous êtes déjà en appel" (409 BUSY) après un crash.
@@ -543,9 +504,6 @@ class CallController extends ChangeNotifier {
           await _calls.leave(id);
           _rt.callState(id, "left",
               userId: myUserId, displayName: myDisplayName);
-          // On quitte un appel qui continue pour les autres : l'historique le
-          // verra encore ONGOING, on le marque comme terminé localement.
-          leftOngoingCallId = id;
         } else {
           await _calls.end(id);
           _rt.callState(id, "ended",
@@ -787,9 +745,6 @@ class CallController extends ChangeNotifier {
 
     _rt.callState(callId, "left", userId: myUserId, displayName: myDisplayName);
     await _stopMesh();
-    // On quitte un appel qui continue entre A et C : l'historique le verra
-    // encore ONGOING. On l'enregistre pour ne plus l'afficher « en cours ».
-    leftOngoingCallId = callId;
     // Même raison que dans `hangUp` : `activeCallId` vient d'être neutralisé,
     // sans cet identifiant l'écran natif resterait affiché après le transfert.
     _clear(idAppel: callId);

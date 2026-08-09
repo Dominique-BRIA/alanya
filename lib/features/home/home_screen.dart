@@ -261,19 +261,16 @@ class _ConversationsTabState extends State<_ConversationsTab>
     try {
       final calls = await context.read<CallsRepository>().history();
       if (!mounted) return;
-      final cc = context.read<CallController>();
-      final ajustes = cc.adjustCalls(calls);
-      _appliqueCalls(ajustes);
+      _appliqueCalls(calls);
       // Le cache est réalimenté ici, sinon il resterait figé sur ce que
       // l'écran Appels y a déposé la dernière fois.
-      await CallCache.putAll(ajustes);
+      await CallCache.putAll(calls);
     } catch (_) {}
   }
 
   void _appliqueCalls(List<CallRecord> calls) {
-    final cc = context.read<CallController>();
     final map = <String, CallRecord>{};
-    for (final call in cc.adjustCalls(calls)) {
+    for (final call in calls) {
       final convId = call.convId;
       if (convId == null) continue;
       final existing = map[convId];
@@ -292,7 +289,6 @@ class _ConversationsTabState extends State<_ConversationsTab>
   ///
   /// Réarme le garde anti-rafale, l'état étant déjà à jour.
   void _integreAppel(CallRecord c) {
-    c = context.read<CallController>().adjustCall(c);
     final convId = c.convId;
     if (convId == null) return;
     _dernierRafraichissementAppels = DateTime.now();

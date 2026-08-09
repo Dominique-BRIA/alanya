@@ -792,9 +792,7 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   void _appliqueCalls(List<CallRecord> calls) {
-    final cc = context.read<CallController>();
-    final ajustes = cc.adjustCalls(calls);
-    final filtered = ajustes.where((c) => c.convId == widget.convId).toList();
+    final filtered = calls.where((c) => c.convId == widget.convId).toList();
     if (!mounted) return;
     setState(() {
       _callsForConv = filtered;
@@ -811,7 +809,6 @@ class _ChatScreenState extends State<ChatScreen>
   /// `call_state` qui l'accompagne n'a plus rien à aller chercher.
   void _integreAppel(CallRecord c) {
     if (c.convId != widget.convId) return;
-    c = context.read<CallController>().adjustCall(c);
     _dernierRafraichissementAppels = DateTime.now();
     final liste = List<CallRecord>.from(_callsForConv);
     final i = liste.indexWhere((x) => x.id == c.id);
