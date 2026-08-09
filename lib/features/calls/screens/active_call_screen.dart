@@ -921,10 +921,17 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
               onPressed: () => _invite(cc),
             ),
             _controlBtn(
-              icon: Icons.phone_forwarded,
+              icon: cc.isTransferring
+                  ? Icons.close
+                  : Icons.phone_forwarded,
               active: cc.isTransferring,
-              label: cc.isTransferring ? "Transfert…" : "Transférer",
-              onPressed: cc.isTransferring ? () {} : () => _transfer(cc),
+              label: cc.isTransferring ? "Annuler" : "Transférer",
+              onPressed: cc.isTransferring
+                  ? () {
+                      cc.cancelTransfer(reason: "Transfert annulé");
+                      showAppSnackBar("Transfert annulé");
+                    }
+                  : () => _transfer(cc),
             ),
           ],
         ),

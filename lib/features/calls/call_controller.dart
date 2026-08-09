@@ -98,6 +98,7 @@ class CallController extends ChangeNotifier {
   bool _pendingTransfer = false;
   String? _transferTargetId;
   bool get isTransferring => _pendingTransfer;
+  Timer? _transferTimeout;
 
   /// Nombre d'écrans d'appel affichés, et non un simple booléen.
   ///
@@ -587,6 +588,8 @@ class CallController extends ChangeNotifier {
     _ecransAppelOuverts = 0;
     _pendingTransfer = false;
     _transferTargetId = null;
+    _transferTimeout?.cancel();
+    _transferTimeout = null;
     notifyListeners();
   }
 
@@ -654,9 +657,30 @@ class CallController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Traduit un code de raison renvoyé par `call_invite_result` en message
+  /// affichable.
+  String _inviteErrorText(String? reason) {
+    switch (reason) {
+      case "NOT_FOUND":
+        return "Numéro introuvable";
+      case "ALREADY_IN":
+        return "Ce correspondant est déjà dans l'appel";
+      case "BLOCKED":
+        return "Ce correspondant vous a bloqué";
+      default:
+        return "Invitation impossible";
+    }
+  }
+
   // --- Lot 4 : transfert d'appel supervisé ---
   /// Invite `publicNumber` dans l'appel puis, dès qu'il rejoint, quitte
   /// automatiquement (l'appel continue entre le correspondant et l'invité).
+  ///
+  /// L'identité de la cible est apprise de deux manières redondantes pour
+  /// éviter la course qui laissait l'initiateur `leftAt = null` côté serveur :
+  ///  1. l'accusé direct `call_invite_result` (le plus fiable, porte `userId`) ;
+  ///  2. le broadcast `call_state "inviting"` (repli).
+  /// Un minuteur annule le transfert si la cible ne rejoint pas.
   void transferCall(String publicNumber) {
     final id = activeCallId;
     if (id == null) return;
@@ -664,17 +688,61 @@ class CallController extends ChangeNotifier {
     _transferTargetId = null;
     lastError = null;
     _rt.callInvite(id, publicNumber);
+    _armTransferTimeout();
     notifyListeners();
+  }
+
+  /// Annule un transfert en cours (utilisateur qui change d'avis, cible qui
+  /// refuse ou qui ne répond pas).
+  void cancelTransfer({String? reason}) {
+    if (!_pendingTransfer) return;
+    _transferTimeout?.cancel();
+    _transferTimeout = null;
+    _pendingTransfer = false;
+    _transferTargetId = null;
+    if (reason != null) {
+      lastError = reason;
+    }
+    notifyListeners();
+  }
+
+  /// Au bout de ce délai sans que la cible ait rejoint, on annule le transfert
+  /// et on reste dans l'appel (plutôt que d'attendre éternellement).
+  static const _transfertDelai = Duration(seconds: 45);
+
+  void _armTransferTimeout() {
+    _transferTimeout?.cancel();
+    _transferTimeout = Timer(_transfertDelai, () {
+      if (!_pendingTransfer) return;
+      DebugOverlay.log("CC ⏱ transfert: la cible n'a pas rejoint, annulation");
+      cancelTransfer(reason: "Transfert annulé : la cible n'a pas répondu");
+    });
   }
 
   /// L'initiateur quitte SANS terminer l'appel pour les autres (transfert).
   Future<void> _completeTransfer(String callId) async {
+    _transferTimeout?.cancel();
+    _transferTimeout = null;
     _pendingTransfer = false;
     _transferTargetId = null;
     activeCallId = null; // bloque les échos pendant le nettoyage
-    try {
-      await _calls.leave(callId);
-    } catch (_) {}
+
+    // Le /leave est ce qui libère l'initiateur côté serveur (pose leftAt). On
+    // NE l'avale plus silencieusement : on réessaie, sinon il reste marqué
+    // occupé jusqu'à la fin de l'appel.
+    var delivered = false;
+    for (var attempt = 0; attempt < 3 && !delivered; attempt++) {
+      try {
+        await _calls.leave(callId);
+        delivered = true;
+      } catch (e) {
+        DebugOverlay.log("CC ❌ /leave de transfert échoué (tentative ${attempt + 1}): $e");
+        if (attempt < 2) {
+          await Future<void>.delayed(Duration(seconds: attempt + 1));
+        }
+      }
+    }
+
     _rt.callState(callId, "left", userId: myUserId, displayName: myDisplayName);
     await _stopMesh();
     // Même raison que dans `hangUp` : `activeCallId` vient d'être neutralisé,
@@ -754,11 +822,25 @@ class CallController extends ChangeNotifier {
     }
     // Transfert supervisé : la cible vient de rejoindre → l'initiateur quitte
     // automatiquement (l'appel continue entre le correspondant et l'invité).
-    if (_pendingTransfer && userId == _transferTargetId) {
-      final id = activeCallId;
-      if (id != null) {
-        await _completeTransfer(id);
-        return;
+    //
+    // Filet de sécurité : si on n'a pas reçu l'ID de la cible (accusé
+    // `call_invite_result` ou broadcast `inviting` perdus/traités dans le
+    // mauvais ordre), on déduit qu'il s'agit d'elle si c'est un NOUVEL
+    // utilisateur, non membre initial, qui rejoint pendant un transfert.
+    // Sans ça, A n'appelait jamais /leave et restait marqué occupé.
+    if (_pendingTransfer) {
+      final isTarget =
+          _transferTargetId != null && userId == _transferTargetId;
+      final isFallbackTarget = _transferTargetId == null &&
+          joinedWhileOngoing &&
+          isNew &&
+          !_initialMemberIds.contains(userId);
+      if (isTarget || isFallbackTarget) {
+        final id = activeCallId;
+        if (id != null) {
+          await _completeTransfer(id);
+          return;
+        }
       }
     }
     // Dès qu'il y a plus d'un autre participant, c'est un appel de groupe
@@ -946,6 +1028,21 @@ class CallController extends ChangeNotifier {
       } else {
         _bufferSignal(callId, from, signal);
       }
+    } else if (type == "call_invite_result") {
+      // Accusé de réception direct du serveur après un call_invite. C'est le
+      // moyen le plus fiable de connaître l'ID de la cible : il arrive même si
+      // le broadcast `inviting` est perdu ou traité dans le mauvais ordre.
+      final ok = e["ok"] == true;
+      final userId = e["userId"] as String?;
+      if (_pendingTransfer) {
+        if (ok && userId != null && userId != myUserId) {
+          _transferTargetId = userId;
+        } else if (!ok) {
+          final reason = e["reason"] as String?;
+          cancelTransfer(reason: _inviteErrorText(reason));
+        }
+        notifyListeners();
+      }
     } else if (type == "call_state") {
       final state = e["state"] as String?;
       final callId = e["callId"] as String?;
@@ -1032,14 +1129,24 @@ class CallController extends ChangeNotifier {
           _takenByAnotherDevice(callId);
           return;
         }
-        // Cible du transfert qui refuse : on annule et on reste dans l'appel.
-        if (state == "declined" &&
+        // Cible du transfert qui refuse/quitte. Le transfert étant en 1-à-1,
+        // l'invité qui refuse émet "rejected" ; en groupe il émet "declined".
+        // On accepte aussi le cas où on n'a pas encore l'ID cible.
+        final isTransferDecline =
+            (state == "declined" || state == "rejected") &&
+                _pendingTransfer &&
+                (_transferTargetId == null ||
+                    userId == _transferTargetId);
+        if (isTransferDecline) {
+          cancelTransfer(reason: "Transfert refusé");
+          return;
+        }
+        // La cible a quitté prématurément après avoir rejoint : on annule.
+        if (state == "left" &&
             _pendingTransfer &&
+            _transferTargetId != null &&
             userId == _transferTargetId) {
-          _pendingTransfer = false;
-          _transferTargetId = null;
-          lastError = "Transfert refusé";
-          notifyListeners();
+          cancelTransfer(reason: "La cible a quitté l'appel");
           return;
         }
         if (callId == activeCallId && userId != null) {

@@ -205,6 +205,10 @@ class RealtimeClient extends ChangeNotifier {
     "call_state",
     "call_ring",
     "call_signal",
+    // call_invite est critique : s'il est perdu sur une coupure réseau, une
+    // invitation de transfert n'atteint jamais la cible et l'initiateur attend
+    // indéfiniment que la cible rejoigne.
+    "call_invite",
     "meeting_join",
     "meeting_leave",
     "meeting_signal",
