@@ -367,7 +367,7 @@ class MeetingController extends ChangeNotifier {
 
   void _handleJoined(Map<String, dynamic> e) {
     final meetingId = e["meetingId"] as int?;
-    if (meetingId != activeMeetingId) return;
+    if (meetingId == null || meetingId != activeMeetingId) return;
 
     final participants = (e["participants"] as List?)?.cast<String>() ?? [];
     // Connecte WebRTC aux participants déjà présents : j'entre dans la salle,
