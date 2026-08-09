@@ -20,11 +20,15 @@ class MeetingRoomScreen extends StatefulWidget {
     required this.meetingId,
     required this.objet,
     required this.isVideo,
+    this.plannedDurationSec = 0,
   });
 
   final int meetingId;
   final String objet;
   final bool isVideo;
+
+  /// Durée prévue de la réunion (0 = pas de limite). Alimente le minuteur.
+  final int plannedDurationSec;
 
   @override
   State<MeetingRoomScreen> createState() => _MeetingRoomScreenState();
@@ -32,6 +36,7 @@ class MeetingRoomScreen extends StatefulWidget {
 
 class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   bool _joining = true;
+  bool _joinAsAudio = false;
 
   @override
   void initState() {
@@ -39,7 +44,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     _join();
   }
 
-  Future<void> _join() async {
+  Future<void> _join({bool forceAudio = false}) async {
     final ctrl = context.read<MeetingController>();
     // Ne rejoint que si on n'est pas déjà dans cette réunion (réouverture via
     // le bandeau) : le flux et la maille sont déjà en place.
@@ -47,23 +52,48 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       if (mounted) setState(() => _joining = false);
       return;
     }
+    final wantVideo = widget.isVideo && !forceAudio;
     try {
       await ctrl.join(
         widget.meetingId,
-        isVideo: widget.isVideo,
+        isVideo: wantVideo,
         objet: widget.objet,
+        plannedDurationSec: widget.plannedDurationSec,
       );
       if (mounted) setState(() => _joining = false);
-    } catch (e) {
-      // Permission refusée ou autre échec : on ne reste pas planté sur un
-      // écran d'erreur sans recours. On affiche un message et on revient, car
-      // la réunion n'a pas démarré localement.
+    } on Exception {
+      // Permission refusée en vidéo : proposer de basculer en audio.
+      if (wantVideo && mounted && !_joinAsAudio) {
+        _joinAsAudio = true;
+        final retry = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text("Caméra indisponible"),
+            content: const Text(
+                "La caméra n'a pas pu être activée. Rejoindre la réunion en audio ?"),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text("Annuler"),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text("Rejoindre en audio"),
+              ),
+            ],
+          ),
+        );
+        if (retry == true) {
+          await _join(forceAudio: true);
+          return;
+        }
+      }
       if (mounted) {
-        final msg = e
-            .toString()
-            .replaceFirst("Exception: ", "");
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(msg)),
+          SnackBar(
+              content: Text(wantVideo
+                  ? "Impossible de rejoindre la réunion."
+                  : "Impossible de rejoindre la réunion en audio.")),
         );
         Navigator.of(context).maybePop();
       }
@@ -137,6 +167,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       ),
     );
   }
+
 
   Widget _buildHeader() {
     return Container(
@@ -242,6 +273,22 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       final t = d.inHours > 0
           ? "${two(d.inHours)}:${two(d.inMinutes.remainder(60))}:${two(d.inSeconds.remainder(60))}"
           : "${two(d.inMinutes.remainder(60))}:${two(d.inSeconds.remainder(60))}";
+      // Temps restant si une durée prévue est définie.
+      final duree = ctrl.plannedDurationSec;
+      if (duree > 0) {
+        final restant = duree - d.inSeconds;
+        String fmt(int sec) {
+          final m = sec ~/ 60;
+          final s = sec % 60;
+          return m >= 60
+              ? "${m ~/ 60}:${two(m % 60)}:${two(s)}"
+              : "$m:${two(s)}";
+        }
+        if (restant >= 0) {
+          return "$compte · $t · ${fmt(restant)} restantes";
+        }
+        return "$compte · $t · +${fmt(-restant)} de dépassement";
+      }
       return "$compte · $t";
     }
     return "$compte participant(s)";

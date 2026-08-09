@@ -76,6 +76,7 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
             meetingId: _meeting.idMeeting,
             objet: _meeting.objet,
             isVideo: _meeting.isVideo,
+            plannedDurationSec: _meeting.duree,
           ),
         ),
       );
@@ -87,6 +88,7 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
           meetingId: _meeting.idMeeting,
           objet: _meeting.objet,
           isVideo: _meeting.isVideo,
+          plannedDurationSec: _meeting.duree,
         ),
       ),
     );

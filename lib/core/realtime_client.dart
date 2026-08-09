@@ -201,7 +201,14 @@ class RealtimeClient extends ChangeNotifier {
   /// de dix secondes n'aurait aucun sens ; perdre un « j'ai décroché » casse
   /// l'appel. Ces trois types décident de l'état d'un appel des DEUX côtés :
   /// ils doivent arriver, même en retard.
-  static const _typesCritiques = {"call_state", "call_ring", "call_signal"};
+  static const _typesCritiques = {
+    "call_state",
+    "call_ring",
+    "call_signal",
+    "meeting_join",
+    "meeting_leave",
+    "meeting_signal",
+  };
 
   final List<({Map<String, dynamic> payload, DateTime expire})> _enAttente = [];
 

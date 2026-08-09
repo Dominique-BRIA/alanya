@@ -7,6 +7,7 @@ import '../../core/call_foreground_service.dart';
 import '../../core/call_permissions.dart';
 import '../../core/debug_overlay.dart';
 import '../../core/realtime_client.dart';
+import '../../core/ringtone_service.dart';
 import '../../models/meeting.dart';
 import '../calls/calls_repository.dart';
 import '../calls/webrtc_group_mesh.dart';
@@ -42,6 +43,10 @@ class MeetingController extends ChangeNotifier {
   /// Début effectif de la participation (réception du `meeting_joined`). Source
   /// unique du minuteur, affiché à la fois dans la salle et dans le bandeau.
   DateTime? connectedSince;
+
+  /// Durée prévue de la réunion, en secondes (0 = pas de limite). Posée au
+  /// démarrage à partir du modèle [Meeting] pour alimenter le minuteur.
+  int plannedDurationSec = 0;
 
   // Participants
   final Map<String, String> _participantNames = {}; // userId -> displayName
@@ -122,9 +127,30 @@ class MeetingController extends ChangeNotifier {
   bool get hasRaisedHands =>
       myHandRaised || _raisedHands.isNotEmpty;
 
+  /// Rejoint la salle après une reconnexion WebSocket. La socket a changé, il
+  /// faut se réinscrire côté serveur. Les paires WebRTC peuvent avoir survécu
+  /// (coupure courte) : on ne les ferme pas ici. Au retour, `meeting_joined`
+  /// nous donnera la liste à jour ; pour les pairs déjà connus, `connectToPeer`
+  /// n'en recréera pas, et les pairs perdus seront retirés via `onPeerLost`.
+  void _rejoinAfterReconnect() {
+    final id = activeMeetingId;
+    if (id == null || !isActive) return;
+    debugPrint('[MeetingController] reconnexion WS → réinscription salle $id');
+    _rt.meetingJoin(id);
+    // Rediffuse mon état courant aux pairs (muet/caméra/main levée).
+    _broadcastState();
+  }
+
   void bindUser(String userId, String displayName) {
     myUserId = userId;
     myDisplayName = displayName;
+  }
+
+  /// Renseigne la durée prévue (en secondes), depuis le détail de la réunion.
+  void setPlannedDuration(int seconds) {
+    if (plannedDurationSec == seconds) return;
+    plannedDurationSec = seconds;
+    notifyListeners();
   }
 
   void setRoomVisible(bool v) {
@@ -146,6 +172,7 @@ class MeetingController extends ChangeNotifier {
     int meetingId, {
     required bool isVideo,
     String? objet,
+    int? plannedDurationSec,
   }) async {
     if (myUserId == null) return;
     if (activeMeetingId == meetingId && isActive) return;
@@ -156,6 +183,7 @@ class MeetingController extends ChangeNotifier {
     activeMeetingId = meetingId;
     activeIsVideo = isVideo;
     activeObjet = objet;
+    plannedDurationSec = plannedDurationSec ?? 0;
     isActive = true;
     notifyListeners();
 
@@ -444,6 +472,13 @@ class MeetingController extends ChangeNotifier {
           _clear();
         }
         break;
+      case "ws_connected":
+        // Reconnexion de la socket après une coupure. On se réinscrit dans la
+        // salle, sinon la nouvelle socket n'est pas dans meetingRooms côté
+        // serveur et plus aucun signal n'est relayé (média gelé). On n'émet
+        // _mesh.ensureLocal() qu'au besoin (le flux local existe déjà).
+        _rejoinAfterReconnect();
+        break;
     }
   }
 
@@ -485,6 +520,8 @@ class MeetingController extends ChangeNotifier {
     // Lui communique mon état muet courant, sinon il m'afficherait toujours
     // « micro actif » tant que je ne bascule pas moi-même.
     _broadcastState(onlyTo: userId);
+    // Ton d'arrivée (sauf pour nous-mêmes, filtré plus haut).
+    RingtoneService.instance.playParticipantJoined();
     notifyListeners();
   }
 
@@ -501,6 +538,7 @@ class MeetingController extends ChangeNotifier {
     _peerMuted.remove(userId);
     _raisedHands.remove(userId);
     _mesh?.removePeer(userId);
+    RingtoneService.instance.playParticipantLeft();
     notifyListeners();
   }
 
@@ -570,6 +608,7 @@ class MeetingController extends ChangeNotifier {
     isMuted = false;
     isCameraOff = false;
     connectedSince = null;
+    plannedDurationSec = 0;
     _roomScreensOpen = 0;
     _participantNames.clear();
     _participantAvatars.clear();

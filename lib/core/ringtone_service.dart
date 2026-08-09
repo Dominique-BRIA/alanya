@@ -71,6 +71,31 @@ class RingtoneService {
     } catch (_) {}
   }
 
+  /// Ton bref joué quand un participant **rejoint** une réunion (style Google
+  /// Meet). One-shot, en échec silencieux.
+  Future<void> playParticipantJoined() => _playCueOnce();
+
+  /// Ton bref joué quand un participant **quitte** une réunion. Même son que
+  /// pour l'arrivée, on évite d'ajouter un asset.
+  Future<void> playParticipantLeft() => _playCueOnce(volume: 0.6);
+
+  /// Joue le son de notification une seule fois, avec anti-rafale léger.
+  Future<void> _playCueOnce({double volume = 1.0}) async {
+    final now = DateTime.now();
+    if (_lastCueAt != null && now.difference(_lastCueAt!) < _cueGap) return;
+    _lastCueAt = now;
+    try {
+      final p = _cuePlayer ??= AudioPlayer();
+      await p.setReleaseMode(ReleaseMode.release);
+      await p.setVolume(volume);
+      await p.stop();
+      await p.play(AssetSource(_cueAsset));
+    } catch (_) {}
+  }
+
+  DateTime? _lastCueAt;
+  static const _cueGap = Duration(milliseconds: 700);
+
   Future<void> _play(String asset) async {
     // Si on rejoue le même son (ex: 2 events consécutifs), on ne relance pas.
     if (_currentAsset == asset && _player != null) return;
