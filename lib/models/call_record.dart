@@ -1,3 +1,5 @@
+const Object _sentinel = Object();
+
 class CallRecord {
   final String id;
   final String? convId;
@@ -109,6 +111,45 @@ class CallRecord {
   bool emisPar(String? myId) {
     if (callerId != null && myId != null) return callerId == myId;
     return isOutgoing;
+  }
+
+  CallRecord copyWith({
+    String? status,
+    DateTime? endedAt,
+    int? durationSec,
+    // `null` explicite permet d'effacer les valeurs serveur.
+    Object? preciseStatus = _sentinel,
+    Object? detail = _sentinel,
+    Object? isFailed = _sentinel,
+    Object? colorHint = _sentinel,
+  }) {
+    return CallRecord(
+      id: id,
+      convId: convId,
+      type: type,
+      status: status ?? this.status,
+      preciseStatus: preciseStatus == _sentinel
+          ? this.preciseStatus
+          : preciseStatus as String?,
+      detail: detail == _sentinel ? this.detail : detail as String?,
+      isFailed: isFailed == _sentinel ? this.isFailed : isFailed as bool?,
+      colorHint: colorHint == _sentinel ? this.colorHint : colorHint as String?,
+      isOutgoing: isOutgoing,
+      isGroup: isGroup,
+      peerName: peerName,
+      peerNumber: peerNumber,
+      peerAvatarUrl: peerAvatarUrl,
+      participantCount: participantCount,
+      startedAt: startedAt,
+      answeredAt: answeredAt,
+      endedAt: endedAt ?? this.endedAt,
+      durationSec: durationSec ?? this.durationSec,
+      callerId: callerId,
+      preciseStatus: preciseStatus,
+      detail: detail,
+      isFailed: isFailed,
+      colorHint: colorHint,
+    );
   }
 }
 
