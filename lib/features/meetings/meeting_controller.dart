@@ -59,6 +59,23 @@ class MeetingController extends ChangeNotifier {
   /// serveur, qui n'en inspecte pas le contenu.
   final Map<String, bool> _peerMuted = {};
 
+  /// Mains levées des pairs, annoncées via la signalisation applicative.
+  final Set<String> _raisedHands = {};
+
+  /// Mon propre état de main levée.
+  bool myHandRaised = false;
+
+  /// Messages de chat reçus pendant la réunion (éphémères, non persistés).
+  final List<MeetingChatMessage> _chatMessages = [];
+
+  List<MeetingChatMessage> get chatMessages =>
+      List.unmodifiable(_chatMessages);
+
+  /// Nombre de messages de chat non lus (tant que le panneau n'est pas ouvert).
+  int _unreadChatCount = 0;
+  int get unreadChatCount => _unreadChatCount;
+
+
   // WebRTC
   WebrtcGroupMesh? _mesh;
   List<Map<String, dynamic>>? _iceServers;
@@ -97,6 +114,13 @@ class MeetingController extends ChangeNotifier {
 
   /// Le pair [peerId] a-t-il son micro coupé ? Faux si on ne sait pas encore.
   bool isPeerMuted(String peerId) => _peerMuted[peerId] ?? false;
+
+  /// Le pair [peerId] a-t-il la main levée ?
+  bool isHandRaised(String peerId) => _raisedHands.contains(peerId);
+
+  /// Y a-t-il au moins une main levée (la mienne comprise) ?
+  bool get hasRaisedHands =>
+      myHandRaised || _raisedHands.isNotEmpty;
 
   void bindUser(String userId, String displayName) {
     myUserId = userId;
@@ -202,6 +226,8 @@ class MeetingController extends ChangeNotifier {
     final payload = {
       "kind": "meeting_state",
       "muted": isMuted,
+      "cameraOff": isCameraOff,
+      "handRaised": myHandRaised,
     };
     if (onlyTo != null) {
       _rt.meetingSignal(id, onlyTo, payload);
@@ -213,6 +239,62 @@ class MeetingController extends ChangeNotifier {
       }
     }
   }
+
+  /// Bascule la main levée et prévient les autres participants.
+  void toggleHandRaised() {
+    myHandRaised = !myHandRaised;
+    _broadcastState();
+    notifyListeners();
+  }
+
+  /// Envoie un message de chat à tous les participants. Le message est aussi
+  /// ajouté localement (les autres le recevront par [meeting_signal]).
+  void sendChatMessage(String text) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return;
+    final id = activeMeetingId;
+    if (id == null) return;
+
+    final now = DateTime.now();
+    final msg = MeetingChatMessage(
+      fromUserId: myUserId ?? "",
+      fromName: myDisplayName ?? "Moi",
+      text: trimmed,
+      sentAt: now,
+      mine: true,
+    );
+    _chatMessages.add(msg);
+
+    final payload = <String, dynamic>{
+      "kind": "meeting_chat",
+      "text": trimmed,
+      "fromName": myDisplayName ?? "Participant",
+      "ts": now.toUtc().toIso8601String(),
+    };
+    for (final peerId in _connectedPeerIds) {
+      if (peerId != myUserId) {
+        _rt.meetingSignal(id, peerId, payload);
+      }
+    }
+    // La salle de chat est peut-être fermée : on incrémente le compteur de
+    // non-lus. Réinitialisé quand on ouvre le panneau.
+    if (!_chatOpen) _unreadChatCount++;
+    notifyListeners();
+  }
+
+  bool _chatOpen = false;
+
+  /// À appeler quand le panneau de chat est ouvert/fermé, pour gérer les
+  /// messages non lus.
+  void setChatOpen(bool open) {
+    if (_chatOpen == open) return;
+    _chatOpen = open;
+    if (open && _unreadChatCount != 0) {
+      _unreadChatCount = 0;
+      notifyListeners();
+    }
+  }
+
 
   /// Toggle caméra.
   void toggleCamera() {
@@ -417,6 +499,7 @@ class MeetingController extends ChangeNotifier {
     _participantAvatars.remove(userId);
     _connectedPeerIds.remove(userId);
     _peerMuted.remove(userId);
+    _raisedHands.remove(userId);
     _mesh?.removePeer(userId);
     notifyListeners();
   }
@@ -429,17 +512,53 @@ class MeetingController extends ChangeNotifier {
     final signal = e["signal"] as Map<String, dynamic>?;
     if (fromUserId == null || signal == null) return;
 
-    // Signal applicatif (état muet) : il transite dans le même canal que la
-    // négociation WebRTC mais n'est pas pour elle.
-    if (signal["kind"] == "meeting_state") {
+    final kind = signal["kind"] as String?;
+
+    // Signal applicatif : état d'un participant (muet/caméra/main levée).
+    if (kind == "meeting_state") {
+      var changed = false;
       final muted = signal["muted"] == true;
       if (_peerMuted[fromUserId] != muted) {
         _peerMuted[fromUserId] = muted;
+        changed = true;
+      }
+      final hand = signal["handRaised"] == true;
+      final hadHand = _raisedHands.contains(fromUserId);
+      if (hand && !hadHand) {
+        _raisedHands.add(fromUserId);
+        changed = true;
+      } else if (!hand && hadHand) {
+        _raisedHands.remove(fromUserId);
+        changed = true;
+      }
+      if (changed) notifyListeners();
+      return;
+    }
+
+    // Signal applicatif : message de chat.
+    if (kind == "meeting_chat") {
+      final text = signal["text"] as String?;
+      final fromName =
+          signal["fromName"] as String? ??
+          _participantNames[fromUserId] ??
+          "Participant";
+      final tsRaw = signal["ts"] as String?;
+      final ts = tsRaw != null ? DateTime.tryParse(tsRaw) ?? DateTime.now() : DateTime.now();
+      if (text != null && text.trim().isNotEmpty) {
+        _chatMessages.add(MeetingChatMessage(
+          fromUserId: fromUserId,
+          fromName: fromName,
+          text: text,
+          sentAt: ts.toLocal(),
+          mine: false,
+        ));
+        if (!_chatOpen) _unreadChatCount++;
         notifyListeners();
       }
       return;
     }
 
+    // Sinon : signal de négociation WebRTC.
     _mesh?.handleSignal(fromUserId, signal);
   }
 
@@ -456,6 +575,11 @@ class MeetingController extends ChangeNotifier {
     _participantAvatars.clear();
     _connectedPeerIds.clear();
     _peerMuted.clear();
+    _raisedHands.clear();
+    _chatMessages.clear();
+    myHandRaised = false;
+    _chatOpen = false;
+    _unreadChatCount = 0;
     notifyListeners();
   }
 
@@ -465,4 +589,21 @@ class MeetingController extends ChangeNotifier {
     _stopMesh();
     super.dispose();
   }
+}
+
+/// Message de chat échangé pendant une réunion. Éphémère, non persisté.
+class MeetingChatMessage {
+  MeetingChatMessage({
+    required this.fromUserId,
+    required this.fromName,
+    required this.text,
+    required this.sentAt,
+    required this.mine,
+  });
+
+  final String fromUserId;
+  final String fromName;
+  final String text;
+  final DateTime sentAt;
+  final bool mine;
 }

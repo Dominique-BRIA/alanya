@@ -181,6 +181,48 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
             icon: const Icon(Icons.people_outline, color: Colors.white),
             onPressed: _showParticipants,
           ),
+          // Bouton chat
+          ListenableBuilder(
+            listenable: context.read<MeetingController>(),
+            builder: (_, __) {
+              final ctrl = context.read<MeetingController>();
+              final unread = ctrl.unreadChatCount;
+              return IconButton(
+                tooltip: "Chat",
+                onPressed: _showChat,
+                icon: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    const Icon(Icons.chat_bubble_outline, color: Colors.white),
+                    if (unread > 0)
+                      Positioned(
+                        right: -4,
+                        top: -4,
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: const BoxDecoration(
+                            color: Colors.red,
+                            shape: BoxShape.circle,
+                          ),
+                          constraints: const BoxConstraints(
+                            minWidth: 16,
+                            minHeight: 16,
+                          ),
+                          child: Text(
+                            unread > 9 ? "9+" : "$unread",
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 9,
+                                fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              );
+            },
+          ),
         ],
       ),
     );
@@ -294,12 +336,13 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     // (source de vérité), et non sur les clés des noms : un participant déjà
     // présent à notre arrivée n'a pas encore son nom résolu, il doit quand même
     // s'afficher (repli « Participant »).
-    final entries = <({String id, String name, String? avatar, bool muted, bool me})>[
+    final entries = <({String id, String name, String? avatar, bool muted, bool hand, bool me})>[
       (
         id: "me",
         name: me?.pseudo ?? "Vous",
         avatar: me?.avatarUrl,
         muted: ctrl.isMuted,
+        hand: ctrl.myHandRaised,
         me: true,
       ),
       for (final id in ctrl.peerIds)
@@ -308,6 +351,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
           name: ctrl.participantNames[id] ?? "Participant",
           avatar: ctrl.participantAvatars[id],
           muted: ctrl.isPeerMuted(id),
+          hand: ctrl.isHandRaised(id),
           me: false,
         ),
     ];
@@ -345,6 +389,20 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                             shape: BoxShape.circle,
                           ),
                           child: const Icon(Icons.mic_off,
+                              color: Colors.white, size: 16),
+                        ),
+                      ),
+                    if (e.hand)
+                      Positioned(
+                        left: -4,
+                        top: -4,
+                        child: Container(
+                          padding: const EdgeInsets.all(5),
+                          decoration: const BoxDecoration(
+                            color: AlanyaColors.gold,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.back_hand,
                               color: Colors.white, size: 16),
                         ),
                       ),
@@ -401,6 +459,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     final name = ctrl.participantNames[peerId] ?? "Participant";
     final avatarUrl = ctrl.participantAvatars[peerId];
     final muted = ctrl.isPeerMuted(peerId);
+    final hand = ctrl.isHandRaised(peerId);
     final hasVideo = stream != null;
 
     return ClipRRect(
@@ -446,6 +505,18 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(Icons.mic_off,
+                        color: Colors.white, size: 14),
+                  ),
+                ],
+                if (hand) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: const BoxDecoration(
+                      color: AlanyaColors.gold,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.back_hand,
                         color: Colors.white, size: 14),
                   ),
                 ],
@@ -523,6 +594,15 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                 isActive: ctrl.isSpeakerOn,
                 onTap: () => ctrl.toggleSpeaker(),
               ),
+              // Lever la main
+              _controlButton(
+                icon: ctrl.myHandRaised
+                    ? Icons.back_hand
+                    : Icons.back_hand_outlined,
+                label: "Main",
+                isActive: ctrl.myHandRaised,
+                onTap: ctrl.toggleHandRaised,
+              ),
               // Quitter
               _controlButton(
                 icon: Icons.call_end,
@@ -576,6 +656,22 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         ],
       ),
     );
+  }
+
+  void _showChat() {
+    final ctrl = context.read<MeetingController>();
+    ctrl.setChatOpen(true);
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF1E1E1E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return _MeetingChatPanel(controller: ctrl);
+      },
+    ).whenComplete(() => ctrl.setChatOpen(false));
   }
 
   void _showParticipants() {
@@ -670,6 +766,215 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
           },
         );
       },
+    );
+  }
+}
+
+/// Panneau de chat de la réunion (éphémère, style Google Meet).
+class _MeetingChatPanel extends StatefulWidget {
+  const _MeetingChatPanel({required this.controller});
+  final MeetingController controller;
+
+  @override
+  State<_MeetingChatPanel> createState() => _MeetingChatPanelState();
+}
+
+class _MeetingChatPanelState extends State<_MeetingChatPanel> {
+  final _inputCtrl = TextEditingController();
+  final _scrollCtrl = ScrollController();
+
+  @override
+  void dispose() {
+    _inputCtrl.dispose();
+    _scrollCtrl.dispose();
+    super.dispose();
+  }
+
+  void _send() {
+    final text = _inputCtrl.text;
+    if (text.trim().isEmpty) return;
+    widget.controller.sendChatMessage(text);
+    _inputCtrl.clear();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollCtrl.hasClients) {
+        _scrollCtrl.animateTo(
+          _scrollCtrl.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: ListenableBuilder(
+        listenable: widget.controller,
+        builder: (_, __) {
+          final messages = widget.controller.chatMessages;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (_scrollCtrl.hasClients) {
+              _scrollCtrl.jumpTo(_scrollCtrl.position.maxScrollExtent);
+            }
+          });
+          return SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Poignée
+                Container(
+                  margin: const EdgeInsets.only(top: 12, bottom: 8),
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text("Messages de la réunion",
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold)),
+                  ),
+                ),
+                const Divider(color: Colors.white12, height: 1),
+                Flexible(
+                  child: messages.isEmpty
+                      ? const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(24),
+                            child: Text(
+                              "Aucun message. Démarre la conversation.",
+                              style: TextStyle(color: Colors.white54),
+                            ),
+                          ),
+                        )
+                      : ListView.builder(
+                          controller: _scrollCtrl,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 12),
+                          itemCount: messages.length,
+                          itemBuilder: (_, i) {
+                            final m = messages[i];
+                            return _ChatBubble(message: m);
+                          },
+                        ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _inputCtrl,
+                          style: const TextStyle(color: Colors.white),
+                          textCapitalization: TextCapitalization.sentences,
+                          minLines: 1,
+                          maxLines: 4,
+                          onSubmitted: (_) => _send(),
+                          decoration: InputDecoration(
+                            hintText: "Ton message…",
+                            hintStyle:
+                                const TextStyle(color: Colors.white38),
+                            filled: true,
+                            fillColor: Colors.white.withValues(alpha: 0.08),
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 10),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(24),
+                              borderSide: BorderSide.none,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      CircleAvatar(
+                        backgroundColor: AlanyaColors.forest,
+                        child: IconButton(
+                          icon: const Icon(Icons.send, color: Colors.white),
+                          onPressed: _send,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _ChatBubble extends StatelessWidget {
+  const _ChatBubble({required this.message});
+  final MeetingChatMessage message;
+
+  String _time(DateTime dt) {
+    final local = dt.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return "${two(local.hour)}:${two(local.minute)}";
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isMine = message.mine;
+    return Align(
+      alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.75,
+        ),
+        decoration: BoxDecoration(
+          color: isMine
+              ? AlanyaColors.forest
+              : Colors.white.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(14),
+            topRight: const Radius.circular(14),
+            bottomLeft:
+                isMine ? const Radius.circular(14) : Radius.zero,
+            bottomRight:
+                isMine ? Radius.zero : const Radius.circular(14),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (!isMine)
+              Text(
+                message.fromName,
+                style: const TextStyle(
+                  color: AlanyaColors.gold,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 12,
+                ),
+              ),
+            Text(
+              message.text,
+              style: const TextStyle(color: Colors.white, fontSize: 14),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              _time(message.sentAt),
+              style: const TextStyle(color: Colors.white60, fontSize: 10),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
