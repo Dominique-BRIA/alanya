@@ -29,6 +29,10 @@ class MeetingController extends ChangeNotifier {
   final MeetingsRepository _meetings;
   final RealtimeClient _rt;
   StreamSubscription? _sub;
+  // Fait « avancer » le minuteur affiché dans la salle/le bandeau. Sans tick,
+  // l'interface ne se redessinait que sur les autres événements (muet, arrivée
+  // d'un pair) et le chronomètre restait figé plusieurs minutes.
+  Timer? _ticker;
 
   // ── État de la réunion active ────────────────────────────────────────────
   int? activeMeetingId;
@@ -220,7 +224,20 @@ class MeetingController extends ChangeNotifier {
     // Rejoint via WebSocket. C'est le handler serveur qui inscrit la socket
     // dans la salle et renvoie la liste des participants déjà présents.
     _rt.meetingJoin(meetingId);
+    _startTicker();
     notifyListeners();
+  }
+
+  /// Démarre (ou redémarre) le ticker qui notifie chaque seconde pour faire
+  /// avancer le minuteur.
+  void _startTicker() {
+    _ticker?.cancel();
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) => notifyListeners());
+  }
+
+  void _stopTicker() {
+    _ticker?.cancel();
+    _ticker = null;
   }
 
   /// Quitter la réunion en cours : coupe le média, arrête le service de
@@ -232,6 +249,7 @@ class MeetingController extends ChangeNotifier {
     _rt.meetingLeave(meetingId);
     await _stopMesh();
     CallForegroundService.arreter();
+    _stopTicker();
     _clear();
   }
 
@@ -601,6 +619,7 @@ class MeetingController extends ChangeNotifier {
   }
 
   void _clear() {
+    _stopTicker();
     isActive = false;
     activeMeetingId = null;
     activeRoom = null;
@@ -625,6 +644,7 @@ class MeetingController extends ChangeNotifier {
   @override
   void dispose() {
     _sub?.cancel();
+    _ticker?.cancel();
     _stopMesh();
     super.dispose();
   }

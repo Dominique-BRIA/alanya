@@ -477,15 +477,39 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   Widget _localVideo({required bool isLarge}) {
     final ctrl = context.watch<MeetingController>();
     final stream = ctrl.localStream;
+    final Widget child;
     if (stream == null || ctrl.isCameraOff) {
-      return _avatarPlaceholder(
+      child = _avatarPlaceholder(
         name: context.read<AuthController>().user?.pseudo ?? "Moi",
         isLarge: isLarge,
       );
+    } else {
+      child = ClipRRect(
+        borderRadius: BorderRadius.circular(isLarge ? 16 : 12),
+        child: RTCVideoRendererObject(stream: stream),
+      );
     }
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(isLarge ? 16 : 12),
-      child: RTCVideoRendererObject(stream: stream),
+    // Indicateur de main levée sur sa propre vignette (comme chez les pairs),
+    // sinon en vidéo on ne voyait rien se passer quand on levait la main.
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        child,
+        if (ctrl.myHandRaised)
+          Positioned(
+            left: 6,
+            top: 6,
+            child: Container(
+              padding: const EdgeInsets.all(5),
+              decoration: const BoxDecoration(
+                color: AlanyaColors.gold,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.back_hand,
+                  color: Colors.white, size: 16),
+            ),
+          ),
+      ],
     );
   }
 
@@ -630,7 +654,9 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                 _controlButton(
                   icon: Icons.cameraswitch,
                   label: "Retourner",
-                  isActive: false,
+                  // Actif pour signaler que le bouton est utilisable (il
+                  // paraissait désactivé avec son fond gris).
+                  isActive: true,
                   onTap: () => ctrl.switchCamera(),
                 ),
               // Haut-parleur
