@@ -224,11 +224,10 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
 
         final remoteIds = ctrl.remoteStreams.keys.toList();
         final remoteCount = remoteIds.length;
-        // Participants logiques (y compris ceux dont le flux n'est pas encore
-        // négocié) : on leur réserve une case avec un avatar en attendant.
-        final logicalOthers = ctrl.participantNames.keys.toList();
-        // Ceux qui n'ont pas encore de flux : affichés en avatar.
-        final pending = logicalOthers
+        // Participants présents (source de vérité = liste des IDs connectés), y
+        // compris ceux dont le flux n'est pas encore négocié : on leur réserve
+        // une case avec un avatar en attendant.
+        final pending = ctrl.peerIds
             .where((id) => !ctrl.remoteStreams.containsKey(id))
             .toList();
         final total = 1 + remoteCount + pending.length;
@@ -291,7 +290,10 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   /// Grille affichée en réunion AUDIO : avatars uniquement, pas de renderer.
   Widget _buildAudioGrid(MeetingController ctrl) {
     final me = context.read<AuthController>().user;
-    // Moi + participants annoncés.
+    // Moi + participants présents. On itère sur la liste des IDs connectés
+    // (source de vérité), et non sur les clés des noms : un participant déjà
+    // présent à notre arrivée n'a pas encore son nom résolu, il doit quand même
+    // s'afficher (repli « Participant »).
     final entries = <({String id, String name, String? avatar, bool muted, bool me})>[
       (
         id: "me",
@@ -300,7 +302,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         muted: ctrl.isMuted,
         me: true,
       ),
-      for (final id in ctrl.participantNames.keys)
+      for (final id in ctrl.peerIds)
         (
           id: id,
           name: ctrl.participantNames[id] ?? "Participant",
@@ -589,7 +591,8 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
           listenable: context.read<MeetingController>(),
           builder: (_, __) {
             final ctrl = context.read<MeetingController>();
-            final peerIds = ctrl.participantNames.keys.toList();
+            // Liste des participants présents (et non des seuls noms résolus).
+            final peerIds = ctrl.peerIds;
             return SafeArea(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -691,9 +694,23 @@ class _RTCVideoRendererObjectState extends State<RTCVideoRendererObject> {
   }
 
   Future<void> _init() async {
-    _renderer.srcObject = widget.stream;
+    // ⚠️ ORDRE IMPORTANT : il faut initialiser le renderer AVANT de lui affecter
+    // un flux. Affecter srcObject avant initialize() ne crée pas de texture et
+    // la vidéo ne s'affiche jamais (écran figé/chargement infini), même si le
+    // flux circule. C'est l'ordre utilisé par l'écran d'appel, qui fonctionne.
     await _renderer.initialize();
+    _renderer.srcObject = widget.stream;
     if (mounted) setState(() => _initialized = true);
+  }
+
+  @override
+  void didUpdateWidget(covariant RTCVideoRendererObject oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Le flux peut changer (négociation qui aboutit, bascule de caméra) une
+    // fois le renderer déjà initialisé : on réaffecte sans le recréer.
+    if (_initialized && oldWidget.stream != widget.stream) {
+      _renderer.srcObject = widget.stream;
+    }
   }
 
   @override

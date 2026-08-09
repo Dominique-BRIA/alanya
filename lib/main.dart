@@ -110,6 +110,7 @@ void main() async {
         ChangeNotifierProvider<MeetingController>(
           create: (ctx) => MeetingController(
             ctx.read<CallsRepository>(),
+            ctx.read<MeetingsRepository>(),
             ctx.read<RealtimeClient>(),
           ),
         ),

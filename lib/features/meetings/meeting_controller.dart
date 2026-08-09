@@ -7,9 +7,11 @@ import '../../core/call_foreground_service.dart';
 import '../../core/call_permissions.dart';
 import '../../core/debug_overlay.dart';
 import '../../core/realtime_client.dart';
+import '../../models/meeting.dart';
 import '../calls/calls_repository.dart';
 import '../calls/webrtc_group_mesh.dart';
 import '../calls/webrtc_peer_session.dart';
+import 'meetings_repository.dart';
 
 /// Contrôleur GLOBAL de réunion, à l'image de [CallController] pour les appels.
 ///
@@ -18,11 +20,12 @@ import '../calls/webrtc_peer_session.dart';
 /// dans l'app (lire ses messages) et revenir par le bandeau, sans couper
 /// l'audio. Le service de premier plan Android garde le processus vivant.
 class MeetingController extends ChangeNotifier {
-  MeetingController(this._calls, this._rt) {
+  MeetingController(this._calls, this._meetings, this._rt) {
     _sub = _rt.events.listen(_onEvent);
   }
 
   final CallsRepository _calls;
+  final MeetingsRepository _meetings;
   final RealtimeClient _rt;
   StreamSubscription? _sub;
 
@@ -75,6 +78,16 @@ class MeetingController extends ChangeNotifier {
   int get connectedPeerCount => _mesh?.connectedCount ?? 0;
   Map<String, String> get participantNames => _participantNames;
   Map<String, String?> get participantAvatars => _participantAvatars;
+
+  /// Identifiants des participants actuellement dans la salle (moi exclu).
+  ///
+  /// Source de vérité pour l'affichage, indépendante de la négociation WebRTC :
+  /// l'événement `meeting_joined` ne donne que ces IDs, sans les noms. On
+  /// résout ces noms via le détail de la réunion ; en attendant, les
+  /// interfaces doivent s'appuyer sur cette liste plutôt que sur les clés de
+  /// [participantNames], sinon les participants déjà présents à notre arrivée
+  /// restent invisibles.
+  List<String> get peerIds => _connectedPeerIds.toList();
 
   /// Nombre de participants logiquement présents dans la salle (moi compris),
   /// indépendamment de l'état de négociation WebRTC. Plus fiable que
@@ -215,6 +228,35 @@ class MeetingController extends ChangeNotifier {
     await _mesh?.switchCamera();
   }
 
+  /// Renseigne les noms/avatars des participants déjà présents à notre arrivée.
+  ///
+  /// L'événement `meeting_joined` ne contient que des IDs, sans les noms. On
+  /// complète avec le détail de la réunion, qui liste tous les participants.
+  /// Les participants annoncés par `meeting_user_joined` (avec leur nom) ne
+  /// sont pas écrasés. Échec silencieux : on se contentera du repli
+  /// « Participant » le temps du rafraîchissement suivant.
+  Future<void> _hydrateParticipants(int meetingId) async {
+    try {
+      final meeting = await _meetings.fetchMeeting(meetingId);
+      var changed = false;
+      for (final p in meeting.participants) {
+        if (p.userId == myUserId) continue;
+        if (!_participantNames.containsKey(p.userId)) {
+          _participantNames[p.userId] = p.displayName;
+          changed = true;
+        }
+        if (p.avatarUrl != null &&
+            _participantAvatars[p.userId] != p.avatarUrl) {
+          _participantAvatars[p.userId] = p.avatarUrl;
+          changed = true;
+        }
+      }
+      if (changed) notifyListeners();
+    } catch (e) {
+      debugPrint('[MeetingController] hydratation participants échouée: $e');
+    }
+  }
+
   /// Renseigne l'avatar d'un participant (venu du détail de la réunion), pour
   /// l'afficher en l'absence de flux vidéo.
   void setParticipantAvatar(String userId, String? avatarUrl) {
@@ -336,6 +378,10 @@ class MeetingController extends ChangeNotifier {
         _connectedPeerIds.add(peerId);
       }
     }
+    // L'événement ne contient que les IDs : on résout noms et avatars depuis le
+    // détail de la réunion, sinon les participants déjà présents restent
+    // invisibles dans la grille et la fiche participants.
+    _hydrateParticipants(meetingId);
     // Annonce mon état muet courant à ceux déjà présents.
     _broadcastState();
     notifyListeners();
