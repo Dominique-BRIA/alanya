@@ -312,14 +312,15 @@ class PushService {
     // l'écran natif ferait doublon avec ce bandeau.
     if (message.data['type'] == 'incoming_call') return;
 
-    // Invitation à une réunion — traitée AVANT le réglage ci-dessous, qui ne
-    // gouverne que les messages. Une invitation n'en est pas un : la faire
-    // taire parce que l'utilisateur a coupé les notifications de discussion lui
-    // ferait manquer une réunion sans qu'il l'ait jamais demandé.
-    if (message.data['type'] == 'meeting_invitation') {
+    // Réunions (invitation, rappel avant le début) — traitées AVANT le réglage
+    // ci-dessous, qui ne gouverne que les messages. Une invitation n'en est pas
+    // un : la faire taire parce que l'utilisateur a coupé les notifications de
+    // discussion lui ferait manquer une réunion sans qu'il l'ait jamais demandé.
+    final type = message.data['type'];
+    if (type == 'meeting_invitation' || type == 'meeting_reminder') {
       final n = message.notification;
       showReunion(
-        title: n?.title ?? 'Invitation à une réunion',
+        title: n?.title ?? 'Réunion',
         body: n?.body ?? '',
         meetingId: message.data['meetingId']?.toString(),
         payload: message.data,
