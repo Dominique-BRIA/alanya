@@ -201,6 +201,32 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     }
   }
 
+  /// Un participant PROPOSE quelqu'un à l'organisateur, sans quitter la salle.
+  ///
+  /// ⚠️ L'intéressé n'est prévenu de rien tant que l'organisateur n'a pas
+  /// accepté. Le message le dit, sans quoi le demandeur croirait avoir invité
+  /// quelqu'un et s'étonnerait de ne pas le voir arriver.
+  Future<void> _proposerParticipant() async {
+    final numeros = await ContactPickerSheet.show(
+      context,
+      title: "Proposer à l'organisateur",
+      confirmLabel: "Proposer",
+    );
+    if (numeros == null || numeros.isEmpty || !mounted) return;
+
+    try {
+      await context
+          .read<MeetingsRepository>()
+          .requestInvite(widget.meetingId, numeros.first);
+      if (mounted) {
+        showAppSnackBar(
+            "Demande envoyée. La personne n'est prévenue que si l'organisateur accepte.");
+      }
+    } on ApiException catch (e) {
+      if (mounted) showAppSnackBar(e.message);
+    }
+  }
+
   /// Réduit la salle SANS quitter : la réunion continue, le bandeau prend le
   /// relais. C'est le geste de retour système comme du bouton dédié.
   void _minimize() {
@@ -891,24 +917,33 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                         ),
                         Text("${ctrl.participantCount}",
                             style: const TextStyle(color: Colors.white54)),
-                        // Ajouter quelqu'un EN COURS de réunion, sans la
-                        // quitter — l'organisateur seul, comme le refuse
-                        // d'ailleurs le serveur si l'on passe outre.
-                        if (ctrl.jeSuisOrganisateur) ...[
-                          const SizedBox(width: 8),
-                          IconButton(
-                            tooltip: "Ajouter un participant",
-                            icon: const Icon(Icons.person_add_alt_1,
-                                color: Colors.white),
-                            onPressed: () {
-                              // La feuille se referme d'abord : deux feuilles
-                              // modales empilées laisseraient le sélecteur de
-                              // contacts sous celle-ci.
-                              Navigator.of(ctx).pop();
-                              _ajouterParticipants();
-                            },
+                        // Faire entrer quelqu'un EN COURS de réunion, sans la
+                        // quitter. L'organisateur AJOUTE, un participant
+                        // PROPOSE — deux gestes différents, deux libellés
+                        // différents, et c'est le serveur qui tranche vraiment.
+                        const SizedBox(width: 8),
+                        IconButton(
+                          tooltip: ctrl.jeSuisOrganisateur
+                              ? "Ajouter un participant"
+                              : "Proposer un participant",
+                          icon: Icon(
+                            ctrl.jeSuisOrganisateur
+                                ? Icons.person_add_alt_1
+                                : Icons.person_add_alt,
+                            color: Colors.white,
                           ),
-                        ],
+                          onPressed: () {
+                            // La feuille se referme d'abord : deux feuilles
+                            // modales empilées laisseraient le sélecteur de
+                            // contacts sous celle-ci.
+                            Navigator.of(ctx).pop();
+                            if (ctrl.jeSuisOrganisateur) {
+                              _ajouterParticipants();
+                            } else {
+                              _proposerParticipant();
+                            }
+                          },
+                        ),
                       ],
                     ),
                   ),

@@ -83,11 +83,10 @@ class Meeting {
         isEnd: (j["isEnd"] as num?)?.toInt() ?? 0,
         startTime: DateTime.parse(j["start_time"] as String),
         duree: (j["duree"] as num).toInt(),
-        organiser: MeetingOrganizer.fromJson(
-            j["organiser"] as Map<String, dynamic>),
+        organiser:
+            MeetingOrganizer.fromJson(j["organiser"] as Map<String, dynamic>),
         participants: ((j["participants"] as List?) ?? [])
-            .map(
-                (p) => MeetingParticipant.fromJson(p as Map<String, dynamic>))
+            .map((p) => MeetingParticipant.fromJson(p as Map<String, dynamic>))
             .toList(),
       );
 }
@@ -108,11 +107,52 @@ class MeetingOrganizer {
 
   String get displayName => pseudo ?? publicNumber ?? "Inconnu";
 
-  factory MeetingOrganizer.fromJson(Map<String, dynamic> j) =>
-      MeetingOrganizer(
+  factory MeetingOrganizer.fromJson(Map<String, dynamic> j) => MeetingOrganizer(
         id: j["id"] as String,
         pseudo: j["pseudo"] as String?,
         publicNumber: j["publicNumber"] as String?,
         avatarUrl: j["avatarUrl"] as String?,
+      );
+}
+
+/// Demande d'un participant pour faire entrer quelqu'un dans une réunion.
+///
+/// N'est lisible que par l'organisateur : lui seul tranche, et un participant
+/// n'a pas à savoir qui les autres ont proposé ni ce qui a été refusé.
+class MeetingInviteRequest {
+  static const enAttente = 0;
+  static const acceptee = 1;
+  static const refusee = 2;
+
+  final int id;
+  final int statut;
+  final MeetingOrganizer demandeur;
+  final MeetingOrganizer invite;
+  final DateTime? createdAt;
+
+  MeetingInviteRequest({
+    required this.id,
+    required this.statut,
+    required this.demandeur,
+    required this.invite,
+    this.createdAt,
+  });
+
+  bool get estEnAttente => statut == enAttente;
+
+  /// [MeetingOrganizer] est réutilisé pour les deux personnes : c'est la même
+  /// forme (identifiant, pseudo, numéro, avatar) et la dupliquer sous un autre
+  /// nom n'apporterait rien.
+  factory MeetingInviteRequest.fromJson(Map<String, dynamic> j) =>
+      MeetingInviteRequest(
+        id: (j["id"] as num).toInt(),
+        statut: (j["statut"] as num?)?.toInt() ?? 0,
+        demandeur: MeetingOrganizer.fromJson(
+            Map<String, dynamic>.from(j["demandeur"] as Map)),
+        invite: MeetingOrganizer.fromJson(
+            Map<String, dynamic>.from(j["invite"] as Map)),
+        createdAt: j["createdAt"] != null
+            ? DateTime.tryParse(j["createdAt"] as String)
+            : null,
       );
 }

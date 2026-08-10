@@ -91,4 +91,38 @@ class MeetingsRepository {
     );
     return (res["ajoutes"] as num?)?.toInt() ?? 0;
   }
+
+  /// Propose quelqu'un à l'organisateur — pour un participant qui n'organise
+  /// pas la réunion.
+  ///
+  /// ⚠️ La personne proposée n'est prévenue de RIEN à ce stade. Elle ne le sera
+  /// que si l'organisateur accepte, et par une invitation ordinaire.
+  Future<void> requestInvite(int idMeeting, String publicNumber) async {
+    await _api.post(
+      "/api/meetings/$idMeeting/invite-requests",
+      {"publicNumber": publicNumber},
+    );
+  }
+
+  /// Demandes d'ajout d'une réunion — organisateur uniquement.
+  Future<List<MeetingInviteRequest>> fetchInviteRequests(int idMeeting) async {
+    final res = await _api.get("/api/meetings/$idMeeting/invite-requests");
+    final list = (res["demandes"] as List?) ?? const [];
+    return list
+        .map((e) =>
+            MeetingInviteRequest.fromJson(Map<String, dynamic>.from(e as Map)))
+        .toList();
+  }
+
+  /// L'organisateur tranche une demande.
+  Future<void> decideInviteRequest(
+    int idMeeting,
+    int requestId, {
+    required bool accepter,
+  }) async {
+    await _api.patch(
+      "/api/meetings/$idMeeting/invite-requests/$requestId",
+      {"accepter": accepter},
+    );
+  }
 }

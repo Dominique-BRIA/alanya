@@ -27,6 +27,9 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
   late Meeting _meeting;
   bool _loading = false;
 
+  /// Demandes EN ATTENTE, chargées pour le seul organisateur.
+  List<MeetingInviteRequest> _demandes = const [];
+
   @override
   void initState() {
     super.initState();
@@ -38,6 +41,10 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
       context.read<MeetingController>().setParticipantAvatars(
             _meeting.participants.map((p) => MapEntry(p.userId, p.avatarUrl)),
           );
+      // `_isOrganiser` lit le contexte : il n'est consultable qu'une fois la
+      // première frame passée, d'où le chargement des demandes ici et non plus
+      // haut dans initState.
+      _chargeDemandes();
     });
   }
 
@@ -134,6 +141,98 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
                     ? "1 participant ajouté et prévenu"
                     : "$ajoutes participants ajoutés et prévenus",
           ),
+        ),
+      );
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  /// Un participant PROPOSE quelqu'un ; l'organisateur tranchera.
+  ///
+  /// Le message de confirmation dit explicitement que l'intéressé n'est pas
+  /// prévenu : sans cela, le demandeur croirait avoir invité quelqu'un et
+  /// s'étonnerait de son absence.
+  Future<void> _proposerParticipant() async {
+    final dejaLa = <String>[
+      ..._meeting.participants.map((p) => p.publicNumber ?? ""),
+      _meeting.organiser.publicNumber ?? "",
+    ].where((n) => n.isNotEmpty).toList();
+
+    final numeros = await ContactPickerSheet.show(
+      context,
+      title: "Proposer à l'organisateur",
+      confirmLabel: "Proposer",
+      excludeNumbers: dejaLa,
+    );
+    if (numeros == null || numeros.isEmpty || !mounted) return;
+
+    setState(() => _loading = true);
+    try {
+      // Une seule personne : chaque proposition se tranche séparément, un lot
+      // obligerait l'organisateur à tout accepter ou tout refuser.
+      await context
+          .read<MeetingsRepository>()
+          .requestInvite(_meeting.idMeeting, numeros.first);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              "Demande envoyée à l'organisateur. La personne n'est pas prévenue tant qu'il n'a pas accepté."),
+          duration: Duration(seconds: 6),
+        ),
+      );
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  /// Charge les demandes en attente — organisateur seulement.
+  Future<void> _chargeDemandes() async {
+    if (!_isOrganiser) return;
+    try {
+      final d = await context
+          .read<MeetingsRepository>()
+          .fetchInviteRequests(_meeting.idMeeting);
+      if (mounted) {
+        setState(() => _demandes = d.where((x) => x.estEnAttente).toList());
+      }
+    } catch (_) {
+      // Silencieux : l'absence de la liste ne doit pas empêcher d'afficher la
+      // fiche, qui reste utilisable sans elle.
+    }
+  }
+
+  /// L'organisateur tranche.
+  Future<void> _trancheDemande(MeetingInviteRequest d, bool accepter) async {
+    setState(() => _loading = true);
+    try {
+      await context.read<MeetingsRepository>().decideInviteRequest(
+            _meeting.idMeeting,
+            d.id,
+            accepter: accepter,
+          );
+      await _refresh();
+      await _chargeDemandes();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(accepter
+              ? "${d.invite.displayName} a été ajouté et prévenu"
+              // On rappelle ici la portée du refus : il vaut pour tout le monde
+              // et pour toujours, ce n'est pas un simple « pas maintenant ».
+              : "Demande refusée. ${d.invite.displayName} n'en saura rien, et ne pourra plus être proposé."),
+          duration: const Duration(seconds: 6),
         ),
       );
     } on ApiException catch (e) {
@@ -303,6 +402,18 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
                 ),
               if (!m.isFinished && !_isOrganiser) ...[
                 const SizedBox(height: 12),
+                // Un participant ne peut pas ajouter : il PROPOSE, et
+                // l'organisateur tranche. Le libellé le dit, pour qu'il ne
+                // croie pas avoir invité quelqu'un.
+                OutlinedButton.icon(
+                  onPressed: _loading ? null : _proposerParticipant,
+                  icon: const Icon(Icons.person_add_alt_outlined),
+                  label: const Text("Proposer un participant"),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 48),
+                  ),
+                ),
+                const SizedBox(height: 12),
                 OutlinedButton.icon(
                   onPressed: _loading ? null : _decline,
                   icon:
@@ -338,6 +449,18 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
               ],
               const SizedBox(height: 24),
 
+              // --- Demandes en attente (organisateur seulement) ---
+              if (_demandes.isNotEmpty) ...[
+                Text(
+                  "Demandes en attente (${_demandes.length})",
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 16),
+                ),
+                const SizedBox(height: 8),
+                ..._demandes.map(_demandeTile),
+                const SizedBox(height: 24),
+              ],
+
               // --- Participants ---
               Text(
                 "Participants (${m.participants.length})",
@@ -370,6 +493,71 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
         ],
       ),
     );
+  }
+
+  /// Une demande en attente, avec les deux seules issues possibles.
+  ///
+  /// Le sous-titre nomme le DEMANDEUR : c'est ce qui permet à l'organisateur de
+  /// juger — la même personne proposée par deux collègues différents n'appelle
+  /// pas la même décision.
+  Widget _demandeTile(MeetingInviteRequest d) {
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      child: ListTile(
+        leading: AvatarCircle(
+          name: d.invite.displayName,
+          avatarUrl: d.invite.avatarUrl,
+          radius: 20,
+          backgroundColor: AlanyaColors.forest,
+        ),
+        title: Text(d.invite.displayName,
+            style: const TextStyle(fontWeight: FontWeight.w600)),
+        subtitle: Text("Proposé par ${d.demandeur.displayName}",
+            style: const TextStyle(fontSize: 12)),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              tooltip: "Refuser",
+              icon: Icon(Icons.close, color: dangerOf(context)),
+              onPressed: _loading ? null : () => _confirmeRefus(d),
+            ),
+            IconButton(
+              tooltip: "Accepter",
+              icon: Icon(Icons.check, color: positiveOf(context)),
+              onPressed: _loading ? null : () => _trancheDemande(d, true),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Le refus est confirmé, l'acceptation non.
+  ///
+  /// Dissymétrie voulue : un refus est IRRÉVERSIBLE — la personne ne pourra
+  /// plus jamais être proposée, par personne. Une acceptation, elle, se rattrape
+  /// (l'organisateur peut retirer quelqu'un ou terminer la réunion).
+  Future<void> _confirmeRefus(MeetingInviteRequest d) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text("Refuser cette demande ?"),
+        content: Text(
+            "${d.invite.displayName} ne sera pas ajouté et n'en saura rien. "
+            "Personne ne pourra plus le proposer pour cette réunion."),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text("Annuler")),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child:
+                  Text("Refuser", style: TextStyle(color: dangerOf(context)))),
+        ],
+      ),
+    );
+    if (ok == true) await _trancheDemande(d, false);
   }
 
   Widget _participantTile(MeetingParticipant p) {
