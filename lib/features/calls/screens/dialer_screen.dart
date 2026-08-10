@@ -338,7 +338,7 @@ class _DialerScreenState extends State<DialerScreen> {
       );
     } else {
       content = Text(
-        "6 ou 8 chiffres",
+        "$alanyaIdMinLength à $alanyaIdMaxLength chiffres",
         style: TextStyle(color: mutedOf(context, Colors.black45), fontSize: 13),
       );
     }
