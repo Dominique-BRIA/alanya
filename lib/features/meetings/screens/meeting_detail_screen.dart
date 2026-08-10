@@ -35,8 +35,7 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       context.read<MeetingController>().setParticipantAvatars(
-            _meeting.participants
-                .map((p) => MapEntry(p.userId, p.avatarUrl)),
+            _meeting.participants.map((p) => MapEntry(p.userId, p.avatarUrl)),
           );
     });
   }
@@ -53,13 +52,13 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
 
   Future<void> _refresh() async {
     try {
-      final updated =
-          await context.read<MeetingsRepository>().fetchMeeting(_meeting.idMeeting);
+      final updated = await context
+          .read<MeetingsRepository>()
+          .fetchMeeting(_meeting.idMeeting);
       if (mounted) {
         setState(() => _meeting = updated);
         context.read<MeetingController>().setParticipantAvatars(
-              updated.participants
-                  .map((p) => MapEntry(p.userId, p.avatarUrl)),
+              updated.participants.map((p) => MapEntry(p.userId, p.avatarUrl)),
             );
       }
     } catch (_) {}
@@ -77,6 +76,7 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
             objet: _meeting.objet,
             isVideo: _meeting.isVideo,
             plannedDurationSec: _meeting.duree,
+            organiserId: _meeting.organiser.id,
           ),
         ),
       );
@@ -89,6 +89,7 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
           objet: _meeting.objet,
           isVideo: _meeting.isVideo,
           plannedDurationSec: _meeting.duree,
+          organiserId: _meeting.organiser.id,
         ),
       ),
     );
@@ -106,8 +107,8 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
               child: const Text("Annuler")),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: Text("Terminer",
-                  style: TextStyle(color: dangerOf(context)))),
+              child:
+                  Text("Terminer", style: TextStyle(color: dangerOf(context)))),
         ],
       ),
     );
@@ -145,8 +146,8 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
               child: const Text("Annuler")),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: Text("Décliner",
-                  style: TextStyle(color: dangerOf(context)))),
+              child:
+                  Text("Décliner", style: TextStyle(color: dangerOf(context)))),
         ],
       ),
     );
@@ -154,7 +155,9 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
 
     setState(() => _loading = true);
     try {
-      await context.read<MeetingsRepository>().declineMeeting(_meeting.idMeeting);
+      await context
+          .read<MeetingsRepository>()
+          .declineMeeting(_meeting.idMeeting);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Invitation déclinée")),
@@ -191,9 +194,14 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
               Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  color: themed(context, light: Colors.white, dark: surfacesOf(context).surface),
+                  color: themed(context,
+                      light: Colors.white, dark: surfacesOf(context).surface),
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: themed(context, light: AlanyaColors.grey200, dark: AlanyaColors.ligne), width: 0.5),
+                  border: Border.all(
+                      color: themed(context,
+                          light: AlanyaColors.grey200,
+                          dark: AlanyaColors.ligne),
+                      width: 0.5),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -202,7 +210,9 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
                       children: [
                         Icon(
                           m.isVideo ? Icons.videocam : Icons.call,
-                          color: m.isFinished ? mutedOf(context, Colors.grey) : positiveOf(context),
+                          color: m.isFinished
+                              ? mutedOf(context, Colors.grey)
+                              : positiveOf(context),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
@@ -244,7 +254,8 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
                 const SizedBox(height: 12),
                 OutlinedButton.icon(
                   onPressed: _loading ? null : _decline,
-                  icon: Icon(Icons.event_busy_outlined, color: dangerOf(context)),
+                  icon:
+                      Icon(Icons.event_busy_outlined, color: dangerOf(context)),
                   label: Text("Décliner l'invitation",
                       style: TextStyle(color: dangerOf(context))),
                   style: OutlinedButton.styleFrom(
@@ -256,7 +267,8 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
                 const SizedBox(height: 12),
                 OutlinedButton.icon(
                   onPressed: _loading ? null : _end,
-                  icon: Icon(Icons.stop_circle_outlined, color: dangerOf(context)),
+                  icon: Icon(Icons.stop_circle_outlined,
+                      color: dangerOf(context)),
                   label: Text("Terminer la réunion",
                       style: TextStyle(color: dangerOf(context))),
                   style: OutlinedButton.styleFrom(
@@ -269,7 +281,8 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
               // --- Participants ---
               Text(
                 "Participants (${m.participants.length})",
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                style:
+                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
               ),
               const SizedBox(height: 8),
               ...m.participants.map(_participantTile),
@@ -287,10 +300,12 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
         children: [
           SizedBox(
             width: 120,
-            child: Text(label, style: TextStyle(color: mutedOf(context, Colors.black54))),
+            child: Text(label,
+                style: TextStyle(color: mutedOf(context, Colors.black54))),
           ),
           Expanded(
-            child: Text(value, style: const TextStyle(fontWeight: FontWeight.w500)),
+            child: Text(value,
+                style: const TextStyle(fontWeight: FontWeight.w500)),
           ),
         ],
       ),
@@ -320,7 +335,8 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
         subtitle: Text(statusText, style: const TextStyle(fontSize: 12)),
         trailing: p.duree != null
             ? Text(_formatDuration(p.duree!),
-                style: TextStyle(fontSize: 12, color: mutedOf(context, Colors.black54)))
+                style: TextStyle(
+                    fontSize: 12, color: mutedOf(context, Colors.black54)))
             : null,
       ),
     );

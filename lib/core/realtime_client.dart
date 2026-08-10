@@ -212,6 +212,9 @@ class RealtimeClient extends ChangeNotifier {
     "meeting_join",
     "meeting_leave",
     "meeting_signal",
+    // Perdue, une prolongation laisse TOUTE la salle sur une durée périmée et
+    // en alerte de dépassement — l'organisateur croit l'avoir accordée.
+    "meeting_extend",
   };
 
   final List<({Map<String, dynamic> payload, DateTime expire})> _enAttente = [];
@@ -255,7 +258,8 @@ class RealtimeClient extends ChangeNotifier {
   void _videLaFile() {
     if (_enAttente.isEmpty) return;
     final maintenant = DateTime.now();
-    final aEnvoyer = _enAttente.where((e) => e.expire.isAfter(maintenant)).toList();
+    final aEnvoyer =
+        _enAttente.where((e) => e.expire.isAfter(maintenant)).toList();
     _enAttente.clear();
     final ch = _channel;
     if (ch == null || !connected) return;
@@ -313,16 +317,16 @@ class RealtimeClient extends ChangeNotifier {
       _send({"type": "delete_message", "messageId": messageId, "scope": scope});
 
   /// Modifier le contenu d'un message texte (seul l'expéditeur, côté serveur).
-  void editMessage(String messageId, String content) =>
-      _send({"type": "edit_message", "messageId": messageId, "content": content});
+  void editMessage(String messageId, String content) => _send(
+      {"type": "edit_message", "messageId": messageId, "content": content});
 
   /// Épingler (messageId) ou détacher (null) un message dans une conversation.
-  void pinMessage(String convId, String? messageId) => _send(
-      {"type": "pin_message", "convId": convId, "messageId": messageId});
+  void pinMessage(String convId, String? messageId) =>
+      _send({"type": "pin_message", "convId": convId, "messageId": messageId});
 
   /// Règle le minuteur des messages éphémères (secondes, 0 = désactivé).
-  void setDisappearing(String convId, int seconds) => _send(
-      {"type": "set_disappearing", "convId": convId, "seconds": seconds});
+  void setDisappearing(String convId, int seconds) =>
+      _send({"type": "set_disappearing", "convId": convId, "seconds": seconds});
 
   void forwardMessage(String messageId, List<String> targetConvIds) => _send({
         "type": "forward_message",
@@ -374,6 +378,14 @@ class RealtimeClient extends ChangeNotifier {
 
   void meetingLeave(int meetingId) =>
       _send({"type": "meeting_leave", "meetingId": meetingId});
+
+  /// Prolonge la durée prévue d'une réunion (organisateur seul, contrôlé par le
+  /// serveur). [dureeSec] est la NOUVELLE durée totale, pas le supplément.
+  void meetingExtend(int meetingId, int dureeSec) => _send({
+        "type": "meeting_extend",
+        "meetingId": meetingId,
+        "duree": dureeSec,
+      });
 
   void meetingSignal(
           int meetingId, String toUserId, Map<String, dynamic> signal) =>

@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/ringtone_service.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
 import '../../auth/auth_controller.dart';
@@ -21,6 +24,7 @@ class MeetingRoomScreen extends StatefulWidget {
     required this.objet,
     required this.isVideo,
     this.plannedDurationSec = 0,
+    this.organiserId,
   });
 
   final int meetingId;
@@ -30,6 +34,11 @@ class MeetingRoomScreen extends StatefulWidget {
   /// Durée prévue de la réunion (0 = pas de limite). Alimente le minuteur.
   final int plannedDurationSec;
 
+  /// Organisateur de la réunion : lui seul voit « Prolonger » quand le terme
+  /// approche. Nul quand la salle est rouverte depuis le bandeau — le
+  /// contrôleur a déjà l'information, et `join` ne refait alors rien.
+  final String? organiserId;
+
   @override
   State<MeetingRoomScreen> createState() => _MeetingRoomScreenState();
 }
@@ -37,6 +46,7 @@ class MeetingRoomScreen extends StatefulWidget {
 class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   bool _joining = true;
   bool _joinAsAudio = false;
+  StreamSubscription<MeetingAlerte>? _alertesSub;
 
   @override
   void initState() {
@@ -59,6 +69,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         isVideo: wantVideo,
         objet: widget.objet,
         plannedDurationSec: widget.plannedDurationSec,
+        organiserId: widget.organiserId,
       );
       if (mounted) setState(() => _joining = false);
     } on Exception {
@@ -108,6 +119,47 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) context.read<MeetingController>().setRoomVisible(true);
     });
+    // Une seule souscription, même si les dépendances changent plusieurs fois.
+    _alertesSub ??= context.read<MeetingController>().alertes.listen(_onAlerte);
+  }
+
+  /// Réagit au franchissement d'un seuil de la durée prévue : une tonalité et un
+  /// bandeau, une seule fois — c'est le contrôleur qui garantit l'unicité.
+  void _onAlerte(MeetingAlerte a) {
+    if (!mounted) return;
+    RingtoneService.instance.playAlerteReunion();
+    final ctrl = context.read<MeetingController>();
+    final organisateur = ctrl.jeSuisOrganisateur;
+    final texte = a == MeetingAlerte.finProche
+        ? "Il reste 2 minutes sur la durée prévue."
+        : "La durée prévue de la réunion est atteinte.";
+    final messenger = ScaffoldMessenger.of(context);
+    // Le bandeau précédent n'a plus lieu d'être : « il reste 2 minutes » devient
+    // faux à l'instant où le terme est atteint.
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(texte),
+        duration: const Duration(seconds: 10),
+        backgroundColor:
+            a == MeetingAlerte.depassement ? AlanyaColors.terracotta : null,
+        action: organisateur
+            ? SnackBarAction(
+                label: "Prolonger",
+                textColor: Colors.white,
+                onPressed: () {
+                  ctrl.prolonger();
+                  // Aucun retour optimiste : la confirmation arrive par
+                  // `meeting_extended`, et l'en-tête repasse alors au vert.
+                },
+              )
+            : SnackBarAction(
+                label: "Ignorer",
+                textColor: Colors.white,
+                onPressed: messenger.hideCurrentSnackBar,
+              ),
+      ),
+    );
   }
 
   /// Réduit la salle SANS quitter : la réunion continue, le bandeau prend le
@@ -124,6 +176,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
 
   @override
   void dispose() {
+    _alertesSub?.cancel();
     // L'écran disparaît : le bandeau global reprend si la réunion continue.
     // On ne quitte PAS la réunion ici — c'est le rôle du bouton rouge.
     context.read<MeetingController>().setRoomVisible(false);
@@ -157,17 +210,16 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                   ),
                 )
               : Column(
-                      children: [
-                        _buildHeader(),
-                        Expanded(child: _buildVideoGrid()),
-                        _buildControls(),
-                      ],
-                    ),
+                  children: [
+                    _buildHeader(),
+                    Expanded(child: _buildVideoGrid()),
+                    _buildControls(),
+                  ],
+                ),
         ),
       ),
     );
   }
-
 
   Widget _buildHeader() {
     return Container(
@@ -199,8 +251,15 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                     final ctrl = context.read<MeetingController>();
                     return Text(
                       _subtitle(ctrl),
-                      style: const TextStyle(
-                          color: Colors.white54, fontSize: 12),
+                      style: TextStyle(
+                        color: _subtitleColor(ctrl),
+                        fontSize: 12,
+                        // Le gras n'arrive qu'avec la couleur : en régime
+                        // normal, ce sous-titre ne doit pas tirer l'œil.
+                        fontWeight: _subtitleColor(ctrl) == Colors.white54
+                            ? FontWeight.normal
+                            : FontWeight.w600,
+                      ),
                     );
                   },
                 ),
@@ -284,6 +343,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
               ? "${m ~/ 60}:${two(m % 60)}:${two(s)}"
               : "$m:${two(s)}";
         }
+
         if (restant >= 0) {
           return "$compte · $t · ${fmt(restant)} restantes";
         }
@@ -292,6 +352,18 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       return "$compte · $t";
     }
     return "$compte participant(s)";
+  }
+
+  /// Couleur du sous-titre : elle seule signale l'approche du terme sans qu'on
+  /// ait à lire les chiffres. Orange dans les deux dernières minutes, rouge en
+  /// dépassement, et retour au gris habituel dès qu'une prolongation redonne du
+  /// temps — c'est le même calcul qui gouverne les trois états.
+  Color _subtitleColor(MeetingController ctrl) {
+    final restant = ctrl.secondesRestantes;
+    if (restant == null) return Colors.white54;
+    if (restant <= 0) return AlanyaColors.terracotta;
+    if (restant <= MeetingController.seuilFinProcheSec) return Colors.orange;
+    return Colors.white54;
   }
 
   /// Zone centrale : vignettes des participants.
@@ -383,7 +455,14 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     // (source de vérité), et non sur les clés des noms : un participant déjà
     // présent à notre arrivée n'a pas encore son nom résolu, il doit quand même
     // s'afficher (repli « Participant »).
-    final entries = <({String id, String name, String? avatar, bool muted, bool hand, bool me})>[
+    final entries = <({
+      String id,
+      String name,
+      String? avatar,
+      bool muted,
+      bool hand,
+      bool me
+    })>[
       (
         id: "me",
         name: me?.pseudo ?? "Vous",
@@ -421,9 +500,8 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                       name: e.name,
                       avatarUrl: e.avatar,
                       radius: 44,
-                      backgroundColor: e.me
-                          ? AlanyaColors.terracotta
-                          : AlanyaColors.forest,
+                      backgroundColor:
+                          e.me ? AlanyaColors.terracotta : AlanyaColors.forest,
                     ),
                     if (e.muted)
                       Positioned(
@@ -505,8 +583,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                 color: AlanyaColors.gold,
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.back_hand,
-                  color: Colors.white, size: 16),
+              child: const Icon(Icons.back_hand, color: Colors.white, size: 16),
             ),
           ),
       ],
@@ -552,8 +629,8 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
               children: [
                 Expanded(
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 4),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
                       color: Colors.black54,
                       borderRadius: BorderRadius.circular(8),
@@ -562,8 +639,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                       name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style:
-                          const TextStyle(color: Colors.white, fontSize: 11),
+                      style: const TextStyle(color: Colors.white, fontSize: 11),
                     ),
                   ),
                 ),
@@ -642,9 +718,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
               // Caméra (vidéo uniquement)
               if (ctrl.activeIsVideo)
                 _controlButton(
-                  icon: ctrl.isCameraOff
-                      ? Icons.videocam_off
-                      : Icons.videocam,
+                  icon: ctrl.isCameraOff ? Icons.videocam_off : Icons.videocam,
                   label: ctrl.isCameraOff ? "Caméra off" : "Caméra",
                   isActive: !ctrl.isCameraOff,
                   onTap: ctrl.toggleCamera,
@@ -661,8 +735,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                 ),
               // Haut-parleur
               _controlButton(
-                icon:
-                    ctrl.isSpeakerOn ? Icons.volume_up : Icons.volume_off,
+                icon: ctrl.isSpeakerOn ? Icons.volume_up : Icons.volume_off,
                 label: "Haut-parleur",
                 isActive: ctrl.isSpeakerOn,
                 onTap: () => ctrl.toggleSpeaker(),
@@ -794,13 +867,11 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                             radius: 18,
                             backgroundColor: AlanyaColors.terracotta,
                           ),
-                          title: Text(
-                              me?.pseudo ?? "Vous",
+                          title: Text(me?.pseudo ?? "Vous",
                               style: const TextStyle(color: Colors.white)),
                           trailing: Icon(
                             ctrl.isMuted ? Icons.mic_off : Icons.mic,
-                            color:
-                                ctrl.isMuted ? Colors.red : Colors.white54,
+                            color: ctrl.isMuted ? Colors.red : Colors.white54,
                             size: 20,
                           ),
                         ),
@@ -809,8 +880,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                         ...peerIds.map((peerId) {
                           final name =
                               ctrl.participantNames[peerId] ?? "Participant";
-                          final avatar =
-                              ctrl.participantAvatars[peerId];
+                          final avatar = ctrl.participantAvatars[peerId];
                           final muted = ctrl.isPeerMuted(peerId);
                           return ListTile(
                             leading: AvatarCircle(
@@ -820,8 +890,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                               backgroundColor: AlanyaColors.forest,
                             ),
                             title: Text(name,
-                                style:
-                                    const TextStyle(color: Colors.white)),
+                                style: const TextStyle(color: Colors.white)),
                             trailing: Icon(
                               muted ? Icons.mic_off : Icons.mic,
                               color: muted ? Colors.red : Colors.white54,
@@ -956,8 +1025,7 @@ class _MeetingChatPanelState extends State<_MeetingChatPanel> {
                           onSubmitted: (_) => _send(),
                           decoration: InputDecoration(
                             hintText: "Ton message…",
-                            hintStyle:
-                                const TextStyle(color: Colors.white38),
+                            hintStyle: const TextStyle(color: Colors.white38),
                             filled: true,
                             fillColor: Colors.white.withValues(alpha: 0.08),
                             contentPadding: const EdgeInsets.symmetric(
@@ -1017,10 +1085,8 @@ class _ChatBubble extends StatelessWidget {
           borderRadius: BorderRadius.only(
             topLeft: const Radius.circular(14),
             topRight: const Radius.circular(14),
-            bottomLeft:
-                isMine ? const Radius.circular(14) : Radius.zero,
-            bottomRight:
-                isMine ? Radius.zero : const Radius.circular(14),
+            bottomLeft: isMine ? const Radius.circular(14) : Radius.zero,
+            bottomRight: isMine ? Radius.zero : const Radius.circular(14),
           ),
         ),
         child: Column(
@@ -1100,7 +1166,8 @@ class _RTCVideoRendererObjectState extends State<RTCVideoRendererObject> {
   @override
   Widget build(BuildContext context) {
     if (!_initialized) {
-      return const Center(child: CircularProgressIndicator(color: Colors.white));
+      return const Center(
+          child: CircularProgressIndicator(color: Colors.white));
     }
     return RTCVideoView(_renderer,
         objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover);

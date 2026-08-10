@@ -52,10 +52,51 @@ class MeetingController extends ChangeNotifier {
   /// démarrage à partir du modèle [Meeting] pour alimenter le minuteur.
   int plannedDurationSec = 0;
 
+  /// Organisateur de la réunion en cours. Lui seul peut prolonger.
+  String? organiserId;
+
+  bool get jeSuisOrganisateur => organiserId != null && organiserId == myUserId;
+
+  /// Seuil de l'alerte « la fin approche », en secondes avant le terme.
+  static const seuilFinProcheSec = 120;
+
+  /// Supplément accordé par un clic sur « Prolonger ».
+  static const prolongationSec = 15 * 60;
+
+  /// Alertes de fin de réunion, émises UNE SEULE FOIS chacune.
+  ///
+  /// Un flux et non un simple booléen : ce sont des événements ponctuels — une
+  /// tonalité, un bandeau — et non un état à afficher. Les exposer comme état
+  /// obligerait l'écran à retenir lui-même ce qu'il a déjà joué, alors qu'il se
+  /// reconstruit à chaque seconde sous l'effet du ticker.
+  Stream<MeetingAlerte> get alertes => _alertes.stream;
+  final StreamController<MeetingAlerte> _alertes =
+      StreamController<MeetingAlerte>.broadcast();
+  bool _finProcheEmise = false;
+  bool _depassementEmis = false;
+
+  /// Secondes écoulées depuis mon entrée dans la salle, ou nul si je n'y suis
+  /// pas encore.
+  int? get secondesEcoulees {
+    final depuis = connectedSince;
+    if (depuis == null) return null;
+    return DateTime.now().difference(depuis).inSeconds;
+  }
+
+  /// Secondes restantes sur la durée prévue — négatif en dépassement, nul quand
+  /// aucune durée n'a été fixée.
+  int? get secondesRestantes {
+    if (plannedDurationSec <= 0) return null;
+    final ecoule = secondesEcoulees;
+    if (ecoule == null) return null;
+    return plannedDurationSec - ecoule;
+  }
+
   // Participants
   final Map<String, String> _participantNames = {}; // userId -> displayName
   final Map<String, String?> _participantAvatars = {}; // userId -> avatarUrl
-  final Set<String> _connectedPeerIds = {}; // participants annoncés par le serveur
+  final Set<String> _connectedPeerIds =
+      {}; // participants annoncés par le serveur
 
   /// État muet des pairs, tel qu'annoncé par eux-mêmes via la signalisation
   /// applicative (`meeting_signal` de type `state`).
@@ -77,13 +118,11 @@ class MeetingController extends ChangeNotifier {
   /// Messages de chat reçus pendant la réunion (éphémères, non persistés).
   final List<MeetingChatMessage> _chatMessages = [];
 
-  List<MeetingChatMessage> get chatMessages =>
-      List.unmodifiable(_chatMessages);
+  List<MeetingChatMessage> get chatMessages => List.unmodifiable(_chatMessages);
 
   /// Nombre de messages de chat non lus (tant que le panneau n'est pas ouvert).
   int _unreadChatCount = 0;
   int get unreadChatCount => _unreadChatCount;
-
 
   // WebRTC
   WebrtcGroupMesh? _mesh;
@@ -128,8 +167,7 @@ class MeetingController extends ChangeNotifier {
   bool isHandRaised(String peerId) => _raisedHands.contains(peerId);
 
   /// Y a-t-il au moins une main levée (la mienne comprise) ?
-  bool get hasRaisedHands =>
-      myHandRaised || _raisedHands.isNotEmpty;
+  bool get hasRaisedHands => myHandRaised || _raisedHands.isNotEmpty;
 
   /// Rejoint la salle après une reconnexion WebSocket. La socket a changé, il
   /// faut se réinscrire côté serveur. Les paires WebRTC peuvent avoir survécu
@@ -154,7 +192,58 @@ class MeetingController extends ChangeNotifier {
   void setPlannedDuration(int seconds) {
     if (plannedDurationSec == seconds) return;
     plannedDurationSec = seconds;
+    _armeSeuils();
     notifyListeners();
+  }
+
+  /// (Ré)arme les deux alertes à partir de l'état COURANT.
+  ///
+  /// Un seuil déjà franchi au moment où on l'arme est considéré comme consommé :
+  /// une durée prévue qui nous parvient en retard, alors qu'elle est déjà
+  /// dépassée, ne doit pas déclencher une tonalité pour un terme franchi depuis
+  /// longtemps. Les alertes marquent un FRANCHISSEMENT, pas un état.
+  void _armeSeuils() {
+    final restant = secondesRestantes;
+    if (restant == null) {
+      _finProcheEmise = false;
+      _depassementEmis = false;
+      return;
+    }
+    _finProcheEmise = restant <= seuilFinProcheSec;
+    _depassementEmis = restant <= 0;
+  }
+
+  /// Appelée à chaque tick : n'émet que sur le franchissement d'un seuil.
+  void _verifieSeuils() {
+    final restant = secondesRestantes;
+    if (restant == null) return;
+    if (!_finProcheEmise && restant <= seuilFinProcheSec) {
+      _finProcheEmise = true;
+      if (!_alertes.isClosed) _alertes.add(MeetingAlerte.finProche);
+    }
+    if (!_depassementEmis && restant <= 0) {
+      _depassementEmis = true;
+      if (!_alertes.isClosed) _alertes.add(MeetingAlerte.depassement);
+    }
+  }
+
+  /// Prolonge la réunion de [prolongationSec].
+  ///
+  /// La nouvelle durée part du TEMPS DÉJÀ ÉCOULÉ quand celui-ci dépasse la durée
+  /// prévue, et non de cette durée : prolonger alors qu'on est à vingt minutes
+  /// de dépassement doit rendre du temps, pas laisser le minuteur dans le rouge.
+  /// Il reste donc toujours exactement [prolongationSec] après le clic.
+  ///
+  /// Rien n'est appliqué localement : on attend `meeting_extended`, qui passe
+  /// par le serveur et arrive à tout le monde en même temps. Une application
+  /// optimiste ferait diverger l'organisateur du reste de la salle si le serveur
+  /// refusait.
+  void prolonger() {
+    final id = activeMeetingId;
+    if (id == null || !jeSuisOrganisateur) return;
+    final ecoule = secondesEcoulees ?? 0;
+    final base = plannedDurationSec > ecoule ? plannedDurationSec : ecoule;
+    _rt.meetingExtend(id, base + prolongationSec);
   }
 
   void setRoomVisible(bool v) {
@@ -177,6 +266,7 @@ class MeetingController extends ChangeNotifier {
     required bool isVideo,
     String? objet,
     int? plannedDurationSec,
+    String? organiserId,
   }) async {
     if (myUserId == null) return;
     if (activeMeetingId == meetingId && isActive) return;
@@ -188,6 +278,11 @@ class MeetingController extends ChangeNotifier {
     activeIsVideo = isVideo;
     activeObjet = objet;
     plannedDurationSec = plannedDurationSec ?? 0;
+    this.organiserId = organiserId;
+    // Les seuils s'arment ici, avant toute connexion : `connectedSince` est
+    // encore nul, donc rien n'est considéré comme franchi, et le premier tick
+    // qui suivra l'entrée dans la salle fera foi.
+    _armeSeuils();
     isActive = true;
     notifyListeners();
 
@@ -232,7 +327,12 @@ class MeetingController extends ChangeNotifier {
   /// avancer le minuteur.
   void _startTicker() {
     _ticker?.cancel();
-    _ticker = Timer.periodic(const Duration(seconds: 1), (_) => notifyListeners());
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+      // Les seuils sont évalués ICI et non dans l'écran : la salle peut être
+      // réduite, l'alerte de fin doit tout de même partir.
+      _verifieSeuils();
+      notifyListeners();
+    });
   }
 
   void _stopTicker() {
@@ -340,7 +440,6 @@ class MeetingController extends ChangeNotifier {
       notifyListeners();
     }
   }
-
 
   /// Toggle caméra.
   void toggleCamera() {
@@ -481,6 +580,20 @@ class MeetingController extends ChangeNotifier {
       case "meeting_signal":
         _handleSignal(e);
         break;
+      case "meeting_extended":
+        // L'organisateur a repoussé le terme. La nouvelle durée vient du
+        // serveur, pour tout le monde en même temps — l'organisateur compris,
+        // qui n'a rien appliqué de son côté.
+        final meetingId = e["meetingId"] as int?;
+        final duree = (e["duree"] as num?)?.toInt();
+        if (meetingId == activeMeetingId && duree != null) {
+          plannedDurationSec = duree;
+          // Réarmement : les deux alertes doivent pouvoir se déclencher de
+          // nouveau à l'approche du NOUVEAU terme.
+          _armeSeuils();
+          notifyListeners();
+        }
+        break;
       case "meeting_ended":
         // L'organisateur a terminé la réunion : tout le monde est déconnecté.
         final meetingId = e["meetingId"];
@@ -594,12 +707,13 @@ class MeetingController extends ChangeNotifier {
     // Signal applicatif : message de chat.
     if (kind == "meeting_chat") {
       final text = signal["text"] as String?;
-      final fromName =
-          signal["fromName"] as String? ??
+      final fromName = signal["fromName"] as String? ??
           _participantNames[fromUserId] ??
           "Participant";
       final tsRaw = signal["ts"] as String?;
-      final ts = tsRaw != null ? DateTime.tryParse(tsRaw) ?? DateTime.now() : DateTime.now();
+      final ts = tsRaw != null
+          ? DateTime.tryParse(tsRaw) ?? DateTime.now()
+          : DateTime.now();
       if (text != null && text.trim().isNotEmpty) {
         _chatMessages.add(MeetingChatMessage(
           fromUserId: fromUserId,
@@ -628,6 +742,9 @@ class MeetingController extends ChangeNotifier {
     isCameraOff = false;
     connectedSince = null;
     plannedDurationSec = 0;
+    organiserId = null;
+    _finProcheEmise = false;
+    _depassementEmis = false;
     _roomScreensOpen = 0;
     _participantNames.clear();
     _participantAvatars.clear();
@@ -645,9 +762,19 @@ class MeetingController extends ChangeNotifier {
   void dispose() {
     _sub?.cancel();
     _ticker?.cancel();
+    _alertes.close();
     _stopMesh();
     super.dispose();
   }
+}
+
+/// Franchissement d'un seuil de la durée prévue d'une réunion.
+enum MeetingAlerte {
+  /// Il reste [MeetingController.seuilFinProcheSec] ou moins.
+  finProche,
+
+  /// La durée prévue vient d'être atteinte ; on est en dépassement.
+  depassement,
 }
 
 /// Message de chat échangé pendant une réunion. Éphémère, non persisté.

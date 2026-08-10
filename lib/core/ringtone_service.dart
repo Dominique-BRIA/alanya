@@ -79,6 +79,27 @@ class RingtoneService {
   /// pour l'arrivée, on évite d'ajouter un asset.
   Future<void> playParticipantLeft() => _playCueOnce(volume: 0.6);
 
+  /// Alerte de fin de réunion : le même son que les autres repères, mais joué
+  /// **deux fois**.
+  ///
+  /// Le doublement est ce qui la distingue à l'oreille d'une arrivée ou d'un
+  /// départ de participant, sans ajouter d'asset. Elle contourne volontairement
+  /// l'anti-rafale de [_playCueOnce] — c'est justement une rafale de deux — mais
+  /// remet son horodatage à jour pour ne pas se superposer à un son voisin.
+  Future<void> playAlerteReunion() async {
+    _lastCueAt = DateTime.now();
+    try {
+      final p = _cuePlayer ??= AudioPlayer();
+      await p.setReleaseMode(ReleaseMode.release);
+      await p.setVolume(1.0);
+      await p.stop();
+      await p.play(AssetSource(_cueAsset));
+      await Future<void>.delayed(const Duration(milliseconds: 850));
+      await p.stop();
+      await p.play(AssetSource(_cueAsset));
+    } catch (_) {}
+  }
+
   /// Joue le son de notification une seule fois, avec anti-rafale léger.
   Future<void> _playCueOnce({double volume = 1.0}) async {
     final now = DateTime.now();
