@@ -12,7 +12,7 @@ import '../contacts_repository.dart';
 
 /// Ajout d'un contact + démarrage d'une discussion (style WhatsApp).
 ///
-/// Formulaire simple : nom (optionnel) + Alanya ID à 6 ou 8 chiffres + bouton
+/// Formulaire simple : nom (optionnel) + Alanya ID + bouton
 /// « Enregistrer ». Si le numéro n'existe pas, on affiche une erreur claire.
 /// Si l'utilisateur est déjà un contact, on ouvre directement le chat.
 class NewChatScreen extends StatefulWidget {
@@ -37,8 +37,7 @@ class _NewChatScreenState extends State<NewChatScreen> {
 
   /// Valide sur l'ID nettoyé : un ID collé au format « 67 64 15 99 » est
   /// légitime et ne doit pas être refusé.
-  bool get _isNumberValid =>
-      RegExp(r'^(\d{6}|\d{8})$').hasMatch(stripAlanyaId(_numberCtrl.text));
+  bool get _isNumberValid => estAlanyaIdValide(_numberCtrl.text);
 
   /// Enregistrer le contact puis ouvrir la discussion.
   Future<void> _save() async {
@@ -47,7 +46,8 @@ class _NewChatScreenState extends State<NewChatScreen> {
 
     // Validation locale du numéro.
     if (!_isNumberValid) {
-      setState(() => _numberError = "L'Alanya ID doit comporter 6 ou 8 chiffres");
+      setState(() => _numberError =
+          "L'Alanya ID doit comporter $alanyaIdMinLength à $alanyaIdMaxLength chiffres");
       return;
     }
     setState(() {
@@ -96,8 +96,8 @@ class _NewChatScreenState extends State<NewChatScreen> {
           if (!mounted) return;
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(
-              builder: (_) =>
-                  ChatScreen(convId: convId, title: alias.isNotEmpty ? alias : number),
+              builder: (_) => ChatScreen(
+                  convId: convId, title: alias.isNotEmpty ? alias : number),
             ),
           );
         } catch (_) {
@@ -128,7 +128,8 @@ class _NewChatScreenState extends State<NewChatScreen> {
                 child: CircleAvatar(
                   radius: 44,
                   backgroundColor: accentOf(context),
-                  child: const Icon(Icons.person_add, size: 40, color: Colors.white),
+                  child: const Icon(Icons.person_add,
+                      size: 40, color: Colors.white),
                 ),
               ),
               const SizedBox(height: 24),
@@ -149,7 +150,7 @@ class _NewChatScreenState extends State<NewChatScreen> {
               TextField(
                 controller: _numberCtrl,
                 keyboardType: TextInputType.number,
-                // Pas de maxLength : le formateur plafonne à 8 CHIFFRES, alors
+                // Pas de maxLength : le formateur plafonne en CHIFFRES, alors
                 // qu'un maxLength compterait aussi les espaces et bloquerait la
                 // saisie à « 67 64 15 » (8 caractères, 6 chiffres).
                 inputFormatters: const [AlanyaIdInputFormatter()],
@@ -167,9 +168,10 @@ class _NewChatScreenState extends State<NewChatScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                "L'Alanya ID est un identifiant public à 6 ou 8 chiffres "
-                "que chaque utilisateur reçoit à l'inscription.",
-                style: TextStyle(fontSize: 12, color: mutedOf(context, Colors.black54)),
+                "L'Alanya ID est l'identifiant public d'un compte : "
+                "8 chiffres pour un utilisateur, moins pour un numéro de service.",
+                style: TextStyle(
+                    fontSize: 12, color: mutedOf(context, Colors.black54)),
               ),
               const SizedBox(height: 32),
 
@@ -182,7 +184,8 @@ class _NewChatScreenState extends State<NewChatScreen> {
                       ? const SizedBox(
                           width: 20,
                           height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white),
                         )
                       : const Icon(Icons.save_outlined),
                   label: Text(_saving ? "Enregistrement…" : "Enregistrer"),

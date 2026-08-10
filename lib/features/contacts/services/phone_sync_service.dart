@@ -68,6 +68,19 @@ class PhoneSyncService {
     }
 
     // 3. Extraction des numéros à 6 ou 8 chiffres
+    //
+    // ⚠️ SEUL ENDROIT QUI RESTE À 6/8, ET C'EST DÉLIBÉRÉ. Partout ailleurs la
+    // règle est passée à 3–10 chiffres, parce qu'un utilisateur qui SAISIT un
+    // identifiant sait ce qu'il tape. Ici, personne ne saisit rien : on fouille
+    // le répertoire téléphonique et on devine. Abaisser le seuil à 3 ferait
+    // remonter les numéros courts d'urgence, les codes opérateur et toute
+    // séquence de trois chiffres traînant dans un carnet d'adresses — puis les
+    // enverrait au serveur pour vérification.
+    //
+    // Les comptes réellement susceptibles de figurer dans un répertoire ont 8
+    // chiffres (c'est ce que la génération produit). Les identifiants courts
+    // sont des numéros de service — centres d'appels, numéros courts
+    // d'entreprise — qu'on compose, qu'on n'enregistre pas comme un contact.
     onProgress?.call("Analyse des ${phoneContacts.length} contacts…");
     final Map<String, String> numberToName = {}; // numéro → nom affiché
     final _sixDigits = RegExp(r'^(\d{6}|\d{8})$');
@@ -77,14 +90,14 @@ class PhoneSyncService {
 
       for (final phone in contact.phones) {
         // Normalise : supprime espaces, tirets, parenthèses, +
-        final cleaned = phone.number
-            .replaceAll(RegExp(r'[\s\-\(\)\+]'), '')
-            .trim();
+        final cleaned =
+            phone.number.replaceAll(RegExp(r'[\s\-\(\)\+]'), '').trim();
 
         // Ne garde que les chaînes de exactement 6 ou 8 chiffres
         if (_sixDigits.hasMatch(cleaned)) {
           // Si plusieurs contacts ont le même numéro, on garde le premier nom trouvé
-          numberToName.putIfAbsent(cleaned, () => displayName.isNotEmpty ? displayName : cleaned);
+          numberToName.putIfAbsent(
+              cleaned, () => displayName.isNotEmpty ? displayName : cleaned);
         }
       }
     }
@@ -94,7 +107,8 @@ class PhoneSyncService {
     }
 
     // 4. Requête batch au backend
-    onProgress?.call("Vérification de ${numberToName.length} numéros sur Alanya…");
+    onProgress
+        ?.call("Vérification de ${numberToName.length} numéros sur Alanya…");
     List<UserSearchResult> matched;
     try {
       matched = await _matchFn(numberToName.keys.toList());
@@ -162,8 +176,8 @@ class PhoneSyncResult {
   factory PhoneSyncResult.noAlanyaNumbers() =>
       PhoneSyncResult._(status: PhoneSyncStatus.noAlanyaNumbers);
 
-  factory PhoneSyncResult.noMatches(int scanned) =>
-      PhoneSyncResult._(status: PhoneSyncStatus.noMatches, totalScanned: scanned);
+  factory PhoneSyncResult.noMatches(int scanned) => PhoneSyncResult._(
+      status: PhoneSyncStatus.noMatches, totalScanned: scanned);
 
   factory PhoneSyncResult.error(String msg) =>
       PhoneSyncResult._(status: PhoneSyncStatus.error, errorMessage: msg);

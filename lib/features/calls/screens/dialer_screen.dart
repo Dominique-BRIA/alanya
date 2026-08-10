@@ -48,9 +48,13 @@ class _DialerScreenState extends State<DialerScreen> {
   bool _calling = false;
   Timer? _debounce;
 
-  /// Le serveur n'émet que des ID à 8 chiffres, mais les endpoints acceptent
-  /// aussi 6 chiffres (comptes historiques) — même règle que l'ajout de contact.
-  bool get _isComplete => _digits.length == 6 || _digits.length == 8;
+  /// Même règle que partout ailleurs : 3 à 10 chiffres, décidée une seule fois
+  /// dans `alanya_id_formatter.dart`.
+  ///
+  /// Elle valait « 6 ou 8 exactement », ce qui rendait un centre d'appels
+  /// (4 chiffres) impossible à composer : le clavier n'activait jamais le bouton
+  /// d'appel, sans le moindre message.
+  bool get _isComplete => estAlanyaIdValide(_digits);
 
   @override
   void dispose() {
@@ -77,7 +81,7 @@ class _DialerScreenState extends State<DialerScreen> {
   }
 
   void _press(String digit) {
-    if (_digits.length >= 8) return;
+    if (_digits.length >= alanyaIdMaxLength) return;
     HapticFeedback.selectionClick();
     _setDigits(_digits + digit);
   }
@@ -97,8 +101,10 @@ class _DialerScreenState extends State<DialerScreen> {
   void _scheduleLookup() {
     _debounce?.cancel();
     if (!_isComplete) return;
-    // 6 chiffres est une longueur valide mais souvent une étape vers 8 : on
-    // laisse le temps de finir de composer avant d'interroger le serveur.
+    // Toute longueur de 3 à 10 est valide, et une saisie courte est presque
+    // toujours une étape vers une plus longue : le délai de grâce compte donc
+    // davantage qu'avant. On n'interroge le serveur que lorsque la frappe
+    // s'arrête, jamais à chaque chiffre.
     _debounce = Timer(const Duration(milliseconds: 450), _lookup);
   }
 

@@ -6,13 +6,13 @@ class ContactsRepository {
   ContactsRepository(this._api);
   final AuthedApi _api;
 
-  /// Recherche un utilisateur par son Alanya ID à 6 chiffres.
+  /// Recherche un utilisateur par son Alanya ID (3 à 10 chiffres).
   Future<UserSearchResult> searchByNumber(String number) async {
     final data = await _api.get("/api/users/search?number=$number");
     return UserSearchResult.fromJson(data);
   }
 
-  /// Envoie un tableau de numéros à 6 chiffres et renvoie ceux qui sont sur Alanya.
+  /// Envoie un tableau de numéros et renvoie ceux qui sont sur Alanya.
   /// Utilisé pour la synchronisation automatique du répertoire téléphonique.
   Future<List<UserSearchResult>> matchNumbers(List<String> numbers) async {
     if (numbers.isEmpty) return [];
@@ -34,7 +34,7 @@ class ContactsRepository {
         .toList();
   }
 
-  /// Ajoute un contact via son Alanya ID à 6 chiffres.
+  /// Ajoute un contact via son Alanya ID.
   Future<Contact> add(String publicNumber, {String? alias}) async {
     final data = await _api.post("/api/contacts", {
       "publicNumber": publicNumber,
@@ -45,7 +45,8 @@ class ContactsRepository {
 
   /// Ajoute plusieurs contacts en une seule passe (import répertoire téléphonique).
   /// Ignore silencieusement les doublons (code ALREADY_CONTACT).
-  Future<int> addMany(List<({String publicNumber, String? alias})> entries) async {
+  Future<int> addMany(
+      List<({String publicNumber, String? alias})> entries) async {
     int added = 0;
     for (final e in entries) {
       try {

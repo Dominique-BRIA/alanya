@@ -54,8 +54,9 @@ class _AddContactScreenState extends State<AddContactScreen> {
     // On nettoie AVANT de valider : l'utilisateur peut coller un ID formaté
     // (« 67 64 15 99 »), qui serait sinon rejeté comme invalide.
     final number = stripAlanyaId(_numberCtrl.text);
-    if (!RegExp(r'^(\d{6}|\d{8})$').hasMatch(number)) {
-      setState(() => _error = "Entre un Alanya ID valide (6 ou 8 chiffres)");
+    if (!estAlanyaIdValide(number)) {
+      setState(() => _error =
+          "Entre un Alanya ID valide ($alanyaIdMinLength à $alanyaIdMaxLength chiffres)");
       return;
     }
     setState(() {

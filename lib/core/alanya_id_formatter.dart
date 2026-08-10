@@ -9,12 +9,13 @@ import 'package:flutter/services.dart';
 /// - 8 chiffres  : xx xx xx xx
 /// - 10 chiffres : x xxx xxx xxx
 ///
-/// Note : aujourd'hui le serveur n'émet que des IDs à 8 chiffres
-/// (`generateUniquePublicNumber`), la colonne est en `VarChar(8)` et les
-/// endpoints n'acceptent que 6 ou 8 chiffres. Les cas 3, 4 et 10 sont donc
-/// injoignables avec des données réelles : ils ne sont conservés que pour ne
-/// pas casser l'affichage si ces longueurs arrivaient un jour (une migration
-/// de la colonne serait nécessaire au-delà de 8).
+/// ⚠️ Ces cinq longueurs sont TOUTES réelles depuis le 10/08/2026, et ce
+/// fichier était le seul à les avoir anticipées. La génération automatique
+/// produit toujours 8 chiffres, mais les comptes créés à la main en portent
+/// d'autres — un **numéro de centre d'appels fait 4 chiffres** (`0000`), et les
+/// numéros courts d'entreprise aussi (`6938`). Les endpoints acceptent
+/// désormais 3 à 10 chiffres (`ALANYA_ID_MIN/MAX_LENGTH` côté serveur), et la
+/// colonne `users.alanyaPhone` est en `VarChar(20)`.
 
 /// Formate un Alanya ID brut pour l'affichage.
 ///
@@ -63,6 +64,34 @@ String stripAlanyaId(String formattedId) {
   return formattedId.replaceAll(RegExp(r'\D'), '');
 }
 
+/// Bornes admises par le serveur (`ALANYA_ID_MIN/MAX_LENGTH` dans
+/// `src/lib/validation.ts`).
+const int alanyaIdMinLength = 3;
+const int alanyaIdMaxLength = 10;
+
+/// La saisie a-t-elle la FORME d'un Alanya ID ?
+///
+/// ⚠️ Elle ne dit RIEN de l'existence du compte : c'est le serveur qui tranche,
+/// et lui seul. Le rôle de ce contrôle est d'écarter ce qui ne peut pas être un
+/// identifiant, pas de deviner l'annuaire.
+///
+/// Elle remplace trois regex `^(\d{6}|\d{8})$` recopiées dans autant d'écrans
+/// (ajout de contact, nouvelle discussion, sélecteur de transfert) plus le
+/// contrôle de longueur du composeur. Chacune refusait, avant tout appel
+/// réseau, des comptes qui existent pourtant : les centres d'appels ont
+/// **4 chiffres**, les numéros courts d'entreprise aussi. Une règle partagée
+/// n'a qu'un seul endroit où vivre — c'est exactement la leçon du bug d'appels
+/// Web → Android de juillet.
+///
+/// Une exception assumée subsiste : la synchronisation du répertoire
+/// (`phone_sync_service.dart`) reste à 6/8, parce qu'elle DEVINE des
+/// identifiants au lieu d'en recevoir. La raison y est écrite.
+bool estAlanyaIdValide(String saisie) {
+  final chiffres = stripAlanyaId(saisie);
+  return chiffres.length >= alanyaIdMinLength &&
+      chiffres.length <= alanyaIdMaxLength;
+}
+
 /// Applique le formatage visuel de l'Alanya ID **pendant la saisie**, en
 /// replaçant le curseur au bon endroit malgré les espaces insérés.
 ///
@@ -73,8 +102,11 @@ String stripAlanyaId(String formattedId) {
 ///
 /// Deux réglages selon le champ :
 ///  - [maxDigits] : nombre de chiffres au-delà duquel la frappe est refusée.
-///    8 pour un champ Alanya ID (le serveur n'accepte que 6 ou 8), 10 pour un
-///    champ tolérant.
+///    **10 par défaut**, le plafond du serveur. Il valait 8, ce qui rendait
+///    impossible la saisie d'un identifiant à 10 chiffres dans les trois champs
+///    qui prennent le défaut (ajout de contact, nouvelle discussion, sélecteur
+///    de transfert) — la frappe était refusée avant même d'atteindre le
+///    serveur.
 ///  - [allowNonDigits] : à `true`, une saisie contenant autre chose que des
 ///    chiffres et des espaces passe telle quelle — c'est le cas du champ mixte
 ///    « Alanya ID **ou** email » de la connexion. À `false`, tout caractère non
@@ -82,7 +114,7 @@ String stripAlanyaId(String formattedId) {
 ///    `FilteringTextInputFormatter.digitsOnly` supplémentaire.
 class AlanyaIdInputFormatter extends TextInputFormatter {
   const AlanyaIdInputFormatter({
-    this.maxDigits = 8,
+    this.maxDigits = 10,
     this.allowNonDigits = false,
   });
 

@@ -80,9 +80,17 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
         });
       }
     } on ApiException catch (_) {
-      if (mounted) setState(() { _loading = false; _error = true; });
+      if (mounted)
+        setState(() {
+          _loading = false;
+          _error = true;
+        });
     } catch (_) {
-      if (mounted) setState(() { _loading = false; _error = true; });
+      if (mounted)
+        setState(() {
+          _loading = false;
+          _error = true;
+        });
     }
   }
 
@@ -100,9 +108,13 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
     // L'ID saisi part tel quel au serveur : on le nettoie et on le valide ici,
     // sinon un ID formaté ou une faute de frappe remonte en erreur 400.
     final number = stripAlanyaId(_manualCtrl.text);
-    if (!RegExp(r'^(\d{6}|\d{8})$').hasMatch(number)) {
+    if (!estAlanyaIdValide(number)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Alanya ID invalide (6 ou 8 chiffres)")),
+        const SnackBar(
+          content: Text(
+            "Alanya ID invalide ($alanyaIdMinLength à $alanyaIdMaxLength chiffres)",
+          ),
+        ),
       );
       return;
     }
@@ -144,7 +156,8 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
             width: 40,
             height: 4,
             decoration: BoxDecoration(
-              color: themed(context, light: AlanyaColors.grey300, dark: AlanyaColors.ligne),
+              color: themed(context,
+                  light: AlanyaColors.grey300, dark: AlanyaColors.ligne),
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -190,17 +203,24 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
                     decoration: InputDecoration(
                       hintText: "Rechercher un contact…",
                       prefixIcon: Icon(Icons.search,
-                          size: 20, color: mutedOf(context, AlanyaColors.grey400)),
+                          size: 20,
+                          color: mutedOf(context, AlanyaColors.grey400)),
                       contentPadding: const EdgeInsets.symmetric(
                           horizontal: 16, vertical: 10),
                       isDense: true,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: themed(context, light: AlanyaColors.grey200, dark: AlanyaColors.ligne)),
+                        borderSide: BorderSide(
+                            color: themed(context,
+                                light: AlanyaColors.grey200,
+                                dark: AlanyaColors.ligne)),
                       ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: themed(context, light: AlanyaColors.grey200, dark: AlanyaColors.ligne)),
+                        borderSide: BorderSide(
+                            color: themed(context,
+                                light: AlanyaColors.grey200,
+                                dark: AlanyaColors.ligne)),
                       ),
                     ),
                   ),
@@ -238,7 +258,10 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
                         isDense: true,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(color: themed(context, light: AlanyaColors.grey200, dark: AlanyaColors.ligne)),
+                          borderSide: BorderSide(
+                              color: themed(context,
+                                  light: AlanyaColors.grey200,
+                                  dark: AlanyaColors.ligne)),
                         ),
                       ),
                       onSubmitted: (_) => _addManualNumber(),
@@ -247,8 +270,7 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
                   const SizedBox(width: 8),
                   IconButton(
                     onPressed: _addManualNumber,
-                    icon: Icon(Icons.add_circle,
-                        color: accentOf(context)),
+                    icon: Icon(Icons.add_circle, color: accentOf(context)),
                   ),
                 ],
               ),
@@ -263,12 +285,10 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
                 scrollDirection: Axis.horizontal,
                 children: _selectedNumbers.map((n) {
                   // Trouve le contact correspondant
-                  final contact = allContacts
-                      .where((c) => c.publicNumber == n)
-                      .toList();
-                  final name = contact.isNotEmpty
-                      ? contact.first.displayName
-                      : n;
+                  final contact =
+                      allContacts.where((c) => c.publicNumber == n).toList();
+                  final name =
+                      contact.isNotEmpty ? contact.first.displayName : n;
 
                   return Padding(
                     padding: const EdgeInsets.only(right: 6),
@@ -297,20 +317,21 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
           Expanded(
             child: _loading
                 ? Center(
-                    child:
-                        CircularProgressIndicator(color: accentOf(context)))
+                    child: CircularProgressIndicator(color: accentOf(context)))
                 : _error
                     ? Center(
                         child: Text("Erreur de chargement",
-                            style: TextStyle(color: mutedOf(context, AlanyaColors.grey500))))
+                            style: TextStyle(
+                                color: mutedOf(context, AlanyaColors.grey500))))
                     : filtered.isEmpty
                         ? Center(
                             child: Text(
                                 _search.isEmpty
                                     ? "Aucun contact"
                                     : "Aucun résultat",
-                                style:
-                                    TextStyle(color: mutedOf(context, AlanyaColors.grey400))))
+                                style: TextStyle(
+                                    color: mutedOf(
+                                        context, AlanyaColors.grey400))))
                         : ListView.builder(
                             controller: scrollCtrl,
                             itemCount: filtered.length,
@@ -331,14 +352,16 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
                                 subtitle: Text(formatAlanyaId(c.publicNumber),
                                     style: TextStyle(
                                         fontSize: 12,
-                                        color: alanyaIdOf(context, AlanyaColors.grey500))),
+                                        color: alanyaIdOf(
+                                            context, AlanyaColors.grey500))),
                                 trailing: selected
                                     ? Icon(Icons.check_circle,
                                         color: accentOf(context))
                                     : Icon(Icons.radio_button_unchecked,
-                                        color: themed(context, light: AlanyaColors.grey300, dark: AlanyaColors.ligne)),
-                                onTap: () =>
-                                    _toggleNumber(c.publicNumber),
+                                        color: themed(context,
+                                            light: AlanyaColors.grey300,
+                                            dark: AlanyaColors.ligne)),
+                                onTap: () => _toggleNumber(c.publicNumber),
                               );
                             },
                           ),
