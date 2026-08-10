@@ -74,4 +74,21 @@ class MeetingsRepository {
   Future<void> deleteMeeting(int idMeeting) async {
     await _api.delete("/api/meetings/$idMeeting/delete");
   }
+
+  /// Ajoute des participants à une réunion — organisateur uniquement, avant
+  /// comme pendant la séance.
+  ///
+  /// Renvoie le nombre de personnes RÉELLEMENT ajoutées : le serveur écarte
+  /// sans erreur celles qui étaient déjà membres, la valeur peut donc être
+  /// inférieure au nombre de numéros envoyés, voire nulle.
+  Future<int> addParticipants(
+    int idMeeting,
+    List<String> publicNumbers,
+  ) async {
+    final res = await _api.post(
+      "/api/meetings/$idMeeting/participants",
+      {"publicNumbers": publicNumbers},
+    );
+    return (res["ajoutes"] as num?)?.toInt() ?? 0;
+  }
 }

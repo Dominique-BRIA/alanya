@@ -4,11 +4,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/api_client.dart';
+import '../../../core/app_snackbar.dart';
 import '../../../core/ringtone_service.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
+import '../../../widgets/contact_picker_sheet.dart';
 import '../../auth/auth_controller.dart';
 import '../meeting_controller.dart';
+import '../meetings_repository.dart';
 
 /// Écran de réunion active — style Google Meet.
 ///
@@ -160,6 +164,41 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
               ),
       ),
     );
+  }
+
+  /// Ajoute des participants sans quitter la salle (organisateur seulement).
+  ///
+  /// Les personnes déjà présentes sont retirées de la liste proposée. La salle
+  /// ne connaît que les participants CONNECTÉS — un invité qui n'a pas encore
+  /// rejoint n'en fait pas partie — donc le serveur reste seul juge : il écarte
+  /// sans erreur ceux qui sont déjà membres, et c'est son décompte qui est
+  /// annoncé.
+  Future<void> _ajouterParticipants() async {
+    final ctrl = context.read<MeetingController>();
+    if (!ctrl.jeSuisOrganisateur) return;
+
+    final numeros = await ContactPickerSheet.show(
+      context,
+      title: "Ajouter à la réunion",
+      confirmLabel: "Ajouter",
+    );
+    if (numeros == null || numeros.isEmpty || !mounted) return;
+
+    try {
+      final ajoutes = await context
+          .read<MeetingsRepository>()
+          .addParticipants(widget.meetingId, numeros);
+      if (!mounted) return;
+      showAppSnackBar(
+        ajoutes == 0
+            ? "Ces contacts sont déjà dans la réunion"
+            : ajoutes == 1
+                ? "1 participant ajouté et prévenu"
+                : "$ajoutes participants ajoutés et prévenus",
+      );
+    } on ApiException catch (e) {
+      if (mounted) showAppSnackBar(e.message);
+    }
   }
 
   /// Réduit la salle SANS quitter : la réunion continue, le bandeau prend le
@@ -852,6 +891,24 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                         ),
                         Text("${ctrl.participantCount}",
                             style: const TextStyle(color: Colors.white54)),
+                        // Ajouter quelqu'un EN COURS de réunion, sans la
+                        // quitter — l'organisateur seul, comme le refuse
+                        // d'ailleurs le serveur si l'on passe outre.
+                        if (ctrl.jeSuisOrganisateur) ...[
+                          const SizedBox(width: 8),
+                          IconButton(
+                            tooltip: "Ajouter un participant",
+                            icon: const Icon(Icons.person_add_alt_1,
+                                color: Colors.white),
+                            onPressed: () {
+                              // La feuille se referme d'abord : deux feuilles
+                              // modales empilées laisseraient le sélecteur de
+                              // contacts sous celle-ci.
+                              Navigator.of(ctx).pop();
+                              _ajouterParticipants();
+                            },
+                          ),
+                        ],
                       ],
                     ),
                   ),

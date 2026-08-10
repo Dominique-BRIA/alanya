@@ -5,6 +5,7 @@ import '../../../core/api_client.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
 import '../../../widgets/back_app_bar.dart';
+import '../../../widgets/contact_picker_sheet.dart';
 import '../../../widgets/motif_background.dart';
 import '../../../models/meeting.dart';
 import '../../auth/auth_controller.dart';
@@ -93,6 +94,56 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
         ),
       ),
     );
+  }
+
+  /// Ajoute des participants — organisateur seulement, avant comme pendant.
+  ///
+  /// Les membres actuels et l'organisateur sont retirés de la liste proposée :
+  /// choisir quelqu'un qui est déjà là n'aurait aucun effet, et le lui laisser
+  /// faire pour ensuite l'ignorer serait déroutant.
+  Future<void> _ajouterParticipants() async {
+    final dejaLa = <String>[
+      ..._meeting.participants.map((p) => p.publicNumber ?? ""),
+      _meeting.organiser.publicNumber ?? "",
+    ].where((n) => n.isNotEmpty).toList();
+
+    final numeros = await ContactPickerSheet.show(
+      context,
+      title: "Ajouter à la réunion",
+      confirmLabel: "Ajouter",
+      excludeNumbers: dejaLa,
+    );
+    if (numeros == null || numeros.isEmpty || !mounted) return;
+
+    setState(() => _loading = true);
+    try {
+      final ajoutes = await context
+          .read<MeetingsRepository>()
+          .addParticipants(_meeting.idMeeting, numeros);
+      await _refresh();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            // Zéro ajout n'est pas une erreur : le serveur écarte sans broncher
+            // ceux qui étaient déjà membres. Le dire évite de laisser croire à
+            // une panne devant une liste inchangée.
+            ajoutes == 0
+                ? "Personne à ajouter : ces contacts sont déjà dans la réunion"
+                : ajoutes == 1
+                    ? "1 participant ajouté et prévenu"
+                    : "$ajoutes participants ajoutés et prévenus",
+          ),
+        ),
+      );
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   Future<void> _end() async {
@@ -264,6 +315,15 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
                 ),
               ],
               if (!m.isFinished && _isOrganiser) ...[
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: _loading ? null : _ajouterParticipants,
+                  icon: const Icon(Icons.person_add_alt_1_outlined),
+                  label: const Text("Ajouter des participants"),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 48),
+                  ),
+                ),
                 const SizedBox(height: 12),
                 OutlinedButton.icon(
                   onPressed: _loading ? null : _end,
