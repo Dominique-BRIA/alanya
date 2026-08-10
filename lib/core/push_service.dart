@@ -154,12 +154,14 @@ class PushService {
 
       // Vérifie qu'on est bien authentifié avant d'envoyer
       if (_api == null || _storage == null) {
-        debugPrint('[PushService] API/Storage non configuré, enregistrement annulé');
+        debugPrint(
+            '[PushService] API/Storage non configuré, enregistrement annulé');
         return;
       }
       final accessToken = await _storage!.accessToken;
       if (accessToken == null) {
-        debugPrint('[PushService] Utilisateur non authentifié, enregistrement annulé');
+        debugPrint(
+            '[PushService] Utilisateur non authentifié, enregistrement annulé');
         return;
       }
 
@@ -177,9 +179,11 @@ class PushService {
 
   /// Initialise les notifications locales (crée le canal Android).
   Future<void> _initLocalNotifications() async {
-    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const androidSettings =
+        AndroidInitializationSettings('@mipmap/ic_launcher');
     const iosSettings = DarwinInitializationSettings();
-    const settings = InitializationSettings(android: androidSettings, iOS: iosSettings);
+    const settings =
+        InitializationSettings(android: androidSettings, iOS: iosSettings);
 
     await _localPlugin.initialize(
       settings,
@@ -300,12 +304,28 @@ class PushService {
 
   /// Gère les messages reçus quand l'app est en premier plan (foreground).
   void _handleForegroundMessage(RemoteMessage message) {
-    debugPrint('[PushService] Message foreground: ${message.notification?.title}');
+    debugPrint(
+        '[PushService] Message foreground: ${message.notification?.title}');
 
     // Appel entrant, application ouverte : c'est le WebSocket qui l'annonce,
     // avec le bandeau interne et la sonnerie de l'application. Déclarer ici
     // l'écran natif ferait doublon avec ce bandeau.
     if (message.data['type'] == 'incoming_call') return;
+
+    // Invitation à une réunion — traitée AVANT le réglage ci-dessous, qui ne
+    // gouverne que les messages. Une invitation n'en est pas un : la faire
+    // taire parce que l'utilisateur a coupé les notifications de discussion lui
+    // ferait manquer une réunion sans qu'il l'ait jamais demandé.
+    if (message.data['type'] == 'meeting_invitation') {
+      final n = message.notification;
+      showReunion(
+        title: n?.title ?? 'Invitation à une réunion',
+        body: n?.body ?? '',
+        meetingId: message.data['meetingId']?.toString(),
+        payload: message.data,
+      );
+      return;
+    }
 
     // Réglage : notifications de messages désactivées → on n'affiche rien.
     if (!notif.NotificationSettings.instance.messagesOn) return;
@@ -313,8 +333,9 @@ class PushService {
     final notification = message.notification;
     if (notification == null) return;
 
-    final body =
-        notif.NotificationSettings.instance.previewOn ? (notification.body ?? '') : 'Nouveau message';
+    final body = notif.NotificationSettings.instance.previewOn
+        ? (notification.body ?? '')
+        : 'Nouveau message';
 
     // Même construction que le chemin WebSocket, et surtout MÊME identité.
     //
@@ -454,6 +475,52 @@ class PushService {
     );
   }
 
+  /// Notification de RÉUNION (invitation, rappel).
+  ///
+  /// Volontairement distincte de [show] : celle-ci est bâtie sur
+  /// `MessagingStyle`, la mise en forme « conversation » d'Android, qui suppose
+  /// un expéditeur et un fil. Une invitation n'est ni l'un ni l'autre, et
+  /// s'afficherait comme un message reçu dans une discussion inexistante.
+  ///
+  /// Canal séparé (« Réunions ») pour que le son et l'importance restent
+  /// réglables indépendamment des discussions dans les paramètres du système —
+  /// Android ne sait pas les distinguer autrement.
+  ///
+  /// [meetingId] sert d'identité : deux annonces d'une même réunion se
+  /// REMPLACENT au lieu de s'empiler, comme `convId` le fait pour les messages.
+  Future<void> showReunion({
+    required String title,
+    required String body,
+    String? meetingId,
+    Map<String, dynamic>? payload,
+  }) async {
+    const details = AndroidNotificationDetails(
+      'reunions',
+      'Réunions',
+      channelDescription: 'Invitations et rappels de réunion',
+      importance: Importance.high,
+      priority: Priority.high,
+      icon: '@mipmap/ic_launcher',
+      color: Color(0xFFB85C38),
+      sound: RawResourceAndroidNotificationSound("notification"),
+      playSound: true,
+      styleInformation: BigTextStyleInformation(''),
+    );
+
+    await _localPlugin.show(
+      meetingId != null && meetingId.isNotEmpty
+          ? "reunion-$meetingId".hashCode & 0x7fffffff
+          : 0,
+      title,
+      body,
+      const NotificationDetails(
+        android: details,
+        iOS: DarwinNotificationDetails(),
+      ),
+      payload: payload == null ? null : jsonEncode(payload),
+    );
+  }
+
   /// Télécharge l'avatar pour la notification, ou renvoie `null`.
   ///
   /// Une notification ne doit jamais attendre le réseau : au-delà de trois
@@ -462,9 +529,8 @@ class PushService {
   Future<Uint8List?> _avatarPourNotification(String? url) async {
     if (url == null || url.isEmpty) return null;
     try {
-      final r = await http
-          .get(Uri.parse(url))
-          .timeout(const Duration(seconds: 3));
+      final r =
+          await http.get(Uri.parse(url)).timeout(const Duration(seconds: 3));
       if (r.statusCode != 200 || r.bodyBytes.isEmpty) return null;
       return r.bodyBytes;
     } catch (_) {
@@ -539,7 +605,8 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
   // (ciblée par le callId partagé WS/FCM).
   if (message.data['type'] == 'call_cancelled') {
     final plugin = FlutterLocalNotificationsPlugin();
-    await plugin.cancel(PushService.callNotifId(message.data['callId']?.toString()));
+    await plugin
+        .cancel(PushService.callNotifId(message.data['callId']?.toString()));
     return;
   }
 
@@ -663,7 +730,8 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
 /// AOT de la version release supprime cette fonction, que rien n'appelle depuis
 /// le code Dart. Le bug ne se verrait qu'en release, jamais en debug.
 @pragma('vm:entry-point')
-Future<void> notificationBackgroundHandler(NotificationResponse response) async {
+Future<void> notificationBackgroundHandler(
+    NotificationResponse response) async {
   if (response.actionId != 'call_reject') return;
 
   // L'isolate démarre nu : les plugins natifs doivent être ré-enregistrés,
