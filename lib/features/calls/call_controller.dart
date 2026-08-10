@@ -66,6 +66,27 @@ class CallController extends ChangeNotifier {
   // n'était PAS un membre initial (évite de taguer un membre de groupe qui
   // décroche en retard).
   final Set<String> _initialMemberIds = {};
+  // Qui a fait venir qui, renseigné par `call_state "inviting"` : clé =
+  // l'invité, valeur = celui qui l'a invité.
+  //
+  // Sert à décider si le NOM d'un invité peut être montré. Quand B transfère
+  // son appel à C, A n'a pas choisi C, ne le connaît pas et n'a aucune raison
+  // d'apprendre son identité : pour lui, ce sera « Invité ». Celui qui a lancé
+  // l'invitation, lui, voit le nom.
+  final Map<String, String> _inviteParUserId = {};
+
+  /// Correspondant d'ORIGINE d'un appel engagé en tête-à-tête, ou nul si
+  /// l'appel était un groupe dès le départ.
+  ///
+  /// Il reste le visage de l'appel même après avoir passé la main : c'est lui
+  /// qu'on a appelé, ou qui nous a appelés.
+  String? get correspondantOrigineId {
+    final autres = _initialMemberIds.where((id) => id != myUserId).toList();
+    return autres.length == 1 ? autres.first : null;
+  }
+
+  /// Est-ce MOI qui ai fait venir cette personne ?
+  bool jaiInvite(String userId) => _inviteParUserId[userId] == myUserId;
 
   WebrtcGroupMesh? _mesh;
   final Map<String, Map<String, List<Map<String, dynamic>>>> _signalBuffer = {};
@@ -176,6 +197,7 @@ class CallController extends ChangeNotifier {
     joinedParticipantIds.clear();
     invitedParticipantIds.clear();
     _initialMemberIds.clear();
+    _inviteParUserId.clear();
     if (myUserId != null) {
       joinedParticipantIds.add(myUserId!);
       _initialMemberIds.add(myUserId!);
@@ -284,6 +306,7 @@ class CallController extends ChangeNotifier {
     _initialMemberIds.clear();
     _initialMemberIds.add(myUserId!);
     _initialMemberIds.add(inc.callerId);
+    _inviteParUserId.clear();
     joinedParticipantIds.add(inc.callerId);
 
     activeType = inc.callType;
@@ -306,7 +329,8 @@ class CallController extends ChangeNotifier {
     notifyListeners();
 
     await _ensureMesh();
-    traceAppel("acceptIncoming — moi=$myUserId, participants actifs renvoyes par /accept : "
+    traceAppel(
+        "acceptIncoming — moi=$myUserId, participants actifs renvoyes par /accept : "
         "${result.activeParticipants.map((p) => p.userId).toList()}, mesh=${_mesh != null ? "pret" : "ABSENT"}");
     for (final p in result.activeParticipants) {
       if (p.userId != myUserId) {
@@ -357,7 +381,8 @@ class CallController extends ChangeNotifier {
       isGroupCall = result.isGroup;
       isCallInitiator = false;
       activeCallId = callId;
-      activePeerName = result.groupName ?? nomAffiche ?? activePeerName ?? "Appel";
+      activePeerName =
+          result.groupName ?? nomAffiche ?? activePeerName ?? "Appel";
       activeRole = ActiveCallRole.ongoing;
       incoming = null;
       // Même raison que dans `acceptIncoming` : sans ce signal, l'écran natif
@@ -397,7 +422,8 @@ class CallController extends ChangeNotifier {
       notifyListeners();
 
       await _ensureMesh();
-      traceAppel("acceptById — moi=$myUserId, participants actifs renvoyes par /accept : "
+      traceAppel(
+          "acceptById — moi=$myUserId, participants actifs renvoyes par /accept : "
           "${result.activeParticipants.map((p) => p.userId).toList()}, mesh=${_mesh != null ? "pret" : "ABSENT"}");
       for (final p in result.activeParticipants) {
         // Même règle que dans `acceptIncoming` : j'arrive, je ne suis pas
@@ -579,6 +605,7 @@ class CallController extends ChangeNotifier {
     joinedParticipantIds.clear();
     invitedParticipantIds.clear();
     _initialMemberIds.clear();
+    _inviteParUserId.clear();
     remoteRinging = false;
     isSpeakerOn = false;
     connectedSince = null;
@@ -736,7 +763,8 @@ class CallController extends ChangeNotifier {
         await _calls.leave(callId);
         delivered = true;
       } catch (e) {
-        DebugOverlay.log("CC ❌ /leave de transfert échoué (tentative ${attempt + 1}): $e");
+        DebugOverlay.log(
+            "CC ❌ /leave de transfert échoué (tentative ${attempt + 1}): $e");
         if (attempt < 2) {
           await Future<void>.delayed(Duration(seconds: attempt + 1));
         }
@@ -829,8 +857,7 @@ class CallController extends ChangeNotifier {
     // utilisateur, non membre initial, qui rejoint pendant un transfert.
     // Sans ça, A n'appelait jamais /leave et restait marqué occupé.
     if (_pendingTransfer) {
-      final isTarget =
-          _transferTargetId != null && userId == _transferTargetId;
+      final isTarget = _transferTargetId != null && userId == _transferTargetId;
       final isFallbackTarget = _transferTargetId == null &&
           joinedWhileOngoing &&
           isNew &&
@@ -890,7 +917,8 @@ class CallController extends ChangeNotifier {
 
   /// Arme le délai de négociation. Sans effet si le média circule déjà.
   void _armerMinuteurConnexion() {
-    traceAppel("minuteur 30s ARME (media=${mediaConnected ? "deja ok" : "absent"})");
+    traceAppel(
+        "minuteur 30s ARME (media=${mediaConnected ? "deja ok" : "absent"})");
     if (mediaConnected) return;
     _connectingTimeout?.cancel();
     _connectingTimeout = Timer(const Duration(seconds: 30), () {
@@ -921,7 +949,8 @@ class CallController extends ChangeNotifier {
       await hangUp();
       return;
     }
-    traceAppel("perte du pair $userId → l'appel continue a ${autres.length - 1}");
+    traceAppel(
+        "perte du pair $userId → l'appel continue a ${autres.length - 1}");
     await _onPeerLeft(userId);
   }
 
@@ -1020,7 +1049,8 @@ class CallController extends ChangeNotifier {
         return;
       }
       final mesh = _mesh;
-      traceAppel("call_signal ${signal["kind"]} recu de $from — mesh=${mesh != null ? "pret" : "ABSENT → tampon"}");
+      traceAppel(
+          "call_signal ${signal["kind"]} recu de $from — mesh=${mesh != null ? "pret" : "ABSENT → tampon"}");
       if (mesh != null) {
         // `await` : deux signaux qui se suivent (offre puis candidats ICE)
         // doivent être appliqués dans leur ordre d'arrivée.
@@ -1054,8 +1084,7 @@ class CallController extends ChangeNotifier {
 
       // Trace posée AVANT toute garde : c'est le point où l'on saura si
       // l'appelant apprend, ou non, que son correspondant a décroché.
-      traceAppel(
-          "call_state '$state' de ${userId ?? "?"} — moi=$myUserId, "
+      traceAppel("call_state '$state' de ${userId ?? "?"} — moi=$myUserId, "
           "actif=${callId == activeCallId}, entrant=${callId == incoming?.callId}");
 
       if (state == "joined" || state == "accepted") {
@@ -1082,10 +1111,12 @@ class CallController extends ChangeNotifier {
           // rejouer : si la mesh n'a pas pu être créée (permission refusée,
           // micro indisponible), les signaux restent en attente.
           final mesh = _mesh;
-          traceAppel("peer_joined de $userId traite — mesh=${mesh != null ? "pret" : "ABSENT"} tampon=${_signalBuffer[callId]?.length ?? 0} pair(s)");
+          traceAppel(
+              "peer_joined de $userId traite — mesh=${mesh != null ? "pret" : "ABSENT"} tampon=${_signalBuffer[callId]?.length ?? 0} pair(s)");
           if (mesh != null) {
             final bufferedForCall = _signalBuffer.remove(callId);
-            for (final peerEntry in bufferedForCall?.entries ?? const <MapEntry<String, List<Map<String, dynamic>>>>[]) {
+            for (final peerEntry in bufferedForCall?.entries ??
+                const <MapEntry<String, List<Map<String, dynamic>>>>[]) {
               for (final sig in peerEntry.value) {
                 await mesh.handleSignal(peerEntry.key, sig);
               }
@@ -1122,6 +1153,11 @@ class CallController extends ChangeNotifier {
         if (_pendingTransfer && userId != null && userId != myUserId) {
           _transferTargetId = userId;
         }
+        // Qui a fait venir qui. Seul celui qui invite verra le nom de l'invité
+        // — voir `_inviteParUserId`.
+        if (userId != null && fromUserId != null) {
+          _inviteParUserId[userId] = fromUserId;
+        }
       } else if (state == "left" || state == "declined") {
         // Notre propre départ est géré localement dans hangUp — sauf s'il vient
         // d'un autre appareil qui a refusé l'appel pendant qu'on sonne.
@@ -1135,8 +1171,7 @@ class CallController extends ChangeNotifier {
         final isTransferDecline =
             (state == "declined" || state == "rejected") &&
                 _pendingTransfer &&
-                (_transferTargetId == null ||
-                    userId == _transferTargetId);
+                (_transferTargetId == null || userId == _transferTargetId);
         if (isTransferDecline) {
           cancelTransfer(reason: "Transfert refusé");
           return;

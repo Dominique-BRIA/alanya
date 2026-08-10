@@ -279,9 +279,14 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     return "Connexion en cours…";
   }
 
-  String _mediaHint(CallController cc) {
+  /// [afficheCommeGroupe] et non `cc.isGroupCall` : après un transfert, l'appel
+  /// est techniquement multi-partie pendant un instant, mais celui qui reste doit
+  /// continuer à vivre un tête-à-tête. Un décompte de participants lui
+  /// apprendrait qu'un tiers est entré, ce que le badge « Invité » dit déjà,
+  /// sans le nommer.
+  String _mediaHint(CallController cc, bool afficheCommeGroupe) {
     if (cc.activeRole != ActiveCallRole.ongoing) return "";
-    if (cc.isGroupCall) {
+    if (afficheCommeGroupe) {
       return "${cc.connectedPeerCount} connecté(s) · ${cc.joinedParticipantIds.length} dans l'appel";
     }
     if (cc.mediaConnected) {
@@ -302,6 +307,22 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
         cc.joinedParticipantIds.where((id) => id != cc.myUserId).toList();
     final invitedOthers =
         others.where((id) => cc.invitedParticipantIds.contains(id)).toList();
+
+    // --- TRANSFERT VU PAR CELUI QUI RESTE ---
+    //
+    // A appelle B, B transfère à C. Pour A, rien ne doit changer à l'écran : il
+    // reste « en communication avec B », le nom et la photo de B sont conservés,
+    // et un badge « Invité » signale simplement que quelqu'un d'autre est entré.
+    // Le nom de C ne lui est JAMAIS montré — A ne l'a pas choisi, ne le connaît
+    // pas, et cette identité ne lui appartient pas.
+    //
+    // La règle générale est donc : on ne dévoile le nom d'un invité qu'à celui
+    // qui l'a fait venir. Quand c'est A lui-même qui invite un tiers dans son
+    // appel, il en voit le nom, comme avant.
+    final origineId = cc.correspondantOrigineId;
+    final inviteParUnAutre = invitedOthers.any((id) => !cc.jaiInvite(id));
+    final transfereVersUnInvite = origineId != null && inviteParUnAutre;
+
     // Interlocuteur principal = le correspondant d'origine s'il est encore là,
     // sinon l'invité restant (cas transfert : l'origine a quitté).
     String? primaryId;
@@ -312,12 +333,24 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
       }
     }
     primaryId ??= others.isNotEmpty ? others.first : null;
-    final bool primaryInvited =
+    bool primaryInvited =
         primaryId != null && cc.invitedParticipantIds.contains(primaryId);
     // Pastilles « invité » à afficher séparément (invités qui ne sont pas déjà
     // l'interlocuteur principal mis en évidence).
-    final invitedChipIds =
-        invitedOthers.where((id) => id != primaryId).toList();
+    var invitedChipIds = invitedOthers.where((id) => id != primaryId).toList();
+    // Vrai groupe, à distinguer d'un tête-à-tête où un invité est entré : dans
+    // ce second cas l'écran garde l'apparence d'un appel direct (photo du
+    // correspondant, pas l'icône de groupe).
+    var afficheCommeGroupe = cc.isGroupCall;
+
+    if (transfereVersUnInvite) {
+      // Le nom et la photo restent ceux de l'origine, même après son départ.
+      primaryId = origineId;
+      // Un seul badge anonyme, jamais de pastille nominative.
+      primaryInvited = true;
+      invitedChipIds = const [];
+      afficheCommeGroupe = false;
+    }
 
     // Photo de profil pour l'écran d'appel audio (sinon initiale).
     final String? callAvatarUrl = (widget.incoming && cc.incoming != null)
@@ -340,9 +373,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
           cc.incoming?.displayTitle ??
           "Contact";
     } else {
-      name = cc.activePeerName ??
-          cc.incoming?.displayTitle ??
-          "Contact";
+      name = cc.activePeerName ?? cc.incoming?.displayTitle ?? "Contact";
     }
     // Après acceptation d'un appel entrant, cc.incoming repasse à null alors que
     // widget.incoming reste true : l'ancien code lisait donc cc.incoming?.callType
@@ -428,7 +459,8 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                   ),
                 )
               else if (showVideo)
-                _remoteGrid(cc, remotes),
+                _remoteGrid(cc, remotes,
+                    anonymiseLesInvites: transfereVersUnInvite),
               // Lot 6 : couche de tap plein écran (toggle des contrôles en vidéo).
               Positioned.fill(
                 child: GestureDetector(
@@ -476,7 +508,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                           color: AlanyaColors.forest,
                           active: cc.activeRole == ActiveCallRole.ongoing ||
                               cc.activeRole == ActiveCallRole.outgoing,
-                          child: cc.isGroupCall
+                          child: afficheCommeGroupe
                               ? const CircleAvatar(
                                   radius: 52,
                                   backgroundColor: AlanyaColors.terracotta,
@@ -516,7 +548,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                               color: Colors.white70, fontSize: 16)),
                       if (cc.activeRole == ActiveCallRole.ongoing) ...[
                         const SizedBox(height: 10),
-                        Text(_mediaHint(cc),
+                        Text(_mediaHint(cc, afficheCommeGroupe),
                             style: const TextStyle(
                                 color: Colors.white54, fontSize: 13)),
                       ],
@@ -684,7 +716,8 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     );
   }
 
-  Widget _remoteGrid(CallController cc, Map<String, MediaStream> remotes) {
+  Widget _remoteGrid(CallController cc, Map<String, MediaStream> remotes,
+      {required bool anonymiseLesInvites}) {
     final ids = remotes.keys.toList();
     return Positioned.fill(
       child: Padding(
@@ -700,8 +733,14 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
           itemBuilder: (_, i) {
             final id = ids[i];
             final r = _remoteRenderers[id];
-            final label = cc.participantNames[id] ?? "Participant";
             final invited = cc.invitedParticipantIds.contains(id);
+            // Même règle que pour le titre de l'écran, et seulement dans le même
+            // cas : un tête-à-tête où un tiers a été amené par le correspondant.
+            // Dans un VRAI groupe, savoir qui a rejoint reste utile — on ne
+            // masque donc rien.
+            final label = anonymiseLesInvites && invited
+                ? "Invité"
+                : (cc.participantNames[id] ?? "Participant");
             return ClipRRect(
               borderRadius: BorderRadius.circular(12),
               child: Stack(
@@ -728,7 +767,11 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(
-                        invited ? "$label (invité)" : label,
+                        // « Invité (invité) » quand le nom est déjà masqué :
+                        // le libellé anonyme se suffit à lui-même.
+                        invited && label != "Invité"
+                            ? "$label (invité)"
+                            : label,
                         style: const TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.w600,
@@ -921,9 +964,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
               onPressed: () => _invite(cc),
             ),
             _controlBtn(
-              icon: cc.isTransferring
-                  ? Icons.close
-                  : Icons.phone_forwarded,
+              icon: cc.isTransferring ? Icons.close : Icons.phone_forwarded,
               active: cc.isTransferring,
               label: cc.isTransferring ? "Annuler" : "Transférer",
               onPressed: cc.isTransferring
