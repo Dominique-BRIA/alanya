@@ -117,6 +117,70 @@ class RingtoneService {
   DateTime? _lastCueAt;
   static const _cueGap = Duration(milliseconds: 700);
 
+  // ── Centre d'appels (standard) ───────────────────────────────────────────
+  //
+  // Lecteur DISTINCT de `_player` : l'invite vocale remplace le bip d'attente
+  // sortant, mais les deux ne doivent pas se disputer le même objet — couper
+  // l'un couperait l'autre au mauvais moment. Distinct de `_cuePlayer`
+  // également, dont le rôle est de jouer des sons courts par-dessus tout.
+  AudioPlayer? _ivrPlayer;
+
+  /// Invite vocale du standard : « tapez 1 pour… ». Une seule fois.
+  Future<void> playIvrPrompt(String url) => _playIvr(url, loop: false);
+
+  /// Musique d'attente pendant que l'agent sonne. En boucle.
+  Future<void> playIvrHold(String url) => _playIvr(url, loop: true);
+
+  /// Coupe l'audio du standard, sans toucher aux sonneries d'appel.
+  Future<void> stopIvr() async {
+    final p = _ivrPlayer;
+    if (p == null) return;
+    _ivrPlayer = null;
+    try {
+      await p.stop();
+      await p.release();
+      await p.dispose();
+    } catch (_) {}
+  }
+
+  Future<void> _playIvr(String url, {required bool loop}) async {
+    await stopIvr();
+    try {
+      final p = AudioPlayer();
+      // Même contexte que les sonneries : flux voix sur Android, pour que le
+      // standard s'entende comme un appel et non comme un média — le volume
+      // physique du téléphone le règle alors, et le mode silencieux médias ne
+      // le fait pas taire.
+      await p.setAudioContext(
+        AudioContext(
+          android: const AudioContextAndroid(
+            isSpeakerphoneOn: false,
+            stayAwake: true,
+            contentType: AndroidContentType.speech,
+            usageType: AndroidUsageType.voiceCommunication,
+            audioFocus: AndroidAudioFocus.gainTransientMayDuck,
+          ),
+          iOS: AudioContextIOS(
+            category: AVAudioSessionCategory.playback,
+            options: const {AVAudioSessionOptions.duckOthers},
+          ),
+        ),
+      );
+      await p.setReleaseMode(loop ? ReleaseMode.loop : ReleaseMode.release);
+      await p.setVolume(1.0);
+      // `UrlSource` et non `AssetSource` : les sons du standard sont servis par
+      // le serveur, hors authentification, et changent d'un centre à l'autre.
+      await p.play(UrlSource(url));
+      _ivrPlayer = p;
+      debugPrint("[RingtoneService] ▶️ standard $url (loop=$loop)");
+    } catch (e) {
+      // Échec silencieux : l'écran du standard affiche les options, il reste
+      // parfaitement utilisable sans le son.
+      debugPrint("[RingtoneService] ❌ échec standard $url: $e");
+      _ivrPlayer = null;
+    }
+  }
+
   Future<void> _play(String asset) async {
     // Si on rejoue le même son (ex: 2 events consécutifs), on ne relance pas.
     if (_currentAsset == asset && _player != null) return;

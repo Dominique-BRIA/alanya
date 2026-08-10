@@ -22,6 +22,90 @@ import 'webrtc_peer_session.dart';
 
 enum ActiveCallRole { outgoing, incoming, ongoing }
 
+/// Étape d'un appel passé à un standard (centre d'appels).
+///
+/// Il n'y en a que deux, et c'est voulu : dès que l'agent décroche, la session
+/// disparaît et l'appel redevient un appel ordinaire. Un troisième état
+/// « en communication » ferait doublon avec [ActiveCallRole].
+enum IvrEtape { menu, attente }
+
+/// Une touche du menu d'un standard.
+///
+/// [disponible] est calculé par le serveur : un service peut être ANNONCÉ par
+/// l'invite vocale sans qu'aucun agent ne le desserve encore. On l'affiche
+/// quand même — l'appelant vient de l'entendre, le masquer serait déroutant —
+/// mais grisé, et l'appui dessus reçoit son propre message.
+class IvrOption {
+  const IvrOption({
+    required this.digit,
+    required this.label,
+    required this.disponible,
+  });
+
+  final int digit;
+  final String label;
+  final bool disponible;
+
+  static IvrOption? depuisJson(dynamic brut) {
+    if (brut is! Map) return null;
+    final digit = (brut["digit"] as num?)?.toInt();
+    if (digit == null) return null;
+    return IvrOption(
+      digit: digit,
+      label: brut["label"] as String? ?? "Service $digit",
+      // Absent = disponible : un serveur plus ancien ne connaît pas ce champ,
+      // et griser toutes les options serait pire que de laisser essayer.
+      disponible: brut["disponible"] as bool? ?? true,
+    );
+  }
+
+  static List<IvrOption> listeDepuisJson(dynamic brut) {
+    if (brut is! List) return const [];
+    return brut
+        .map(IvrOption.depuisJson)
+        .whereType<IvrOption>()
+        .toList(growable: false);
+  }
+}
+
+/// Ce que le client sait d'un appel en cours vers un standard.
+///
+/// ⚠️ On n'y trouvera JAMAIS l'identité d'un agent. Le serveur n'en envoie
+/// aucune, et c'est la seule garantie qui tienne : un identifiant qui arrive
+/// jusqu'au client est un identifiant public, même s'il n'est pas affiché.
+class IvrSession {
+  IvrSession({
+    required this.callId,
+    required this.centerId,
+    required this.centerName,
+    this.centerNumber,
+    this.promptUrl,
+    this.holdUrl,
+    required this.options,
+  });
+
+  final String callId;
+  final String centerId;
+  final String centerName;
+  final String? centerNumber;
+
+  /// Les deux peuvent être nuls : l'écran doit rester utilisable en silence.
+  final String? promptUrl;
+  final String? holdUrl;
+
+  List<IvrOption> options;
+  IvrEtape etape = IvrEtape.menu;
+
+  /// Libellé du service choisi, pendant que l'agent sonne.
+  String? serviceChoisi;
+
+  /// Dernier message du serveur (« … n'est pas encore disponible »).
+  String? message;
+
+  /// Touche envoyée, réponse pas encore arrivée → clavier verrouillé.
+  bool envoiEnCours = false;
+}
+
 /// Appels directs et de groupe — mesh WebRTC (une connexion par participant).
 class CallController extends ChangeNotifier {
   CallController(this._calls, this._rt) {
@@ -32,6 +116,13 @@ class CallController extends ChangeNotifier {
   final RealtimeClient _rt;
   StreamSubscription<Map<String, dynamic>>? _sub;
   Timer? _ringTimeout;
+
+  /// Délai de lecture d'un message de fin du standard, avant de raccrocher.
+  ///
+  /// Le serveur n'envoie jamais `ivr_error` ET `call_ended` : le second
+  /// fermerait l'écran avant que le premier ne soit lu. C'est donc au client de
+  /// tenir l'écran ouvert le temps du message.
+  Timer? _finIvr;
 
   /// Délai accordé à la négociation UNE FOIS l'appel décroché.
   ///
@@ -46,6 +137,11 @@ class CallController extends ChangeNotifier {
   String? myDisplayName;
 
   IncomingCallInfo? incoming;
+
+  /// Standard en cours, ou nul. Non nul ⇒ l'appel sortant a été intercepté par
+  /// un centre d'appels et l'écran d'appel affiche le menu à la place.
+  IvrSession? ivr;
+
   String? activeCallId;
   String? activeConvId;
   String? activePeerName;
@@ -231,6 +327,29 @@ class CallController extends ChangeNotifier {
       rethrow;
     }
     notifyListeners();
+  }
+
+  /// Envoie une touche au standard.
+  ///
+  /// Le clavier se verrouille jusqu'à la réponse du serveur : sur un réseau
+  /// lent, l'utilisateur insiste, et deux appuis lanceraient deux sonneries
+  /// d'agent pour une seule intention. Le serveur tient la même garde de son
+  /// côté — celle-ci n'est que le confort qui évite d'en arriver là.
+  ///
+  /// On envoie même une touche marquée indisponible : c'est le serveur qui dit
+  /// pourquoi, et son message est plus juste que tout ce qu'on pourrait deviner
+  /// ici.
+  Future<void> envoyerToucheIvr(int digit) async {
+    final session = ivr;
+    if (session == null || session.etape != IvrEtape.menu) return;
+    if (session.envoiEnCours) return;
+    session.envoiEnCours = true;
+    session.message = null;
+    notifyListeners();
+    // L'invite s'arrête à l'appui : la laisser courir sous la musique d'attente
+    // donnerait deux sons superposés.
+    await RingtoneService.instance.stopIvr();
+    _rt.ivrDtmf(session.callId, digit);
   }
 
   Future<void> acceptIncoming() async {
@@ -574,6 +693,12 @@ class CallController extends ChangeNotifier {
   void _clear({String? idAppel}) {
     _ringTimeout?.cancel();
     _ringTimeout = null;
+    _finIvr?.cancel();
+    _finIvr = null;
+    // Le standard meurt avec l'appel. `_clear` étant le point de passage de
+    // TOUTES les fins d'appel, c'est le seul endroit où l'oubli est impossible.
+    ivr = null;
+    RingtoneService.instance.stopIvr();
     _annulerMinuteurConnexion();
     // Filet de sécurité : coupe toute sonnerie encore en cours.
     // (Doublon sûr des stop() éparpillés — mieux vaut couper 2 fois que 0.)
@@ -1058,6 +1183,88 @@ class CallController extends ChangeNotifier {
       } else {
         _bufferSignal(callId, from, signal);
       }
+    } else if (type == "ivr_menu") {
+      // Le serveur répond « voici le menu » au lieu de faire sonner : ce numéro
+      // était un centre d'appels. Le client ne l'avait pas demandé et n'avait
+      // aucun contrôle à faire avant d'appeler — c'est le serveur qui décide.
+      final callId = e["callId"] as String?;
+      if (callId == null || callId != activeCallId) return;
+      // ⚠️ COUPER LE MINUTEUR DE SONNERIE. `startOutgoing` arme 60 s pour un
+      // appel que personne ne décroche ; laissé en place, il raccrocherait
+      // l'appelant en plein milieu de son choix.
+      _ringTimeout?.cancel();
+      _ringTimeout = null;
+      // Le bip d'attente sortant n'a plus lieu d'être : personne ne sonne.
+      await RingtoneService.instance.stop();
+      final session = IvrSession(
+        callId: callId,
+        centerId: e["centerId"] as String? ?? "",
+        centerName: e["centerName"] as String? ?? activePeerName ?? "Standard",
+        centerNumber: e["centerNumber"] as String?,
+        promptUrl: e["promptUrl"] as String?,
+        holdUrl: e["holdUrl"] as String?,
+        options: IvrOption.listeDepuisJson(e["options"]),
+      );
+      ivr = session;
+      activePeerName = session.centerName;
+      final avatarCentre = e["centerAvatarUrl"] as String?;
+      if (avatarCentre != null) activePeerAvatarUrl = avatarCentre;
+      DebugOverlay.log(
+          "CC ☎️ standard ${session.centerName} — ${session.options.length} option(s)");
+      notifyListeners();
+      final prompt = session.promptUrl;
+      if (prompt != null) {
+        unawaited(RingtoneService.instance.playIvrPrompt(prompt));
+      }
+    } else if (type == "ivr_hold") {
+      final session = ivr;
+      if (session == null || e["callId"] != session.callId) return;
+      session.etape = IvrEtape.attente;
+      session.serviceChoisi = e["label"] as String?;
+      session.message = null;
+      session.envoiEnCours = false;
+      notifyListeners();
+      // L'URL est arrivée dès `ivr_menu` : le client a eu toute la durée de
+      // l'invite pour la mettre en cache, la musique démarre donc à l'instant
+      // de l'appui au lieu de laisser trois secondes de silence.
+      final hold = e["holdUrl"] as String? ?? session.holdUrl;
+      if (hold != null) unawaited(RingtoneService.instance.playIvrHold(hold));
+    } else if (type == "ivr_error") {
+      final callId = e["callId"] as String?;
+      final retry = e["retry"] == true;
+      final message =
+          e["message"] as String? ?? "Le standard n'a pas pu aboutir";
+      await RingtoneService.instance.stopIvr();
+      final session = ivr;
+      if (session == null || callId != session.callId) {
+        // Refus AVANT toute session : le centre n'a aucun service joignable.
+        lastError = message;
+        notifyListeners();
+        await hangUp();
+        return;
+      }
+      final options = IvrOption.listeDepuisJson(e["options"]);
+      if (options.isNotEmpty) session.options = options;
+      session.message = message;
+      session.envoiEnCours = false;
+      if (retry) {
+        // Un agent occupé, absent ou qui refuse ne raccroche PAS au nez de
+        // l'appelant : il revient au menu et choisit un autre service. C'est ce
+        // que fait un vrai standard.
+        session.etape = IvrEtape.menu;
+        session.serviceChoisi = null;
+        notifyListeners();
+        return;
+      }
+      // Fin sans retour possible. Le message reste affiché : le serveur n'envoie
+      // volontairement AUCUN `call_ended` avec, sinon l'écran se fermerait dans
+      // la même milliseconde et le texte serait illisible. C'est donc à nous de
+      // laisser le temps de lire avant de raccrocher.
+      notifyListeners();
+      _finIvr?.cancel();
+      _finIvr = Timer(const Duration(seconds: 4), () {
+        if (ivr?.callId == callId) hangUp();
+      });
     } else if (type == "call_invite_result") {
       // Accusé de réception direct du serveur après un call_invite. C'est le
       // moyen le plus fiable de connaître l'ID de la cible : il arrive même si
@@ -1097,6 +1304,16 @@ class CallController extends ChangeNotifier {
           return;
         }
         if (callId == activeCallId || callId == incoming?.callId) {
+          // Standard : quelqu'un a décroché. La session n'a plus de raison
+          // d'être, l'écran redevient un écran d'appel ordinaire — au nom du
+          // CENTRE. Le serveur a réécrit `userId` pour nous : le pair qu'on
+          // s'apprête à connecter est le centre, jamais l'agent.
+          if (ivr != null && callId == ivr!.callId) {
+            _finIvr?.cancel();
+            _finIvr = null;
+            ivr = null;
+            unawaited(RingtoneService.instance.stopIvr());
+          }
           // ⚠️ ATTENDRE la fin de `_onPeerJoined` avant de toucher au tampon.
           // C'est elle qui construit la mesh (`_ensureMesh`) et ouvre la session
           // du pair. Sans `await`, la ligne suivante s'exécutait alors que

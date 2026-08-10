@@ -11,6 +11,7 @@ import '../../../widgets/contact_picker_sheet.dart';
 import '../../chat/screens/chat_screen.dart';
 import '../call_controller.dart';
 import '../widgets/call_avatar_waves.dart';
+import '../widgets/ivr_panel.dart';
 
 class ActiveCallScreen extends StatefulWidget {
   const ActiveCallScreen({super.key, this.incoming = false});
@@ -267,6 +268,14 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
       final inc = cc.incoming!;
       if (inc.isGroup) return "Groupe · ${inc.memberCount} membres";
       return "Appel entrant…";
+    }
+    // Standard : personne ne sonne tant que l'appelant n'a pas choisi. Laisser
+    // « Sonnerie… » dirait exactement le contraire de ce qui se passe.
+    final ivr = cc.ivr;
+    if (ivr != null) {
+      return ivr.etape == IvrEtape.menu
+          ? "Serveur vocal"
+          : "Mise en relation — ${ivr.serviceChoisi ?? "votre service"}";
     }
     if (cc.activeRole == ActiveCallRole.outgoing) {
       if (cc.isGroupCall) return "Sonnerie du groupe…";
@@ -567,7 +576,27 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                       if (invitedChipIds.isNotEmpty &&
                           cc.activeRole == ActiveCallRole.ongoing)
                         _invitedChips(cc, invitedChipIds),
-                      const Spacer(),
+                      // SERVEUR VOCAL — affiché DANS l'écran d'appel, et non sur
+                      // un écran à part.
+                      //
+                      // Le guide recommande un écran dédié atteint par
+                      // `pushReplacement`, et met en garde contre les pièges qui
+                      // en découlent : écouteurs retirés par le `dispose` de
+                      // l'ancien écran, ligne à réoccuper, mode « déjà décroché »
+                      // à inventer sur l'écran d'appel. Aucun de ces problèmes
+                      // n'existe ici parce qu'on ne change pas d'écran : le
+                      // contrôleur tient déjà la ligne, l'abonnement au flux
+                      // temps réel lui appartient, et quand l'agent décroche le
+                      // panneau disparaît — l'écran d'appel était déjà là.
+                      if (cc.ivr != null)
+                        Expanded(
+                          child: IvrPanel(
+                            session: cc.ivr!,
+                            onTouche: cc.envoyerToucheIvr,
+                          ),
+                        )
+                      else
+                        const Spacer(),
                       if (showIncoming)
                         _incomingActions(cc)
                       else if (showActive)

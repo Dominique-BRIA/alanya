@@ -373,6 +373,15 @@ class RealtimeClient extends ChangeNotifier {
         "publicNumber": publicNumber,
       });
 
+  /// Touche tapée dans le menu d'un standard (centre d'appels).
+  ///
+  /// ⚠️ VOLONTAIREMENT ABSENTE de [_typesCritiques]. Rejouer une touche après
+  /// une reconnexion ferait sonner un agent pour un appelant qui n'est peut-être
+  /// plus là — le serveur referme la session dès que sa socket tombe. Une touche
+  /// perdue se retape ; une touche rejouée dérange quelqu'un pour rien.
+  void ivrDtmf(String callId, int digit) =>
+      _send({"type": "ivr_dtmf", "callId": callId, "digit": digit});
+
   void meetingJoin(int meetingId) =>
       _send({"type": "meeting_join", "meetingId": meetingId});
 
