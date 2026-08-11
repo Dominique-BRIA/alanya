@@ -3,12 +3,11 @@ version: 2.1
 jobs:
   build-apk:
     docker:
-      # Image officielle CircleCI avec Android SDK et Java pré-installés
       - image: cimg/android:2024.01
     steps:
       - checkout
 
-      # Installation rapide du SDK Flutter depuis le dépôt officiel
+      # 1. Installation de Flutter SDK
       - run:
           name: Install Flutter SDK
           command: |
@@ -17,21 +16,28 @@ jobs:
             source $BASH_ENV
             flutter doctor -v
 
-      # Récupération des paquets et dépendances
+      # 2. Ajout des outils CMake et Ninja requis pour le NDK / C++
+      - run:
+          name: Install CMake & Ninja for Android NDK
+          command: |
+            yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
+            $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "cmake;3.22.1"
+
+      # 3. Récupération des dépendances Flutter
       - run:
           name: Get Dependencies
           command: |
             source $BASH_ENV
             flutter pub get
 
-      # Compilation de l'APK Release
+      # 4. Compilation de l'APK Release
       - run:
           name: Build APK Release
           command: |
             source $BASH_ENV
             flutter build apk --release
 
-      # Expiration de l'artefact pour le téléchargement
+      # 5. Exposition de l'artefact
       - store_artifacts:
           path: build/app/outputs/flutter-apk/app-release.apk
           destination: app-release.apk
