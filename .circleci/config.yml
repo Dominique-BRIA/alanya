@@ -1,24 +1,37 @@
 version: 2.1
 
-# On importe l'Orb Flutter officiel maintenu par la communauté/CircleCI
-orbs:
-  flutter: circleci/flutter@2.0.0
-
 jobs:
   build-apk:
-    executor:
-      name: flutter/default
-      tag: '3.22.0'
+    docker:
+      # Image officielle CircleCI avec Android SDK et Java pré-installés
+      - image: cimg/android:2024.01
     steps:
       - checkout
-      - flutter/install_sdk:
-          version: '3.22.0'
+
+      # Installation rapide du SDK Flutter depuis le dépôt officiel
+      - run:
+          name: Install Flutter SDK
+          command: |
+            git clone https://github.com/flutter/flutter.git -b stable --depth 1 $HOME/flutter
+            echo 'export PATH="$HOME/flutter/bin:$PATH"' >> $BASH_ENV
+            source $BASH_ENV
+            flutter doctor -v
+
+      # Récupération des paquets et dépendances
       - run:
           name: Get Dependencies
-          command: flutter pub get
+          command: |
+            source $BASH_ENV
+            flutter pub get
+
+      # Compilation de l'APK Release
       - run:
           name: Build APK Release
-          command: flutter build apk --release
+          command: |
+            source $BASH_ENV
+            flutter build apk --release
+
+      # Expiration de l'artefact pour le téléchargement
       - store_artifacts:
           path: build/app/outputs/flutter-apk/app-release.apk
           destination: app-release.apk
