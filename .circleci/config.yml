@@ -3,8 +3,8 @@ version: 2.1
 executors:
   flutter-executor:
     docker:
-      # Utilisation d'une image Docker pré-configurée avec Flutter et Android SDK
-      - image: ghcr.io/cirrusci/flutter:latest
+      # Image hébergée sur Docker Hub pour éviter le blocage 403 de GHCR
+      - image: plugagrow/flutter:latest
 
 jobs:
   build-apk:
@@ -12,22 +12,22 @@ jobs:
     steps:
       - checkout
 
-      # Optionnel : afficher la version de Flutter pour vérifier l'environnement
+      # Vérification de l'installation et de l'environnement Flutter
       - run:
           name: Flutter Doctor
           command: flutter doctor -v
 
-      # Récupération des dépendances
+      # Récupération des packages et dépendances
       - run:
           name: Get Dependencies
           command: flutter pub get
 
-      # Compilation de l'APK Release
+      # Compilation du fichier APK en mode Release
       - run:
           name: Build APK
           command: flutter build apk --release
 
-      # Sauvegarde de l'APK généré pour pouvoir le télécharger depuis CircleCI
+      # Exposition du fichier APK téléchargable dans les artefacts CircleCI
       - store_artifacts:
           path: build/app/outputs/flutter-apk/app-release.apk
           destination: app-release.apk
