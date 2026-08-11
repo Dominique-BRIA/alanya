@@ -1,29 +1,24 @@
 version: 2.1
 
-executors:
-  flutter-executor:
-    docker:
-      # Image Flutter stable hébergée sur Docker Hub
-      - image: mobiledevops/flutter:3.22.0
+# On importe l'Orb Flutter officiel maintenu par la communauté/CircleCI
+orbs:
+  flutter: circleci/flutter@2.0.0
 
 jobs:
   build-apk:
-    executor: flutter-executor
+    executor:
+      name: flutter/default
+      tag: '3.22.0'
     steps:
       - checkout
-
-      - run:
-          name: Flutter Doctor
-          command: flutter doctor -v
-
+      - flutter/install_sdk:
+          version: '3.22.0'
       - run:
           name: Get Dependencies
           command: flutter pub get
-
       - run:
           name: Build APK Release
           command: flutter build apk --release
-
       - store_artifacts:
           path: build/app/outputs/flutter-apk/app-release.apk
           destination: app-release.apk
