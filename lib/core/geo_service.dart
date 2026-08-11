@@ -49,7 +49,21 @@ class GeoService {
 
   AuthedApi? _api;
 
-  static const _cleConsentement = 'geo_consentement';
+  /// Clé du consentement, **par COMPTE**.
+  ///
+  /// 🐛 ELLE ÉTAIT GLOBALE AU TÉLÉPHONE, et c'était un défaut sérieux. Deux
+  /// conséquences constatées sur un même appareil : un compte qui n'avait jamais
+  /// été consulté héritait du « oui » d'un autre et se retrouvait suivi sans
+  /// l'avoir accepté ; et à l'inverse, le compte qui revenait n'était plus
+  /// jamais interrogé — l'écran de divulgation ne réapparaissait pas, même après
+  /// une déconnexion.
+  ///
+  /// Un consentement appartient à une PERSONNE, pas à un morceau de matériel.
+  ///
+  /// ⚠️ L'ancienne clé globale n'est pas reprise : impossible de savoir QUI
+  /// avait accepté. Ceux qui l'avaient fait seront donc consultés une fois de
+  /// plus — c'est le comportement juste, pas une régression.
+  static String _cleConsentement(String userId) => 'geo_consentement_$userId';
 
   /// ⚠️ PUBLIQUES parce que l'ISOLAT D'ARRIÈRE-PLAN écrit dans la même file.
   /// Deux constantes séparées auraient fini par diverger, et l'application
@@ -67,13 +81,17 @@ class GeoService {
   Timer? _minuteur;
   bool _envoiEnCours = false;
 
+  /// Écoute de l'interrupteur de localisation du système. Voir
+  /// [_surveilleLaLocalisation].
+  StreamSubscription<ServiceStatus>? _surveillance;
+
   void init(AuthedApi api) => _api = api;
 
   // ── Consentement ─────────────────────────────────────────────────────────
 
-  Future<ConsentementGeo> consentement() async {
+  Future<ConsentementGeo> consentement(String userId) async {
     final prefs = await SharedPreferences.getInstance();
-    switch (prefs.getString(_cleConsentement)) {
+    switch (prefs.getString(_cleConsentement(userId))) {
       case 'accepte':
         return ConsentementGeo.accepte;
       case 'refuse':
@@ -83,9 +101,36 @@ class GeoService {
     }
   }
 
-  Future<void> enregistreConsentement(bool accepte) async {
+  /// Enregistre la décision localement **et la remonte au serveur**.
+  ///
+  /// ⚠️ LA REMONTÉE N'EST PAS DÉCORATIVE : l'écran de divulgation promet à
+  /// l'utilisateur que son entreprise sera informée si le suivi n'est pas actif.
+  /// Tant que la décision ne vivait que dans les préférences du téléphone, cette
+  /// phrase était une promesse que rien ne tenait.
+  ///
+  /// Le REFUS est même l'information la plus utile des deux : un compte sans
+  /// relevé peut l'être parce qu'il a refusé, parce que son GPS est coupé, ou
+  /// parce qu'il n'a pas ouvert l'application depuis deux jours. Sans cette
+  /// remontée, l'entreprise ne pouvait pas distinguer trois situations très
+  /// différentes.
+  ///
+  /// L'écriture locale d'abord, l'envoi ensuite : un réseau absent ne doit pas
+  /// faire reposer la question à la prochaine ouverture.
+  Future<void> enregistreConsentement(String userId, bool accepte) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_cleConsentement, accepte ? 'accepte' : 'refuse');
+    await prefs.setString(
+        _cleConsentement(userId), accepte ? 'accepte' : 'refuse');
+    await _remonteConsentement(accepte);
+  }
+
+  Future<void> _remonteConsentement(bool accepte) async {
+    try {
+      await _api?.post('/api/geo/consentement', {'accepte': accepte});
+    } catch (e) {
+      // Réseau absent : la décision reste locale et sera ré-affirmée à la
+      // prochaine connexion — `demarrer` la renvoie à chaque démarrage.
+      debugPrint('[GeoService] consentement non remonté : $e');
+    }
   }
 
   // ── Permissions ──────────────────────────────────────────────────────────
@@ -126,6 +171,28 @@ class GeoService {
 
   // ── Collecte ─────────────────────────────────────────────────────────────
 
+  /// Surveille l'interrupteur de localisation du système, EN COURS DE ROUTE.
+  ///
+  /// ⚠️ SANS ELLE, LE RAPPEL N'ARRIVAIT QU'AU LANCEMENT SUIVANT. Quelqu'un qui
+  /// coupe sa localisation à midi sans fermer l'application n'était prévenu
+  /// qu'au prochain démarrage — il pouvait passer la journée à se croire suivi
+  /// sans l'être. C'est exactement le silence que ce rappel existe pour rompre.
+  ///
+  /// Le flux est fourni par le système : aucun sondage, aucune batterie
+  /// consommée à interroger un interrupteur.
+  void _surveilleLaLocalisation() {
+    _surveillance ??= Geolocator.getServiceStatusStream().listen((statut) {
+      if (statut == ServiceStatus.disabled) {
+        debugPrint('[GeoService] localisation coupée en cours de route');
+        unawaited(PushService.instance.showRappelLocalisation());
+      } else {
+        // Rallumée : on retire le rappel, il n'a plus lieu d'être. Le relevé
+        // suivant repartira tout seul, le minuteur n'ayant jamais cessé.
+        unawaited(PushService.instance.retireRappelLocalisation());
+      }
+    });
+  }
+
   /// Ouvre les réglages de localisation du système.
   ///
   /// Le seul chemin possible quand le GPS est coupé : aucune boîte de dialogue
@@ -139,9 +206,16 @@ class GeoService {
   /// Démarre le relevé si, et seulement si, tout est réuni.
   ///
   /// Idempotent : appelable à chaque retour au premier plan sans rien empiler.
-  Future<void> demarrer({required int intervalleMin}) async {
+  Future<void> demarrer({
+    required String userId,
+    required int intervalleMin,
+  }) async {
     if (_minuteur != null) return;
-    if (await consentement() != ConsentementGeo.accepte) return;
+    if (await consentement(userId) != ConsentementGeo.accepte) return;
+    // Ré-affirmée à chaque démarrage : c'est ce qui rattrape une remontée
+    // perdue faute de réseau au moment du choix.
+    unawaited(_remonteConsentement(true));
+    _surveilleLaLocalisation();
     if (!await demandePermissions()) {
       /*
        * ⚠️ RAPPEL SEULEMENT SI L'UTILISATEUR AVAIT ACCEPTÉ — la garde du dessus
@@ -171,6 +245,12 @@ class GeoService {
   Future<void> arreter() async {
     _minuteur?.cancel();
     _minuteur = null;
+    await _surveillance?.cancel();
+    _surveillance = null;
+    // Le rappel appartenait au compte qui part : le laisser afficher
+    // « activez votre localisation » à qui vient de se déconnecter n'a aucun
+    // sens, et le suivant n'est peut-être même pas concerné.
+    await PushService.instance.retireRappelLocalisation();
     if (Platform.isAndroid) {
       try {
         await FlutterForegroundTask.stopService();

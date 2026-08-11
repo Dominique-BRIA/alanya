@@ -113,7 +113,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final user = context.read<AuthController>().user;
     if (user == null || !user.suiviPosition) return;
 
-    final consentement = await GeoService.instance.consentement();
+    final consentement = await GeoService.instance.consentement(user.id);
     if (!mounted) return;
 
     if (consentement == ConsentementGeo.jamaisDemande) {
@@ -121,7 +121,7 @@ class _HomeScreenState extends State<HomeScreen> {
       // la règle l'interdit, et harceler quelqu'un qui a dit non ne le fera pas
       // changer d'avis.
       await Navigator.of(context).push<bool>(
-        MaterialPageRoute(builder: (_) => const GeoDisclosureScreen()),
+        MaterialPageRoute(builder: (_) => GeoDisclosureScreen(userId: user.id)),
       );
       if (!mounted) return;
     } else if (consentement == ConsentementGeo.refuse) {
@@ -129,6 +129,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     await GeoService.instance.demarrer(
+      userId: user.id,
       intervalleMin: user.suiviPositionIntervalleMin,
     );
   }

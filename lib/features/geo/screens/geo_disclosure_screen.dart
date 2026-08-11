@@ -21,7 +21,12 @@ import '../../../theme/alanya_theme.dart';
 /// Affiché UNE SEULE FOIS, et seulement aux comptes que le serveur déclare
 /// concernés (`suiviPosition`). Un particulier ne le verra jamais.
 class GeoDisclosureScreen extends StatefulWidget {
-  const GeoDisclosureScreen({super.key});
+  const GeoDisclosureScreen({super.key, required this.userId});
+
+  /// ⚠️ Le consentement appartient à une PERSONNE, pas au téléphone. Il était
+  /// enregistré globalement : sur un appareil partagé, un compte héritait du
+  /// « oui » d'un autre et se retrouvait suivi sans avoir été consulté.
+  final String userId;
 
   @override
   State<GeoDisclosureScreen> createState() => _GeoDisclosureScreenState();
@@ -32,7 +37,7 @@ class _GeoDisclosureScreenState extends State<GeoDisclosureScreen> {
 
   Future<void> _repondre(bool accepte) async {
     setState(() => _enCours = true);
-    await GeoService.instance.enregistreConsentement(accepte);
+    await GeoService.instance.enregistreConsentement(widget.userId, accepte);
     // La permission n'est demandée QU'APRÈS un accord explicite : c'est tout
     // l'objet de cet écran, et l'ordre inverse serait précisément ce que la
     // règle interdit.

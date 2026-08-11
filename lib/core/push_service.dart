@@ -306,6 +306,14 @@ class PushService {
     }
   }
 
+  /// Retire le rappel dès que la localisation est rallumée : le laisser
+  /// afficher un problème résolu ferait douter de tous les autres.
+  Future<void> retireRappelLocalisation() async {
+    try {
+      await _localPlugin.cancel(_idRappelLocalisation);
+    } catch (_) {}
+  }
+
   Future<void> showIncomingCall({
     required String title,
     required String body,
