@@ -50,13 +50,23 @@ class DeviceRegistry {
     if (existant != null && existant.isNotEmpty) return existant;
 
     final rnd = Random.secure();
-    final id = List.generate(24, (_) => rnd.nextInt(36).toRadixString(36)).join();
+    final id =
+        List.generate(24, (_) => rnd.nextInt(36).toRadixString(36)).join();
     final complet = 'mob-$id';
     await prefs.setString(_cleId, complet);
     return complet;
   }
 
   /// Code attendu par le serveur : 0=web 1=Android 2=iOS 3=bureau.
+  ///
+  /// Public depuis le 11/08/2026 : la connexion l'envoie désormais, pour que le
+  /// serveur sache à quelle FAMILLE appartient l'appareil et n'évince que les
+  /// autres de la même — un téléphone ne doit pas fermer une session de bureau.
+  /// Sans cette annonce, le serveur ne peut le déduire qu'à partir de la
+  /// deuxième connexion, l'appareil n'étant pas encore au registre à la
+  /// première.
+  int get typeDevice => _typeDevice;
+
   int get _typeDevice {
     if (Platform.isAndroid) return 1;
     if (Platform.isIOS) return 2;

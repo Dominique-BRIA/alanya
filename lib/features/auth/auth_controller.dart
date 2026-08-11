@@ -30,6 +30,26 @@ class AuthController extends ChangeNotifier {
   AuthStatus status = AuthStatus.unknown;
   AuthUser? user;
 
+  /// Pourquoi la session s'est fermée, quand ce n'est pas l'utilisateur qui
+  /// l'a voulu. Affiché une seule fois sur l'écran de connexion, puis effacé
+  /// par [messageDeconnexionLu].
+  ///
+  /// Nul dans le cas ordinaire : une déconnexion volontaire n'a rien à
+  /// expliquer.
+  String? messageDeconnexion;
+
+  /// À appeler dès que le message a été montré : il ne doit pas réapparaître à
+  /// la prochaine ouverture de l'écran de connexion.
+  void messageDeconnexionLu() {
+    if (messageDeconnexion == null) return;
+    messageDeconnexion = null;
+    notifyListeners();
+  }
+
+  /// Raison envoyée avec `session_revoked` quand c'est une nouvelle connexion
+  /// qui ferme les autres, et non un ménage volontaire.
+  static const raisonEviction = "eviction";
+
   StreamSubscription<Map<String, dynamic>>? _revocationSub;
 
   /// Déconnexion à distance : une autre session du compte a révoqué un
@@ -46,6 +66,13 @@ class AuthController extends ChangeNotifier {
       final vise = e["deviceId"] as String?;
       if (vise == null) return;
       if (vise != await DeviceRegistry.instance.deviceId()) return;
+      // Deux causes passent par le même événement, et elles n'appellent pas le
+      // même message : une connexion ailleurs, ou un ménage que l'utilisateur a
+      // fait lui-même depuis « Appareils connectés ». Sans la raison, on
+      // annoncerait une intrusion à quelqu'un qui vient de ranger ses appareils.
+      if (e["raison"] == raisonEviction) {
+        messageDeconnexion = "Votre compte a été ouvert sur un autre appareil.";
+      }
       await logout();
     });
   }
@@ -68,7 +95,8 @@ class AuthController extends ChangeNotifier {
       final cachedUser = await _storage.userJson;
       if (cachedUser != null) {
         try {
-          user = AuthUser.fromJson(jsonDecode(cachedUser) as Map<String, dynamic>);
+          user =
+              AuthUser.fromJson(jsonDecode(cachedUser) as Map<String, dynamic>);
           // On reste en unknown le temps de valider le token, mais l'UI peut déjà afficher le pseudo
           notifyListeners();
         } catch (_) {}
@@ -107,11 +135,21 @@ class AuthController extends ChangeNotifier {
       if (refresh != null) {
         try {
           final tokens = await _repo.refresh(refresh);
-          await _storage.saveTokens(access: tokens.accessToken, refresh: tokens.refreshToken);
+          await _storage.saveTokens(
+              access: tokens.accessToken, refresh: tokens.refreshToken);
           final u = await _repo.me(tokens.accessToken);
           await _saveUserCache(u);
           _set(AuthStatus.authenticated, u);
           return;
+        } on ApiException catch (e) {
+          // ⚠️ LE SEUL CHEMIN qui couvre l'appareil ÉTEINT au moment de
+          // l'éviction : il n'a pas reçu l'événement temps réel, et ne
+          // l'apprend qu'en tentant de se rafraîchir à son réveil. Sans ce cas,
+          // il retomberait sur l'écran de connexion sans la moindre explication.
+          if (e.code == "SESSION_EVINCEE") {
+            messageDeconnexion =
+                "Votre compte a été ouvert sur un autre appareil.";
+          }
         } catch (_) {
           // refresh échoué → on nettoie
         }
@@ -133,13 +171,38 @@ class AuthController extends ChangeNotifier {
 
   Future<void> completeSetup(AuthSession session) => _persist(session);
 
-  Future<void> completeLogin(AuthSession session) => _persist(session);
+  Future<void> completeLogin(AuthSession session) async {
+    await _persist(session);
+    // Un message resté d'une éviction précédente n'a plus lieu d'être : on
+    // vient de se reconnecter, l'incident est clos.
+    messageDeconnexion = null;
+    _annonceLesEvictions(session.sessionsFermees);
+  }
+
+  /// Prévient TOUT DE SUITE les appareils que cette connexion vient de fermer.
+  ///
+  /// Le serveur les a déjà coupés en base — c'est la garantie de fond. Mais
+  /// l'API et le serveur temps réel sont deux process sans canal entre eux :
+  /// sans cette annonce, les appareils sortants resteraient utilisables jusqu'à
+  /// l'expiration de leur jeton d'accès, soit un quart d'heure.
+  ///
+  /// La trame part alors que le WebSocket vient tout juste d'être ouvert par
+  /// `_persist` : c'est pour ce moment précis que `session_revoked` a rejoint
+  /// les types mis en attente jusqu'à la connexion.
+  void _annonceLesEvictions(List<String> appareils) {
+    final rt = _realtime;
+    if (rt == null || appareils.isEmpty) return;
+    for (final deviceId in appareils) {
+      rt.sendSessionRevoked(deviceId, raison: raisonEviction);
+    }
+  }
 
   /// Met à jour localement le profil après une modification réussie côté API.
   void applyProfile({String? pseudo, String? avatarUrl, String? statusMsg}) {
     final current = user;
     if (current == null) return;
-    user = current.copyWith(pseudo: pseudo, avatarUrl: avatarUrl, statusMsg: statusMsg);
+    user = current.copyWith(
+        pseudo: pseudo, avatarUrl: avatarUrl, statusMsg: statusMsg);
     _saveUserCache(user!); // fire-and-forget
     notifyListeners();
   }

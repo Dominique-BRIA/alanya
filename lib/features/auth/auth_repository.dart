@@ -1,4 +1,3 @@
-
 import '../../core/device_registry.dart';
 import '../../core/api_client.dart';
 import '../../models/auth_user.dart';
@@ -16,7 +15,22 @@ class AuthSession {
   final AuthUser user;
   final String accessToken;
   final String refreshToken;
-  AuthSession(this.user, this.accessToken, this.refreshToken);
+
+  /// Identifiants des appareils que cette connexion vient d'évincer.
+  ///
+  /// Le serveur les a déjà coupés en base ; cette liste sert seulement à les
+  /// prévenir TOUT DE SUITE, sans quoi ils l'apprendraient à l'expiration de
+  /// leur jeton d'accès — jusqu'à quinze minutes plus tard. L'API et le serveur
+  /// temps réel étant deux process sans canal entre eux, c'est le client qui
+  /// vient d'ouvrir la session qui fait le lien.
+  final List<String> sessionsFermees;
+
+  AuthSession(
+    this.user,
+    this.accessToken,
+    this.refreshToken, {
+    this.sessionsFermees = const [],
+  });
 }
 
 /// Tokens rafraîchis (sans user – il faut rappeler /api/me après).
@@ -38,7 +52,8 @@ class AuthRepository {
 
   /// Étape 2 : vérifie le code OTP à 6 chiffres.
   Future<VerifyResult> verify(String email, String code) async {
-    final data = await _api.post("/api/auth/verify", {"email": email, "code": code});
+    final data =
+        await _api.post("/api/auth/verify", {"email": email, "code": code});
     return VerifyResult(
       data["setupToken"] as String,
       data["publicNumber"] as String,
@@ -78,7 +93,8 @@ class AuthRepository {
   }
 
   /// Connexion par email OU numéro public à 6 chiffres.
-  Future<AuthSession> login({required String identifier, required String password}) async {
+  Future<AuthSession> login(
+      {required String identifier, required String password}) async {
     // `deviceId` rattache la session à cet appareil : c'est ce qui permet de la
     // révoquer depuis « Appareils connectés ». Sans lui, le serveur sait à quel
     // compte appartient le jeton, mais pas depuis quel appareil il a été émis.
@@ -86,6 +102,12 @@ class AuthRepository {
       "identifier": identifier,
       "password": password,
       "deviceId": await DeviceRegistry.instance.deviceId(),
+      // La FAMILLE de l'appareil, pour que le serveur n'évince que les autres
+      // téléphones et laisse tranquille une session de bureau. À la toute
+      // première connexion, l'appareil n'est pas encore au registre : sans cette
+      // annonce, le serveur ne saurait pas à quelle famille il appartient et,
+      // par prudence, n'évincerait personne.
+      "typeDevice": DeviceRegistry.instance.typeDevice,
     });
     return _session(data);
   }
@@ -116,7 +138,8 @@ class AuthRepository {
   /// Rafraîchit un access token expiré à partir du refresh token.
   /// Retourne les nouveaux tokens. Ne supprime rien en cas d'échec – c'est à l'appelant.
   Future<RefreshSession> refresh(String refreshToken) async {
-    final data = await _api.post("/api/auth/refresh", {"refreshToken": refreshToken});
+    final data =
+        await _api.post("/api/auth/refresh", {"refreshToken": refreshToken});
     return RefreshSession(
       data["accessToken"] as String,
       data["refreshToken"] as String,
@@ -131,5 +154,10 @@ class AuthRepository {
         AuthUser.fromJson(data["user"] as Map<String, dynamic>),
         data["accessToken"] as String,
         data["refreshToken"] as String,
+        // Absent d'un serveur plus ancien, et absent de `/setup` : la liste vide
+        // est alors la vérité, aucune session n'ayant été fermée.
+        sessionsFermees:
+            (data["sessionsFermees"] as List?)?.whereType<String>().toList() ??
+                const [],
       );
 }

@@ -11,7 +11,6 @@ import 'forgot_password_screen.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../core/alanya_id_formatter.dart';
 
-
 /// Connexion par email OU numéro public (6 ou 8 chiffres) + mot de passe.
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -41,9 +40,8 @@ class _LoginScreenState extends State<LoginScreen> {
       // Nettoie les espaces si l'utilisateur a tapé un Alanya ID formaté.
       // (Le backend attend le numéro brut, sans espaces.)
       final rawId = _idCtrl.text.trim();
-      final identifier = RegExp(r'^[\d\s]+$').hasMatch(rawId)
-          ? stripAlanyaId(rawId)
-          : rawId;
+      final identifier =
+          RegExp(r'^[\d\s]+$').hasMatch(rawId) ? stripAlanyaId(rawId) : rawId;
 
       final session = await context.read<AuthRepository>().login(
             identifier: identifier,
@@ -82,11 +80,44 @@ class _LoginScreenState extends State<LoginScreen> {
                     Expanded(
                       child: Text(
                         tr(context, 'login_welcome'),
-                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                        style: const TextStyle(
+                            fontSize: 20, fontWeight: FontWeight.bold),
                       ),
                     ),
                   ],
                 ),
+                // Pourquoi la session s'est fermée, quand ce n'est pas
+                // l'utilisateur qui l'a voulu. Sans ce bandeau, quelqu'un
+                // éjecté parce que son compte vient d'être ouvert ailleurs
+                // retrouve l'écran de connexion sans la moindre explication —
+                // et le prend pour une panne.
+                if (context.watch<AuthController>().messageDeconnexion != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 20),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: AlanyaColors.gold.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.info_outline,
+                              size: 20, color: AlanyaColors.gold),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              context
+                                  .watch<AuthController>()
+                                  .messageDeconnexion!,
+                              style: const TextStyle(fontSize: 13),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 const SizedBox(height: 24),
                 TextFormField(
                   controller: _idCtrl,
@@ -98,8 +129,9 @@ class _LoginScreenState extends State<LoginScreen> {
                     labelText: tr(context, 'email_or_alanya'),
                     prefixIcon: const Icon(Icons.alternate_email),
                   ),
-                  validator: (v) =>
-                      (v ?? "").trim().isEmpty ? tr(context, 'email_required') : null,
+                  validator: (v) => (v ?? "").trim().isEmpty
+                      ? tr(context, 'email_required')
+                      : null,
                 ),
                 const SizedBox(height: 16),
                 TextFormField(
@@ -109,11 +141,13 @@ class _LoginScreenState extends State<LoginScreen> {
                     labelText: tr(context, 'password'),
                     prefixIcon: const Icon(Icons.lock_outline),
                     suffixIcon: IconButton(
-                      icon: Icon(_obscure ? Icons.visibility : Icons.visibility_off),
+                      icon: Icon(
+                          _obscure ? Icons.visibility : Icons.visibility_off),
                       onPressed: () => setState(() => _obscure = !_obscure),
                     ),
                   ),
-                  validator: (v) => (v ?? "").isEmpty ? tr(context, 'password') : null,
+                  validator: (v) =>
+                      (v ?? "").isEmpty ? tr(context, 'password') : null,
                 ),
                 const SizedBox(height: 24),
                 ElevatedButton(

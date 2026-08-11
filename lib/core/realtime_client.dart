@@ -209,6 +209,11 @@ class RealtimeClient extends ChangeNotifier {
     // invitation de transfert n'atteint jamais la cible et l'initiateur attend
     // indéfiniment que la cible rejoigne.
     "call_invite",
+    // Une éviction perdue laisse l'appareil sortant connecté jusqu'à
+    // l'expiration de son jeton d'accès, soit un quart d'heure. Elle part
+    // justement au moment le plus défavorable : la socket vient d'être ouverte
+    // par une connexion toute fraîche.
+    "session_revoked",
     "meeting_join",
     "meeting_leave",
     "meeting_signal",
@@ -301,8 +306,14 @@ class RealtimeClient extends ChangeNotifier {
   ///
   /// Le serveur ne rediffuse qu'aux sockets du même compte : on ne peut couper
   /// que ses propres appareils.
-  void sendSessionRevoked(String deviceId) =>
-      _send({"type": "session_revoked", "deviceId": deviceId});
+  /// [raison] `"eviction"` quand c'est une connexion ailleurs qui ferme cette
+  /// session, absente quand l'utilisateur déconnecte lui-même un poste depuis
+  /// « Appareils connectés ». L'appareil visé s'en sert pour dire la vérité.
+  void sendSessionRevoked(String deviceId, {String? raison}) => _send({
+        "type": "session_revoked",
+        "deviceId": deviceId,
+        if (raison != null) "raison": raison,
+      });
 
   /// Réaction emoji sur un message. `emoji` vide = retrait ; renvoyer le même
   /// emoji que l'actuel = bascule (retrait) côté serveur.
