@@ -72,7 +72,11 @@ dependencies:
   # Base de données locale (cache des messages hors ligne)
   sqflite: ^2.4.1
   path: ^1.9.0
-  
+  # Relevé de position des agents rattachés à une entreprise (table `geo`).
+  # ⚠️ Le serveur décide QUI est suivi (`/api/me` → `suiviPosition`) : ce paquet
+  # n'est sollicité que pour les comptes concernés, jamais pour un particulier.
+  geolocator: ^14.0.2
+
 
 dev_dependencies:
   flutter_test:

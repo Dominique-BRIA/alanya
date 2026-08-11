@@ -10,6 +10,7 @@ import '../../core/contact_cache.dart';
 import '../../core/conversation_cache.dart';
 import '../../core/message_cache.dart';
 import '../../core/device_registry.dart';
+import '../../core/geo_service.dart';
 import '../../core/push_service.dart';
 import '../../core/realtime_client.dart';
 import '../../core/token_storage.dart';
@@ -219,6 +220,11 @@ class AuthController extends ChangeNotifier {
     // En premier, avant même le jeton push : si la suite échoue, l'écran
     // fantôme aura au moins disparu.
     await CallUiNative.toutMasquer();
+
+    // Arrête le relevé de position. Sans cela, le téléphone continuerait de
+    // rapporter la position d'un compte qui n'est plus connecté — et les envois
+    // échoueraient en boucle, faute de jeton.
+    GeoService.instance.arreter();
 
     // Désenregistre le token FCM avant de nettoyer les tokens locaux
     await PushService.instance.unregister();

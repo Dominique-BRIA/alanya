@@ -9,6 +9,7 @@ import 'core/authed_api.dart';
 import 'core/connectivity_service.dart';
 import 'core/data_saver_service.dart';
 import 'core/debug_overlay.dart';
+import 'core/geo_service.dart';
 import 'core/notification_settings.dart';
 import 'core/locale_controller.dart';
 import 'core/outbox.dart';
@@ -64,6 +65,9 @@ void main() async {
   // Registre des appareils : simple câblage, aucun appel réseau ici.
   // L'enregistrement a lieu à l'authentification (voir AuthController).
   DeviceRegistry.instance.init(api: api, storage: storage);
+  // Relevé de position : simple câblage. Rien ne démarre ici — c'est le serveur
+  // qui dira si ce compte est concerné, et l'utilisateur qui devra l'accepter.
+  GeoService.instance.init(authedApi);
   await DataSaverService.instance.load();
   await NotificationSettings.instance.load();
 
@@ -73,14 +77,16 @@ void main() async {
         Provider<ApiClient>.value(value: api),
         Provider<AuthRepository>.value(value: repo),
         Provider<TokenStorage>.value(value: storage),
-        Provider<ContactsRepository>.value(value: ContactsRepository(authedApi)),
+        Provider<ContactsRepository>.value(
+            value: ContactsRepository(authedApi)),
         Provider<ChatRepository>.value(value: ChatRepository(authedApi)),
         Provider<AccountRepository>.value(value: AccountRepository(authedApi)),
         Provider<StatusRepository>.value(value: StatusRepository(authedApi)),
         Provider<AiRepository>.value(value: AiRepository(authedApi)),
         Provider<MediaRepository>.value(value: MediaRepository(authedApi)),
         Provider<CallsRepository>.value(value: CallsRepository(authedApi)),
-        Provider<MeetingsRepository>.value(value: MeetingsRepository(authedApi)),
+        Provider<MeetingsRepository>.value(
+            value: MeetingsRepository(authedApi)),
         Provider<BlockedRepository>.value(value: BlockedRepository(authedApi)),
         ChangeNotifierProvider<RealtimeClient>.value(value: realtime),
         ChangeNotifierProvider<PresenceStore>(
@@ -199,12 +205,12 @@ class AuthGate extends StatelessWidget {
           body: Center(child: CircularProgressIndicator()),
         );
       case AuthStatus.authenticated:
-  	return OfflineBanner(
-    		child: BiometricGate(
-      			child: CallListener(child: const HomeScreen()),
-    			),
- 	 );
- 	 
+        return OfflineBanner(
+          child: BiometricGate(
+            child: CallListener(child: const HomeScreen()),
+          ),
+        );
+
       case AuthStatus.unauthenticated:
         return const WelcomeScreen();
     }

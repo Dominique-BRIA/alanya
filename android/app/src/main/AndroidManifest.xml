@@ -44,6 +44,28 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
 
+    <!-- Relevé de position des agents rattachés à une entreprise (table `geo`).
+
+         ⚠️ TROIS PERMISSIONS, ET ELLES NE SE DEMANDENT PAS ENSEMBLE. Android
+         impose un parcours en deux temps : d'abord « pendant l'utilisation »
+         (FINE + COARSE), et seulement ensuite « toujours autoriser »
+         (BACKGROUND), qui s'obtient dans les réglages du système et non dans une
+         boîte de dialogue. Les demander d'un bloc fait échouer la seconde en
+         silence.
+
+         COARSE accompagne obligatoirement FINE depuis Android 12 : sans elle, le
+         système n'affiche que le choix « position approximative » et refuse la
+         précision.
+
+         ⚠️ `ACCESS_BACKGROUND_LOCATION` est la permission la plus examinée du
+         Play Store. L'application partant en distribution PUBLIQUE, elle exige
+         un formulaire de déclaration, une vidéo de démonstration, un écran de
+         divulgation DANS l'application avant toute demande, et une politique de
+         confidentialité publique. Voir `GeoDisclosureScreen`. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
+
     <application
         android:label="Alanya Work"
         android:name="${applicationName}"

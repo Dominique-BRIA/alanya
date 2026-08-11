@@ -8,6 +8,8 @@ import '../../core/whatsapp_text.dart';
 
 import '../../core/connectivity_service.dart';
 import '../../core/conversation_cache.dart';
+import '../../core/geo_service.dart';
+import '../geo/screens/geo_disclosure_screen.dart';
 import '../../core/push_service.dart';
 import '../../core/notification_settings.dart';
 import '../../core/realtime_client.dart';
@@ -88,7 +90,41 @@ class _HomeScreenState extends State<HomeScreen> {
       // ICI et non au tout premier écran : la question n'a de sens qu'une fois
       // l'utilisateur connecté, donc susceptible de recevoir un appel.
       FullScreenPermission.demanderSiNecessaire(context);
+      _assureLeSuiviDePosition();
     });
+  }
+
+  /// Met en place le relevé de position, si ce compte est concerné.
+  ///
+  /// ⚠️ ORDRE IMPOSÉ PAR LA RÈGLE DU PLAY STORE : divulgation d'abord, demande
+  /// de permission ensuite, et seulement après un accord explicite. L'inverse
+  /// est un motif de rejet.
+  ///
+  /// Trois filtres, dans cet ordre : le SERVEUR dit si le compte est concerné,
+  /// l'utilisateur dit s'il accepte, le système dit si la permission est
+  /// accordée. Un particulier ne voit donc jamais rien de tout ceci.
+  Future<void> _assureLeSuiviDePosition() async {
+    final user = context.read<AuthController>().user;
+    if (user == null || !user.suiviPosition) return;
+
+    final consentement = await GeoService.instance.consentement();
+    if (!mounted) return;
+
+    if (consentement == ConsentementGeo.jamaisDemande) {
+      // Une seule fois. Un refus n'est jamais redemandé au lancement suivant :
+      // la règle l'interdit, et harceler quelqu'un qui a dit non ne le fera pas
+      // changer d'avis.
+      await Navigator.of(context).push<bool>(
+        MaterialPageRoute(builder: (_) => const GeoDisclosureScreen()),
+      );
+      if (!mounted) return;
+    } else if (consentement == ConsentementGeo.refuse) {
+      return;
+    }
+
+    await GeoService.instance.demarrer(
+      intervalleMin: user.suiviPositionIntervalleMin,
+    );
   }
 
   @override
@@ -127,94 +163,113 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-          // letterSpacing réduit de 4 à 2 : « ALANYA WORK » fait onze
-          // caractères, et l'AppBar porte aussi des actions.
-          title: const AlanyaWordmark(fontSize: 22, letterSpacing: 2, height: 1),
-          actions: [
-            IconButton(
-              icon: Icon(
-                Theme.of(context).brightness == Brightness.dark ? Icons.wb_sunny : Icons.nightlight_round,
-                color: Theme.of(context).brightness == Brightness.dark ? AlanyaColors.terracottaNuit : AlanyaColors.terracotta,
-              ),
-              tooltip: Theme.of(context).brightness == Brightness.dark ? "Passer au mode clair" : "Passer au mode sombre",
-              onPressed: () {
-                final themeCtrl = context.read<ThemeController>();
-                themeCtrl.basculerClairSombre(
-                  Theme.of(context).brightness == Brightness.dark,
+        // letterSpacing réduit de 4 à 2 : « ALANYA WORK » fait onze
+        // caractères, et l'AppBar porte aussi des actions.
+        title: const AlanyaWordmark(fontSize: 22, letterSpacing: 2, height: 1),
+        actions: [
+          IconButton(
+            icon: Icon(
+              Theme.of(context).brightness == Brightness.dark
+                  ? Icons.wb_sunny
+                  : Icons.nightlight_round,
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? AlanyaColors.terracottaNuit
+                  : AlanyaColors.terracotta,
+            ),
+            tooltip: Theme.of(context).brightness == Brightness.dark
+                ? "Passer au mode clair"
+                : "Passer au mode sombre",
+            onPressed: () {
+              final themeCtrl = context.read<ThemeController>();
+              themeCtrl.basculerClairSombre(
+                Theme.of(context).brightness == Brightness.dark,
+              );
+            },
+          ),
+          PopupMenuButton<String>(
+            onSelected: (v) {
+              if (v == "settings") {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
                 );
-              },
-            ),
-            PopupMenuButton<String>(
-              onSelected: (v) {
-                if (v == "settings") {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const SettingsScreen()),
-                  );
-                } else if (v == "devices") {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const DevicesScreen()),
-                  );
-                } else if (v == "logout") {
-                  context.read<AuthController>().logout();
-                }
-              },
-              itemBuilder: (_) => [
-                const PopupMenuItem(value: "devices", child: ListTile(leading: Icon(Icons.devices_outlined), title: Text("Appareils connectés"), contentPadding: EdgeInsets.zero,)),
-                const PopupMenuItem(value: "settings", child: ListTile(leading: Icon(Icons.settings_outlined), title: Text("Paramètres"), contentPadding: EdgeInsets.zero,)),
-                const PopupMenuItem(value: "logout", child: Text("Se déconnecter")),
-              ],
-            ),
-          ],
-        ),
-        body: IndexedStack(index: _tab, children: tabs),
-        floatingActionButton: _tab == 0
-            ? FloatingActionButton(
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const ContactsScreen()),
-                ),
-                // Nuit : icône sombre sur la terre cuite (contraste du modèle).
-                child: Icon(Icons.edit,
-                    color: Theme.of(context).brightness == Brightness.dark
-                        ? const Color(0xFF160B06)
-                        : Colors.white),
-              )
-            : null,
-        bottomNavigationBar: AlanyaNavBar(
-          currentIndex: _tab,
-          onTap: (i) {
-            setState(() => _tab = i);
-            // Ouvrir l'onglet Appels vaut consultation : la pastille tombe.
-            if (i == 2) MissedCalls.instance.marquerVus();
-          },
-          items: [
-            const AlanyaNavItem(
-              icon: Icons.chat_bubble_outline,
-              activeIcon: Icons.chat_bubble,
-              label: 'Chats',
-            ),
-            const AlanyaNavItem(
-              icon: Icons.radio_button_unchecked,
-              activeIcon: Icons.adjust,
-              label: 'Status',
-            ),
-            AlanyaNavItem(
-              icon: Icons.call_outlined,
-              activeIcon: Icons.call,
-              label: 'Appels',
-              badge: _appelsManques,
-            ),
-            const AlanyaNavItem(
-              icon: Icons.videocam_outlined,
-              activeIcon: Icons.videocam,
-              label: 'Réunions',
-            ),
-            const AlanyaNavItem(
-              icon: Icons.auto_awesome_outlined,
-              activeIcon: Icons.auto_awesome,
-              label: 'IA',
-            ),
-          ],
-        ),
+              } else if (v == "devices") {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const DevicesScreen()),
+                );
+              } else if (v == "logout") {
+                context.read<AuthController>().logout();
+              }
+            },
+            itemBuilder: (_) => [
+              const PopupMenuItem(
+                  value: "devices",
+                  child: ListTile(
+                    leading: Icon(Icons.devices_outlined),
+                    title: Text("Appareils connectés"),
+                    contentPadding: EdgeInsets.zero,
+                  )),
+              const PopupMenuItem(
+                  value: "settings",
+                  child: ListTile(
+                    leading: Icon(Icons.settings_outlined),
+                    title: Text("Paramètres"),
+                    contentPadding: EdgeInsets.zero,
+                  )),
+              const PopupMenuItem(
+                  value: "logout", child: Text("Se déconnecter")),
+            ],
+          ),
+        ],
+      ),
+      body: IndexedStack(index: _tab, children: tabs),
+      floatingActionButton: _tab == 0
+          ? FloatingActionButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const ContactsScreen()),
+              ),
+              // Nuit : icône sombre sur la terre cuite (contraste du modèle).
+              child: Icon(Icons.edit,
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? const Color(0xFF160B06)
+                      : Colors.white),
+            )
+          : null,
+      bottomNavigationBar: AlanyaNavBar(
+        currentIndex: _tab,
+        onTap: (i) {
+          setState(() => _tab = i);
+          // Ouvrir l'onglet Appels vaut consultation : la pastille tombe.
+          if (i == 2) MissedCalls.instance.marquerVus();
+        },
+        items: [
+          const AlanyaNavItem(
+            icon: Icons.chat_bubble_outline,
+            activeIcon: Icons.chat_bubble,
+            label: 'Chats',
+          ),
+          const AlanyaNavItem(
+            icon: Icons.radio_button_unchecked,
+            activeIcon: Icons.adjust,
+            label: 'Status',
+          ),
+          AlanyaNavItem(
+            icon: Icons.call_outlined,
+            activeIcon: Icons.call,
+            label: 'Appels',
+            badge: _appelsManques,
+          ),
+          const AlanyaNavItem(
+            icon: Icons.videocam_outlined,
+            activeIcon: Icons.videocam,
+            label: 'Réunions',
+          ),
+          const AlanyaNavItem(
+            icon: Icons.auto_awesome_outlined,
+            activeIcon: Icons.auto_awesome,
+            label: 'IA',
+          ),
+        ],
+      ),
     );
   }
 }
@@ -240,10 +295,14 @@ class _ConversationsTabState extends State<_ConversationsTab>
   bool _wasBusy = false;
 
   // Formalisme centralisé – voir lib/core/call_status.dart
-  String _preciseCallStatus(CallRecord c) => CallStatusFormalisme.preciseLabel(c);
+  String _preciseCallStatus(CallRecord c) =>
+      CallStatusFormalisme.preciseLabel(c);
   IconData _callIconFor(CallRecord c) => CallStatusFormalisme.iconFor(c);
-  Color _callColorFor(CallRecord c, BuildContext context) => CallStatusFormalisme.colorFor(c, danger: dangerOf(context), positive: positiveOf(context));
-  String _formatDateTimeShort(DateTime dt) => CallStatusFormalisme.formatDateTime(dt);
+  Color _callColorFor(CallRecord c, BuildContext context) =>
+      CallStatusFormalisme.colorFor(c,
+          danger: dangerOf(context), positive: positiveOf(context));
+  String _formatDateTimeShort(DateTime dt) =>
+      CallStatusFormalisme.formatDateTime(dt);
 
   /// Recharge les appels : le cache pour l'affichage immédiat, puis le serveur
   /// qui fait autorité.
@@ -346,7 +405,9 @@ class _ConversationsTabState extends State<_ConversationsTab>
         final senderId = msg?["senderId"] as String?;
         final myId = context.read<AuthController>().user?.id;
         // Ne pas notifier si c'est mon propre message OU si je suis dans cette conv
-        if (senderId != myId && convId != null && convId != ChatScreen.activeConvId) {
+        if (senderId != myId &&
+            convId != null &&
+            convId != ChatScreen.activeConvId) {
           _showMessageNotification(e);
         }
       } else if (t == "read") {
@@ -436,7 +497,9 @@ class _ConversationsTabState extends State<_ConversationsTab>
         break;
       default:
         // Si c'est un message formaté, on n'affiche pas les * _ ~ dans la notif
-        body = content == null ? "Nouveau message" : sansMarqueursWhatsApp(content);
+        body = content == null
+            ? "Nouveau message"
+            : sansMarqueursWhatsApp(content);
         if (body.trim().isEmpty) body = "Nouveau message";
     }
 
@@ -597,87 +660,91 @@ class _ConversationsTabState extends State<_ConversationsTab>
         overlayOpacity: 0.92,
         plainInDark: true,
         child: Column(
-        children: [
-          if (user != null)
-            // IntrinsicHeight + stretch : sans lui, la Row centrerait le
-            // bouton sur sa hauteur et il ne s'alignerait ni en haut ni en bas
-            // avec la carte. Ici les deux blocs font exactement la même
-            // hauteur, celle imposée par la carte de profil.
-            IntrinsicHeight(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(child: _carteProfil(context, user)),
-                  _boutonSaisirId(context),
-                  const SizedBox(width: 12),
-                ],
-              ),
-            ),
-          // --- Barre de recherche ---
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
-            child: TextField(
-              controller: _searchCtrl,
-              onChanged: (v) => setState(() => _searchQuery = v.trim().toLowerCase()),
-              decoration: InputDecoration(
-                hintText: "Rechercher une discussion…",
-                prefixIcon: Icon(Icons.search, color: searchIconColor, size: 20),
-                suffixIcon: _searchQuery.isNotEmpty
-                    ? IconButton(
-                        icon: Icon(Icons.close, color: searchIconColor, size: 18),
-                        onPressed: () {
-                          _searchCtrl.clear();
-                          setState(() => _searchQuery = '');
-                        },
-                      )
-                    : null,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                filled: true,
-                fillColor: themed(context,
-                    light: Colors.white, dark: surfacesOf(context).surface),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(color: searchBorder, width: 0.5),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(color: searchBorder, width: 0.5),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(
-                      color: themed(context,
-                          light: AlanyaColors.terracotta,
-                          dark: AlanyaColors.terracottaNuit),
-                      width: 1),
+          children: [
+            if (user != null)
+              // IntrinsicHeight + stretch : sans lui, la Row centrerait le
+              // bouton sur sa hauteur et il ne s'alignerait ni en haut ni en bas
+              // avec la carte. Ici les deux blocs font exactement la même
+              // hauteur, celle imposée par la carte de profil.
+              IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(child: _carteProfil(context, user)),
+                    _boutonSaisirId(context),
+                    const SizedBox(width: 12),
+                  ],
                 ),
               ),
-              style: const TextStyle(fontSize: 14),
+            // --- Barre de recherche ---
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+              child: TextField(
+                controller: _searchCtrl,
+                onChanged: (v) =>
+                    setState(() => _searchQuery = v.trim().toLowerCase()),
+                decoration: InputDecoration(
+                  hintText: "Rechercher une discussion…",
+                  prefixIcon:
+                      Icon(Icons.search, color: searchIconColor, size: 20),
+                  suffixIcon: _searchQuery.isNotEmpty
+                      ? IconButton(
+                          icon: Icon(Icons.close,
+                              color: searchIconColor, size: 18),
+                          onPressed: () {
+                            _searchCtrl.clear();
+                            setState(() => _searchQuery = '');
+                          },
+                        )
+                      : null,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  filled: true,
+                  fillColor: themed(context,
+                      light: Colors.white, dark: surfacesOf(context).surface),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide(color: searchBorder, width: 0.5),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide(color: searchBorder, width: 0.5),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide(
+                        color: themed(context,
+                            light: AlanyaColors.terracotta,
+                            dark: AlanyaColors.terracottaNuit),
+                        width: 1),
+                  ),
+                ),
+                style: const TextStyle(fontSize: 14),
+              ),
             ),
-          ),
-          // --- Onglets : Tous / Non lues / Groupes ---
-          TabBar(
-            tabs: const [
-              Tab(text: "Tous"),
-              Tab(text: "Non lues"),
-              Tab(text: "Groupes"),
-            ],
-            labelColor: AlanyaColors.terracotta,
-            unselectedLabelColor: AlanyaColors.craie2,
-            indicatorColor: AlanyaColors.terracotta,
-            indicatorWeight: 2.5,
-            onTap: (i) => setState(() => _tabFilter = i),
-          ),
-          Expanded(
-            child: RefreshIndicator(
-              onRefresh: _refresh,
-              child: _buildList(),
+            // --- Onglets : Tous / Non lues / Groupes ---
+            TabBar(
+              tabs: const [
+                Tab(text: "Tous"),
+                Tab(text: "Non lues"),
+                Tab(text: "Groupes"),
+              ],
+              labelColor: AlanyaColors.terracotta,
+              unselectedLabelColor: AlanyaColors.craie2,
+              indicatorColor: AlanyaColors.terracotta,
+              indicatorWeight: 2.5,
+              onTap: (i) => setState(() => _tabFilter = i),
             ),
-          ),
-        ],
+            Expanded(
+              child: RefreshIndicator(
+                onRefresh: _refresh,
+                child: _buildList(),
+              ),
+            ),
+          ],
+        ),
       ),
-    ),
-  );
+    );
   }
 
   /// Carte d'identité de l'utilisateur : avatar, nom, Alanya ID.
@@ -789,13 +856,14 @@ class _ConversationsTabState extends State<_ConversationsTab>
   Widget _buildList() {
     final muted =
         themed(context, light: Colors.black54, dark: AlanyaColors.craie2);
-    final muted2 = themed(context,
-        light: AlanyaColors.grey500, dark: AlanyaColors.craie2);
+    final muted2 =
+        themed(context, light: AlanyaColors.grey500, dark: AlanyaColors.craie2);
     if (_convs == null && !_error) {
       return Center(
         child: CircularProgressIndicator(
           color: themed(context,
-              light: AlanyaColors.terracotta, dark: AlanyaColors.terracottaNuit),
+              light: AlanyaColors.terracotta,
+              dark: AlanyaColors.terracottaNuit),
         ),
       );
     }
@@ -835,7 +903,8 @@ class _ConversationsTabState extends State<_ConversationsTab>
             if (title.contains(_searchQuery)) return true;
             // Cherche dans les numéros des membres
             for (final m in c.members) {
-              if (m.publicNumber.toLowerCase().contains(_searchQuery)) return true;
+              if (m.publicNumber.toLowerCase().contains(_searchQuery))
+                return true;
             }
             // Cherche dans le dernier message
             final content = (c.lastMessage?.content ?? '').toLowerCase();
@@ -899,8 +968,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
             ),
             onTap: _showArchived,
           ),
-        if (archivedCount > 0 && _searchQuery.isEmpty)
-          const Divider(height: 1),
+        if (archivedCount > 0 && _searchQuery.isEmpty) const Divider(height: 1),
         // Liste des conversations
         ...convs.map((c) => _tile(c)),
       ],
@@ -985,7 +1053,8 @@ class _ConversationsTabState extends State<_ConversationsTab>
       }
 
       if (last == null) {
-        return Text("—", style: baseStyle, maxLines: 1, overflow: TextOverflow.ellipsis);
+        return Text("—",
+            style: baseStyle, maxLines: 1, overflow: TextOverflow.ellipsis);
       }
       final isText = last.type == "TEXT" && (last.content?.isNotEmpty ?? false);
       if (!isText) {
@@ -1028,7 +1097,8 @@ class _ConversationsTabState extends State<_ConversationsTab>
         ? null
         : c.members.firstWhere(
             (m) => m.id != myId,
-            orElse: () => c.members.isNotEmpty ? c.members.first : c.members.first,
+            orElse: () =>
+                c.members.isNotEmpty ? c.members.first : c.members.first,
           );
 
     final subtitleStyle = TextStyle(
@@ -1045,7 +1115,8 @@ class _ConversationsTabState extends State<_ConversationsTab>
                   // Nuit : l'indigo porte l'identité (avatars, groupes).
                   backgroundColor:
                       isDark ? AlanyaColors.indigo : AlanyaColors.forest,
-                  child: const Icon(Icons.groups, color: Colors.white, size: 22),
+                  child:
+                      const Icon(Icons.groups, color: Colors.white, size: 22),
                 )
               : AvatarCircle(
                   name: title,
@@ -1076,8 +1147,9 @@ class _ConversationsTabState extends State<_ConversationsTab>
               // Modèle Nuit : le non-lu est un accent terre cuite sur texte sombre.
               ? CircleAvatar(
                   radius: 11,
-                  backgroundColor:
-                      isDark ? AlanyaColors.terracottaNuit : AlanyaColors.forest,
+                  backgroundColor: isDark
+                      ? AlanyaColors.terracottaNuit
+                      : AlanyaColors.forest,
                   child: Text("${c.unread}",
                       style: TextStyle(
                         color: isDark ? const Color(0xFF140A06) : Colors.white,
@@ -1085,9 +1157,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
                       )),
                 )
               : null),
-      onLongPress: isSelecting
-          ? null
-          : () => _showConversationOptions(c),
+      onLongPress: isSelecting ? null : () => _showConversationOptions(c),
       onTap: () async {
         if (isSelecting) {
           toggleSelect(c.id);
@@ -1130,7 +1200,8 @@ class _ConversationsTabState extends State<_ConversationsTab>
             Padding(
               padding: const EdgeInsets.all(16),
               child: Text(c.title ?? "Conversation",
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  style: const TextStyle(
+                      fontSize: 18, fontWeight: FontWeight.bold)),
             ),
             const Divider(height: 1),
             ListTile(
@@ -1141,7 +1212,9 @@ class _ConversationsTabState extends State<_ConversationsTab>
               title: Text(c.isPinned ? "Désépingler" : "Épingler"),
               onTap: () async {
                 Navigator.pop(ctx);
-                await context.read<ChatRepository>().pinConversation(c.id, !c.isPinned);
+                await context
+                    .read<ChatRepository>()
+                    .pinConversation(c.id, !c.isPinned);
                 _load();
               },
             ),
@@ -1153,13 +1226,16 @@ class _ConversationsTabState extends State<_ConversationsTab>
               title: Text(c.isArchived ? "Désarchiver" : "Archiver"),
               onTap: () async {
                 Navigator.pop(ctx);
-                await context.read<ChatRepository>().archiveConversation(c.id, !c.isArchived);
+                await context
+                    .read<ChatRepository>()
+                    .archiveConversation(c.id, !c.isArchived);
                 _load();
               },
             ),
             ListTile(
               leading: const Icon(Icons.delete_outline, color: Colors.red),
-              title: const Text("Supprimer", style: TextStyle(color: Colors.red)),
+              title:
+                  const Text("Supprimer", style: TextStyle(color: Colors.red)),
               onTap: () async {
                 Navigator.pop(ctx);
                 final ok = await showDialog<bool>(
@@ -1168,8 +1244,13 @@ class _ConversationsTabState extends State<_ConversationsTab>
                     title: const Text("Supprimer cette conversation ?"),
                     content: const Text("Cette action est irréversible."),
                     actions: [
-                      TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Annuler")),
-                      TextButton(onPressed: () => Navigator.pop(context, true), child: const Text("Supprimer", style: TextStyle(color: Colors.red))),
+                      TextButton(
+                          onPressed: () => Navigator.pop(context, false),
+                          child: const Text("Annuler")),
+                      TextButton(
+                          onPressed: () => Navigator.pop(context, true),
+                          child: const Text("Supprimer",
+                              style: TextStyle(color: Colors.red))),
                     ],
                   ),
                 );
@@ -1192,8 +1273,8 @@ class _ConversationsTabState extends State<_ConversationsTab>
     final repo = context.read<ChatRepository>();
     final handle =
         themed(context, light: AlanyaColors.grey300, dark: AlanyaColors.craie2);
-    final muted2 = themed(context,
-        light: AlanyaColors.grey500, dark: AlanyaColors.craie2);
+    final muted2 =
+        themed(context, light: AlanyaColors.grey500, dark: AlanyaColors.craie2);
 
     await showModalBottomSheet(
       context: context,
@@ -1316,8 +1397,8 @@ class _ConversationsTabState extends State<_ConversationsTab>
               child: const Text("Annuler")),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text("Supprimer",
-                  style: TextStyle(color: Colors.red))),
+              child:
+                  const Text("Supprimer", style: TextStyle(color: Colors.red))),
         ],
       ),
     );
@@ -1373,7 +1454,8 @@ class _StatusTabState extends State<_StatusTab> {
 
   Future<void> _openViewer(StatusGroup group, {required bool isMine}) async {
     await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => StatusViewerScreen(group: group, isMine: isMine)),
+      MaterialPageRoute(
+          builder: (_) => StatusViewerScreen(group: group, isMine: isMine)),
     );
     _load();
   }
@@ -1399,14 +1481,16 @@ class _StatusTabState extends State<_StatusTab> {
               if (_error)
                 const Padding(
                   padding: EdgeInsets.all(24),
-                  child: Center(child: Text("Erreur de chargement. Tire pour réessayer.")),
+                  child: Center(
+                      child:
+                          Text("Erreur de chargement. Tire pour réessayer.")),
                 ),
               if (others.isNotEmpty) ...[
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
                   child: Text("Récents",
-                      style: TextStyle(
-                          color: muted, fontWeight: FontWeight.bold)),
+                      style:
+                          TextStyle(color: muted, fontWeight: FontWeight.bold)),
                 ),
                 ...others.map((g) => _statusTile(g, isMine: false)),
               ] else if (!_error && _feed != null && me == null)
@@ -1461,8 +1545,10 @@ class _StatusTabState extends State<_StatusTab> {
           ),
         ],
       ),
-      title: const Text("Mon statut", style: TextStyle(fontWeight: FontWeight.w600)),
-      subtitle: Text(has ? "${me!.statuses.length} statut(s)" : "Appuie pour ajouter"),
+      title: const Text("Mon statut",
+          style: TextStyle(fontWeight: FontWeight.w600)),
+      subtitle: Text(
+          has ? "${me!.statuses.length} statut(s)" : "Appuie pour ajouter"),
       onTap: has ? () => _openViewer(me!, isMine: true) : _openCreate,
       trailing: has
           ? IconButton(
@@ -1498,7 +1584,8 @@ class _StatusTabState extends State<_StatusTab> {
               style: const TextStyle(color: Colors.white)),
         ),
       ),
-      title: Text(g.displayName, style: const TextStyle(fontWeight: FontWeight.w600)),
+      title: Text(g.displayName,
+          style: const TextStyle(fontWeight: FontWeight.w600)),
       subtitle: Text(g.hasUnviewed ? "Nouveau" : "Vu"),
       onTap: () => _openViewer(g, isMine: isMine),
     );
@@ -1626,8 +1713,8 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
       _scrollToBottom();
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text("L'assistant n'a pas répondu")));
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("L'assistant n'a pas répondu")));
       }
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -1651,26 +1738,27 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
     return MotifBackground(
       overlayOpacity: 0.9,
       child: Column(
-      children: [
-        // --- Onglets Discussion / Mes Conversations ---
-        TabBar(
-          controller: _tabCtrl,
-          tabs: const [
-            Tab(text: "Discussion"),
-            Tab(text: "Mes Conversations"),
-          ],
-          labelColor: AlanyaColors.terracotta,
-          unselectedLabelColor: AlanyaColors.craie2,
-          indicatorColor: AlanyaColors.terracotta,
-          indicatorWeight: 2.5,
-        ),
-        Expanded(
-          child: _tabCtrl.index == 0 ? _buildDiscussion() : _buildThreadsList(),
-        ),
-        if (_tabCtrl.index == 0) _composer(),
-      ],
-    ),
-  );
+        children: [
+          // --- Onglets Discussion / Mes Conversations ---
+          TabBar(
+            controller: _tabCtrl,
+            tabs: const [
+              Tab(text: "Discussion"),
+              Tab(text: "Mes Conversations"),
+            ],
+            labelColor: AlanyaColors.terracotta,
+            unselectedLabelColor: AlanyaColors.craie2,
+            indicatorColor: AlanyaColors.terracotta,
+            indicatorWeight: 2.5,
+          ),
+          Expanded(
+            child:
+                _tabCtrl.index == 0 ? _buildDiscussion() : _buildThreadsList(),
+          ),
+          if (_tabCtrl.index == 0) _composer(),
+        ],
+      ),
+    );
   }
 
   /// Supprime la conversation IA courante (après confirmation).
@@ -1684,10 +1772,15 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text("Supprimer cette conversation ?"),
-        content: const Text("Les échanges de cette conversation seront supprimés."),
+        content:
+            const Text("Les échanges de cette conversation seront supprimés."),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Annuler")),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text("Supprimer")),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text("Annuler")),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text("Supprimer")),
         ],
       ),
     );
@@ -1789,12 +1882,14 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
     await Clipboard.setData(ClipboardData(text: "Assistant Alanya\n\n$text"));
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Conversation copiée dans le presse-papier")),
+        const SnackBar(
+            content: Text("Conversation copiée dans le presse-papier")),
       );
     }
   }
 
-  Widget _bubble(String text, bool mine, {bool typing = false, AiMessage? msg}) {
+  Widget _bubble(String text, bool mine,
+      {bool typing = false, AiMessage? msg}) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return GestureDetector(
       onLongPress: msg == null ? null : () => _showAiMessageOptions(msg),
@@ -1818,8 +1913,7 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
           child: typing
               ? Text("L'assistant écrit…",
                   style: TextStyle(
-                      color:
-                          isDark ? AlanyaColors.craie2 : Colors.black54,
+                      color: isDark ? AlanyaColors.craie2 : Colors.black54,
                       fontStyle: FontStyle.italic))
               : Text(text,
                   style: TextStyle(
@@ -1833,7 +1927,11 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
 
   Widget _buildDiscussion() {
     return _loading
-        ? Center(child: CircularProgressIndicator(color: Theme.of(context).brightness == Brightness.dark ? AlanyaColors.terracottaNuit : AlanyaColors.terracotta))
+        ? Center(
+            child: CircularProgressIndicator(
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? AlanyaColors.terracottaNuit
+                    : AlanyaColors.terracotta))
         : (_messages.isEmpty
             ? Center(
                 child: Padding(
@@ -1841,12 +1939,16 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.auto_awesome, size: 56, color: AlanyaColors.gold),
+                      const Icon(Icons.auto_awesome,
+                          size: 56, color: AlanyaColors.gold),
                       const SizedBox(height: 12),
                       Text("Pose-moi une question pour commencer.",
                           textAlign: TextAlign.center,
                           style: TextStyle(
-                              color: Theme.of(context).brightness == Brightness.dark ? AlanyaColors.craie2 : Colors.black54)),
+                              color: Theme.of(context).brightness ==
+                                      Brightness.dark
+                                  ? AlanyaColors.craie2
+                                  : Colors.black54)),
                     ],
                   ),
                 ),
@@ -1882,22 +1984,29 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
                 backgroundColor: AlanyaColors.terracotta,
                 child: Icon(Icons.add, color: Colors.white),
               ),
-              title: const Text("Nouvelle conversation", style: TextStyle(fontWeight: FontWeight.bold)),
+              title: const Text("Nouvelle conversation",
+                  style: TextStyle(fontWeight: FontWeight.bold)),
               onTap: _newConversation,
             ),
             const Divider(height: 1),
             Expanded(
               child: threads.isEmpty
-                  ? const Center(child: Text("Aucune conversation. Pose une question !"))
+                  ? const Center(
+                      child: Text("Aucune conversation. Pose une question !"))
                   : ListView.separated(
                       itemCount: threads.length,
                       separatorBuilder: (_, __) => const Divider(height: 1),
                       itemBuilder: (_, i) {
                         final t = threads[i];
                         return ListTile(
-                          leading: const Icon(Icons.chat_bubble_outline, color: AlanyaColors.terracotta),
-                          title: Text(t.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                          subtitle: t.lastMessage != null ? Text(t.lastMessage!, maxLines: 1, overflow: TextOverflow.ellipsis) : null,
+                          leading: const Icon(Icons.chat_bubble_outline,
+                              color: AlanyaColors.terracotta),
+                          title: Text(t.title,
+                              maxLines: 1, overflow: TextOverflow.ellipsis),
+                          subtitle: t.lastMessage != null
+                              ? Text(t.lastMessage!,
+                                  maxLines: 1, overflow: TextOverflow.ellipsis)
+                              : null,
                           trailing: PopupMenuButton<String>(
                             icon: const Icon(Icons.more_vert, size: 20),
                             onSelected: (v) async {
@@ -1906,15 +2015,20 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
                                 if (_threadId == t.id) _newConversation();
                               } else if (v == 'share') {
                                 final text = "Conversation: ${t.title}";
-                                await Clipboard.setData(ClipboardData(text: text));
+                                await Clipboard.setData(
+                                    ClipboardData(text: text));
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(content: Text("Lien copié")),
                                 );
                               }
                             },
                             itemBuilder: (_) => [
-                              const PopupMenuItem(value: 'share', child: Text("Partager")),
-                              const PopupMenuItem(value: 'delete', child: Text("Supprimer", style: TextStyle(color: Colors.red))),
+                              const PopupMenuItem(
+                                  value: 'share', child: Text("Partager")),
+                              const PopupMenuItem(
+                                  value: 'delete',
+                                  child: Text("Supprimer",
+                                      style: TextStyle(color: Colors.red))),
                             ],
                           ),
                           onTap: () => _openThread(t.id),
@@ -1939,8 +2053,7 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
           children: [
             ListTile(
               leading: Icon(Icons.copy,
-                  color:
-                      isDark ? AlanyaColors.craie2 : AlanyaColors.chocolate),
+                  color: isDark ? AlanyaColors.craie2 : AlanyaColors.chocolate),
               title: const Text("Copier"),
               onTap: () {
                 Navigator.pop(ctx);
@@ -1993,7 +2106,8 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
           textColor: Colors.white,
           onPressed: () {
             setState(() {
-              _messages = [..._messages, msg]..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+              _messages = [..._messages, msg]
+                ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
             });
           },
         ),
@@ -2019,7 +2133,8 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
                 onSubmitted: (_) => _send(),
                 decoration: const InputDecoration(
                   hintText: "Demande quelque chose à l'IA…",
-                  contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  contentPadding:
+                      EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 ),
               ),
             ),
@@ -2039,7 +2154,8 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
 }
 
 class _Placeholder extends StatelessWidget {
-  const _Placeholder({required this.icon, required this.label, required this.soon});
+  const _Placeholder(
+      {required this.icon, required this.label, required this.soon});
   final IconData icon;
   final String label;
   final String soon;
@@ -2052,7 +2168,9 @@ class _Placeholder extends StatelessWidget {
         children: [
           Icon(icon, size: 64, color: AlanyaColors.gold),
           const SizedBox(height: 12),
-          Text(label, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          Text(label,
+              style:
+                  const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
           const SizedBox(height: 4),
           Text("$soon — bientôt",
               style: TextStyle(
