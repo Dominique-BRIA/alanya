@@ -69,7 +69,7 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     MissedCalls.instance.addListener(_onManquesChanges);
     // Ouvre la connexion temps réel dès que l'utilisateur est sur l'accueil.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       context.read<RealtimeClient>().connect();
       final user = context.read<AuthController>().user;
@@ -89,8 +89,14 @@ class _HomeScreenState extends State<HomeScreen> {
       // Autorisation d'afficher l'appel par-dessus le verrouillage. Demandée
       // ICI et non au tout premier écran : la question n'a de sens qu'une fois
       // l'utilisateur connecté, donc susceptible de recevoir un appel.
-      FullScreenPermission.demanderSiNecessaire(context);
-      _assureLeSuiviDePosition();
+      // ⚠️ ATTENDU, pas lancé en parallèle. Les deux demandes se font au même
+      // instant, sur le même écran : sans cette attente, l'explication de
+      // l'appel plein écran et l'écran de divulgation de la localisation
+      // partaient dans le même cycle et se recouvraient — l'un masquant l'autre
+      // selon lequel arrivait le dernier. Une question à la fois.
+      await FullScreenPermission.demanderSiNecessaire(context);
+      if (!mounted) return;
+      await _assureLeSuiviDePosition();
     });
   }
 

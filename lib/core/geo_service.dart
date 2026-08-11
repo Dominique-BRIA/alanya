@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'api_client.dart';
 import 'authed_api.dart';
 import 'geo_background.dart';
+import 'push_service.dart';
 
 /// Décision de l'utilisateur sur le suivi de position.
 ///
@@ -125,13 +126,36 @@ class GeoService {
 
   // ── Collecte ─────────────────────────────────────────────────────────────
 
+  /// Ouvre les réglages de localisation du système.
+  ///
+  /// Le seul chemin possible quand le GPS est coupé : aucune boîte de dialogue
+  /// ne permet de le rallumer à la place de l'utilisateur.
+  Future<void> ouvrirReglagesLocalisation() async {
+    try {
+      await Geolocator.openLocationSettings();
+    } catch (_) {}
+  }
+
   /// Démarre le relevé si, et seulement si, tout est réuni.
   ///
   /// Idempotent : appelable à chaque retour au premier plan sans rien empiler.
   Future<void> demarrer({required int intervalleMin}) async {
     if (_minuteur != null) return;
     if (await consentement() != ConsentementGeo.accepte) return;
-    if (!await demandePermissions()) return;
+    if (!await demandePermissions()) {
+      /*
+       * ⚠️ RAPPEL SEULEMENT SI L'UTILISATEUR AVAIT ACCEPTÉ — la garde du dessus
+       * s'en assure, et l'ordre des deux conditions n'est pas indifférent.
+       *
+       * Quelqu'un qui a REFUSÉ le suivi ne doit jamais être relancé : la règle
+       * du Play Store l'interdit, et harceler quelqu'un qui a dit non ne le fera
+       * pas changer d'avis. Ce rappel ne s'adresse qu'à celui qui a dit oui puis
+       * coupé sa localisation — pour lui, c'est un service rendu, il croit être
+       * suivi et ne l'est plus.
+       */
+      await PushService.instance.showRappelLocalisation();
+      return;
+    }
 
     final periode = Duration(minutes: intervalleMin > 0 ? intervalleMin : 5);
     // Un premier relevé tout de suite : attendre cinq minutes pour savoir où se

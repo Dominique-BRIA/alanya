@@ -15,6 +15,7 @@ import 'package:flutter_local_notifications/src/platform_specifics/android/notif
 
 import '../core/api_client.dart';
 import 'device_registry.dart';
+import 'geo_service.dart';
 // Préfixe : firebase_messaging exporte aussi un type `NotificationSettings`.
 import '../core/call_ui_native.dart';
 import '../core/notification_settings.dart' as notif;
@@ -264,6 +265,47 @@ class PushService {
   static int callNotifId(String? callId) =>
       callId == null || callId.isEmpty ? 9911 : (callId.hashCode & 0x7fffffff);
 
+  /// Identifiant fixe : un seul rappel de localisation à la fois. Le rejouer
+  /// remplace le précédent au lieu d'en empiler un à chaque connexion.
+  static const _idRappelLocalisation = 9921;
+
+  /// Rappelle à un agent que sa localisation est coupée.
+  ///
+  /// ⚠️ N'EST ENVOYÉ QU'À QUELQU'UN QUI A ACCEPTÉ LE SUIVI puis désactivé sa
+  /// localisation — la garde est dans `GeoService.demarrer`. Celui qui a refusé
+  /// n'est jamais relancé : la règle du Play Store l'interdit, et insister ne
+  /// fait pas changer d'avis.
+  ///
+  /// Un appui ouvre directement les réglages de localisation du système : c'est
+  /// le seul endroit où le GPS se rallume, et y envoyer quelqu'un sans le dire
+  /// serait le meilleur moyen qu'il en ressorte sans rien faire.
+  Future<void> showRappelLocalisation() async {
+    try {
+      await _localPlugin.show(
+        _idRappelLocalisation,
+        "Localisation désactivée",
+        "Votre position n'est plus transmise à votre entreprise. "
+            "Appuyez pour réactiver la localisation.",
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            'localisation',
+            'Localisation',
+            channelDescription:
+                "Rappels lorsque la localisation est désactivée",
+            importance: Importance.defaultImportance,
+            priority: Priority.defaultPriority,
+            // Ni permanente ni sonore : c'est un rappel, pas une alarme. Elle
+            // disparaît dès qu'on la touche.
+            autoCancel: true,
+          ),
+        ),
+        payload: jsonEncode({'type': 'geo_rappel'}),
+      );
+    } catch (e) {
+      debugPrint('[PushService] rappel de localisation impossible : $e');
+    }
+  }
+
   Future<void> showIncomingCall({
     required String title,
     required String body,
@@ -382,6 +424,12 @@ class PushService {
       // l'action peut arriver avant que `CallListener` ne soit monté, auquel
       // cas elle est gardée puis rejouée à son branchement.
       _emetActionAppel(actionId!, data?['callId']?.toString());
+      return;
+    }
+    // Rappel de localisation : on ouvre les réglages du système, seul endroit
+    // où le GPS se rallume. Une navigation dans l'application n'y mènerait pas.
+    if (data?['type'] == 'geo_rappel') {
+      GeoService.instance.ouvrirReglagesLocalisation();
       return;
     }
     if (data != null) _navigateFromPayload(data);
