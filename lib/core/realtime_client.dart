@@ -424,6 +424,23 @@ class RealtimeClient extends ChangeNotifier {
     _channel?.sink.close();
     _channel = null;
     _sub = null;
+    /*
+     * ⚠️ VIDER LA FILE, ET C'EST ICI QUE ÇA COMPTE.
+     *
+     * Les trames en attente appartiennent à la session qui se termine, mais le
+     * serveur les attribue à `ws.userId` — c'est-à-dire à qui tient la socket au
+     * moment où elles partent. Sans cette purge, A se déconnecte, B se connecte
+     * sur le même téléphone dans les trente secondes, et `_videLaFile()` rejoue
+     * sur la socket de B des trames décidées par A : un « j'ai décroché », un
+     * « je quitte l'appel », une éviction d'appareil. Même famille de bug que le
+     * message de B qui partait au nom de A, et qui venait d'un WebSocket resté
+     * ouvert avec le jeton du précédent.
+     *
+     * `disconnect()` n'est appelé qu'à la FIN D'UNE SESSION — les coupures
+     * réseau passent par `_handleDrop`, qui laisse la file intacte. La purge ne
+     * retire donc jamais une trame qu'une reconnexion devait porter.
+     */
+    _enAttente.clear();
     _setConnected(false);
   }
 
