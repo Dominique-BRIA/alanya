@@ -26,6 +26,28 @@ class RingtoneService {
   AudioPlayer? _player;
   String? _currentAsset;
 
+  /// Génération de la sonnerie en cours.
+  ///
+  /// ⚠️ CE COMPTEUR CORRIGE UNE SONNERIE QUI NE S'ARRÊTAIT PLUS APRÈS LE
+  /// DÉCROCHAGE, de façon intermittente.
+  ///
+  /// Démarrer une sonnerie demande quatre allers-retours vers la couche audio
+  /// native — contexte, mode de boucle, volume, puis lecture — soit largement de
+  /// quoi laisser passer un événement. Or les deux démarrages sont lancés SANS
+  /// `await` (`startOutgoing` à la création de l'appel, `startIncoming` à
+  /// l'arrivée), pendant que tous les arrêts, eux, sont attendus.
+  ///
+  /// Quand le décrochage tombe dans cette fenêtre, l'ordre réel devient :
+  /// `stop()` s'exécute alors que `_player` est encore nul — il ne coupe donc
+  /// RIEN — puis la préparation s'achève et la lecture démarre, en boucle, sans
+  /// plus personne pour l'arrêter. D'où le « parfois » : la fenêtre est courte,
+  /// mais elle s'allonge sur une couche audio froide.
+  ///
+  /// Le compteur transforme l'arrêt en intention : `stop()` l'incrémente, et
+  /// toute lecture qui se réveille sur une génération périmée se jette au lieu
+  /// de se lancer.
+  int _generation = 0;
+
   // Lecteur séparé pour les sons courts (message reçu) afin de ne jamais
   // perturber la sonnerie d'appel (_player).
   AudioPlayer? _cuePlayer;
@@ -125,6 +147,12 @@ class RingtoneService {
   // également, dont le rôle est de jouer des sons courts par-dessus tout.
   AudioPlayer? _ivrPlayer;
 
+  /// Même rôle que [_generation], pour l'audio du standard : l'invite est lancée
+  /// sans attente à l'arrivée du menu, et coupée dès l'appui sur une touche.
+  /// Une touche tapée sans hésiter tombe donc dans la même fenêtre, et l'invite
+  /// se serait mise à jouer sous la musique d'attente.
+  int _generationIvr = 0;
+
   /// Invite vocale du standard : « tapez 1 pour… ». Une seule fois.
   Future<void> playIvrPrompt(String url) => _playIvr(url, loop: false);
 
@@ -133,6 +161,8 @@ class RingtoneService {
 
   /// Coupe l'audio du standard, sans toucher aux sonneries d'appel.
   Future<void> stopIvr() async {
+    // Avant le retour anticipé : annule aussi une lecture encore en préparation.
+    _generationIvr++;
     final p = _ivrPlayer;
     if (p == null) return;
     _ivrPlayer = null;
@@ -145,6 +175,7 @@ class RingtoneService {
 
   Future<void> _playIvr(String url, {required bool loop}) async {
     await stopIvr();
+    final gen = _generationIvr;
     try {
       final p = AudioPlayer();
       // Même contexte que les sonneries : flux voix sur Android, pour que le
@@ -168,9 +199,15 @@ class RingtoneService {
       );
       await p.setReleaseMode(loop ? ReleaseMode.loop : ReleaseMode.release);
       await p.setVolume(1.0);
+      if (gen != _generationIvr) return _jeter(p);
       // `UrlSource` et non `AssetSource` : les sons du standard sont servis par
       // le serveur, hors authentification, et changent d'un centre à l'autre.
+      //
+      // Le chargement passe par le réseau : la fenêtre pendant laquelle un
+      // arrêt peut arriver est donc BEAUCOUP plus longue que pour une sonnerie
+      // embarquée, et le contrôle qui suit d'autant plus nécessaire.
       await p.play(UrlSource(url));
+      if (gen != _generationIvr) return _jeter(p);
       _ivrPlayer = p;
       debugPrint("[RingtoneService] ▶️ standard $url (loop=$loop)");
     } catch (e) {
@@ -186,6 +223,9 @@ class RingtoneService {
     if (_currentAsset == asset && _player != null) return;
 
     await stop();
+    // Retenu APRÈS l'arrêt, qui vient lui-même d'incrémenter le compteur : tout
+    // `stop()` ultérieur rendra donc cette valeur périmée.
+    final gen = _generation;
 
     try {
       final p = AudioPlayer();
@@ -212,7 +252,12 @@ class RingtoneService {
       );
       await p.setReleaseMode(ReleaseMode.loop);
       await p.setVolume(1.0);
+      // Un arrêt est-il passé pendant la préparation ? Alors ce lecteur ne doit
+      // jamais commencer : c'est ici que se jouait la sonnerie fantôme.
+      if (gen != _generation) return _jeter(p);
       await p.play(AssetSource(asset));
+      // Et pendant le démarrage lui-même, qui est le plus long des quatre.
+      if (gen != _generation) return _jeter(p);
       _player = p;
       _currentAsset = asset;
       debugPrint("[RingtoneService] ▶️ $asset (loop)");
@@ -223,7 +268,23 @@ class RingtoneService {
     }
   }
 
+  /// Abandonne un lecteur qu'un arrêt a rendu caduc pendant sa préparation.
+  Future<void> _jeter(AudioPlayer p) async {
+    try {
+      await p.stop();
+      await p.release();
+      await p.dispose();
+      debugPrint(
+          "[RingtoneService] ⏹️ sonnerie abandonnée (arrêt pendant la préparation)");
+    } catch (_) {}
+  }
+
   Future<void> stop() async {
+    // ⚠️ AVANT le retour anticipé, et c'est tout l'intérêt : un arrêt demandé
+    // alors qu'aucun lecteur n'existe encore doit quand même annuler la lecture
+    // qui est en train de se préparer. C'est exactement le cas du décrochage
+    // qui arrive plus vite que le démarrage de la sonnerie.
+    _generation++;
     final p = _player;
     if (p == null) return;
     _player = null;
