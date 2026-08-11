@@ -14,6 +14,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_local_notifications/src/platform_specifics/android/notification_sound.dart';
 
 import '../core/api_client.dart';
+import 'device_registry.dart';
 // Préfixe : firebase_messaging exporte aussi un type `NotificationSettings`.
 import '../core/call_ui_native.dart';
 import '../core/notification_settings.dart' as notif;
@@ -168,7 +169,17 @@ class PushService {
       // Envoie le token au backend via POST /api/push/register
       await _api!.post(
         '/api/push/register',
-        {'token': _fcmToken, 'platform': 'android'},
+        {
+          'token': _fcmToken,
+          'platform': 'android',
+          // ⚠️ Rattache le jeton à CET appareil. Sans lui, l'envoi ne cible
+          // qu'un compte : un téléphone déconnecté ou évincé continuait de
+          // recevoir messages et appels, faute de savoir en base quel jeton lui
+          // appartenait. C'est ce qui permet au serveur de couper à la
+          // déconnexion, sans dépendre d'un `DELETE` que l'application n'a pas
+          // toujours le temps — ni le jeton valide — d'envoyer.
+          'deviceId': await DeviceRegistry.instance.deviceId(),
+        },
         bearer: accessToken,
       );
       debugPrint('[PushService] ✅ Token enregistré auprès du backend');
