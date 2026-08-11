@@ -1,12 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api_client.dart';
 import 'authed_api.dart';
+import 'geo_background.dart';
 
 /// Décision de l'utilisateur sur le suivi de position.
 ///
@@ -46,7 +49,11 @@ class GeoService {
   AuthedApi? _api;
 
   static const _cleConsentement = 'geo_consentement';
-  static const _cleFile = 'geo_file_attente';
+
+  /// ⚠️ PUBLIQUES parce que l'ISOLAT D'ARRIÈRE-PLAN écrit dans la même file.
+  /// Deux constantes séparées auraient fini par diverger, et l'application
+  /// viderait alors une file que le service remplit ailleurs.
+  static const cleFile = 'geo_file_attente';
 
   /// Plafond de la file hors ligne.
   ///
@@ -54,7 +61,7 @@ class GeoService {
   /// réseau. Au-delà, on jette les PLUS ANCIENS : une trace récente vaut mieux
   /// qu'une trace complète mais périmée, et une file sans limite finirait par
   /// remplir les préférences.
-  static const _tailleMaxFile = 288;
+  static const tailleMaxFile = 288;
 
   Timer? _minuteur;
   bool _envoiEnCours = false;
@@ -131,14 +138,69 @@ class GeoService {
     // trouve quelqu'un qui vient d'ouvrir l'application n'aurait aucun sens.
     unawaited(_releve());
     _minuteur = Timer.periodic(periode, (_) => unawaited(_releve()));
+    await _demarreServicePremierPlan(periode);
     debugPrint('[GeoService] relevé démarré (${periode.inMinutes} min)');
   }
 
   /// Arrête le relevé. À appeler à la déconnexion — sans quoi le téléphone
   /// continuerait de rapporter la position d'un compte qui n'est plus là.
-  void arreter() {
+  Future<void> arreter() async {
     _minuteur?.cancel();
     _minuteur = null;
+    if (Platform.isAndroid) {
+      try {
+        await FlutterForegroundTask.stopService();
+      } catch (_) {}
+    }
+  }
+
+  /// Démarre le service qui fait survivre le relevé à la fermeture.
+  ///
+  /// ⚠️ LA NOTIFICATION PERMANENTE EST INÉVITABLE, pas un choix. `workmanager`
+  /// ne descend pas sous quinze minutes d'intervalle : les cinq minutes
+  /// demandées ne peuvent passer que par un service de premier plan, et Android
+  /// impose qu'un tel service se montre.
+  ///
+  /// Le minuteur du dessus reste en place : il couvre l'application vivante,
+  /// tandis que le service couvre l'application fermée. Un relevé de trop, très
+  /// occasionnellement, vaut mieux qu'un trou pendant la bascule — et le serveur
+  /// le traitera de toute façon comme une prolongation, pas comme un lieu de
+  /// plus.
+  Future<void> _demarreServicePremierPlan(Duration periode) async {
+    if (!Platform.isAndroid) return;
+    try {
+      FlutterForegroundTask.init(
+        androidNotificationOptions: AndroidNotificationOptions(
+          channelId: 'alanya_localisation',
+          channelName: 'Localisation',
+          channelDescription:
+              "Indique que votre position est relevée pour votre entreprise.",
+          // La notification ne doit pas vibrer ni sonner toutes les cinq
+          // minutes : elle informe, elle n'alerte pas.
+          onlyAlertOnce: true,
+        ),
+        iosNotificationOptions: const IOSNotificationOptions(),
+        foregroundTaskOptions: ForegroundTaskOptions(
+          eventAction: ForegroundTaskEventAction.repeat(periode.inMilliseconds),
+          // Reprend après un redémarrage du téléphone : sans cela, la collecte
+          // s'arrêterait la nuit et ne repartirait qu'à la prochaine ouverture.
+          autoRunOnBoot: true,
+          allowWakeLock: true,
+          allowWifiLock: false,
+        ),
+      );
+      await FlutterForegroundTask.startService(
+        notificationTitle: "Alanya Work — localisation active",
+        notificationText:
+            "Votre position est relevée toutes les ${periode.inMinutes} minutes.",
+        callback: pointEntreeTacheGeo,
+      );
+    } catch (e) {
+      // Service refusé par le système (permission manquante, constructeur
+      // restrictif) : le relevé continue tant que l'application vit. Mieux vaut
+      // une trace partielle que pas de trace du tout.
+      debugPrint('[GeoService] service de premier plan indisponible : $e');
+    }
   }
 
   Future<void> _releve() async {
@@ -173,14 +235,14 @@ class GeoService {
 
   Future<void> _ajouteALaFile(Map<String, dynamic> releve) async {
     final prefs = await SharedPreferences.getInstance();
-    final file = prefs.getStringList(_cleFile) ?? <String>[];
+    final file = prefs.getStringList(cleFile) ?? <String>[];
     file.add(jsonEncode(releve));
     // On jette par le DÉBUT : les relevés les plus anciens sont ceux dont
     // l'absence se remarque le moins.
-    while (file.length > _tailleMaxFile) {
+    while (file.length > tailleMaxFile) {
       file.removeAt(0);
     }
-    await prefs.setStringList(_cleFile, file);
+    await prefs.setStringList(cleFile, file);
   }
 
   /// Envoie ce qui attend, dans l'ordre. À appeler aussi au retour du réseau.
@@ -194,7 +256,13 @@ class GeoService {
     _envoiEnCours = true;
     try {
       final prefs = await SharedPreferences.getInstance();
-      var file = prefs.getStringList(_cleFile) ?? <String>[];
+      // ⚠️ `reload()` OBLIGATOIRE. `SharedPreferences` met ses valeurs en cache
+      // PAR ISOLAT : ce que le service d'arrière-plan a écrit reste invisible
+      // ici tant qu'on ne relit pas le disque. Sans cet appel, l'application
+      // viderait une file qu'elle croit vide, puis l'écraserait — et tous les
+      // relevés faits application fermée disparaîtraient.
+      await prefs.reload();
+      var file = prefs.getStringList(cleFile) ?? <String>[];
 
       while (file.isNotEmpty) {
         final brut = file.first;
@@ -207,8 +275,8 @@ class GeoService {
           if (e.statusCode != 422) rethrow;
           debugPrint('[GeoService] relevé refusé (${e.statusCode}), abandonné');
         }
-        file = (prefs.getStringList(_cleFile) ?? <String>[])..remove(brut);
-        await prefs.setStringList(_cleFile, file);
+        file = (prefs.getStringList(cleFile) ?? <String>[])..remove(brut);
+        await prefs.setStringList(cleFile, file);
       }
     } catch (e) {
       // Réseau, session expirée : la file reste en place et repartira au

@@ -1,4 +1,7 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<!-- `xmlns:tools` sert au `tools:replace` du service de localisation plus bas :
+     sans lui, la fusion des manifestes échoue sur un attribut en conflit. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
     <uses-permission android:name="android.permission.READ_CONTACTS"/>
@@ -65,6 +68,14 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
+    <!-- Même règle que pour le micro : depuis Android 14, chaque type de service
+         de premier plan exige SA permission. Sans celle-ci, démarrer le service
+         de localisation lève une SecurityException. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
+    <!-- Reprend le relevé après un redémarrage du téléphone. Sans elle,
+         `autoRunOnBoot` ne peut rien : la collecte s'arrêterait à l'extinction
+         et ne repartirait qu'à la prochaine ouverture de l'application. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
 
     <application
         android:label="Alanya Work"
@@ -118,6 +129,24 @@
             android:name=".CallForegroundService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+
+        <!-- Service de relevé de position, fourni par `flutter_foreground_task`.
+
+             ⚠️ `tools:replace` EST INDISPENSABLE. Le paquet déclare son service
+             dans SON propre manifeste, avec un type générique ; la fusion des
+             manifestes garderait donc le sien, et Android refuserait de
+             démarrer un service de localisation dont le type ne le dit pas.
+             C'est ici qu'on impose `location`, et l'attribut ne peut être
+             écrasé qu'explicitement.
+
+             Le nom de classe vient du paquet — le changer casserait le
+             démarrage sans le moindre message : le système chercherait un
+             service qui n'existe pas. -->
+        <service
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="location"
+            tools:replace="android:foregroundServiceType" />
 
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->

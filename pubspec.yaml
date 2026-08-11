@@ -76,6 +76,7 @@ dependencies:
   # ⚠️ Le serveur décide QUI est suivi (`/api/me` → `suiviPosition`) : ce paquet
   # n'est sollicité que pour les comptes concernés, jamais pour un particulier.
   geolocator: ^14.0.2
+  flutter_foreground_task: ^10.0.0
 
 
 dev_dependencies:
