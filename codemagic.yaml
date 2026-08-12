@@ -4,7 +4,11 @@ workflows:
     max_build_duration: 60
 
     environment:
-      flutter: 3.24.5   # Version stable fixe
+      # ⚠️ MEME VERSION QUE `.circleci/config.yml`,
+      # `.github/workflows/build-android.yml` et le poste de developpement.
+      # 3.24.5 ne suffit plus : `flutter_foreground_task 10.0.0` exige
+      # `flutter: ">=3.38.0"` et `pub get` echoue des la resolution.
+      flutter: 3.44.6
       java: 17
       # Les variables globales (ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD,
       # ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD) configurées dans l'IHM
