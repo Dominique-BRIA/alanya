@@ -6,8 +6,15 @@
 #
 #   ANDROID_KEYSTORE_BASE64   → cat alanya-release.jks | base64 -w 0
 #   ANDROID_KEYSTORE_PASSWORD → mot de passe du keystore
-#   ANDROID_KEY_ALIAS         → alias de la clé
 #   ANDROID_KEY_PASSWORD      → mot de passe de la clé
+#
+# ⚠️ PAS `ANDROID_KEY_ALIAS` : un alias n'est pas un secret. Il est écrit en
+# clair dans `key.properties` et lisible dans la signature de tout APK publié.
+# Le déclarer en variable de projet a un coût réel : CircleCI comme GitHub
+# remplacent par `***` toute occurrence de la valeur dans les journaux — et
+# celle-ci vaut « alanya », donc le nom du dépôt. Les liens d'artefact
+# sortaient en `github.com/Dominique-BRIA/***/…` et renvoyaient une page
+# introuvable. L'alias est donc écrit en clair plus bas.
 # ============================================================
 version: 2.1
 
@@ -119,6 +126,13 @@ jobs:
           command: |
             set -euo pipefail
 
+            # Alias en clair, jamais en variable de projet : voir l'en-tête du
+            # fichier. Il doit reprendre EXACTEMENT ce que renvoie
+            #   keytool -list -keystore alanya-release.jks
+            # et non ce qu'on croit avoir tapé à la création : un magasin PKCS12
+            # préserve la casse, un JKS met tout en minuscules.
+            KEY_ALIAS="alanya"
+
             if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ]; then
               echo "ERREUR : ANDROID_KEYSTORE_BASE64 est absent."
               echo "CircleCI → Project Settings → Environment Variables."
@@ -130,16 +144,19 @@ jobs:
 
             # Échoue TÔT si l'alias ne correspond pas : sans ce contrôle,
             # l'erreur n'apparaîtrait qu'à la fin du build, après dix minutes.
+            # -alias est ESSENTIEL, pas seulement -storepass : sans lui le
+            # contrôle passe, et Gradle échoue bien plus tard sur
+            # « No key with alias found ».
             keytool -list \
               -keystore android/app/alanya-release.jks \
-              -alias "$ANDROID_KEY_ALIAS" \
+              -alias "$KEY_ALIAS" \
               -storepass "$ANDROID_KEYSTORE_PASSWORD" > /dev/null
 
             # storeFile est relatif à android/app/ (lu par build.gradle.kts).
             cat > android/key.properties << PROPS
             storeFile=alanya-release.jks
             storePassword=${ANDROID_KEYSTORE_PASSWORD}
-            keyAlias=${ANDROID_KEY_ALIAS}
+            keyAlias=${KEY_ALIAS}
             keyPassword=${ANDROID_KEY_PASSWORD}
             PROPS
 

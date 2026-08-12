@@ -11,7 +11,7 @@ workflows:
       flutter: 3.44.6
       java: 17
       # Les variables globales (ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD,
-      # ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD) configurées dans l'IHM
+      # ANDROID_KEY_PASSWORD) configurées dans l'IHM — PAS l'alias, voir plus bas
       # sont automatiquement injectées ici sans avoir besoin de la section groups.
 
     scripts:
@@ -48,19 +48,27 @@ workflows:
             exit 1
           fi
 
+          # ⚠️ ALIAS EN CLAIR, jamais en variable de projet. Un alias n'est pas
+          # confidentiel — il est écrit dans `key.properties` et lisible dans la
+          # signature de tout APK publié. En variable, sa valeur (« alanya »,
+          # soit le nom du dépôt) était remplacée par `***` dans TOUS les
+          # journaux, y compris les liens d'artefact, qui devenaient
+          # inutilisables.
+          KEY_ALIAS="alanya"
+
           # Décodage du keystore Base64 dans android/app/alanya-release.jks
           echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/alanya-release.jks
 
           # Vérification immédiate de la validité du fichier keystore et de l'alias
           keytool -list -keystore android/app/alanya-release.jks \
-            -alias "$ANDROID_KEY_ALIAS" \
+            -alias "$KEY_ALIAS" \
             -storepass "$ANDROID_KEYSTORE_PASSWORD" > /dev/null
 
           # Génération du fichier key.properties lu par Gradle
           cat > android/key.properties <<PROPS
           storeFile=alanya-release.jks
           storePassword=$ANDROID_KEYSTORE_PASSWORD
-          keyAlias=$ANDROID_KEY_ALIAS
+          keyAlias=$KEY_ALIAS
           keyPassword=$ANDROID_KEY_PASSWORD
           PROPS
 

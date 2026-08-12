@@ -68,7 +68,22 @@ jobs:
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          # ⚠️ L'ALIAS N'EST PAS UN SECRET, et le traiter comme tel coûtait cher.
+          #
+          # Un alias est une étiquette : il est écrit en clair dans
+          # `key.properties` et lisible dans la signature de n'importe quel APK
+          # publié. En revanche, GitHub masque par `***` TOUTE occurrence de la
+          # valeur d'un secret dans les journaux — or celle-ci valait « alanya »,
+          # c'est-à-dire le nom du dépôt. Résultat : les liens d'artefact
+          # sortaient sous la forme
+          #   https://github.com/Dominique-BRIA/***/actions/runs/…
+          # et renvoyaient une page introuvable. Le nom de l'artefact lui-même
+          # s'affichait « ***-apk ».
+          #
+          # Écrit en clair ici, il redevient lisible partout. Le SECRET du même
+          # nom doit être SUPPRIMÉ des réglages du dépôt : tant qu'il existe et
+          # qu'il est référencé, le masquage revient.
+          KEY_ALIAS: alanya
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           set -euo pipefail
