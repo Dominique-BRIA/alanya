@@ -85,6 +85,12 @@ class GeoService {
   /// [_surveilleLaLocalisation].
   StreamSubscription<ServiceStatus>? _surveillance;
 
+  /// Compte et cadence en cours, retenus pour pouvoir RELANCER la collecte
+  /// quand la localisation est rétablie en cours de session — le flux système
+  /// ne transporte pas ces informations.
+  String? _userId;
+  int _intervalleMin = 5;
+
   void init(AuthedApi api) => _api = api;
 
   // ── Consentement ─────────────────────────────────────────────────────────
@@ -185,11 +191,30 @@ class GeoService {
       if (statut == ServiceStatus.disabled) {
         debugPrint('[GeoService] localisation coupée en cours de route');
         unawaited(PushService.instance.showRappelLocalisation());
-      } else {
-        // Rallumée : on retire le rappel, il n'a plus lieu d'être. Le relevé
-        // suivant repartira tout seul, le minuteur n'ayant jamais cessé.
-        unawaited(PushService.instance.retireRappelLocalisation());
+        return;
       }
+
+      /*
+       * 🐛 RALLUMÉE : IL NE SUFFIT PAS DE RETIRER LA NOTIFICATION.
+       *
+       * Le commentaire précédent affirmait « le minuteur n'ayant jamais cessé ».
+       * C'était FAUX dans le cas qui compte : quand l'application démarre alors
+       * que la localisation est déjà coupée, `demarrer` sort par son contrôle de
+       * permissions AVANT d'armer le minuteur et le service de premier plan.
+       * Rien ne tournait donc, et retirer le rappel se contentait d'effacer le
+       * seul signe visible du problème — l'utilisateur voyait la notification
+       * disparaître, en concluait que tout allait bien, et rien n'était collecté
+       * jusqu'au prochain lancement.
+       *
+       * On relance donc réellement. `demarrer` est idempotent : son contrôle
+       * `_minuteur != null` empêche d'empiler un second minuteur si la collecte
+       * tournait déjà, et l'abonnement à ce flux est protégé par `??=`.
+       */
+      unawaited(PushService.instance.retireRappelLocalisation());
+      final userId = _userId;
+      if (userId == null) return;
+      debugPrint('[GeoService] localisation rétablie — relance de la collecte');
+      unawaited(demarrer(userId: userId, intervalleMin: _intervalleMin));
     });
   }
 
@@ -212,6 +237,10 @@ class GeoService {
   }) async {
     if (_minuteur != null) return;
     if (await consentement(userId) != ConsentementGeo.accepte) return;
+    // Retenus AVANT toute sortie anticipée : c'est précisément quand `demarrer`
+    // échoue sur les permissions que la surveillance aura besoin de relancer.
+    _userId = userId;
+    _intervalleMin = intervalleMin > 0 ? intervalleMin : 5;
     // Ré-affirmée à chaque démarrage : c'est ce qui rattrape une remontée
     // perdue faute de réseau au moment du choix.
     unawaited(_remonteConsentement(true));
@@ -247,6 +276,9 @@ class GeoService {
     _minuteur = null;
     await _surveillance?.cancel();
     _surveillance = null;
+    // Sans cet oubli, la surveillance d'une session suivante pourrait relancer
+    // la collecte au nom du compte qui vient de partir.
+    _userId = null;
     // Le rappel appartenait au compte qui part : le laisser afficher
     // « activez votre localisation » à qui vient de se déconnecter n'a aucun
     // sens, et le suivant n'est peut-être même pas concerné.
