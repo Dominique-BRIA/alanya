@@ -162,9 +162,16 @@ class RingtoneService {
   Future<void> playIvrHold(String url) => _playIvr(url, loop: true);
 
   /// Coupe l'audio du standard, sans toucher aux sonneries d'appel.
+  /// Relais de bouclage — voir [_playIvr]. Annulé avec le lecteur qu'il surveille.
+  StreamSubscription<void>? _finIvrSub;
+
   Future<void> stopIvr() async {
     // Avant le retour anticipé : annule aussi une lecture encore en préparation.
     _generationIvr++;
+    // Avant tout le reste : un relais laissé vivant relancerait la lecture que
+    // l'on est en train d'arrêter.
+    _finIvrSub?.cancel();
+    _finIvrSub = null;
     final p = _ivrPlayer;
     if (p == null) return;
     _ivrPlayer = null;
@@ -216,6 +223,18 @@ class RingtoneService {
       // arrêt peut arriver est donc BEAUCOUP plus longue que pour une sonnerie
       // embarquée, et le contrôle qui suit d'autant plus nécessaire.
       await p.play(UrlSource(url));
+      /*
+       * 🐛 LA MUSIQUE NE SE REJOUAIT PAS, malgré `loop=true` dans la trace.
+       *
+       * `setReleaseMode` était posé AVANT `play()`, donc avant que la source
+       * existe. Le lecteur natif applique son bouclage à la source PRÉPARÉE :
+       * réglé sur un lecteur encore vide, il n'était repris nulle part, et la
+       * musique s'arrêtait à la fin du morceau — au moment précis où l'appelant
+       * attend le plus, puisque l'agent n'a toujours pas décroché.
+       *
+       * Ré-affirmé ici, une fois la source en place.
+       */
+      if (loop) await p.setReleaseMode(ReleaseMode.loop);
       if (gen != _generationIvr) {
         // Tracé, et pas seulement jeté : c'est LE cas qui explique une invite
         // muette sans la moindre erreur — la lecture a bien démarré, un arrêt
@@ -225,6 +244,29 @@ class RingtoneService {
         return _jeter(p);
       }
       _ivrPlayer = p;
+      /*
+       * CEINTURE ET BRETELLES, VOLONTAIREMENT.
+       *
+       * Le bouclage natif dépend du lecteur qu'`audioplayers` choisit selon la
+       * source et la version d'Android — et il vient de nous faire défaut une
+       * fois. Ce relais ne coûte rien quand le bouclage fonctionne : l'événement
+       * de fin n'arrive tout simplement jamais. Il rattrape le cas contraire.
+       *
+       * ⚠️ La garde de génération est indispensable ICI AUSSI : sans elle, une
+       * musique arrêtée par un raccrochage se relancerait à sa propre fin, et
+       * l'on retrouverait à l'identique le défaut de la sonnerie fantôme.
+       */
+      if (loop) {
+        _finIvrSub?.cancel();
+        _finIvrSub = p.onPlayerComplete.listen((_) async {
+          if (gen != _generationIvr || _ivrPlayer != p) return;
+          try {
+            await p.seek(Duration.zero);
+            await p.resume();
+            traceAppel("IVR audio ↻ relance de ${_finDe(url)}");
+          } catch (_) {}
+        });
+      }
       traceAppel("IVR audio ▶️ ${_finDe(url)} (loop=$loop)");
     } catch (e) {
       /*

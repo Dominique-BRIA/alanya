@@ -804,11 +804,50 @@ class CallController extends ChangeNotifier {
   }
 
   Future<void> toggleSpeaker() async {
-    isSpeakerOn = !isSpeakerOn;
+    // Un geste de l'utilisateur reprend la main sur le forçage du standard :
+    // s'il coupe le haut-parleur pendant le menu, on ne le lui remettra pas, et
+    // on ne le coupera pas non plus derrière lui au décrochage.
+    _hautParleurForceParStandard = false;
+    await _appliqueHautParleur(!isSpeakerOn);
+  }
+
+  Future<void> _appliqueHautParleur(bool actif) async {
+    isSpeakerOn = actif;
     try {
-      await Helper.setSpeakerphoneOn(isSpeakerOn);
+      await Helper.setSpeakerphoneOn(actif);
     } catch (_) {}
     notifyListeners();
+  }
+
+  /// Le haut-parleur a-t-il été allumé par le standard, et non par l'utilisateur ?
+  ///
+  /// C'est ce qui autorise à le RÉÉTEINDRE au décrochage sans contrarier un
+  /// choix explicite : on ne défait que ce qu'on a fait soi-même.
+  bool _hautParleurForceParStandard = false;
+
+  /// 🐛 LE STANDARD ALLUME LE HAUT-PARLEUR, ET C'EST UN CORRECTIF, PAS UN CONFORT.
+  ///
+  /// Symptôme rapporté le 12/08/2026 : « quand j'appelle ça ne sonne pas, c'est
+  /// quand j'active puis réactive le haut-parleur que la musique commence ». Les
+  /// traces ont montré que la lecture DÉMARRAIT normalement, sans erreur — le son
+  /// était produit, mais envoyé à l'ÉCOUTEUR, ce minuscule haut-parleur qu'on
+  /// colle à l'oreille. L'audio du standard part sur le flux voix
+  /// (`usageType: voiceCommunication`), et WebRTC, déjà en mode conversation,
+  /// route ce flux vers l'écouteur. Or personne ne tient son téléphone contre
+  /// l'oreille pendant qu'il regarde un pavé numérique pour choisir un service.
+  ///
+  /// Le retour à l'écouteur au décrochage est délibéré : à partir de là c'est une
+  /// vraie conversation, et l'agent n'a pas à être diffusé dans la pièce.
+  Future<void> _hautParleurPourStandard(bool actif) async {
+    if (actif) {
+      if (isSpeakerOn) return; // déjà allumé par l'utilisateur : ne rien forcer
+      _hautParleurForceParStandard = true;
+      await _appliqueHautParleur(true);
+      return;
+    }
+    if (!_hautParleurForceParStandard) return;
+    _hautParleurForceParStandard = false;
+    await _appliqueHautParleur(false);
   }
 
   void toggleVideo() {
@@ -1244,6 +1283,10 @@ class CallController extends ChangeNotifier {
       DebugOverlay.log(
           "CC ☎️ standard ${session.centerName} — ${session.options.length} option(s)");
       notifyListeners();
+      // ⚠️ LA ROUTE AUDIO D'ABORD, LA LECTURE ENSUITE. Poser le haut-parleur
+      // après avoir lancé l'invite laisserait ses premières secondes sortir par
+      // l'écouteur — soit exactement le symptôme qu'on corrige, en plus court.
+      await _hautParleurPourStandard(true);
       final prompt = session.promptUrl;
       // Tracé AVANT la lecture : c'est la seule façon de distinguer « le serveur
       // n'a envoyé aucune invite » de « l'invite n'a pas pu être lue ». Sans
@@ -1352,6 +1395,9 @@ class CallController extends ChangeNotifier {
             _finIvr = null;
             ivr = null;
             unawaited(RingtoneService.instance.stopIvr());
+            // Le menu est fini : on rend l'écouteur à la conversation, sauf si
+            // l'utilisateur avait lui-même demandé le haut-parleur.
+            unawaited(_hautParleurPourStandard(false));
           }
           // ⚠️ ATTENDRE la fin de `_onPeerJoined` avant de toucher au tampon.
           // C'est elle qui construit la mesh (`_ensureMesh`) et ouvre la session
