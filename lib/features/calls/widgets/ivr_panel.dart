@@ -70,7 +70,10 @@ class _IvrPanelState extends State<IvrPanel> {
         // à chaque appui long, et la touche glisserait sous le doigt.
         _revelation(),
         const SizedBox(height: 8),
-        Flexible(child: SingleChildScrollView(child: _pave())),
+        // `Expanded` et plus `Flexible` + `SingleChildScrollView` : le pavé
+        // occupe exactement la place disponible au lieu de déborder. Voir
+        // [_pave].
+        Expanded(child: _pave()),
       ],
     );
   }
@@ -87,7 +90,10 @@ class _IvrPanelState extends State<IvrPanel> {
       if (option == null) {
         titre = "Aucun service sur cette touche";
       } else {
-        titre = option.label;
+        // `nom_service` d'abord, `libelle` en repli — demande du user du
+        // 12/08/2026. Les deux viennent de la table `center` : le premier est le
+        // nom montré au public, le second le nom interne de la ligne.
+        titre = option.nomAffiche;
         if (!option.disponible) sous = "Bientôt disponible";
       }
     }
@@ -134,21 +140,52 @@ class _IvrPanelState extends State<IvrPanel> {
 
   // ── Le pavé ──────────────────────────────────────────────────────────────
 
+  /// Les quatre rangées du pavé. `null` = case vide, autour du zéro.
+  static const List<List<int?>> _rangees = [
+    [1, 2, 3],
+    [4, 5, 6],
+    [7, 8, 9],
+    [null, 0, null],
+  ];
+
+  /// Le pavé, qui TIENT TOUJOURS DANS LA HAUTEUR DISPONIBLE.
+  ///
+  /// 🐛 Il fallait tirer vers le bas pour atteindre le zéro (signalé par le user
+  /// le 12/08/2026). La cause était un `GridView` à `childAspectRatio` FIXE
+  /// (1.7) posé dans une zone scrollable : la hauteur des touches ne dépendait
+  /// que de leur largeur, donc de celle de l'écran. Dès que la place verticale
+  /// manquait — écran court, bandeau de message affiché, barre système haute —
+  /// la quatrième rangée passait dessous, et un pavé numérique qu'il faut faire
+  /// défiler pour trouver le zéro n'est plus un pavé numérique.
+  ///
+  /// Des rangées `Expanded` plutôt qu'un ratio calculé : la contrainte « remplir
+  /// exactement la hauteur, quelle qu'elle soit » est ainsi tenue par la mise en
+  /// page elle-même, sans arithmétique à refaire à chaque changement d'espacement
+  /// ou de marge — et donc sans possibilité de la fausser d'un pixel.
   Widget _pave() {
-    return GridView.count(
-      crossAxisCount: 3,
+    return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 44),
-      mainAxisSpacing: 10,
-      crossAxisSpacing: 16,
-      childAspectRatio: 1.7,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      children: [
-        for (var d = 1; d <= 9; d++) _touche(d),
-        const SizedBox.shrink(),
-        _touche(0),
-        const SizedBox.shrink(),
-      ],
+      child: Column(
+        children: [
+          for (var r = 0; r < _rangees.length; r++) ...[
+            if (r > 0) const SizedBox(height: 10),
+            Expanded(
+              child: Row(
+                children: [
+                  for (var c = 0; c < _rangees[r].length; c++) ...[
+                    if (c > 0) const SizedBox(width: 16),
+                    Expanded(
+                      child: _rangees[r][c] == null
+                          ? const SizedBox.shrink()
+                          : _touche(_rangees[r][c]!),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -182,35 +219,44 @@ class _IvrPanelState extends State<IvrPanel> {
           color: Colors.white.withValues(alpha: maintenue ? 0.26 : 0.12),
           borderRadius: BorderRadius.circular(16),
         ),
+        // ⚠️ `FittedBox` + `MainAxisSize.min` : les touches se dimensionnent
+        // désormais sur la hauteur restante, qui peut devenir courte (petit
+        // écran, bandeau de message affiché). Sans lui, le chiffre de 26 points
+        // et sa pastille déborderaient de leur case au lieu de rétrécir — et un
+        // débordement, en Flutter, se voit à l'écran en rayures jaunes.
         child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                "$digit",
-                style: TextStyle(
-                  color: verrouille ? Colors.white38 : Colors.white,
-                  fontSize: 26,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              // Repère discret sur les touches qui mènent quelque part. Il ne
-              // dit PAS quoi — c'est l'appui long qui le dit — mais il évite de
-              // maintenir les dix touches une à une pour trouver les trois qui
-              // servent.
-              if (option != null)
-                Container(
-                  margin: const EdgeInsets.only(top: 3),
-                  width: 5,
-                  height: 5,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: option.disponible
-                        ? AlanyaColors.forest
-                        : Colors.white38,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  "$digit",
+                  style: TextStyle(
+                    color: verrouille ? Colors.white38 : Colors.white,
+                    fontSize: 26,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-            ],
+                // Repère discret sur les touches qui mènent quelque part. Il ne
+                // dit PAS quoi — c'est l'appui long qui le dit — mais il évite de
+                // maintenir les dix touches une à une pour trouver les trois qui
+                // servent.
+                if (option != null)
+                  Container(
+                    margin: const EdgeInsets.only(top: 3),
+                    width: 5,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: option.disponible
+                          ? AlanyaColors.forest
+                          : Colors.white38,
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),

@@ -273,9 +273,18 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     // « Sonnerie… » dirait exactement le contraire de ce qui se passe.
     final ivr = cc.ivr;
     if (ivr != null) {
-      return ivr.etape == IvrEtape.menu
-          ? "Serveur vocal"
-          : "Mise en relation — ${ivr.serviceChoisi ?? "votre service"}";
+      if (ivr.etape == IvrEtape.menu) return "Serveur vocal";
+      /*
+       * Sous le nom du centre : `nom_service`, et RIEN s'il est vide — demande
+       * du user du 12/08/2026, qui remplace « Mise en relation — <libelle> ».
+       *
+       * On ne replie PAS sur `serviceChoisi` : ce serait remettre `libelle`,
+       * c'est-à-dire le nom interne de la ligne `center`, sous les yeux de
+       * l'appelant. Et l'information « on vous met en relation » n'est pas
+       * perdue pour autant — le panneau juste en dessous l'écrit en toutes
+       * lettres, sous le rond de progression.
+       */
+      return ivr.nomServiceChoisi ?? "";
     }
     if (cc.activeRole == ActiveCallRole.outgoing) {
       if (cc.isGroupCall) return "Sonnerie du groupe…";
@@ -551,10 +560,17 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                         const SizedBox(height: 8),
                         _invitedBadge(),
                       ],
-                      const SizedBox(height: 8),
-                      Text(_statusText(cc),
-                          style: const TextStyle(
-                              color: Colors.white70, fontSize: 16)),
+                      // Ligne d'état omise ENTIÈREMENT quand elle est vide, et
+                      // non rendue avec un texte nul : un `Text("")` occuperait
+                      // quand même sa hauteur de ligne, et l'espacement au-dessus
+                      // laisserait un trou sous le nom du centre — visible
+                      // précisément dans le cas « pas de nom de service ».
+                      if (_statusText(cc).isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(_statusText(cc),
+                            style: const TextStyle(
+                                color: Colors.white70, fontSize: 16)),
+                      ],
                       if (cc.activeRole == ActiveCallRole.ongoing) ...[
                         const SizedBox(height: 10),
                         Text(_mediaHint(cc, afficheCommeGroupe),
@@ -935,8 +951,56 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
 
   Widget _activeActions(CallController cc) {
     if (cc.activeRole == ActiveCallRole.outgoing) {
-      // Appel sortant : uniquement le bouton rouge Raccrocher (« Annuler »
-      // supprimé — il faisait doublon).
+      /*
+       * STANDARD : MICRO ET HAUT-PARLEUR, malgré un appel encore « sortant ».
+       *
+       * Demande du user, 12/08/2026. L'état est bien `outgoing` tant qu'aucun
+       * agent n'a décroché, mais la situation n'a rien d'un appel qui sonne dans
+       * le vide : l'appelant ÉCOUTE déjà — invite vocale puis musique d'attente —
+       * et son micro est ouvert depuis `startOutgoing`, qui construit la mesh
+       * d'emblée pour être prêt au décrochage. Les deux commandes agissent donc
+       * réellement, et le haut-parleur est justement ce qu'on cherche quand on
+       * écoute un menu en tenant son téléphone à la main.
+       *
+       * Les autres commandes restent absentes, et c'est volontaire : inviter,
+       * transférer ou envoyer un message n'a pas de sens tant qu'il n'y a
+       * personne en face.
+       */
+      if (cc.ivr != null) {
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 10,
+              runSpacing: 12,
+              children: [
+                _controlBtn(
+                  icon: cc.isMuted ? Icons.mic_off : Icons.mic,
+                  active: cc.isMuted,
+                  label: cc.isMuted ? "Muet" : "Micro",
+                  onPressed: cc.toggleMute,
+                ),
+                _controlBtn(
+                  icon: cc.isSpeakerOn ? Icons.volume_up : Icons.hearing,
+                  active: cc.isSpeakerOn,
+                  label: "Haut-parleur",
+                  onPressed: () => cc.toggleSpeaker(),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            _roundBtn(
+              icon: Icons.call_end,
+              color: Colors.red,
+              label: "Raccrocher",
+              onPressed: () => _hangUp(cc),
+            ),
+          ],
+        );
+      }
+      // Appel sortant ordinaire : uniquement le bouton rouge Raccrocher
+      // (« Annuler » supprimé — il faisait doublon).
       return _roundBtn(
         icon: Icons.call_end,
         color: Colors.red,

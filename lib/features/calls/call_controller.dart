@@ -40,11 +40,26 @@ class IvrOption {
     required this.digit,
     required this.label,
     required this.disponible,
+    this.nomService,
   });
 
   final int digit;
+
+  /// `center.libelle` — le nom interne de la ligne. Repli, jamais le premier
+  /// choix pour l'affichage.
   final String label;
   final bool disponible;
+
+  /// `center.nom_service` — le nom du service tel qu'il doit être MONTRÉ.
+  ///
+  /// ⚠️ Nul quand la colonne est vide, et le serveur ne renvoie jamais de chaîne
+  /// vide : il normalise à `null` dès la lecture. Les deux règles d'affichage
+  /// demandées en dépendent, et elles ne sont pas les mêmes — sur le pavé, on
+  /// retombe sur [label] ; sous le nom du centre, on n'affiche RIEN.
+  final String? nomService;
+
+  /// Ce qu'on montre pour désigner cette touche sur le pavé.
+  String get nomAffiche => nomService ?? label;
 
   static IvrOption? depuisJson(dynamic brut) {
     if (brut is! Map) return null;
@@ -56,7 +71,16 @@ class IvrOption {
       // Absent = disponible : un serveur plus ancien ne connaît pas ce champ,
       // et griser toutes les options serait pire que de laisser essayer.
       disponible: brut["disponible"] as bool? ?? true,
+      // Une chaîne vide vaut absence : le serveur normalise déjà, mais un serveur
+      // plus ancien — ou une donnée saisie autrement — ne le ferait pas, et un
+      // nom vide afficherait une ligne blanche sous le nom du centre.
+      nomService: _texteOuNull(brut["nomService"]),
     );
+  }
+
+  static String? _texteOuNull(dynamic brut) {
+    final s = brut is String ? brut.trim() : "";
+    return s.isEmpty ? null : s;
   }
 
   static List<IvrOption> listeDepuisJson(dynamic brut) {
@@ -98,6 +122,14 @@ class IvrSession {
 
   /// Libellé du service choisi, pendant que l'agent sonne.
   String? serviceChoisi;
+
+  /// `nom_service` du service choisi, ou nul si la colonne est vide.
+  ///
+  /// Affiché sous le nom du centre pendant la mise en relation — et **rien**
+  /// n'est affiché quand il est nul, à la demande du user. C'est pour cela qu'il
+  /// est distinct de [serviceChoisi] : replier sur le libellé ici mettrait un
+  /// nom interne sous les yeux de l'appelant.
+  String? nomServiceChoisi;
 
   /// Dernier message du serveur (« … n'est pas encore disponible »).
   String? message;
@@ -1221,6 +1253,7 @@ class CallController extends ChangeNotifier {
       if (session == null || e["callId"] != session.callId) return;
       session.etape = IvrEtape.attente;
       session.serviceChoisi = e["label"] as String?;
+      session.nomServiceChoisi = IvrOption._texteOuNull(e["nomService"]);
       session.message = null;
       session.envoiEnCours = false;
       notifyListeners();
