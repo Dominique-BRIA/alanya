@@ -1245,6 +1245,12 @@ class CallController extends ChangeNotifier {
           "CC ☎️ standard ${session.centerName} — ${session.options.length} option(s)");
       notifyListeners();
       final prompt = session.promptUrl;
+      // Tracé AVANT la lecture : c'est la seule façon de distinguer « le serveur
+      // n'a envoyé aucune invite » de « l'invite n'a pas pu être lue ». Sans
+      // cette ligne, les deux se présentent de la même manière — le silence.
+      DebugOverlay.log(prompt == null
+          ? "CC ☎️ AUCUNE invite envoyée par le serveur"
+          : "CC ☎️ invite : $prompt");
       if (prompt != null) {
         unawaited(RingtoneService.instance.playIvrPrompt(prompt));
       }

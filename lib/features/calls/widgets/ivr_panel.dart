@@ -162,9 +162,17 @@ class _IvrPanelState extends State<IvrPanel> {
   /// exactement la hauteur, quelle qu'elle soit » est ainsi tenue par la mise en
   /// page elle-même, sans arithmétique à refaire à chaque changement d'espacement
   /// ou de marge — et donc sans possibilité de la fausser d'un pixel.
+  /// Marge horizontale, réduite de 44 à 20 le 12/08/2026.
+  ///
+  /// Les touches trouvaient leur hauteur dans la place laissée par l'en-tête, et
+  /// paraissaient donc plus petites qu'avant une fois toutes visibles. Élargir
+  /// est le seul levier qui les agrandit SANS reprendre de la hauteur : sur un
+  /// écran de 360 points, une touche passe ainsi de 80 à 96 points de large.
+  static const _margeH = 20.0;
+
   Widget _pave() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 44),
+      padding: const EdgeInsets.symmetric(horizontal: _margeH),
       child: Column(
         children: [
           for (var r = 0; r < _rangees.length; r++) ...[
@@ -219,45 +227,54 @@ class _IvrPanelState extends State<IvrPanel> {
           color: Colors.white.withValues(alpha: maintenue ? 0.26 : 0.12),
           borderRadius: BorderRadius.circular(16),
         ),
-        // ⚠️ `FittedBox` + `MainAxisSize.min` : les touches se dimensionnent
-        // désormais sur la hauteur restante, qui peut devenir courte (petit
-        // écran, bandeau de message affiché). Sans lui, le chiffre de 26 points
-        // et sa pastille déborderaient de leur case au lieu de rétrécir — et un
-        // débordement, en Flutter, se voit à l'écran en rayures jaunes.
-        child: Center(
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  "$digit",
-                  style: TextStyle(
-                    color: verrouille ? Colors.white38 : Colors.white,
-                    fontSize: 26,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                // Repère discret sur les touches qui mènent quelque part. Il ne
-                // dit PAS quoi — c'est l'appui long qui le dit — mais il évite de
-                // maintenir les dix touches une à une pour trouver les trois qui
-                // servent.
-                if (option != null)
-                  Container(
-                    margin: const EdgeInsets.only(top: 3),
-                    width: 5,
-                    height: 5,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: option.disponible
-                          ? AlanyaColors.forest
-                          : Colors.white38,
+        // ⚠️ LE CHIFFRE SUIT LA TAILLE DE SA CASE, il n'est plus figé à 26
+        // points. Une taille fixe donnait des touches qui paraissent petites dès
+        // que la case s'agrandit, et un débordement dès qu'elle rétrécit. Le
+        // `FittedBox` ne sait que RÉDUIRE (`scaleDown`) : il protège du second
+        // cas, jamais du premier — d'où le calcul.
+        //
+        // 42 % de la hauteur, borné à [22, 38] : en dessous ce n'est plus
+        // lisible, au-dessus le chiffre mange sa touche.
+        child: LayoutBuilder(
+          builder: (context, contraintes) {
+            final taille =
+                (contraintes.maxHeight * 0.42).clamp(22.0, 38.0).toDouble();
+            return Center(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      "$digit",
+                      style: TextStyle(
+                        color: verrouille ? Colors.white38 : Colors.white,
+                        fontSize: taille,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
-                  ),
-              ],
-            ),
-          ),
+                    // Repère discret sur les touches qui mènent quelque part. Il
+                    // ne dit PAS quoi — c'est l'appui long qui le dit — mais il
+                    // évite de maintenir les dix touches une à une pour trouver
+                    // les trois qui servent.
+                    if (option != null)
+                      Container(
+                        margin: const EdgeInsets.only(top: 3),
+                        width: 5,
+                        height: 5,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: option.disponible
+                              ? AlanyaColors.forest
+                              : Colors.white38,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            );
+          },
         ),
       ),
     );

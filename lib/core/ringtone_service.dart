@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 
+import 'debug_overlay.dart';
+
 /// Service dédié aux sonneries d'appel (outgoing/incoming).
 ///
 /// Découplé de [InlineAudioPlayer] pour deux raisons :
@@ -173,6 +175,13 @@ class RingtoneService {
     } catch (_) {}
   }
 
+  /// La fin d'une URL, pour que la trace tienne sur une ligne de l'overlay.
+  /// Le nom de fichier suffit à identifier le vocal ou la musique en cause.
+  static String _finDe(String url) {
+    final morceaux = url.split('/');
+    return morceaux.isEmpty ? url : morceaux.last;
+  }
+
   Future<void> _playIvr(String url, {required bool loop}) async {
     await stopIvr();
     final gen = _generationIvr;
@@ -207,13 +216,27 @@ class RingtoneService {
       // arrêt peut arriver est donc BEAUCOUP plus longue que pour une sonnerie
       // embarquée, et le contrôle qui suit d'autant plus nécessaire.
       await p.play(UrlSource(url));
-      if (gen != _generationIvr) return _jeter(p);
+      if (gen != _generationIvr) {
+        // Tracé, et pas seulement jeté : c'est LE cas qui explique une invite
+        // muette sans la moindre erreur — la lecture a bien démarré, un arrêt
+        // l'a devancée. Sans cette ligne, il est indiscernable d'un fichier
+        // illisible.
+        traceAppel("IVR audio ANNULÉ pendant le chargement (loop=$loop)");
+        return _jeter(p);
+      }
       _ivrPlayer = p;
-      debugPrint("[RingtoneService] ▶️ standard $url (loop=$loop)");
+      traceAppel("IVR audio ▶️ ${_finDe(url)} (loop=$loop)");
     } catch (e) {
-      // Échec silencieux : l'écran du standard affiche les options, il reste
-      // parfaitement utilisable sans le son.
-      debugPrint("[RingtoneService] ❌ échec standard $url: $e");
+      /*
+       * Échec silencieux POUR L'UTILISATEUR, mais plus pour nous.
+       *
+       * L'écran du standard reste utilisable sans le son, donc on n'affiche
+       * rien — mais un `debugPrint` seul ne remonte que par `adb logcat`, dont
+       * on ne dispose pas ici. Or c'est exactement le message qui distingue
+       * « le fichier est illisible » de « quelque chose a coupé la lecture »,
+       * et sans lui les deux se ressemblent : le silence.
+       */
+      traceAppel("IVR audio ❌ ${_finDe(url)} : $e");
       _ivrPlayer = null;
     }
   }

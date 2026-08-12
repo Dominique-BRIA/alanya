@@ -8,7 +8,12 @@ import 'package:flutter/material.dart';
 /// permis d'identifier, en une seule capture d'écran, une course que plusieurs
 /// correctifs raisonnés n'avaient pas su trouver. Les traces continuent de
 /// partir dans le journal système (`adb logcat`), où elles ne coûtent rien.
-const bool tracesAppelsVisibles = false;
+/// ⚠️ REMIS À `true` LE 12/08/2026, TEMPORAIREMENT, pour l'invite vocale du
+/// standard qui reste muette. Deux tours de correctifs raisonnés n'ont rien
+/// donné : le bandeau affiche les traces SUR LE TÉLÉPHONE, sans `adb`, ce qui
+/// avait déjà été décisif en août pour les appels. À repasser à `false` dès que
+/// la cause est connue — ce bandeau n'a rien à faire dans un APK publié.
+const bool tracesAppelsVisibles = true;
 
 /// Trace de négociation d'appel : journal système ET overlay à l'écran.
 ///
@@ -92,11 +97,16 @@ class _DebugOverlayState extends State<DebugOverlay> {
                         children: [
                           const Text(
                             '🐛 DEBUG WS/CALL (tap pour réduire)',
-                            style: TextStyle(color: Colors.yellow, fontSize: 10, fontWeight: FontWeight.bold),
+                            style: TextStyle(
+                                color: Colors.yellow,
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold),
                           ),
                           const SizedBox(height: 4),
                           if (DebugOverlay._log.isEmpty)
-                            const Text('(en attente…)', style: TextStyle(color: Colors.white54, fontSize: 9)),
+                            const Text('(en attente…)',
+                                style: TextStyle(
+                                    color: Colors.white54, fontSize: 9)),
                           ...DebugOverlay._log.take(15).map(
                                 (l) => Text(
                                   l,

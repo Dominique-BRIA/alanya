@@ -263,6 +263,15 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     return type == "VIDEO";
   }
 
+  /// Le pavé du standard est-il à l'écran ?
+  ///
+  /// Sert à rendre l'en-tête compact pour lui : c'est la seule situation où
+  /// l'écran d'appel doit céder de la hauteur à ce qu'il contient. Pendant la
+  /// mise en relation, le pavé a disparu au profit du rond de progression —
+  /// l'avatar reprend donc sa taille normale.
+  bool _menuStandardAffiche(CallController cc) =>
+      cc.ivr != null && cc.ivr!.etape == IvrEtape.menu;
+
   String _statusText(CallController cc) {
     if (widget.incoming && cc.incoming != null) {
       final inc = cc.incoming!;
@@ -521,27 +530,36 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                       ),
                       const SizedBox(height: 8),
                       if (!showVideo && !useDynamic)
+                        // ⚠️ AVATAR RÉDUIT PENDANT LE MENU DU STANDARD, et lui
+                        // seul. Le pavé n'occupe que la place que l'en-tête lui
+                        // laisse : à 104 px d'avatar, il ne restait pas de quoi
+                        // donner aux touches leur taille normale, et les rendre
+                        // toutes visibles les rabougrissait. Ce qu'on regarde à
+                        // cet instant, c'est le clavier — pas la photo d'un
+                        // standard, qui n'a même pas de visage.
                         CallAvatarWaves(
-                          diameter: 104,
+                          diameter: _menuStandardAffiche(cc) ? 64 : 104,
                           color: AlanyaColors.forest,
                           active: cc.activeRole == ActiveCallRole.ongoing ||
                               cc.activeRole == ActiveCallRole.outgoing,
                           child: afficheCommeGroupe
-                              ? const CircleAvatar(
-                                  radius: 52,
+                              ? CircleAvatar(
+                                  radius: _menuStandardAffiche(cc) ? 32 : 52,
                                   backgroundColor: AlanyaColors.terracotta,
                                   child: Icon(Icons.groups,
-                                      size: 48, color: Colors.white),
+                                      size: _menuStandardAffiche(cc) ? 30 : 48,
+                                      color: Colors.white),
                                 )
                               : AvatarCircle(
                                   name: name,
                                   avatarUrl: callAvatarUrl,
-                                  radius: 52,
+                                  radius: _menuStandardAffiche(cc) ? 32 : 52,
                                   backgroundColor: AlanyaColors.terracotta,
                                   textColor: Colors.white,
                                 ),
                         ),
-                      if (!showVideo) const SizedBox(height: 20),
+                      if (!showVideo)
+                        SizedBox(height: _menuStandardAffiche(cc) ? 10 : 20),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 24),
                         child: Text(
