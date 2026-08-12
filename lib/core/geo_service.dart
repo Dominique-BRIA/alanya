@@ -78,12 +78,46 @@ class GeoService {
   /// remplir les préférences.
   static const tailleMaxFile = 288;
 
+  /// Cadence en cours, ÉCRITE dans les préférences pour l'isolat.
+  ///
+  /// Il en a besoin pour rétablir le libellé exact du service de premier plan
+  /// (« relevée toutes les N minutes ») quand la localisation revient alors que
+  /// l'application est fermée. Sans elle, il devrait inventer un texte différent
+  /// de celui posé par l'application.
+  static const cleIntervalle = 'geo_intervalle_min';
+
+  /// Libellés de la notification du service de premier plan.
+  ///
+  /// ⚠️ PUBLICS parce que l'ISOLAT les repose quand il constate le retour ou la
+  /// coupure de la localisation, application fermée. Deux jeux de textes
+  /// finiraient par diverger, et la notification changerait de mots selon
+  /// l'isolat qui l'a écrite la dernière.
+  static const titreServiceActif = "Alanya Work — localisation active";
+  static const titreServicePause = "Alanya Work — suivi en pause";
+  static const texteServicePause =
+      "La localisation du téléphone est coupée : plus rien n'est relevé.";
+  static String texteServiceActif(Duration periode) =>
+      "Votre position est relevée toutes les ${periode.inMinutes} minutes.";
+
   Timer? _minuteur;
   bool _envoiEnCours = false;
 
   /// Écoute de l'interrupteur de localisation du système. Voir
   /// [_surveilleLaLocalisation].
   StreamSubscription<ServiceStatus>? _surveillance;
+
+  /// Veille qui REPOSE le rappel tant que la localisation est coupée. Voir
+  /// [_signaleLocalisationCoupee].
+  Timer? _veilleRappel;
+
+  /// Cadence de cette veille.
+  ///
+  /// Une minute est un compromis assumé : c'est le délai maximum pendant lequel
+  /// un utilisateur d'Android 14 peut faire disparaître le rappel en le
+  /// balayant. Plus court n'apporterait rien de visible (la notification est
+  /// silencieuse et sa pose coûte un appel de plateforme), plus long donnerait
+  /// l'impression que le balayage a marché.
+  static const _cadenceVeilleRappel = Duration(minutes: 1);
 
   /// Compte et cadence en cours, retenus pour pouvoir RELANCER la collecte
   /// quand la localisation est rétablie en cours de session — le flux système
@@ -190,7 +224,10 @@ class GeoService {
     _surveillance ??= Geolocator.getServiceStatusStream().listen((statut) {
       if (statut == ServiceStatus.disabled) {
         debugPrint('[GeoService] localisation coupée en cours de route');
-        unawaited(PushService.instance.showRappelLocalisation());
+        // Permanent sans condition ici : on RELEVAIT jusqu'à cet instant, donc
+        // la permission est forcément accordée et le service de premier plan
+        // tourne — les deux conditions qui rendent le rappel retirable.
+        unawaited(_signaleLocalisationCoupee(permanent: true));
         return;
       }
 
@@ -210,12 +247,69 @@ class GeoService {
        * `_minuteur != null` empêche d'empiler un second minuteur si la collecte
        * tournait déjà, et l'abonnement à ce flux est protégé par `??=`.
        */
-      unawaited(PushService.instance.retireRappelLocalisation());
-      final userId = _userId;
-      if (userId == null) return;
-      debugPrint('[GeoService] localisation rétablie — relance de la collecte');
-      unawaited(demarrer(userId: userId, intervalleMin: _intervalleMin));
+      unawaited(_localisationRevenue());
     });
+  }
+
+  /// Signale que la localisation est coupée, et **fait en sorte que ça se voie
+  /// tant que ça dure**.
+  ///
+  /// 🔴 LE DRAPEAU `ongoing` NE SUFFIT PAS, ET C'EST LA RAISON D'ÊTRE DE CETTE
+  /// VEILLE. Jusqu'à Android 13, une notification `ongoing` ne se balaie pas :
+  /// le drapeau tient seul la promesse. **Depuis Android 14, l'utilisateur peut
+  /// la balayer** — le système ne réserve plus l'exception qu'aux appels, aux
+  /// sessions média et aux applications de gestion d'entreprise. Reposer la
+  /// notification est donc le seul moyen restant de tenir « non balayable ».
+  ///
+  /// La veille sert aussi de second filet à la détection : elle relit
+  /// l'interrupteur elle-même, donc un événement du flux système perdu (isolat
+  /// suspendu, constructeur trop zélé) ne laisse pas le rappel affiché après le
+  /// retour de la localisation.
+  ///
+  /// ⚠️ `permanent: false` quand rien ne pourra la retirer — voir [demarrer].
+  Future<void> _signaleLocalisationCoupee({required bool permanent}) async {
+    /*
+     * Le minuteur s'arrête : sans interrupteur, chaque relevé partirait quand
+     * même pour rester pendu 45 secondes sur un GPS qui ne répondra pas — de la
+     * batterie dépensée à échouer. C'est aussi ce qui permet à
+     * `_localisationRevenue` de relancer VRAIMENT : `demarrer` sort par son
+     * contrôle `_minuteur != null`, donc tant qu'un minuteur mort traîne, le
+     * retour de la localisation ne rétablirait ni la collecte ni le libellé du
+     * service de premier plan.
+     */
+    _minuteur?.cancel();
+    _minuteur = null;
+    await _marqueServiceEnPause();
+    await PushService.instance.showRappelLocalisation(permanent: permanent);
+    if (!permanent) return;
+    _veilleRappel ??= Timer.periodic(_cadenceVeilleRappel, (_) async {
+      if (await Geolocator.isLocationServiceEnabled()) {
+        await _localisationRevenue();
+        return;
+      }
+      await PushService.instance.showRappelLocalisation(permanent: true);
+    });
+  }
+
+  /// La localisation est revenue : retirer le rappel, arrêter la veille, et
+  /// **relancer réellement la collecte**.
+  ///
+  /// 🐛 IL NE SUFFIT PAS DE RETIRER LA NOTIFICATION. Quand l'application démarre
+  /// alors que la localisation est déjà coupée, `demarrer` sort par son contrôle
+  /// de permissions AVANT d'armer le minuteur : rien ne tourne, et effacer le
+  /// rappel effacerait le seul signe visible du problème — l'utilisateur en
+  /// conclurait que tout va bien pendant que rien n'est collecté.
+  ///
+  /// `demarrer` est idempotent (`_minuteur != null`), donc l'appeler ici ne
+  /// risque pas d'empiler un second minuteur si la collecte tournait déjà.
+  Future<void> _localisationRevenue() async {
+    _veilleRappel?.cancel();
+    _veilleRappel = null;
+    await PushService.instance.retireRappelLocalisation();
+    final userId = _userId;
+    if (userId == null) return;
+    debugPrint('[GeoService] localisation rétablie — relance de la collecte');
+    await demarrer(userId: userId, intervalleMin: _intervalleMin);
   }
 
   /// Ouvre les réglages de localisation du système.
@@ -231,16 +325,40 @@ class GeoService {
   /// Démarre le relevé si, et seulement si, tout est réuni.
   ///
   /// Idempotent : appelable à chaque retour au premier plan sans rien empiler.
+  ///
+  /// ⚠️ LA GARDE `_minuteur != null` NE SUFFIT PLUS À ELLE SEULE depuis que le
+  /// retour de la localisation relance la collecte : le flux système et la
+  /// veille peuvent le constater au même instant, et deux appels partiraient en
+  /// parallèle. Or `_minuteur` n'est posé qu'à la toute fin, après plusieurs
+  /// attentes (préférences, permissions) — les deux passeraient donc la garde
+  /// et armeraient chacun un minuteur, doublant la cadence des relevés à vie.
+  bool _demarrageEnCours = false;
+
   Future<void> demarrer({
     required String userId,
     required int intervalleMin,
   }) async {
-    if (_minuteur != null) return;
+    if (_minuteur != null || _demarrageEnCours) return;
+    _demarrageEnCours = true;
+    try {
+      await _demarre(userId: userId, intervalleMin: intervalleMin);
+    } finally {
+      _demarrageEnCours = false;
+    }
+  }
+
+  Future<void> _demarre({
+    required String userId,
+    required int intervalleMin,
+  }) async {
     if (await consentement(userId) != ConsentementGeo.accepte) return;
     // Retenus AVANT toute sortie anticipée : c'est précisément quand `demarrer`
     // échoue sur les permissions que la surveillance aura besoin de relancer.
     _userId = userId;
     _intervalleMin = intervalleMin > 0 ? intervalleMin : 5;
+    final periode = Duration(minutes: _intervalleMin);
+    // Déposée pour l'isolat, qui doit pouvoir rétablir le même libellé.
+    await _memoriseIntervalle(_intervalleMin);
     // Ré-affirmée à chaque démarrage : c'est ce qui rattrape une remontée
     // perdue faute de réseau au moment du choix.
     unawaited(_remonteConsentement(true));
@@ -255,12 +373,40 @@ class GeoService {
        * pas changer d'avis. Ce rappel ne s'adresse qu'à celui qui a dit oui puis
        * coupé sa localisation — pour lui, c'est un service rendu, il croit être
        * suivi et ne l'est plus.
+       *
+       * 🔴 DEUX ÉCHECS TRÈS DIFFÉRENTS SE CACHENT DERRIÈRE CE SEUL `false`, et
+       * ils n'appellent pas le même rappel :
+       *
+       * — L'INTERRUPTEUR est coupé, la permission étant accordée : c'est
+       *   exactement le cas visé, le rappel est **permanent**. On peut le
+       *   promettre parce qu'on garde les moyens de le retirer — le service de
+       *   premier plan a le droit de démarrer et fera la veille même
+       *   application fermée.
+       *
+       * — La PERMISSION est refusée : le service de premier plan de type
+       *   `location` ne peut pas démarrer (Android 14 le refuse net), donc
+       *   personne ne veillera une fois l'application fermée. Un rappel non
+       *   balayable resterait alors affiché À VIE, y compris longtemps après
+       *   que l'utilisateur a tout réglé. On le laisse balayable : une
+       *   notification qu'on ne peut plus retirer est pire que le silence.
+       *   ⚠️ `demandePermissions` sort sur l'interrupteur AVANT de regarder la
+       *   permission — les deux peuvent donc être en cause à la fois, d'où le
+       *   contrôle explicite des deux ici.
        */
-      await PushService.instance.showRappelLocalisation();
+      final interrupteurCoupe = !await Geolocator.isLocationServiceEnabled();
+      final permission = await Geolocator.checkPermission();
+      final permissionAccordee = permission == LocationPermission.always ||
+          permission == LocationPermission.whileInUse;
+      final permanent = interrupteurCoupe && permissionAccordee;
+      await _signaleLocalisationCoupee(permanent: permanent);
+      // La vigie : le service tourne sans rien relever, uniquement pour
+      // reposer le rappel et le retirer quand la localisation reviendra.
+      if (permanent) {
+        await _demarreServicePremierPlan(periode, localisationCoupee: true);
+      }
       return;
     }
 
-    final periode = Duration(minutes: intervalleMin > 0 ? intervalleMin : 5);
     // Un premier relevé tout de suite : attendre cinq minutes pour savoir où se
     // trouve quelqu'un qui vient d'ouvrir l'application n'aurait aucun sens.
     unawaited(_releve());
@@ -269,25 +415,66 @@ class GeoService {
     debugPrint('[GeoService] relevé démarré (${periode.inMinutes} min)');
   }
 
+  Future<void> _memoriseIntervalle(int minutes) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(cleIntervalle, minutes);
+    } catch (_) {}
+  }
+
+  /// Met le libellé du service de premier plan en accord avec la réalité.
+  ///
+  /// ⚠️ SANS ÇA, LA NOTIFICATION PERMANENTE MENT. Elle annonce « votre position
+  /// est relevée toutes les 5 minutes » alors que l'interrupteur est coupé et
+  /// que rien n'est relevé — c'est-à-dire qu'elle rassure précisément au moment
+  /// où il faudrait alerter. Le service, lui, continue de tourner : il n'est pas
+  /// lié à l'interrupteur, et on a besoin qu'il vive pour tenir la veille.
+  ///
+  /// Le chemin inverse n'existe pas ici : le libellé actif est reposé par
+  /// [_demarreServicePremierPlan], que la relance traverse de toute façon.
+  Future<void> _marqueServiceEnPause() async {
+    if (!Platform.isAndroid) return;
+    try {
+      if (!await FlutterForegroundTask.isRunningService) return;
+      await FlutterForegroundTask.updateService(
+        notificationTitle: titreServicePause,
+        notificationText: texteServicePause,
+      );
+    } catch (e) {
+      debugPrint('[GeoService] libellé du service inchangé : $e');
+    }
+  }
+
   /// Arrête le relevé. À appeler à la déconnexion — sans quoi le téléphone
   /// continuerait de rapporter la position d'un compte qui n'est plus là.
   Future<void> arreter() async {
     _minuteur?.cancel();
     _minuteur = null;
+    _veilleRappel?.cancel();
+    _veilleRappel = null;
     await _surveillance?.cancel();
     _surveillance = null;
     // Sans cet oubli, la surveillance d'une session suivante pourrait relancer
     // la collecte au nom du compte qui vient de partir.
     _userId = null;
-    // Le rappel appartenait au compte qui part : le laisser afficher
-    // « activez votre localisation » à qui vient de se déconnecter n'a aucun
-    // sens, et le suivant n'est peut-être même pas concerné.
-    await PushService.instance.retireRappelLocalisation();
+
+    /*
+     * ⚠️ L'ORDRE COMPTE, ET IL A CHANGÉ : LE SERVICE D'ABORD, LA NOTIFICATION
+     * ENSUITE. L'isolat repose le rappel à chaque cycle tant que la localisation
+     * est coupée ; le retirer avant de l'arrêter laisserait une fenêtre où il le
+     * repose juste après. Et comme ce rappel n'est plus balayable, la personne
+     * qui vient de se déconnecter se retrouverait avec, sur son écran, une
+     * notification définitive qu'aucun code ne viendrait plus jamais enlever.
+     */
     if (Platform.isAndroid) {
       try {
         await FlutterForegroundTask.stopService();
       } catch (_) {}
     }
+    // Le rappel appartenait au compte qui part : le laisser afficher
+    // « activez votre localisation » à qui vient de se déconnecter n'a aucun
+    // sens, et le suivant n'est peut-être même pas concerné.
+    await PushService.instance.retireRappelLocalisation();
   }
 
   /// Démarre le service qui fait survivre le relevé à la fermeture.
@@ -302,7 +489,10 @@ class GeoService {
   /// occasionnellement, vaut mieux qu'un trou pendant la bascule — et le serveur
   /// le traitera de toute façon comme une prolongation, pas comme un lieu de
   /// plus.
-  Future<void> _demarreServicePremierPlan(Duration periode) async {
+  Future<void> _demarreServicePremierPlan(
+    Duration periode, {
+    bool localisationCoupee = false,
+  }) async {
     if (!Platform.isAndroid) return;
     try {
       FlutterForegroundTask.init(
@@ -325,10 +515,28 @@ class GeoService {
           allowWifiLock: false,
         ),
       );
+      final titre = localisationCoupee ? titreServicePause : titreServiceActif;
+      final texte =
+          localisationCoupee ? texteServicePause : texteServiceActif(periode);
+
+      /*
+       * ⚠️ DÉMARRER UN SERVICE DÉJÀ DÉMARRÉ N'EST PAS ANODIN : `startService`
+       * échoue quand le service tourne, et le libellé resterait alors celui
+       * posé la première fois — c'est-à-dire « localisation active » sur un
+       * téléphone dont l'interrupteur est coupé. Or on repasse ici à chaque
+       * relance, la principale étant justement le retour de la localisation.
+       */
+      if (await FlutterForegroundTask.isRunningService) {
+        await FlutterForegroundTask.updateService(
+          notificationTitle: titre,
+          notificationText: texte,
+        );
+        return;
+      }
+
       await FlutterForegroundTask.startService(
-        notificationTitle: "Alanya Work — localisation active",
-        notificationText:
-            "Votre position est relevée toutes les ${periode.inMinutes} minutes.",
+        notificationTitle: titre,
+        notificationText: texte,
         callback: pointEntreeTacheGeo,
       );
     } catch (e) {

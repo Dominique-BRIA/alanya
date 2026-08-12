@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api_client.dart';
 import 'geo_service.dart';
+import 'push_service.dart';
 import 'token_storage.dart';
 
 /// Relevé de position quand l'application est fermée.
@@ -60,6 +61,12 @@ void pointEntreeTacheGeo() {
 }
 
 class _TacheGeo extends TaskHandler {
+  /// Dernier état connu de l'interrupteur, pour n'écrire le libellé du service
+  /// que lorsqu'il CHANGE. `null` au démarrage : le premier cycle l'écrit donc
+  /// toujours, ce qui rattrape un service relancé au réveil du téléphone avec le
+  /// texte figé de la veille.
+  bool? _localisationCoupeeAuCyclePrecedent;
+
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
     // Les greffons ne sont pas enregistrés d'office dans un isolat secondaire :
@@ -80,7 +87,56 @@ class _TacheGeo extends TaskHandler {
   @override
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {}
 
+  /// L'interrupteur de localisation, vu depuis le service.
+  ///
+  /// 🔴 C'EST ICI QUE SE TIENT LA PROMESSE « NON BALAYABLE » APPLICATION FERMÉE.
+  /// La veille de `GeoService` vit dans l'isolate de l'application, qu'Android
+  /// détruit dès qu'on balaie Alanya des tâches récentes. Ce service, lui,
+  /// survit — c'est même toute sa raison d'être. Il reprend donc les deux gestes
+  /// à son compte : reposer le rappel tant que la localisation est coupée,
+  /// **et le retirer dès qu'elle revient**. Le second est le plus important :
+  /// une notification non balayable dont plus personne ne s'occupe resterait
+  /// affichée indéfiniment, à annoncer un problème déjà résolu.
+  ///
+  /// Renvoie `true` si la localisation est coupée — auquel cas il n'y a rien à
+  /// relever, et surtout rien à attendre : sans ce contrôle, chaque cycle partait
+  /// s'échouer pendant 45 secondes sur un GPS qui ne répondra pas.
+  Future<bool> _policeLeRappel() async {
+    final coupee = !await Geolocator.isLocationServiceEnabled();
+
+    if (coupee) {
+      await montreRappelLocalisationDepuisIsolate();
+    } else {
+      await retireRappelLocalisationDepuisIsolate();
+    }
+
+    // Le libellé du service n'est réécrit que sur changement d'état : le
+    // rafraîchir à chaque cycle serait un appel de plateforme pour rien.
+    if (_localisationCoupeeAuCyclePrecedent != coupee) {
+      _localisationCoupeeAuCyclePrecedent = coupee;
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.reload();
+        final minutes = prefs.getInt(GeoService.cleIntervalle) ?? 5;
+        await FlutterForegroundTask.updateService(
+          notificationTitle: coupee
+              ? GeoService.titreServicePause
+              : GeoService.titreServiceActif,
+          notificationText: coupee
+              ? GeoService.texteServicePause
+              : GeoService.texteServiceActif(Duration(minutes: minutes)),
+        );
+      } catch (e) {
+        debugPrint('[GeoBackground] libellé du service inchangé : $e');
+      }
+    }
+
+    return coupee;
+  }
+
   Future<void> _releveEtEnvoie() async {
+    if (await _policeLeRappel()) return;
+
     final position = await Geolocator.getCurrentPosition(
       locationSettings: const LocationSettings(
         accuracy: LocationAccuracy.high,

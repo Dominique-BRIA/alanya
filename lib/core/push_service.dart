@@ -267,7 +267,57 @@ class PushService {
 
   /// Identifiant fixe : un seul rappel de localisation à la fois. Le rejouer
   /// remplace le précédent au lieu d'en empiler un à chaque connexion.
-  static const _idRappelLocalisation = 9921;
+  ///
+  /// ⚠️ PUBLIC parce que l'ISOLAT du service de premier plan repose et retire la
+  /// MÊME notification quand l'application est fermée. Deux identifiants
+  /// différents laisseraient deux rappels côte à côte.
+  static const idRappelLocalisation = 9921;
+
+  static const titreRappelLocalisation = "Localisation désactivée";
+  static const texteRappelLocalisation =
+      "Votre position n'est plus transmise à votre entreprise. "
+      "Appuyez pour réactiver la localisation.";
+
+  /// Habillage du rappel, extrait pour que l'application et l'isolat posent
+  /// EXACTEMENT la même notification — deux définitions finiraient par diverger,
+  /// et l'utilisateur verrait un rappel différent selon que l'application est
+  /// ouverte ou fermée.
+  ///
+  /// `permanent` rend la notification **non balayable** (`ongoing`) : le doigt
+  /// ne la fait plus disparaître, et « Tout effacer » ne l'emporte pas.
+  ///
+  /// 🔴 CE N'EST PAS SUFFISANT SEUL, ET C'EST UNE LIMITE D'ANDROID, PAS DU CODE :
+  /// **depuis Android 14, une notification `ongoing` redevient balayable**
+  /// lorsque le téléphone est déverrouillé (seuls les appels, les sessions média
+  /// et les applications de gestion d'entreprise en sont exemptés). La promesse
+  /// « elle reste tant que la localisation est coupée » est donc tenue par la
+  /// VEILLE qui la repose (`GeoService._signaleLocalisationCoupee` quand
+  /// l'application vit, `geo_background` quand elle est fermée), pas par ce
+  /// drapeau. Le drapeau couvre Android 13 et antérieurs, la veille couvre le
+  /// reste.
+  ///
+  /// `onlyAlertOnce` est ce qui rend la veille invisible : reposer la
+  /// notification ne fait ni vibrer ni sonner, elle réapparaît simplement.
+  static NotificationDetails detailsRappelLocalisation({
+    required bool permanent,
+  }) {
+    return NotificationDetails(
+      android: AndroidNotificationDetails(
+        'localisation',
+        'Localisation',
+        channelDescription: "Rappels lorsque la localisation est désactivée",
+        importance: Importance.defaultImportance,
+        priority: Priority.defaultPriority,
+        ongoing: permanent,
+        autoCancel: !permanent,
+        onlyAlertOnce: true,
+      ),
+    );
+  }
+
+  /// Charge utile du rappel, commune aux deux isolats.
+  static String get payloadRappelLocalisation =>
+      jsonEncode({'type': 'geo_rappel'});
 
   /// Rappelle à un agent que sa localisation est coupée.
   ///
@@ -279,27 +329,20 @@ class PushService {
   /// Un appui ouvre directement les réglages de localisation du système : c'est
   /// le seul endroit où le GPS se rallume, et y envoyer quelqu'un sans le dire
   /// serait le meilleur moyen qu'il en ressorte sans rien faire.
-  Future<void> showRappelLocalisation() async {
+  ///
+  /// ⚠️ `permanent: false` n'est PAS un réglage de confort : voir la garde de
+  /// `GeoService.demarrer`. Une notification non balayable ne se retire que par
+  /// du code ; si personne ne peut plus l'exécuter — permission refusée, donc
+  /// pas de service de premier plan pour faire la veille — elle resterait
+  /// affichée à vie, y compris une fois le problème résolu.
+  Future<void> showRappelLocalisation({bool permanent = true}) async {
     try {
       await _localPlugin.show(
-        _idRappelLocalisation,
-        "Localisation désactivée",
-        "Votre position n'est plus transmise à votre entreprise. "
-            "Appuyez pour réactiver la localisation.",
-        const NotificationDetails(
-          android: AndroidNotificationDetails(
-            'localisation',
-            'Localisation',
-            channelDescription:
-                "Rappels lorsque la localisation est désactivée",
-            importance: Importance.defaultImportance,
-            priority: Priority.defaultPriority,
-            // Ni permanente ni sonore : c'est un rappel, pas une alarme. Elle
-            // disparaît dès qu'on la touche.
-            autoCancel: true,
-          ),
-        ),
-        payload: jsonEncode({'type': 'geo_rappel'}),
+        idRappelLocalisation,
+        titreRappelLocalisation,
+        texteRappelLocalisation,
+        detailsRappelLocalisation(permanent: permanent),
+        payload: payloadRappelLocalisation,
       );
     } catch (e) {
       debugPrint('[PushService] rappel de localisation impossible : $e');
@@ -310,7 +353,7 @@ class PushService {
   /// afficher un problème résolu ferait douter de tous les autres.
   Future<void> retireRappelLocalisation() async {
     try {
-      await _localPlugin.cancel(_idRappelLocalisation);
+      await _localPlugin.cancel(idRappelLocalisation);
     } catch (_) {}
   }
 
@@ -898,4 +941,55 @@ Future<void> refuserAppelDepuisIsolate(String callId) async {
     // est le seul comportement possible : il n'y a ni interface où signaler
     // l'erreur, ni contexte où réessayer.
   }
+}
+
+/// Le greffon de notifications, vu depuis un isolate SANS INTERFACE.
+///
+/// ⚠️ `PushService.instance` n'est PAS utilisable ici : son `_localPlugin` a été
+/// initialisé dans l'isolate de l'application, et un isolate ne partage aucune
+/// mémoire avec un autre. Il faut donc une instance neuve, initialisée sur
+/// place — même famille que le repli de `notificationBackgroundHandler`.
+Future<FlutterLocalNotificationsPlugin> _greffonPourIsolate() async {
+  final plugin = FlutterLocalNotificationsPlugin();
+  await plugin.initialize(const InitializationSettings(
+    android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+    iOS: DarwinInitializationSettings(),
+  ));
+  return plugin;
+}
+
+/// Repose le rappel de localisation depuis le service de premier plan.
+///
+/// C'est CE QUI TIENT LA PROMESSE quand l'application est fermée : la veille de
+/// `GeoService` vit dans l'isolate de l'application, qu'Android détruit dès que
+/// l'utilisateur balaie l'application des tâches récentes. Sans ce relais, un
+/// rappel balayé sur Android 14 ne reviendrait qu'au prochain lancement.
+@pragma('vm:entry-point')
+Future<void> montreRappelLocalisationDepuisIsolate() async {
+  try {
+    final plugin = await _greffonPourIsolate();
+    await plugin.show(
+      PushService.idRappelLocalisation,
+      PushService.titreRappelLocalisation,
+      PushService.texteRappelLocalisation,
+      PushService.detailsRappelLocalisation(permanent: true),
+      payload: PushService.payloadRappelLocalisation,
+    );
+  } catch (e) {
+    debugPrint('[PushService] rappel hors application impossible : $e');
+  }
+}
+
+/// Retire le rappel depuis le service de premier plan.
+///
+/// ⚠️ INDISPENSABLE, et pas seulement symétrique : une notification non
+/// balayable ne part que par du code. Si seule l'application savait la retirer,
+/// quelqu'un qui rallume sa localisation sans rouvrir Alanya garderait sous les
+/// yeux, indéfiniment, l'annonce d'un problème déjà résolu.
+@pragma('vm:entry-point')
+Future<void> retireRappelLocalisationDepuisIsolate() async {
+  try {
+    final plugin = await _greffonPourIsolate();
+    await plugin.cancel(PushService.idRappelLocalisation);
+  } catch (_) {}
 }
