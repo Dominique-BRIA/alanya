@@ -8,12 +8,16 @@ import 'package:flutter/material.dart';
 /// permis d'identifier, en une seule capture d'écran, une course que plusieurs
 /// correctifs raisonnés n'avaient pas su trouver. Les traces continuent de
 /// partir dans le journal système (`adb logcat`), où elles ne coûtent rien.
-/// ⚠️ REMIS À `true` LE 12/08/2026, TEMPORAIREMENT, pour l'invite vocale du
-/// standard qui reste muette. Deux tours de correctifs raisonnés n'ont rien
-/// donné : le bandeau affiche les traces SUR LE TÉLÉPHONE, sans `adb`, ce qui
-/// avait déjà été décisif en août pour les appels. À repasser à `false` dès que
-/// la cause est connue — ce bandeau n'a rien à faire dans un APK publié.
-const bool tracesAppelsVisibles = true;
+/// ✅ REPASSÉ À `false` LE 12/08/2026 : la cause est trouvée. Allumé quelques
+/// heures pour l'invite vocale du standard restée muette, le bandeau a montré en
+/// UNE capture ce que trois hypothèses raisonnées avaient manqué — la lecture
+/// démarrait sans erreur, le son sortait simplement par l'écouteur. Deuxième
+/// fois que cet outil tranche là où le raisonnement s'égarait.
+///
+/// ⚠️ Les traces elles-mêmes RESTENT en place, et c'est délibéré : `traceAppel`
+/// continue d'écrire dans le journal système, où elle ne coûte rien et où `adb
+/// logcat` la retrouvera. Seul l'affichage est coupé.
+const bool tracesAppelsVisibles = false;
 
 /// Trace de négociation d'appel : journal système ET overlay à l'écran.
 ///
