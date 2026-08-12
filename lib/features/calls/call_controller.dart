@@ -764,7 +764,19 @@ class CallController extends ChangeNotifier {
     _initialMemberIds.clear();
     _inviteParUserId.clear();
     remoteRinging = false;
-    isSpeakerOn = false;
+    /*
+     * ⚠️ LA ROUTE AUDIO SE REMET AUSSI, PAS SEULEMENT LE DRAPEAU.
+     *
+     * Le drapeau seul suffisait tant que le haut-parleur était rare : depuis que
+     * tout appel à un centre l'allume, un appel ordinaire suivant aurait
+     * démarré avec le bouton affiché « écouteur » et le son sortant en fait par
+     * le haut-parleur — un décalage entre ce qu'on montre et ce qu'on fait, qui
+     * se paierait la première fois qu'on appelle quelqu'un en public.
+     */
+    if (isSpeakerOn) {
+      isSpeakerOn = false;
+      unawaited(Helper.setSpeakerphoneOn(false).catchError((_) {}));
+    }
     connectedSince = null;
     // Remise à zéro du compteur : l'appel est fini, plus aucun écran ne le
     // concerne. Les `dispose` qui suivront décrémenteraient dans le vide, ce
@@ -803,13 +815,7 @@ class CallController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> toggleSpeaker() async {
-    // Un geste de l'utilisateur reprend la main sur le forçage du standard :
-    // s'il coupe le haut-parleur pendant le menu, on ne le lui remettra pas, et
-    // on ne le coupera pas non plus derrière lui au décrochage.
-    _hautParleurForceParStandard = false;
-    await _appliqueHautParleur(!isSpeakerOn);
-  }
+  Future<void> toggleSpeaker() => _appliqueHautParleur(!isSpeakerOn);
 
   Future<void> _appliqueHautParleur(bool actif) async {
     isSpeakerOn = actif;
@@ -818,12 +824,6 @@ class CallController extends ChangeNotifier {
     } catch (_) {}
     notifyListeners();
   }
-
-  /// Le haut-parleur a-t-il été allumé par le standard, et non par l'utilisateur ?
-  ///
-  /// C'est ce qui autorise à le RÉÉTEINDRE au décrochage sans contrarier un
-  /// choix explicite : on ne défait que ce qu'on a fait soi-même.
-  bool _hautParleurForceParStandard = false;
 
   /// 🐛 LE STANDARD ALLUME LE HAUT-PARLEUR, ET C'EST UN CORRECTIF, PAS UN CONFORT.
   ///
@@ -836,18 +836,18 @@ class CallController extends ChangeNotifier {
   /// route ce flux vers l'écouteur. Or personne ne tient son téléphone contre
   /// l'oreille pendant qu'il regarde un pavé numérique pour choisir un service.
   ///
-  /// Le retour à l'écouteur au décrochage est délibéré : à partir de là c'est une
-  /// vraie conversation, et l'agent n'a pas à être diffusé dans la pièce.
-  Future<void> _hautParleurPourStandard(bool actif) async {
-    if (actif) {
-      if (isSpeakerOn) return; // déjà allumé par l'utilisateur : ne rien forcer
-      _hautParleurForceParStandard = true;
-      await _appliqueHautParleur(true);
-      return;
-    }
-    if (!_hautParleurForceParStandard) return;
-    _hautParleurForceParStandard = false;
-    await _appliqueHautParleur(false);
+  /// ⚠️ **ON NE REVIENT PLUS À L'ÉCOUTEUR AU DÉCROCHAGE** (règle du user, 12/08) :
+  /// « par défaut le son sort par le haut-parleur, et c'est à l'utilisateur de
+  /// basculer à l'écouteur lors de l'appel d'un centre ». Le retour automatique
+  /// que j'avais posé la remplaçait par une décision de l'application, au pire
+  /// moment : l'agent se met à parler dans un téléphone tenu à la main, et sa
+  /// première phrase se perd le temps qu'on comprenne pourquoi.
+  ///
+  /// Rien à défaire non plus si l'appelant coupe le haut-parleur pendant le
+  /// menu : plus personne ne le rallume derrière lui.
+  Future<void> _hautParleurPourStandard() async {
+    if (isSpeakerOn) return;
+    await _appliqueHautParleur(true);
   }
 
   void toggleVideo() {
@@ -1286,7 +1286,7 @@ class CallController extends ChangeNotifier {
       // ⚠️ LA ROUTE AUDIO D'ABORD, LA LECTURE ENSUITE. Poser le haut-parleur
       // après avoir lancé l'invite laisserait ses premières secondes sortir par
       // l'écouteur — soit exactement le symptôme qu'on corrige, en plus court.
-      await _hautParleurPourStandard(true);
+      await _hautParleurPourStandard();
       final prompt = session.promptUrl;
       // Tracé AVANT la lecture : c'est la seule façon de distinguer « le serveur
       // n'a envoyé aucune invite » de « l'invite n'a pas pu être lue ». Sans
@@ -1395,9 +1395,8 @@ class CallController extends ChangeNotifier {
             _finIvr = null;
             ivr = null;
             unawaited(RingtoneService.instance.stopIvr());
-            // Le menu est fini : on rend l'écouteur à la conversation, sauf si
-            // l'utilisateur avait lui-même demandé le haut-parleur.
-            unawaited(_hautParleurPourStandard(false));
+            // ⚠️ LE HAUT-PARLEUR RESTE COMME IL EST. On ne rend pas l'écouteur
+            // à la conversation : c'est le choix de l'appelant, pas le nôtre.
           }
           // ⚠️ ATTENDRE la fin de `_onPeerJoined` avant de toucher au tampon.
           // C'est elle qui construit la mesh (`_ensureMesh`) et ouvre la session
