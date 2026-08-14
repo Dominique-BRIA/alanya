@@ -105,6 +105,7 @@ class IvrSession {
     this.centerNumber,
     this.promptUrl,
     this.holdUrl,
+    this.queueUrls = const [],
     required this.options,
   });
 
@@ -113,9 +114,10 @@ class IvrSession {
   final String centerName;
   final String? centerNumber;
 
-  /// Les deux peuvent être nuls : l'écran doit rester utilisable en silence.
+  /// Les trois peuvent être nuls : l'écran doit rester utilisable en silence.
   final String? promptUrl;
   final String? holdUrl;
+  final List<String> queueUrls;
 
   List<IvrOption> options;
   IvrEtape etape = IvrEtape.menu;
@@ -1267,6 +1269,10 @@ class CallController extends ChangeNotifier {
       _ringTimeout = null;
       // Le bip d'attente sortant n'a plus lieu d'être : personne ne sonne.
       await RingtoneService.instance.stop();
+      final rawQueue = e["queueUrls"];
+      final queueUrls = rawQueue is List
+          ? rawQueue.map((x) => x.toString()).toList()
+          : <String>[];
       final session = IvrSession(
         callId: callId,
         centerId: e["centerId"] as String? ?? "",
@@ -1274,6 +1280,7 @@ class CallController extends ChangeNotifier {
         centerNumber: e["centerNumber"] as String?,
         promptUrl: e["promptUrl"] as String?,
         holdUrl: e["holdUrl"] as String?,
+        queueUrls: queueUrls,
         options: IvrOption.listeDepuisJson(e["options"]),
       );
       ivr = session;
@@ -1295,7 +1302,7 @@ class CallController extends ChangeNotifier {
           ? "CC ☎️ AUCUNE invite envoyée par le serveur"
           : "CC ☎️ invite : $prompt");
       if (prompt != null) {
-        unawaited(RingtoneService.instance.playIvrPrompt(prompt));
+        unawaited(RingtoneService.instance.playIvrPrompt(prompt, loop: true));
       }
     } else if (type == "ivr_hold") {
       final session = ivr;
@@ -1310,7 +1317,7 @@ class CallController extends ChangeNotifier {
       // l'invite pour la mettre en cache, la musique démarre donc à l'instant
       // de l'appui au lieu de laisser trois secondes de silence.
       final hold = e["holdUrl"] as String? ?? session.holdUrl;
-      if (hold != null) unawaited(RingtoneService.instance.playIvrHold(hold));
+      if (hold != null) unawaited(RingtoneService.instance.playIvrHold(hold, loop: true));
     } else if (type == "ivr_error") {
       final callId = e["callId"] as String?;
       final retry = e["retry"] == true;
@@ -1336,6 +1343,16 @@ class CallController extends ChangeNotifier {
         session.etape = IvrEtape.menu;
         session.serviceChoisi = null;
         notifyListeners();
+
+        // Si tous les agents sont occupés et qu'on a des musiques d'attente (vocal_attente),
+        // on les joue en boucle pour faire patienter agréablement l'utilisateur.
+        final rawQueue = e["queueUrls"];
+        final queueList = rawQueue is List
+            ? rawQueue.map((x) => x.toString()).toList()
+            : session.queueUrls;
+        if (e["code"] == "busy" && queueList.isNotEmpty) {
+          unawaited(RingtoneService.instance.playIvrQueueList(queueList, loop: true));
+        }
         return;
       }
       // Fin sans retour possible. Le message reste affiché : le serveur n'envoie
