@@ -35,12 +35,15 @@ Widget imageDepuisOctets(
   double? height,
   BoxFit fit = BoxFit.cover,
   Widget Function()? surErreur,
+  Key? key,
 }) {
   final repli = surErreur ?? () => const SizedBox.shrink();
+  final widgetKey = key ?? ValueKey(octets);
 
   if (estSvg(octets)) {
     return SvgPicture.memory(
       octets,
+      key: widgetKey,
       width: width,
       height: height,
       fit: fit,
@@ -52,6 +55,7 @@ Widget imageDepuisOctets(
 
   return Image.memory(
     octets,
+    key: widgetKey,
     width: width,
     height: height,
     fit: fit,

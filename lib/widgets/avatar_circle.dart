@@ -51,11 +51,14 @@ class _AvatarCircleState extends State<AvatarCircle> {
   }
 
   Future<void> _loadToken() async {
-    // Utilisé uniquement pour AuthNetworkImage (GET /api/media/<id> requiert le token).
-    // On lit une fois, pas de refresh nécessaire (le token vit longtemps).
+    // Si l'avatar est une donnée base64 inline (`data:`), aucun jeton réseau n'est nécessaire.
+    // Sauter l'appel évite un setState asynchrone inutile qui provoquait un clignotement.
+    final raw = widget.avatarUrl?.trim();
+    if (raw != null && raw.startsWith("data:")) return;
+
     try {
       final t = await context.read<TokenStorage>().accessToken;
-      if (mounted) setState(() => _token = t);
+      if (mounted && _token != t) setState(() => _token = t);
     } catch (_) {}
   }
 

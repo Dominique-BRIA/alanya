@@ -32,6 +32,8 @@ class AvatarSource {
 
   bool get estVide => url == null && bytes == null;
 
+  static final Map<String, Uint8List> _base64Cache = {};
+
   factory AvatarSource.depuis(String? brut) {
     final valeur = brut?.trim();
     if (valeur == null || valeur.isEmpty) return const AvatarSource._();
@@ -40,11 +42,21 @@ class AvatarSource {
       final virgule = valeur.indexOf(',');
       if (virgule < 0) return const AvatarSource._();
       try {
-        // Les retours à la ligne sont tolérés dans le base64 transporté, mais
-        // pas par le décodeur de Dart.
-        final utile =
-            valeur.substring(virgule + 1).replaceAll(RegExp(r'\s'), '');
-        return AvatarSource._(bytes: base64Decode(utile));
+        // Cache mémoire pour réutiliser la MÊME instance de Uint8List.
+        // Sans ceci, base64Decode() ré-alloue un nouvel objet Uint8List à chaque
+        // build frame, ce qui forçait Image.memory / SvgPicture.memory à re-décoder
+        // l'image à chaque rafraîchissement et provoquait un clignotement visible !
+        var octets = _base64Cache[valeur];
+        if (octets == null) {
+          final utile =
+              valeur.substring(virgule + 1).replaceAll(RegExp(r'\s'), '');
+          octets = base64Decode(utile);
+          if (_base64Cache.length > 150) {
+            _base64Cache.remove(_base64Cache.keys.first);
+          }
+          _base64Cache[valeur] = octets;
+        }
+        return AvatarSource._(bytes: octets);
       } catch (_) {
         // Valeur tronquée ou non-base64 (`data:image/svg+xml,<svg…`) : on
         // retombe sur l'initiale, comme pour un avatar absent. Un écran ne doit
