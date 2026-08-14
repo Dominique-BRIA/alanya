@@ -71,15 +71,39 @@ class CachedMedia extends StatefulWidget {
   final Widget? placeholder;
   final Widget? errorWidget;
 
-  /// Clé de cache stable pour une URL média (ignore le token en query).
+  /// Clé de cache stable pour une URL média (ignore le token JWT en query, mais
+  /// distingue les paramètres de génération type Dicebear `?seed=...`).
+  ///
+  /// 🐛 CORRECTION DU BUG DES AVATARS MAINS/DICEBEAR :
+  /// Auparavant, pour toute URL du type `https://api.dicebear.com/7.x/icons/svg?seed=...`,
+  /// `uri.pathSegments.last` renvoyait `"svg"`. TOUS les avatars Dicebear recevaient donc
+  /// la même clé de cache `"svg"`, et le premier téléchargé écrasait les 10 autres !
   static String cacheKey(String url) {
     try {
       final uri = Uri.parse(url);
-      if (uri.pathSegments.isNotEmpty && uri.pathSegments.last.isNotEmpty) {
-        return uri.pathSegments.last;
+      final pathSegs = uri.pathSegments;
+      if (pathSegs.isNotEmpty) {
+        final last = pathSegs.last;
+        final isGeneric =
+            RegExp(r'^(svg|png|jpg|jpeg|gif|webp)$', caseSensitive: false)
+                .hasMatch(last);
+        if (uri.query.isNotEmpty || isGeneric) {
+          // Exclut le token JWT s'il est en query pour ne pas casser le cache au refresh de token
+          final queryClean = uri.queryParameters.entries
+              .where((e) => e.key.toLowerCase() != 'token')
+              .map((e) => '${e.key}=${e.value}')
+              .join('&');
+          final queryHash = (queryClean.isNotEmpty ? queryClean : url)
+              .hashCode
+              .toRadixString(16);
+          return '${last}_$queryHash';
+        }
+        if (last.isNotEmpty) {
+          return last;
+        }
       }
     } catch (_) {}
-    return url.split('?').first.hashCode.toRadixString(16);
+    return url.hashCode.toRadixString(16);
   }
 
   @override
