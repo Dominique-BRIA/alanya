@@ -63,7 +63,7 @@ android {
         // Flutter 3.44. Le public d'Alanya comprend beaucoup d'appareils
         // anciens : passer à 24 exclurait Android 5.0, 5.1 et 6.0 sans rien
         // apporter en échange. Choix délibéré, à ne pas « corriger ».
-        minSdk = 21
+        minSdk = flutter.minSdkVersion
         targetSdk = 36
         // Numéro de build de la CI quand il existe, celui du pubspec sinon.
         //
