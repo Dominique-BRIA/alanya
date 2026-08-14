@@ -1351,6 +1351,7 @@ class CallController extends ChangeNotifier {
             ? rawQueue.map((x) => x.toString()).toList()
             : session.queueUrls;
         if (e["code"] == "busy" && queueList.isNotEmpty) {
+          DebugOverlay.log("CC ☎️ Musique d'attente en boucle (${queueList.length} titre(s))");
           unawaited(RingtoneService.instance.playIvrQueueList(queueList, loop: true));
         }
         return;
