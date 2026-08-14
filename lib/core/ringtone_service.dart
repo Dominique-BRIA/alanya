@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 
 import 'debug_overlay.dart';
 
@@ -218,43 +221,94 @@ class RingtoneService {
     return morceaux.isEmpty ? url : morceaux.last;
   }
 
+  /// Télécharge et met en cache localement le fichier audio si c'est une URL HTTP.
+  /// En cas de problème ou délai, retombe sur UrlSource.
+  Future<Source> _resoudreSourceIvr(String url) async {
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      return UrlSource(url);
+    }
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final hashName = url.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
+      final filename = hashName.length > 80
+          ? hashName.substring(hashName.length - 80)
+          : hashName;
+      final file = File('${tempDir.path}/ivr_$filename.mp3');
+
+      if (await file.exists()) {
+        final stat = await file.stat();
+        if (stat.size > 0) {
+          return DeviceFileSource(file.path);
+        }
+      }
+
+      final response = await http
+          .get(Uri.parse(url))
+          .timeout(const Duration(seconds: 8));
+      if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {
+        await file.writeAsBytes(response.bodyBytes, flush: true);
+        return DeviceFileSource(file.path);
+      }
+    } catch (e) {
+      debugPrint("[RingtoneService] Cache fallback for $url: $e");
+    }
+    return UrlSource(url);
+  }
+
   Future<void> _playIvr(String url,
       {required bool loop, void Function()? onComplete}) async {
     await stopIvr();
     final gen = _generationIvr;
     try {
       final p = AudioPlayer();
-      // Même contexte que les sonneries : flux voix sur Android, pour que le
-      // standard s'entende comme un appel et non comme un média — le volume
-      // physique du téléphone le règle alors, et le mode silencieux médias ne
-      // le fait pas taire.
+      // Configuration mains-libres & média robuste : force le haut-parleur principal
+      // et empêche le basculement silencieux vers l'écouteur d'oreille sur Android/iOS.
       await p.setAudioContext(
         AudioContext(
           android: const AudioContextAndroid(
-            isSpeakerphoneOn: false,
+            isSpeakerphoneOn: true,
             stayAwake: true,
-            contentType: AndroidContentType.speech,
-            usageType: AndroidUsageType.voiceCommunication,
+            contentType: AndroidContentType.music,
+            usageType: AndroidUsageType.media,
             audioFocus: AndroidAudioFocus.gainTransientMayDuck,
           ),
           iOS: AudioContextIOS(
             category: AVAudioSessionCategory.playback,
-            options: const {AVAudioSessionOptions.duckOthers},
+            options: const {
+              AVAudioSessionOptions.duckOthers,
+              AVAudioSessionOptions.defaultToSpeaker,
+            },
           ),
         ),
       );
       await p.setReleaseMode(loop ? ReleaseMode.loop : ReleaseMode.release);
       await p.setVolume(1.0);
       if (gen != _generationIvr) return _jeter(p);
-      await p.play(UrlSource(url));
+
+      // Résolution source (Cache disque local + fallback URL)
+      final source = await _resoudreSourceIvr(url);
+      if (gen != _generationIvr) return _jeter(p);
+
+      await p.play(source);
       if (loop) await p.setReleaseMode(ReleaseMode.loop);
       if (gen != _generationIvr) {
         traceAppel("IVR audio ANNULÉ pendant le chargement (loop=$loop)");
         return _jeter(p);
       }
       _ivrPlayer = p;
+
+      // Auto-Healing & Watchdog Listener
       _finIvrSub?.cancel();
-      _finIvrSub = p.onPlayerComplete.listen((_) async {
+      _finIvrSub = p.onPlayerStateChanged.listen((state) async {
+        if (gen != _generationIvr || _ivrPlayer != p) return;
+        if (state == PlayerState.paused || state == PlayerState.stopped) {
+          try {
+            await p.resume();
+          } catch (_) {}
+        }
+      });
+
+      p.onPlayerComplete.listen((_) async {
         if (gen != _generationIvr || _ivrPlayer != p) return;
         if (loop) {
           try {
@@ -268,15 +322,6 @@ class RingtoneService {
       });
       traceAppel("IVR audio ▶️ ${_finDe(url)} (loop=$loop)");
     } catch (e) {
-      /*
-       * Échec silencieux POUR L'UTILISATEUR, mais plus pour nous.
-       *
-       * L'écran du standard reste utilisable sans le son, donc on n'affiche
-       * rien — mais un `debugPrint` seul ne remonte que par `adb logcat`, dont
-       * on ne dispose pas ici. Or c'est exactement le message qui distingue
-       * « le fichier est illisible » de « quelque chose a coupé la lecture »,
-       * et sans lui les deux se ressemblent : le silence.
-       */
       traceAppel("IVR audio ❌ ${_finDe(url)} : $e");
       _ivrPlayer = null;
     }
