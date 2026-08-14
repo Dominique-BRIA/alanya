@@ -96,8 +96,11 @@ class GeoService {
   static const titreServicePause = "Alanya Work — suivi en pause";
   static const texteServicePause =
       "La localisation du téléphone est coupée : plus rien n'est relevé.";
-  static String texteServiceActif(Duration periode) =>
-      "Votre position est relevée toutes les ${periode.inMinutes} minutes.";
+  static const seuilDeplacementMetresDefaut = 75;
+  static const intervalleHeartbeatMinDefaut = 5;
+
+  static String texteServiceActif({int seuilMetres = 75, int heartbeatMin = 5}) =>
+      "Votre position est relevée tous les $seuilMetres m (ou $heartbeatMin min d'immobilité).";
 
   Timer? _minuteur;
   bool _envoiEnCours = false;
@@ -517,7 +520,7 @@ class GeoService {
       );
       final titre = localisationCoupee ? titreServicePause : titreServiceActif;
       final texte =
-          localisationCoupee ? texteServicePause : texteServiceActif(periode);
+          localisationCoupee ? texteServicePause : texteServiceActif();
 
       /*
        * ⚠️ DÉMARRER UN SERVICE DÉJÀ DÉMARRÉ N'EST PAS ANODIN : `startService`
@@ -547,24 +550,48 @@ class GeoService {
     }
   }
 
+  double? _derniereLat;
+  double? _derniereLon;
+  DateTime? _dernierReleveTime;
+
   Future<void> _releve() async {
     try {
       final position = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
-          // Sans plafond, un GPS qui ne accroche pas laisserait la lecture
-          // pendante jusqu'au relevé suivant, et deux lectures se
-          // chevaucheraient.
           timeLimit: Duration(seconds: 45),
         ),
       );
-      await _envoieOuMetEnFile({
-        'lat': position.latitude,
-        'lon': position.longitude,
-        // L'heure du RELEVÉ, pas de l'envoi : c'est ce qui rend la trace juste
-        // même quand la file a attendu le retour du réseau.
-        'collectedAt': position.timestamp.toUtc().toIso8601String(),
-      });
+
+      final maintenant = DateTime.now();
+      bool doitEnvoyer = false;
+
+      if (_derniereLat == null || _derniereLon == null || _dernierReleveTime == null) {
+        doitEnvoyer = true;
+      } else {
+        final distance = Geolocator.distanceBetween(
+          _derniereLat!,
+          _derniereLon!,
+          position.latitude,
+          position.longitude,
+        );
+        final ecouleMin = maintenant.difference(_dernierReleveTime!).inMinutes;
+        if (distance >= seuilDeplacementMetresDefaut || ecouleMin >= intervalleHeartbeatMinDefaut) {
+          doitEnvoyer = true;
+        }
+      }
+
+      if (doitEnvoyer) {
+        _derniereLat = position.latitude;
+        _derniereLon = position.longitude;
+        _dernierReleveTime = maintenant;
+
+        await _envoieOuMetEnFile({
+          'lat': position.latitude,
+          'lon': position.longitude,
+          'collectedAt': position.timestamp.toUtc().toIso8601String(),
+        });
+      }
     } catch (e) {
       debugPrint('[GeoService] relevé impossible : $e');
     }

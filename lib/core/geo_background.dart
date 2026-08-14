@@ -124,7 +124,7 @@ class _TacheGeo extends TaskHandler {
               : GeoService.titreServiceActif,
           notificationText: coupee
               ? GeoService.texteServicePause
-              : GeoService.texteServiceActif(Duration(minutes: minutes)),
+              : GeoService.texteServiceActif(),
         );
       } catch (e) {
         debugPrint('[GeoBackground] libellé du service inchangé : $e');
