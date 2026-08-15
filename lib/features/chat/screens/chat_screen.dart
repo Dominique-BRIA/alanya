@@ -2503,10 +2503,16 @@ class _ChatScreenState extends State<ChatScreen>
         // contenu stocké et envoyé reste le texte brut avec ses marqueurs, ce
         // qui garde le message lisible pour tout client qui ne les interprète
         // pas.
-        Text.rich(
-          TextSpan(children: spansWhatsApp(m.content ?? "[${m.type}]")),
-          style: TextStyle(color: onTextColor),
-        ),
+        (() {
+          var displayText = m.content ?? "[${m.type}]";
+          if (!m.isDeleted && displayText.contains('[')) {
+            displayText = displayText.replaceAll(RegExp(r'\[([^\]]+)\]'), '').trim();
+          }
+          return Text.rich(
+            TextSpan(children: spansWhatsApp(displayText.isNotEmpty ? displayText : (m.content ?? "[${m.type}]"))),
+            style: TextStyle(color: onTextColor),
+          );
+        })(),
         if ((m.content ?? '').isNotEmpty) ...[
           buildLinkPreview(m.content!, mine),
           (() {
