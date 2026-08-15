@@ -57,6 +57,7 @@ import '../../../widgets/media/reply_media_preview.dart';
 import '../../../widgets/media/media_grid.dart';
 import '../../../core/media_helper.dart';
 import '../chat_media_integration.dart';
+import '../../../widgets/media/gps_preview.dart';
 import 'media_gallery_viewer.dart';
 import '../../../widgets/media/media_picker_sheet.dart';
 import 'gallery_screen.dart';
@@ -2506,7 +2507,13 @@ class _ChatScreenState extends State<ChatScreen>
           TextSpan(children: spansWhatsApp(m.content ?? "[${m.type}]")),
           style: TextStyle(color: onTextColor),
         ),
-        if ((m.content ?? '').isNotEmpty) buildLinkPreview(m.content!, mine),
+        if ((m.content ?? '').isNotEmpty) ...[
+          buildLinkPreview(m.content!, mine),
+          (() {
+            final gps = extractGpsCoords(m.content!);
+            return gps != null ? GpsPreview(lat: gps.lat, lng: gps.lng, isMe: mine) : const SizedBox.shrink();
+          })(),
+        ],
         if (!m.isDeleted && (m.content ?? '').isNotEmpty) ...[
           (() {
             final buttonMatches = RegExp(r'\[([^\]]+)\]').allMatches(m.content!);
