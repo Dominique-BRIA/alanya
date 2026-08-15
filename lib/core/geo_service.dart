@@ -102,7 +102,54 @@ class GeoService {
   static String texteServiceActif({int seuilMetres = 75, int heartbeatMin = 5}) =>
       "Votre position est relevée tous les $seuilMetres m (ou $heartbeatMin min d'immobilité).";
 
+  static const cleDerniereLat = 'geo_derniere_lat';
+  static const cleDerniereLon = 'geo_derniere_lon';
+  static const cleDernierReleveTimeMs = 'geo_dernier_releve_time_ms';
+
+  /// Détermine si un relevé doit être enregistré et envoyé (déplacement >= seuilMetres OU temps écoulé >= heartbeatMin).
+  static Future<bool> doitEnregistrerEtEnvoyer(
+    double lat,
+    double lon,
+    DateTime timestamp, {
+    int seuilMetres = seuilDeplacementMetresDefaut,
+    int heartbeatMin = intervalleHeartbeatMinDefaut,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+
+    final lastLat = prefs.getDouble(cleDerniereLat);
+    final lastLon = prefs.getDouble(cleDerniereLon);
+    final lastTimeMs = prefs.getInt(cleDernierReleveTimeMs);
+
+    if (lastLat == null || lastLon == null || lastTimeMs == null) {
+      return true;
+    }
+
+    final distance = Geolocator.distanceBetween(lastLat, lastLon, lat, lon);
+    final lastTime = DateTime.fromMillisecondsSinceEpoch(lastTimeMs);
+    final ecouleSec = timestamp.difference(lastTime).inSeconds;
+
+    if (distance >= seuilMetres || ecouleSec >= heartbeatMin * 60) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /// Sauvegarde les coordonnées du dernier relevé validé.
+  static Future<void> sauvegarderDernierReleve(
+    double lat,
+    double lon,
+    DateTime timestamp,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(cleDerniereLat, lat);
+    await prefs.setDouble(cleDerniereLon, lon);
+    await prefs.setInt(cleDernierReleveTimeMs, timestamp.millisecondsSinceEpoch);
+  }
+
   Timer? _minuteur;
+  StreamSubscription<Position>? _positionStreamSub;
   bool _envoiEnCours = false;
 
   /// Écoute de l'interrupteur de localisation du système. Voir
@@ -410,12 +457,27 @@ class GeoService {
       return;
     }
 
-    // Un premier relevé tout de suite : attendre cinq minutes pour savoir où se
-    // trouve quelqu'un qui vient d'ouvrir l'application n'aurait aucun sens.
-    unawaited(_releve());
-    _minuteur = Timer.periodic(periode, (_) => unawaited(_releve()));
+    // Écoute continue des déplacements >= 75 mètres via la position stream
+    _positionStreamSub?.cancel();
+    _positionStreamSub = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: seuilDeplacementMetresDefaut,
+      ),
+    ).listen((position) {
+      unawaited(_traiteNouvellePosition(position));
+    });
+
+    // Un premier relevé heartbeat tout de suite au démarrage
+    unawaited(_releveHeartbeat());
+
+    // Minuteur récurrent (chaque minute) pour vérifier le heartbeat des 5 minutes d'immobilité
+    _minuteur = Timer.periodic(
+      const Duration(minutes: 1),
+      (_) => unawaited(_releveHeartbeat()),
+    );
     await _demarreServicePremierPlan(periode);
-    debugPrint('[GeoService] relevé démarré (${periode.inMinutes} min)');
+    debugPrint('[GeoService] relevé démarré (seuil $seuilDeplacementMetresDefaut m / heartbeat $_intervalleMin min)');
   }
 
   Future<void> _memoriseIntervalle(int minutes) async {
@@ -453,6 +515,8 @@ class GeoService {
   Future<void> arreter() async {
     _minuteur?.cancel();
     _minuteur = null;
+    await _positionStreamSub?.cancel();
+    _positionStreamSub = null;
     _veilleRappel?.cancel();
     _veilleRappel = null;
     await _surveillance?.cancel();
@@ -510,7 +574,7 @@ class GeoService {
         ),
         iosNotificationOptions: const IOSNotificationOptions(),
         foregroundTaskOptions: ForegroundTaskOptions(
-          eventAction: ForegroundTaskEventAction.repeat(periode.inMilliseconds),
+          eventAction: ForegroundTaskEventAction.repeat(const Duration(minutes: 1).inMilliseconds),
           // Reprend après un redémarrage du téléphone : sans cela, la collecte
           // s'arrêterait la nuit et ne repartirait qu'à la prochaine ouverture.
           autoRunOnBoot: true,
@@ -550,11 +614,32 @@ class GeoService {
     }
   }
 
-  double? _derniereLat;
-  double? _derniereLon;
-  DateTime? _dernierReleveTime;
+  Future<void> _traiteNouvellePosition(Position position) async {
+    final timestamp = position.timestamp;
+    final doitEnvoyer = await doitEnregistrerEtEnvoyer(
+      position.latitude,
+      position.longitude,
+      timestamp,
+      seuilMetres: seuilDeplacementMetresDefaut,
+      heartbeatMin: _intervalleMin,
+    );
 
-  Future<void> _releve() async {
+    if (doitEnvoyer) {
+      await sauvegarderDernierReleve(
+        position.latitude,
+        position.longitude,
+        timestamp,
+      );
+
+      await _envoieOuMetEnFile({
+        'lat': position.latitude,
+        'lon': position.longitude,
+        'collectedAt': timestamp.toUtc().toIso8601String(),
+      });
+    }
+  }
+
+  Future<void> _releveHeartbeat() async {
     try {
       final position = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
@@ -562,38 +647,9 @@ class GeoService {
           timeLimit: Duration(seconds: 45),
         ),
       );
-
-      final maintenant = DateTime.now();
-      bool doitEnvoyer = false;
-
-      if (_derniereLat == null || _derniereLon == null || _dernierReleveTime == null) {
-        doitEnvoyer = true;
-      } else {
-        final distance = Geolocator.distanceBetween(
-          _derniereLat!,
-          _derniereLon!,
-          position.latitude,
-          position.longitude,
-        );
-        final ecouleMin = maintenant.difference(_dernierReleveTime!).inMinutes;
-        if (distance >= seuilDeplacementMetresDefaut || ecouleMin >= intervalleHeartbeatMinDefaut) {
-          doitEnvoyer = true;
-        }
-      }
-
-      if (doitEnvoyer) {
-        _derniereLat = position.latitude;
-        _derniereLon = position.longitude;
-        _dernierReleveTime = maintenant;
-
-        await _envoieOuMetEnFile({
-          'lat': position.latitude,
-          'lon': position.longitude,
-          'collectedAt': position.timestamp.toUtc().toIso8601String(),
-        });
-      }
+      await _traiteNouvellePosition(position);
     } catch (e) {
-      debugPrint('[GeoService] relevé impossible : $e');
+      debugPrint('[GeoService] relevé heartbeat impossible : $e');
     }
   }
 

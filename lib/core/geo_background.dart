@@ -124,7 +124,7 @@ class _TacheGeo extends TaskHandler {
               : GeoService.titreServiceActif,
           notificationText: coupee
               ? GeoService.texteServicePause
-              : GeoService.texteServiceActif(),
+              : GeoService.texteServiceActif(heartbeatMin: minutes),
         );
       } catch (e) {
         debugPrint('[GeoBackground] libellé du service inchangé : $e');
@@ -144,6 +144,26 @@ class _TacheGeo extends TaskHandler {
       ),
     );
 
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+    final intervalleMin = prefs.getInt(GeoService.cleIntervalle) ?? 5;
+
+    final doitEnvoyer = await GeoService.doitEnregistrerEtEnvoyer(
+      position.latitude,
+      position.longitude,
+      position.timestamp,
+      seuilMetres: GeoService.seuilDeplacementMetresDefaut,
+      heartbeatMin: intervalleMin,
+    );
+
+    if (!doitEnvoyer) return;
+
+    await GeoService.sauvegarderDernierReleve(
+      position.latitude,
+      position.longitude,
+      position.timestamp,
+    );
+
     final releve = jsonEncode({
       'lat': position.latitude,
       'lon': position.longitude,
@@ -152,8 +172,6 @@ class _TacheGeo extends TaskHandler {
 
     // On écrit AVANT de tenter l'envoi : si l'envoi échoue, ou si le service est
     // tué au milieu, le relevé est déjà à l'abri.
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.reload();
     final file = prefs.getStringList(GeoService.cleFile) ?? <String>[];
     file.add(releve);
     while (file.length > GeoService.tailleMaxFile) {
