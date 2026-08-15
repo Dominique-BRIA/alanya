@@ -131,6 +131,21 @@ class CallsRepository {
     );
   }
 
+  /// L'appelant est-il agent d'au moins un centre ? Sert UNIQUEMENT à
+  /// décider si le menu « Clients abandonnés » doit être montré (demande
+  /// user 15/08/2026 : un non-agent ne doit rien voir). La protection réelle
+  /// reste sur [abandonedClients] (403).
+  Future<bool> isAgent() async {
+    try {
+      final data = await _api.get("/api/queue/agent-status");
+      return (data["isAgent"] as bool?) ?? false;
+    } catch (_) {
+      // Un menu qui disparaît sur une erreur réseau vaut mieux qu'un menu
+      // qui plante — l'agent le retrouvera au prochain lancement.
+      return false;
+    }
+  }
+
   /// Clients abandonnés/expirés, tous centres dont l'appelant est agent (ou
   /// un seul si `centerAlanyaID` est fourni). Réservé aux agents — 403 sinon.
   Future<List<Map<String, dynamic>>> abandonedClients({String? centerAlanyaID}) async {

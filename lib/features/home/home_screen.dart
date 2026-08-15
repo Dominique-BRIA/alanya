@@ -59,6 +59,11 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _tab = 0;
   int _appelsManques = 0;
+  // Décide seulement l'AFFICHAGE du menu « Clients abandonnés » — un
+  // non-agent ne doit rien voir (demande user 15/08/2026), pas même un
+  // message « réservé ». La protection réelle reste côté serveur (403 sur
+  // /api/queue/history) : ce champ n'en est qu'un reflet, jamais la garde.
+  bool _isAgent = false;
 
   void _onManquesChanges() {
     if (!mounted) return;
@@ -87,6 +92,8 @@ class _HomeScreenState extends State<HomeScreen> {
       MissedCalls.instance
         ..bind(context.read<CallsRepository>())
         ..rafraichir();
+      final estAgent = await context.read<CallsRepository>().isAgent();
+      if (mounted) setState(() => _isAgent = estAgent);
       // Autorisation d'afficher l'appel par-dessus le verrouillage. Demandée
       // ICI et non au tout premier écran : la question n'a de sens qu'une fois
       // l'utilisateur connecté, donc susceptible de recevoir un appel.
@@ -220,15 +227,17 @@ class _HomeScreenState extends State<HomeScreen> {
                     title: Text("Appareils connectés"),
                     contentPadding: EdgeInsets.zero,
                   )),
-              // Réservé aux agents/centres côté serveur (403 sinon) — pas de
-              // condition ici, cf. AbandonedClientsScreen.
-              const PopupMenuItem(
-                  value: "abandoned",
-                  child: ListTile(
-                    leading: Icon(Icons.person_search_outlined),
-                    title: Text("Clients abandonnés"),
-                    contentPadding: EdgeInsets.zero,
-                  )),
+              // Un non-agent ne doit RIEN voir (demande user 15/08/2026) —
+              // pas un message « réservé ». _isAgent n'est qu'un reflet
+              // d'affichage ; la vraie garde reste le 403 serveur.
+              if (_isAgent)
+                const PopupMenuItem(
+                    value: "abandoned",
+                    child: ListTile(
+                      leading: Icon(Icons.person_search_outlined),
+                      title: Text("Clients abandonnés"),
+                      contentPadding: EdgeInsets.zero,
+                    )),
               const PopupMenuItem(
                   value: "settings",
                   child: ListTile(
