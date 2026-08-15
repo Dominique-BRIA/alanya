@@ -2357,6 +2357,7 @@ class _ChatScreenState extends State<ChatScreen>
                         : isImage
                             ? ImageBubble(
                                 imageUrl: '$_baseUrl${m.media.first.url}', token: _token,
+                                caption: m.content,
                                 onTap: () => _openImageViewer(m), onLongPress: () => _openMessageActions(m),
                                 timestamp: _time(m.createdAt),
                                 statusWidget: mine ? _statusTicks(m.status, Colors.white) : null,
@@ -2366,6 +2367,7 @@ class _ChatScreenState extends State<ChatScreen>
                                 ? VideoBubble(
                                     videoUrl: '$_baseUrl${m.media.first.url}', token: _token,
                                     duration: m.media.first.durationMs,
+                                    caption: m.content,
                                     onTap: () => _openVideoViewer(m), onLongPress: () => _openMessageActions(m),
                                     timestamp: _time(m.createdAt),
                                     statusWidget: mine ? _statusTicks(m.status, Colors.white) : null,
