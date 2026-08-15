@@ -2520,6 +2520,7 @@ class _ChatScreenState extends State<ChatScreen>
                   final btnTitle = bm.group(1) ?? '';
                   return GestureDetector(
                     onTap: () {
+                      setState(() => _replyTo = m);
                       _inputCtrl.text = btnTitle;
                       _send();
                     },
