@@ -329,6 +329,8 @@ class GeoService {
      */
     _minuteur?.cancel();
     _minuteur = null;
+    await _positionStreamSub?.cancel();
+    _positionStreamSub = null;
     await _marqueServiceEnPause();
     await PushService.instance.showRappelLocalisation(permanent: permanent);
     if (!permanent) return;
@@ -471,9 +473,9 @@ class GeoService {
     // Un premier relevé heartbeat tout de suite au démarrage
     unawaited(_releveHeartbeat());
 
-    // Minuteur récurrent (chaque minute) pour vérifier le heartbeat des 5 minutes d'immobilité
+    // Minuteur récurrent (toutes les 5 min) pour vérifier le heartbeat d'immobilité
     _minuteur = Timer.periodic(
-      const Duration(minutes: 1),
+      periode,
       (_) => unawaited(_releveHeartbeat()),
     );
     await _demarreServicePremierPlan(periode);
@@ -574,7 +576,7 @@ class GeoService {
         ),
         iosNotificationOptions: const IOSNotificationOptions(),
         foregroundTaskOptions: ForegroundTaskOptions(
-          eventAction: ForegroundTaskEventAction.repeat(const Duration(minutes: 1).inMilliseconds),
+          eventAction: ForegroundTaskEventAction.repeat(periode.inMilliseconds),
           // Reprend après un redémarrage du téléphone : sans cela, la collecte
           // s'arrêterait la nuit et ne repartirait qu'à la prochaine ouverture.
           autoRunOnBoot: true,
