@@ -226,6 +226,16 @@ class _IvrPanelState extends State<IvrPanel> {
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: maintenue ? 0.26 : 0.12),
           borderRadius: BorderRadius.circular(16),
+          // Repère des touches qui mènent quelque part (15/08/2026) : un anneau
+          // AUTOUR du bouton plutôt qu'un point sous le chiffre — remplace
+          // l'ancien indicateur, demandé plus visible. Toujours discret : il ne
+          // dit pas QUOI, l'appui long le dit toujours.
+          border: option == null
+              ? null
+              : Border.all(
+                  color: option.disponible ? AlanyaColors.forest : Colors.white38,
+                  width: 2,
+                ),
         ),
         // ⚠️ LE CHIFFRE SUIT LA TAILLE DE SA CASE, il n'est plus figé à 26
         // points. Une taille fixe donnait des touches qui paraissent petites dès
@@ -254,22 +264,6 @@ class _IvrPanelState extends State<IvrPanel> {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    // Repère discret sur les touches qui mènent quelque part. Il
-                    // ne dit PAS quoi — c'est l'appui long qui le dit — mais il
-                    // évite de maintenir les dix touches une à une pour trouver
-                    // les trois qui servent.
-                    if (option != null)
-                      Container(
-                        margin: const EdgeInsets.only(top: 3),
-                        width: 5,
-                        height: 5,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: option.disponible
-                              ? AlanyaColors.forest
-                              : Colors.white38,
-                        ),
-                      ),
                   ],
                 ),
               ),
