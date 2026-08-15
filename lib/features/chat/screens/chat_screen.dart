@@ -2512,13 +2512,24 @@ class _ChatScreenState extends State<ChatScreen>
         // pas.
         (() {
           var displayText = m.content ?? "[${m.type}]";
+          if (!m.isDeleted && extractGpsCoords(displayText) != null) {
+            displayText = displayText
+                .replaceAll(RegExp(r'\(\s*(-?\d+\.\d{2,})\s*,\s*(-?\d+\.\d{2,})\s*\)'), '')
+                .replaceAll(RegExp(r'(?:google\.\w+/maps|maps\.google\.\w+|goo\.gl/maps).*?[/@](-?\d+\.\d+),(-?\d+\.\d+)'), '')
+                .replaceAll(RegExp(r'(-?\d+\.\d{2,})\s*,\s*(-?\d+\.\d{2,})'), '')
+                .replaceAll(RegExp(r'\(\s*\)'), '')
+                .replaceAll(RegExp(r'\s{2,}'), ' ')
+                .trim();
+          }
           if (!m.isDeleted && displayText.contains('[')) {
             displayText = displayText.replaceAll(RegExp(r'\[([^\]]+)\]'), '').trim();
           }
-          return Text.rich(
-            TextSpan(children: spansWhatsApp(displayText.isNotEmpty ? displayText : (m.content ?? "[${m.type}]"))),
-            style: TextStyle(color: onTextColor),
-          );
+          return displayText.isNotEmpty
+              ? Text.rich(
+                  TextSpan(children: spansWhatsApp(displayText)),
+                  style: TextStyle(color: onTextColor),
+                )
+              : const SizedBox.shrink();
         })(),
         if ((m.content ?? '').isNotEmpty) ...[
           buildLinkPreview(m.content!, mine),
