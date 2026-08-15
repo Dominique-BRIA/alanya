@@ -15,6 +15,7 @@ import '../../chat/screens/chat_screen.dart';
 import '../call_controller.dart';
 import '../widgets/call_avatar_waves.dart';
 import '../widgets/ivr_panel.dart';
+import '../widgets/queue_status_sheet.dart';
 
 class ActiveCallScreen extends StatefulWidget {
   const ActiveCallScreen({super.key, this.incoming = false});
@@ -527,28 +528,46 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                   ignoring: !showControls,
                   child: Column(
                     children: [
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        // Aligné sur le bouton retour : ce bouton RÉDUIT
-                        // l'appel au lieu de le couper. Une croix « Fermer »
-                        // qui raccroche, à côté d'un retour qui réduit, disait
-                        // deux choses différentes du même geste.
-                        child: IconButton(
-                          icon: Icon(
-                            showIncoming
-                                ? Icons.close
-                                : Icons.keyboard_arrow_down,
-                            color: Colors.white70,
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          // Aligné sur le bouton retour : ce bouton RÉDUIT
+                          // l'appel au lieu de le couper. Une croix « Fermer »
+                          // qui raccroche, à côté d'un retour qui réduit, disait
+                          // deux choses différentes du même geste.
+                          IconButton(
+                            icon: Icon(
+                              showIncoming
+                                  ? Icons.close
+                                  : Icons.keyboard_arrow_down,
+                              color: Colors.white70,
+                            ),
+                            tooltip: showIncoming ? "Refuser" : "Réduire",
+                            onPressed: () async {
+                              if (showIncoming) {
+                                await _reject(cc);
+                              } else {
+                                _popScreen();
+                              }
+                            },
                           ),
-                          tooltip: showIncoming ? "Refuser" : "Réduire",
-                          onPressed: () async {
-                            if (showIncoming) {
-                              await _reject(cc);
-                            } else {
-                              _popScreen();
-                            }
-                          },
-                        ),
+                          // Uniquement pour un agent EN TRAIN de prendre un appel
+                          // routé par un centre (demande user 15/08/2026) — nul
+                          // pour un appel ordinaire, ou décroché app tuée
+                          // (`acceptById` n'a pas cette info).
+                          if (cc.activeIvrFromId != null)
+                            IconButton(
+                              icon: const Icon(Icons.groups_outlined, color: Colors.white70),
+                              tooltip: "Liste d'attente",
+                              onPressed: () {
+                                QueueStatusSheet.show(
+                                  context,
+                                  centerAlanyaID: cc.activeIvrFromId!,
+                                  api: context.read<AuthedApi>(),
+                                );
+                              },
+                            ),
+                        ],
                       ),
                       const SizedBox(height: 8),
                       if (!showVideo && !useDynamic)

@@ -196,6 +196,12 @@ class CallController extends ChangeNotifier {
   String? activeConvId;
   String? activePeerName;
   String? activePeerAvatarUrl;
+  /// Centre qui a routé l'appel EN COURS vers moi (agent) — voir
+  /// [IncomingCallInfo.ivrFromId]. Nul pour un appel ordinaire, ou pour un
+  /// appel décroché depuis l'écran natif application tuée (`acceptById` n'a
+  /// pas cette information, seule la trame WebSocket la porte).
+  String? activeIvrFromId;
+  String? activeIvrFromName;
   final Map<String, String> participantAvatars = {};
   String activeType = "AUDIO";
   ActiveCallRole? activeRole;
@@ -379,6 +385,65 @@ class CallController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Rappelle un client SOUS LE NOM DU CENTRE (demande user 15/08/2026),
+  /// depuis l'écran « Clients abandonnés ». Même déroulé que [startOutgoing]
+  /// — seule la création de l'appel diffère (`/api/queue/callback` au lieu de
+  /// `/api/calls`) : le reste (mesh, sonnerie sortante, minuteur) est
+  /// identique, l'agent est ici aussi l'appelant réel.
+  Future<void> startCallback(
+      String centerAlanyaID, String customerId, String title) async {
+    if (isBusy) {
+      lastError = "Termine l'appel en cours avant d'en lancer un autre";
+      notifyListeners();
+      throw StateError("BUSY");
+    }
+    lastError = null;
+    final started = await _calls.callback(centerAlanyaID, customerId);
+    _rt.callRing(started.id);
+    activeCallId = started.id;
+    activeConvId = started.convId;
+    isGroupCall = false;
+    isCallInitiator = true;
+    activePeerName = title;
+    activePeerAvatarUrl =
+        started.callees.isNotEmpty ? started.callees.first.avatarUrl : null;
+    activeType = "AUDIO";
+    activeRole = ActiveCallRole.outgoing;
+    participantNames.clear();
+    joinedParticipantIds.clear();
+    invitedParticipantIds.clear();
+    _initialMemberIds.clear();
+    _inviteParUserId.clear();
+    if (myUserId != null) {
+      joinedParticipantIds.add(myUserId!);
+      _initialMemberIds.add(myUserId!);
+    }
+    for (final c in started.callees) {
+      participantNames[c.userId] = c.pseudo ?? c.publicNumber ?? "Membre";
+      if (c.avatarUrl != null) participantAvatars[c.userId] = c.avatarUrl!;
+      _initialMemberIds.add(c.userId);
+    }
+    _ringTimeout?.cancel();
+    _ringTimeout = Timer(const Duration(seconds: 60), () {
+      if (activeRole == ActiveCallRole.outgoing && activeCallId != null) {
+        hangUp();
+      }
+    });
+    RingtoneService.instance.startOutgoing();
+    notifyListeners();
+    try {
+      await _ensureMesh();
+    } catch (e) {
+      await RingtoneService.instance.stop();
+      await _calls.end(started.id);
+      _rt.callState(started.id, "ended",
+          userId: myUserId, displayName: myDisplayName);
+      _clear();
+      rethrow;
+    }
+    notifyListeners();
+  }
+
   /// Envoie une touche au standard.
   ///
   /// Le clavier se verrouille jusqu'à la réponse du serveur : sur un réseau
@@ -436,6 +501,8 @@ class CallController extends ChangeNotifier {
         activeCallId = inc.callId;
         activeConvId = inc.convId;
         activePeerName = inc.displayTitle;
+        activeIvrFromId = inc.ivrFromId;
+        activeIvrFromName = inc.ivrFrom;
         activeType = inc.callType;
         activeRole = ActiveCallRole.ongoing;
         incoming = null;
@@ -465,6 +532,8 @@ class CallController extends ChangeNotifier {
     activeCallId = inc.callId; // activeCallId défini AVANT incoming = null
     activeConvId = inc.convId;
     activePeerName = inc.displayTitle;
+    activeIvrFromId = inc.ivrFromId;
+    activeIvrFromName = inc.ivrFrom;
     activePeerAvatarUrl = inc.isGroup ? null : inc.callerAvatarUrl;
     if (inc.callerAvatarUrl != null) {
       participantAvatars[inc.callerId] = inc.callerAvatarUrl!;
@@ -771,6 +840,8 @@ class CallController extends ChangeNotifier {
     activeCallId = null;
     activeConvId = null;
     activePeerName = null;
+    activeIvrFromId = null;
+    activeIvrFromName = null;
     activePeerAvatarUrl = null;
     participantAvatars.clear();
     activeRole = null;
@@ -1210,6 +1281,8 @@ class CallController extends ChangeNotifier {
         isGroup: (e["isGroup"] as bool?) ?? false,
         groupName: e["groupName"] as String?,
         memberCount: (e["memberCount"] as num?)?.toInt() ?? 2,
+        ivrFrom: e["ivrFrom"] as String?,
+        ivrFromId: e["ivrFromId"] as String?,
       );
       // COMMENT ANNONCER L'APPEL — cela dépend de l'état de l'application.
       //

@@ -42,6 +42,7 @@ import '../calls/ouvrir_appel_en_cours.dart';
 import '../calls/calls_repository.dart';
 import '../calls/full_screen_permission.dart';
 import '../calls/screens/calls_screen.dart';
+import '../calls/screens/abandoned_clients_screen.dart';
 import '../meetings/meeting_controller.dart';
 import '../meetings/screens/meetings_screen.dart';
 import '../status/screens/create_status_screen.dart';
@@ -203,6 +204,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const DevicesScreen()),
                 );
+              } else if (v == "abandoned") {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const AbandonedClientsScreen()),
+                );
               } else if (v == "logout") {
                 context.read<AuthController>().logout();
               }
@@ -213,6 +218,15 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: ListTile(
                     leading: Icon(Icons.devices_outlined),
                     title: Text("Appareils connectés"),
+                    contentPadding: EdgeInsets.zero,
+                  )),
+              // Réservé aux agents/centres côté serveur (403 sinon) — pas de
+              // condition ici, cf. AbandonedClientsScreen.
+              const PopupMenuItem(
+                  value: "abandoned",
+                  child: ListTile(
+                    leading: Icon(Icons.person_search_outlined),
+                    title: Text("Clients abandonnés"),
                     contentPadding: EdgeInsets.zero,
                   )),
               const PopupMenuItem(

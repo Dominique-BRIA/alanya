@@ -145,6 +145,11 @@ class IncomingCallInfo {
   final bool isGroup;
   final String? groupName;
   final int memberCount;
+  /// Nom et Alanya ID du centre qui a routé cet appel vers moi (agent) — nuls
+  /// pour un appel ordinaire. `ivrFromId` sert à interroger la file d'attente
+  /// du centre (`/api/queue/live`, `/api/queue/history`) depuis l'écran d'appel.
+  final String? ivrFrom;
+  final String? ivrFromId;
 
   IncomingCallInfo({
     required this.callId,
@@ -156,6 +161,8 @@ class IncomingCallInfo {
     required this.isGroup,
     required this.groupName,
     required this.memberCount,
+    this.ivrFrom,
+    this.ivrFromId,
   });
 
   String get displayTitle =>

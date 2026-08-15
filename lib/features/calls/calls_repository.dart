@@ -91,6 +91,23 @@ class CallsRepository {
 
   Future<StartedCall> start(String convId, String type) async {
     final data = await _api.post("/api/calls", {"convId": convId, "type": type});
+    return _parseStartedCall(data);
+  }
+
+  /// Rappelle un client SOUS LE NOM DU CENTRE (demande user 15/08/2026) —
+  /// typiquement un abandonné trouvé via [abandonedClients]. `centerAlanyaID`
+  /// doit être un centre dont l'appelant est agent, sinon 403.
+  Future<StartedCall> callback(String centerAlanyaID, String customerId,
+      {String type = "AUDIO"}) async {
+    final data = await _api.post("/api/queue/callback", {
+      "centerAlanyaID": centerAlanyaID,
+      "customerId": customerId,
+      "type": type,
+    });
+    return _parseStartedCall(data);
+  }
+
+  StartedCall _parseStartedCall(Map<String, dynamic> data) {
     final callees = ((data["callees"] as List?) ?? [])
         .map((c) {
           final m = c as Map<String, dynamic>;
@@ -112,6 +129,15 @@ class CallsRepository {
       memberCount: (data["memberCount"] as num?)?.toInt() ?? 2,
       callees: callees,
     );
+  }
+
+  /// Clients abandonnés/expirés, tous centres dont l'appelant est agent (ou
+  /// un seul si `centerAlanyaID` est fourni). Réservé aux agents — 403 sinon.
+  Future<List<Map<String, dynamic>>> abandonedClients({String? centerAlanyaID}) async {
+    final qs = StringBuffer("excludeServed=1&limit=100");
+    if (centerAlanyaID != null) qs.write("&centerAlanyaID=$centerAlanyaID");
+    final data = await _api.get("/api/queue/history?$qs");
+    return List<Map<String, dynamic>>.from(data["history"] as List? ?? []);
   }
 
   Future<AcceptCallResult> accept(String callId) async {
