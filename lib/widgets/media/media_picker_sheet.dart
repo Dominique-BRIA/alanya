@@ -27,6 +27,12 @@ class ContactPickResult {
   const ContactPickResult({required this.publicNumbers});
 }
 
+/// Résultat de la sélection de localisation.
+class LocationPickResult {
+  final String text;
+  const LocationPickResult({required this.text});
+}
+
 /// Bottom sheet style WhatsApp pour envoyer des médias :
 /// - 4 options : Galerie, Caméra, Document, Contact
 /// - Galerie récente en bas (thumbnails horizontaux, multi-sélection)
@@ -195,6 +201,63 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
     }
   }
 
+  // ══ LOCALISATION — envoi de position GPS / speech vendeur ══
+  Future<void> _pickLocation() async {
+    Navigator.pop(context);
+    final text = await showDialog<String>(
+      context: context,
+      builder: (ctx) {
+        final ctrl = TextEditingController();
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.location_on, color: Color(0xFFE53935)),
+              SizedBox(width: 8),
+              Text("Partager une localisation"),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                "Saisissez votre annonce ou discours commercial et vos coordonnées GPS (ex: 3.8480, 11.5020).",
+                style: TextStyle(fontSize: 13, color: Colors.black87),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: ctrl,
+                maxLines: 3,
+                decoration: InputDecoration(
+                  hintText: "ex: Venez visiter notre boutique au centre-ville ! (3.8480, 11.5020)",
+                  hintStyle: const TextStyle(fontSize: 12, color: Colors.grey),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text("Annuler"),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AlanyaColors.forest,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: const Text("Partager", style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        );
+      },
+    );
+    if (text != null && text.isNotEmpty && mounted) {
+      Navigator.pop(context, LocationPickResult(text: text));
+    }
+  }
+
   String _mimeFromAsset(AssetEntity asset) {
     final name = asset.title?.toLowerCase() ?? '';
     if (name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'image/jpeg';
@@ -285,6 +348,12 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
                   label: "Contact",
                   color: const Color(0xFF2196F3),
                   onTap: _pickContact,
+                ),
+                _optionButton(
+                  icon: Icons.location_on,
+                  label: "Position",
+                  color: const Color(0xFF009688),
+                  onTap: _pickLocation,
                 ),
               ],
             ),

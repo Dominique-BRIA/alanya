@@ -1295,6 +1295,13 @@ class _ChatScreenState extends State<ChatScreen>
       return;
     }
 
+    // Localisation sélectionnée → envoie le speech / position GPS
+    if (result is LocationPickResult) {
+      _inputCtrl.text = result.text;
+      _send();
+      return;
+    }
+
     // Médias sélectionnés
     final files = result as List<MediaPickResult>;
     if (files.isEmpty) return;
