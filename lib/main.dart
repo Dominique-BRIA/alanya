@@ -77,6 +77,9 @@ void main() async {
         Provider<ApiClient>.value(value: api),
         Provider<AuthRepository>.value(value: repo),
         Provider<TokenStorage>.value(value: storage),
+        // Sert directement CallRatingSheet (POST /api/queue/rate) : les autres
+        // consommateurs passent par un repository dédié, celui-ci n'en a pas.
+        Provider<AuthedApi>.value(value: authedApi),
         Provider<ContactsRepository>.value(
             value: ContactsRepository(authedApi)),
         Provider<ChatRepository>.value(value: ChatRepository(authedApi)),

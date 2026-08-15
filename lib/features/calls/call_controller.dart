@@ -176,6 +176,22 @@ class CallController extends ChangeNotifier {
   /// un centre d'appels et l'écran d'appel affiche le menu à la place.
   IvrSession? ivr;
 
+  /// `idHist` reçu via `queue_rating_available`, en attente d'être montré.
+  ///
+  /// Ne PAS le vider dans `_clear()` : le message serveur arrive quasi
+  /// toujours après notre propre nettoyage local (voir le handler). Consommé
+  /// une seule fois par [consumePendingRating], appelé par l'écran d'appel
+  /// juste après s'être refermé.
+  String? _pendingRatingIdHist;
+
+  /// Lit puis efface l'évaluation en attente — à appeler au plus une fois par
+  /// appel, après la fermeture de l'écran.
+  String? consumePendingRating() {
+    final v = _pendingRatingIdHist;
+    _pendingRatingIdHist = null;
+    return v;
+  }
+
   String? activeCallId;
   String? activeConvId;
   String? activePeerName;
@@ -1365,6 +1381,17 @@ class CallController extends ChangeNotifier {
       _finIvr = Timer(const Duration(seconds: 4), () {
         if (ivr?.callId == callId) hangUp();
       });
+    } else if (type == "queue_rating_available") {
+      // Envoyé par le serveur à la clôture d'un appel passé par un centre
+      // (voir `handleCallState` de ws-server.mjs), une fois que l'appel a
+      // réellement atteint un agent. Arrive quasi toujours APRÈS `_clear()` :
+      // notre propre raccrochage nettoie l'état localement avant que le
+      // serveur ait fini de traiter l'`ended` qu'on vient de lui envoyer.
+      // On garde l'`idHist` sans condition sur l'appel actif ; c'est
+      // `ActiveCallScreen` qui décide quand le montrer, après la fermeture
+      // de l'écran.
+      final idHist = e["idHist"] as String?;
+      if (idHist != null) _pendingRatingIdHist = idHist;
     } else if (type == "call_invite_result") {
       // Accusé de réception direct du serveur après un call_invite. C'est le
       // moyen le plus fiable de connaître l'ID de la cible : il arrive même si

@@ -5,8 +5,11 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/app_snackbar.dart';
+import '../../../core/authed_api.dart';
+import '../../../core/push_service.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
+import '../../../widgets/call_rating_sheet.dart';
 import '../../../widgets/contact_picker_sheet.dart';
 import '../../chat/screens/chat_screen.dart';
 import '../call_controller.dart';
@@ -104,9 +107,28 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     if (!mounted) return;
     final cc = _calls;
     if (cc != null && !cc.isBusy) {
+      // Lu AVANT de fermer l'écran : `consumePendingRating` ne rend qu'une
+      // fois, et un appel sans idHist (jamais atteint un agent) rend nul.
+      final idHist = cc.consumePendingRating();
       _popScreen();
+      if (idHist != null) _afficherNotePostAppel(idHist);
     }
     if (mounted) _syncStreams();
+  }
+
+  /// Affiche la feuille de notation une fois l'écran d'appel refermé.
+  ///
+  /// ⚠️ Sur le contexte GLOBAL (`PushService.navigatorKey`), pas `context` de
+  /// cet écran : `_popScreen()` vient de le retirer de la pile, et un contexte
+  /// démonté ne peut plus ouvrir de feuille modale. `addPostFrameCallback`
+  /// laisse le temps à l'animation de fermeture de démarrer avant d'empiler
+  /// la feuille par-dessus.
+  void _afficherNotePostAppel(String idHist) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = PushService.navigatorKey.currentContext;
+      if (ctx == null) return;
+      CallRatingSheet.show(ctx, idHist: idHist, api: ctx.read<AuthedApi>());
+    });
   }
 
   Future<void> _initRenderers() async {
