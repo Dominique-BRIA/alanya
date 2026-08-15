@@ -288,13 +288,27 @@ class RealtimeClient extends ChangeNotifier {
       });
 
   void sendMedia(String convId, String mediaId, String msgType, String tempId,
-          {String? replyToId}) =>
+          {String? replyToId, String? content}) =>
       _send({
         "type": "send",
         "convId": convId,
         "mediaId": mediaId,
         "msgType": msgType,
         "tempId": tempId,
+        if (content != null && content.isNotEmpty) "content": content,
+        if (replyToId != null) "replyToId": replyToId,
+      });
+
+  void sendMultiMedia(
+          String convId, List<String> mediaIds, String msgType, String tempId,
+          {String? replyToId, String? content}) =>
+      _send({
+        "type": "send",
+        "convId": convId,
+        "mediaIds": mediaIds,
+        "msgType": msgType,
+        "tempId": tempId,
+        if (content != null && content.isNotEmpty) "content": content,
         if (replyToId != null) "replyToId": replyToId,
       });
 

@@ -46,6 +46,7 @@ import '../../media/media_repository.dart';
 import '../chat_repository.dart';
 import '../widgets/activity_indicator.dart';
 import 'pdf_viewer_screen.dart';
+import 'media_caption_screen.dart';
 
 // ── Imports previews WhatsApp ──
 import '../../../widgets/media/image_bubble.dart';
@@ -1296,6 +1297,11 @@ class _ChatScreenState extends State<ChatScreen>
     // Médias sélectionnés
     final files = result as List<MediaPickResult>;
     if (files.isEmpty) return;
+
+    // Ouvre la deuxième page (prévisualisation + saisie de légende façon WhatsApp)
+    final captionText = await MediaCaptionScreen.open(context, files);
+    if (captionText == null) return; // Annulé par l'utilisateur
+
     setState(() => _uploading = true);
     final replyId = _replyTo?.id;
     final replyMsg = _replyTo;
@@ -1314,11 +1320,12 @@ class _ChatScreenState extends State<ChatScreen>
         firstMime ??= f.mimeType;
       }
       final msgType = firstMime!.startsWith('image/') ? 'IMAGE' : firstMime.startsWith('video/') ? 'VIDEO' : firstMime.startsWith('audio/') ? 'AUDIO' : 'FILE';
+      final finalContent = captionText.isNotEmpty ? captionText : null;
       if (rt.connected) {
-        rt.sendMultiMedia(widget.convId, uploadedIds, msgType, "tmp-${DateTime.now().microsecondsSinceEpoch}", replyToId: replyId);
+        rt.sendMultiMedia(widget.convId, uploadedIds, msgType, "tmp-${DateTime.now().microsecondsSinceEpoch}", replyToId: replyId, content: finalContent);
       } else {
         final repo = context.read<ChatRepository>();
-        final msg = await repo.sendMultiMedia(widget.convId, uploadedIds, msgType, replyToId: replyId);
+        final msg = await repo.sendMultiMedia(widget.convId, uploadedIds, msgType, replyToId: replyId, content: finalContent);
         if (mounted) setState(() => _messages = [..._messages, msg]);
       }
       _scrollToBottom();
@@ -2500,6 +2507,44 @@ class _ChatScreenState extends State<ChatScreen>
           style: TextStyle(color: onTextColor),
         ),
         if ((m.content ?? '').isNotEmpty) buildLinkPreview(m.content!, mine),
+        if (!m.isDeleted && (m.content ?? '').isNotEmpty) ...[
+          (() {
+            final buttonMatches = RegExp(r'\[([^\]]+)\]').allMatches(m.content!);
+            if (buttonMatches.isEmpty) return const SizedBox.shrink();
+            return Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: buttonMatches.map((bm) {
+                  final btnTitle = bm.group(1) ?? '';
+                  return GestureDetector(
+                    onTap: () {
+                      _inputCtrl.text = btnTitle;
+                      _send();
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: mine ? Colors.white.withOpacity(0.2) : _accent.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: mine ? Colors.white54 : _accent),
+                      ),
+                      child: Text(
+                        btnTitle,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: mine ? Colors.white : _accent,
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            );
+          })(),
+        ],
         if (translated != null) ...[
           const SizedBox(height: 6),
           Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: mine ? Colors.white.withOpacity(0.15) : _quoteBgRecv(0.7), borderRadius: BorderRadius.circular(8)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
