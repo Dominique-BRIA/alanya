@@ -78,6 +78,10 @@ class _AbandonedClientsScreenState extends State<AbandonedClientsScreen> {
       await Navigator.of(context).push(
         MaterialPageRoute(fullscreenDialog: true, builder: (_) => const ActiveCallScreen()),
       );
+      // Au retour de l'appel : si le client a décroché, le serveur l'a passé
+      // en RECONTACTER et il ne fait plus partie de la liste. Sans ce
+      // rechargement, l'agent le verrait encore et le rappellerait.
+      if (mounted) await _charger();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
