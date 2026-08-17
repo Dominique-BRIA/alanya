@@ -1,7 +1,10 @@
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
+import '../../core/media_cache.dart';
 import '../../theme/alanya_theme.dart';
 
 /// Carte statique centrée sur un point, composée de tuiles.
@@ -76,8 +79,16 @@ class OsmStaticMap extends StatelessWidget {
   String _urlTuile(int z, int x, int y) =>
       "https://api.maptiler.com/maps/$_style/256/$z/$x/$y.png?key=$cleMapTiler";
 
+  /// Nom de la tuile sur le disque.
+  ///
+  /// ⚠️ **La clé n'entre PAS dans ce nom**, alors qu'elle est dans l'URL : une
+  /// rotation de clé jetterait sinon tout le cache, alors que l'image est
+  /// exactement la même. Le style, lui, en fait partie — deux styles donnent
+  /// deux images pour les mêmes coordonnées.
+  String _cleCache(int z, int x, int y) => "tuile_${_style}_${z}_${x}_$y";
+
   /// Identifie l'application auprès du fournisseur de tuiles.
-  static const Map<String, String> _entetes = {
+  static const Map<String, String> entetes = {
     "User-Agent": "AlanyaWork/0.1 (com.alanya237.work)",
   };
 
@@ -127,16 +138,8 @@ class OsmStaticMap extends StatelessWidget {
           top: ty * _tuile - origineY,
           width: _tuile,
           height: _tuile,
-          child: Image.network(
-            _urlTuile(zoom, x, ty),
-            headers: _entetes,
-            fit: BoxFit.cover,
-            // Une tuile manquante ne doit pas trouer la carte : le fond neutre
-            // reste visible, et le repère par-dessus dit toujours où on est.
-            errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-            loadingBuilder: (_, enfant, progres) =>
-                progres == null ? enfant : const SizedBox.shrink(),
-          ),
+          child:
+              _Tuile(url: _urlTuile(zoom, x, ty), cle: _cleCache(zoom, x, ty)),
         ));
       }
     }
@@ -188,6 +191,90 @@ class OsmStaticMap extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Une tuile, servie depuis le DISQUE quand elle y est déjà.
+///
+/// POURQUOI : le quota MapTiler du palier gratuit se compte en requêtes
+/// (100 000 par mois). `Image.network` ne garde ses images qu'en MÉMOIRE, et
+/// Flutter vide ce cache dès qu'il manque de place : remonter une conversation
+/// où traînent trois positions retéléchargeait leurs tuiles à chaque passage.
+/// Le même carré de carte pouvait donc être payé dix fois dans la journée.
+///
+/// Avec le disque, une tuile est téléchargée UNE FOIS par téléphone. Et comme
+/// on partage souvent sa position depuis les mêmes endroits — bureau, domicile,
+/// boutique —, les mêmes tuiles reviennent d'un message à l'autre : c'est le
+/// cas où un cache rapporte le plus.
+///
+/// ⚠️ Pas de purge par ancienneté : une tuile pèse ~30 Ko, il en faudrait
+/// plusieurs milliers pour que cela pèse. `MediaCache.clear()` les efface avec
+/// le reste si le besoin s'en fait sentir.
+class _Tuile extends StatefulWidget {
+  const _Tuile({required this.url, required this.cle});
+
+  final String url;
+  final String cle;
+
+  @override
+  State<_Tuile> createState() => _TuileState();
+}
+
+class _TuileState extends State<_Tuile> {
+  String? _chemin;
+
+  @override
+  void initState() {
+    super.initState();
+    _charge();
+  }
+
+  @override
+  void didUpdateWidget(_Tuile ancien) {
+    super.didUpdateWidget(ancien);
+    // La liste recycle ses widgets : sans cela, une tuile garderait l'image de
+    // la position précédente en changeant de message.
+    if (ancien.cle != widget.cle) {
+      _chemin = null;
+      _charge();
+    }
+  }
+
+  Future<void> _charge() async {
+    try {
+      final chemin = await MediaCache.getOrFetch(
+        mediaId: widget.cle,
+        ext: 'png',
+        fetchNetwork: () async {
+          final res = await http
+              .get(Uri.parse(widget.url), headers: OsmStaticMap.entetes)
+              .timeout(const Duration(seconds: 15));
+          // ⚠️ Une clé invalide répond 403 AVEC une image d'erreur dans le
+          // corps. Sans ce contrôle, ce carré « unauthorized » serait écrit sur
+          // le disque et s'afficherait POUR TOUJOURS, même une fois la clé
+          // corrigée — un cache ne se trompe qu'une fois, mais durablement.
+          if (res.statusCode != 200) {
+            throw HttpException('tuile ${res.statusCode}');
+          }
+          return res.bodyBytes;
+        },
+      );
+      if (mounted) setState(() => _chemin = chemin);
+    } catch (_) {
+      // Tuile indisponible : le fond neutre reste, et le repère par-dessus dit
+      // toujours où on est.
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final chemin = _chemin;
+    if (chemin == null) return const SizedBox.shrink();
+    return Image.file(
+      File(chemin),
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
     );
   }
 }
