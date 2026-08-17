@@ -1,8 +1,4 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
-import 'package:flutter_contacts/flutter_contacts.dart' as fc;
-import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
 import '../features/contacts/contacts_repository.dart';
@@ -13,30 +9,21 @@ import 'avatar_circle.dart';
 
 /// Ce que l'écran de discussion doit envoyer après la sélection.
 ///
-/// [photoBytes] n'est renseigné que pour le partage d'UN SEUL contact du
-/// répertoire qui a une photo : elle part comme média du message. On ne
-/// téléverse pas dix photos pour dix contacts — la carte n'en montrerait
-/// aucune, et ce serait dix requêtes pour rien.
+/// Type dédié (et non une `List<SharedContact>`) parce que la feuille de médias
+/// rend des résultats de natures différentes par le même `Navigator.pop` :
+/// l'écran de discussion distingue les cas par leur type.
 class ContactShareResult {
   final List<SharedContact> contacts;
-  final Uint8List? photoBytes;
-  final String? photoMimeType;
-
-  const ContactShareResult({
-    required this.contacts,
-    this.photoBytes,
-    this.photoMimeType,
-  });
+  const ContactShareResult({required this.contacts});
 }
 
-/// Sélecteur de contact à partager, façon WhatsApp : deux origines, recherche,
-/// multi-sélection, et un compteur sur le bouton d'envoi.
+/// Sélecteur des contacts **Alanya** à partager dans une discussion.
 ///
-/// Les deux origines ne sont pas un raffinement : un contact **Alanya** porte un
-/// Alanya ID, donc le destinataire pourra lui écrire ou l'appeler dans
-/// l'application ; un contact du **répertoire** ne porte qu'un numéro, et la
-/// seule action utile est de l'enregistrer. Fusionner les deux listes
-/// masquerait cette différence au moment précis où elle se décide.
+/// ⚠️ Uniquement des contacts Alanya, c'est-à-dire porteurs d'un Alanya ID —
+/// règle rappelée par le user le 17/08/2026. C'est ce qui donne son intérêt à la
+/// fiche reçue : le destinataire peut écrire, appeler et ajouter la personne
+/// DANS l'application. Un contact tiré du répertoire téléphonique ne
+/// porterait qu'un nom et un numéro inutilisables ici.
 class ContactShareSheet extends StatefulWidget {
   const ContactShareSheet({super.key});
 
@@ -53,48 +40,13 @@ class ContactShareSheet extends StatefulWidget {
   State<ContactShareSheet> createState() => _ContactShareSheetState();
 }
 
-/// Une entrée de la liste, quelle que soit son origine.
-class _Entree {
-  final String cle;
-  final String nom;
-  final String? numero;
-  final String? alanyaId;
-  final String? avatarUrl;
-
-  /// Identifiant du contact du répertoire, pour aller chercher sa photo
-  /// seulement s'il est retenu (la charger pour tout le carnet serait lent).
-  final String? idTelephone;
-
-  const _Entree({
-    required this.cle,
-    required this.nom,
-    this.numero,
-    this.alanyaId,
-    this.avatarUrl,
-    this.idTelephone,
-  });
-
-  SharedContact versCharge() => SharedContact(
-        name: nom,
-        phones: numero != null ? [numero!] : const [],
-        alanyaId: alanyaId,
-        avatarUrl: avatarUrl,
-      );
-}
-
 class _ContactShareSheetState extends State<ContactShareSheet> {
-  bool _origineAlanya = true;
-
-  List<_Entree>? _alanya;
-  List<_Entree>? _telephone;
+  List<modele.Contact>? _contacts;
   bool _chargement = true;
-  bool _permissionRefusee = false;
   String? _erreur;
 
-  final Set<String> _retenus = {};
-  final Map<String, _Entree> _parCle = {};
+  final Set<String> _retenus = {}; // Alanya ID des contacts choisis
   String _recherche = '';
-  bool _envoiEnCours = false;
 
   /// Plafond aligné sur celui du serveur (10 par charge) : bloquer la sélection
   /// vaut mieux que laisser envoyer puis échouer à l'arrivée.
@@ -103,10 +55,10 @@ class _ContactShareSheetState extends State<ContactShareSheet> {
   @override
   void initState() {
     super.initState();
-    _chargeAlanya();
+    _charge();
   }
 
-  Future<void> _chargeAlanya() async {
+  Future<void> _charge() async {
     setState(() {
       _chargement = true;
       _erreur = null;
@@ -114,92 +66,26 @@ class _ContactShareSheetState extends State<ContactShareSheet> {
     try {
       final contacts = await context.read<ContactsRepository>().list();
       if (!mounted) return;
-      final entrees = contacts
-          .where((c) => !c.isBlocked)
-          .map((modele.Contact c) => _Entree(
-                cle: 'alanya:${c.publicNumber}',
-                nom: c.displayName,
-                numero: c.publicNumber,
-                alanyaId: c.publicNumber,
-                avatarUrl: c.avatarUrl,
-              ))
-          .toList()
-        ..sort((a, b) => a.nom.toLowerCase().compareTo(b.nom.toLowerCase()));
-      for (final e in entrees) {
-        _parCle[e.cle] = e;
-      }
+      final utiles = contacts.where((c) => !c.isBlocked).toList()
+        ..sort((a, b) =>
+            a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase()));
       setState(() {
-        _alanya = entrees;
+        _contacts = utiles;
         _chargement = false;
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _chargement = false;
-        _erreur = "Impossible de charger les contacts Alanya";
+        _erreur = "Impossible de charger les contacts";
       });
     }
   }
 
-  Future<void> _chargeTelephone() async {
-    if (_telephone != null) return;
+  void _bascule(modele.Contact c) {
     setState(() {
-      _chargement = true;
-      _erreur = null;
-    });
-    final statut = await Permission.contacts.request();
-    if (!mounted) return;
-    if (!statut.isGranted) {
-      setState(() {
-        _chargement = false;
-        _permissionRefusee = true;
-      });
-      return;
-    }
-    try {
-      // `withPhoto: false` : la photo d'un carnet de 800 contacts ferait
-      // plusieurs mégaoctets et rendrait l'ouverture de la feuille inutilisable.
-      // Celle du contact RETENU est chargée à l'envoi.
-      final brut = await fc.FlutterContacts.getContacts(
-        withProperties: true,
-        withPhoto: false,
-      );
-      if (!mounted) return;
-      final entrees = <_Entree>[];
-      for (final c in brut) {
-        final nom = c.displayName.trim();
-        final numero =
-            c.phones.isNotEmpty ? c.phones.first.number.trim() : null;
-        if (nom.isEmpty && (numero == null || numero.isEmpty)) continue;
-        entrees.add(_Entree(
-          cle: 'tel:${c.id}',
-          nom: nom.isNotEmpty ? nom : numero!,
-          numero: (numero != null && numero.isNotEmpty) ? numero : null,
-          idTelephone: c.id,
-        ));
-      }
-      entrees
-          .sort((a, b) => a.nom.toLowerCase().compareTo(b.nom.toLowerCase()));
-      for (final e in entrees) {
-        _parCle[e.cle] = e;
-      }
-      setState(() {
-        _telephone = entrees;
-        _chargement = false;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _chargement = false;
-        _erreur = "Impossible de lire le répertoire";
-      });
-    }
-  }
-
-  void _bascule(_Entree e) {
-    setState(() {
-      if (_retenus.contains(e.cle)) {
-        _retenus.remove(e.cle);
+      if (_retenus.contains(c.publicNumber)) {
+        _retenus.remove(c.publicNumber);
       } else {
         if (_retenus.length >= _maxContacts) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -207,57 +93,37 @@ class _ContactShareSheetState extends State<ContactShareSheet> {
           );
           return;
         }
-        _retenus.add(e.cle);
+        _retenus.add(c.publicNumber);
       }
     });
   }
 
-  Future<void> _envoyer() async {
-    if (_retenus.isEmpty || _envoiEnCours) return;
-    setState(() => _envoiEnCours = true);
-
-    final entrees =
-        _retenus.map((cle) => _parCle[cle]).whereType<_Entree>().toList();
-    Uint8List? photo;
-    String? mime;
-
-    // Photo seulement pour un partage unique venu du répertoire : c'est le seul
-    // cas où la carte peut l'afficher, un compte Alanya ayant déjà son avatar.
-    if (entrees.length == 1 && entrees.first.idTelephone != null) {
-      try {
-        final complet = await fc.FlutterContacts.getContact(
-          entrees.first.idTelephone!,
-          withPhoto: true,
-          withThumbnail: true,
-        );
-        final octets = complet?.photo ?? complet?.thumbnail;
-        if (octets != null && octets.isNotEmpty) {
-          photo = octets;
-          // Les photos de contact d'Android sont des JPEG ; le serveur n'accepte
-          // de toute façon que des types connus, et se fie à celui annoncé.
-          mime = 'image/jpeg';
-        }
-      } catch (_) {
-        // Une photo illisible ne doit pas empêcher le partage du contact.
-      }
-    }
-
-    if (!mounted) return;
-    Navigator.of(context).pop(ContactShareResult(
-      contacts: entrees.map((e) => e.versCharge()).toList(),
-      photoBytes: photo,
-      photoMimeType: mime,
-    ));
+  void _envoyer() {
+    if (_retenus.isEmpty) return;
+    final source = _contacts ?? const <modele.Contact>[];
+    // Ordre de la LISTE, et non ordre de sélection : c'est celui que
+    // l'utilisateur voit à l'écran au moment où il valide.
+    final charges = source
+        .where((c) => _retenus.contains(c.publicNumber))
+        .map((c) => SharedContact(
+              name: c.displayName,
+              phones: [c.publicNumber],
+              alanyaId: c.publicNumber,
+              avatarUrl: c.avatarUrl,
+            ))
+        .toList();
+    if (charges.isEmpty) return;
+    Navigator.of(context).pop(ContactShareResult(contacts: charges));
   }
 
-  List<_Entree> get _liste {
-    final source = (_origineAlanya ? _alanya : _telephone) ?? const <_Entree>[];
+  List<modele.Contact> get _liste {
+    final source = _contacts ?? const <modele.Contact>[];
     if (_recherche.isEmpty) return source;
     final q = _recherche.toLowerCase();
     return source
-        .where((e) =>
-            e.nom.toLowerCase().contains(q) ||
-            (e.numero?.toLowerCase().contains(q) ?? false))
+        .where((c) =>
+            c.displayName.toLowerCase().contains(q) ||
+            c.publicNumber.contains(q))
         .toList();
   }
 
@@ -288,43 +154,13 @@ class _ContactShareSheetState extends State<ContactShareSheet> {
         const Text("Partager un contact",
             style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
         const SizedBox(height: 10),
-
-        // Origine : deux sources qui n'offrent pas les mêmes actions au
-        // destinataire (voir l'en-tête de la classe).
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: SegmentedButton<bool>(
-            segments: const [
-              ButtonSegment(
-                  value: true,
-                  label: Text("Alanya"),
-                  icon: Icon(Icons.chat_bubble_outline_rounded, size: 16)),
-              ButtonSegment(
-                  value: false,
-                  label: Text("Téléphone"),
-                  icon: Icon(Icons.contacts_outlined, size: 16)),
-            ],
-            selected: {_origineAlanya},
-            showSelectedIcon: false,
-            onSelectionChanged: (s) {
-              final alanya = s.first;
-              setState(() {
-                _origineAlanya = alanya;
-                _permissionRefusee = false;
-              });
-              if (!alanya) _chargeTelephone();
-            },
-          ),
-        ),
-        const SizedBox(height: 10),
-
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: TextField(
             onChanged: (v) => setState(() => _recherche = v.trim()),
             decoration: InputDecoration(
               isDense: true,
-              hintText: "Rechercher",
+              hintText: "Rechercher un contact",
               prefixIcon: const Icon(Icons.search, size: 20),
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -333,9 +169,7 @@ class _ContactShareSheetState extends State<ContactShareSheet> {
           ),
         ),
         const SizedBox(height: 6),
-
         Flexible(child: _corps(onSub)),
-
         if (_retenus.isNotEmpty)
           SafeArea(
             top: false,
@@ -344,14 +178,8 @@ class _ContactShareSheetState extends State<ContactShareSheet> {
               child: SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
-                  onPressed: _envoiEnCours ? null : _envoyer,
-                  icon: _envoiEnCours
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2, color: Colors.white))
-                      : const Icon(Icons.send, size: 18),
+                  onPressed: _envoyer,
+                  icon: const Icon(Icons.send, size: 18),
                   label: Text("Envoyer (${_retenus.length})"),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: accentOf(context),
@@ -376,30 +204,11 @@ class _ContactShareSheetState extends State<ContactShareSheet> {
             Center(child: CircularProgressIndicator(color: accentOf(context))),
       );
     }
-    if (_permissionRefusee) {
-      return _message(
-        icone: Icons.contacts_outlined,
-        texte: "Accès au répertoire refusé",
-        action: const TextButton(
-          onPressed: openAppSettings,
-          child: Text("Ouvrir les paramètres"),
-        ),
-        onSub: onSub,
-      );
-    }
     if (_erreur != null) {
       return _message(
         icone: Icons.cloud_off_rounded,
         texte: _erreur!,
-        action: TextButton(
-          onPressed: _origineAlanya
-              ? _chargeAlanya
-              : () {
-                  _telephone = null;
-                  _chargeTelephone();
-                },
-          child: const Text("Réessayer"),
-        ),
+        action: TextButton(onPressed: _charge, child: const Text("Réessayer")),
         onSub: onSub,
       );
     }
@@ -408,7 +217,9 @@ class _ContactShareSheetState extends State<ContactShareSheet> {
     if (liste.isEmpty) {
       return _message(
         icone: Icons.person_search_outlined,
-        texte: _recherche.isEmpty ? "Aucun contact" : "Aucun résultat",
+        texte: _recherche.isEmpty
+            ? "Aucun contact Alanya à partager"
+            : "Aucun résultat",
         onSub: onSub,
       );
     }
@@ -417,19 +228,18 @@ class _ContactShareSheetState extends State<ContactShareSheet> {
       shrinkWrap: true,
       itemCount: liste.length,
       itemBuilder: (_, i) {
-        final e = liste[i];
-        final choisi = _retenus.contains(e.cle);
+        final c = liste[i];
+        final choisi = _retenus.contains(c.publicNumber);
         return ListTile(
-          onTap: () => _bascule(e),
-          leading:
-              AvatarCircle(name: e.nom, avatarUrl: e.avatarUrl, radius: 20),
-          title: Text(e.nom, maxLines: 1, overflow: TextOverflow.ellipsis),
-          subtitle: e.numero != null
-              ? Text(e.numero!,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 12.5, color: onSub))
-              : null,
+          onTap: () => _bascule(c),
+          leading: AvatarCircle(
+              name: c.displayName, avatarUrl: c.avatarUrl, radius: 20),
+          title:
+              Text(c.displayName, maxLines: 1, overflow: TextOverflow.ellipsis),
+          subtitle: Text(c.publicNumber,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12.5, color: onSub)),
           trailing: Container(
             width: 22,
             height: 22,

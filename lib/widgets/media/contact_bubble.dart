@@ -6,20 +6,22 @@ import '../avatar_circle.dart';
 
 /// Ce que le destinataire peut faire d'un contact reçu.
 ///
-/// Les trois actions sont fournies par l'écran de discussion : ouvrir une
-/// discussion et appeler supposent de créer la conversation et de piloter
-/// `CallController`, ce qui n'a rien à faire dans une bulle. L'enregistrement
-/// passe par l'écran de création de contact du téléphone (aucune permission
-/// d'écriture demandée, l'utilisateur confirme lui-même).
+/// Les trois actions sont fournies par l'écran de discussion : elles supposent
+/// de créer une conversation, de piloter `CallController` ou d'écrire dans le
+/// répertoire Alanya — rien de tout cela n'a sa place dans une bulle.
+///
+/// « Ajouter » ajoute la personne aux contacts **Alanya**, et non au carnet
+/// d'adresses du téléphone : c'est le répertoire dont cette application se
+/// sert pour retrouver quelqu'un, l'appeler et lui écrire.
 class ContactBubbleActions {
   final void Function(SharedContact contact) onOuvrirDiscussion;
   final void Function(SharedContact contact) onAppeler;
-  final void Function(SharedContact contact) onEnregistrer;
+  final void Function(SharedContact contact) onAjouter;
 
   const ContactBubbleActions({
     required this.onOuvrirDiscussion,
     required this.onAppeler,
-    required this.onEnregistrer,
+    required this.onAjouter,
   });
 }
 
@@ -34,7 +36,6 @@ class ContactBubble extends StatelessWidget {
     super.key,
     required this.contacts,
     required this.actions,
-    this.photoUrl,
     this.onLongPress,
     this.timestamp,
     this.statusWidget,
@@ -43,14 +44,6 @@ class ContactBubble extends StatelessWidget {
 
   final List<SharedContact> contacts;
   final ContactBubbleActions actions;
-
-  /// Photo portée par le MÉDIA du message : c'est ainsi qu'arrive la photo d'un
-  /// contact du répertoire, la charge JSON ne transportant jamais d'image.
-  /// Ne s'applique qu'au partage d'UN seul contact.
-  ///
-  /// Chemin RELATIF (`/api/media/<id>`) : [AvatarCircle] le résout et va
-  /// chercher le jeton lui-même — inutile de le lui passer.
-  final String? photoUrl;
 
   final VoidCallback? onLongPress;
   final String? timestamp;
@@ -119,10 +112,11 @@ class ContactBubble extends StatelessWidget {
     final sousTitre = contact.subtitle;
     return Row(children: [
       AvatarCircle(
+        // L'avatar du compte Alanya, tel qu'il est en base : chemin relatif,
+        // URL absolue ou image base64 — `AvatarCircle` traite les trois formes
+        // et va chercher le jeton lui-même.
         name: contact.displayName,
-        // La photo du média prime : elle vient du répertoire de l'expéditeur,
-        // alors que `avatarUrl` n'existe que pour un compte Alanya.
-        avatarUrl: photoUrl ?? contact.avatarUrl,
+        avatarUrl: contact.avatarUrl,
         radius: 22,
       ),
       const SizedBox(width: 10),
@@ -199,10 +193,10 @@ class ContactBubble extends StatelessWidget {
 
   Widget _actionsRow(
       BuildContext context, SharedContact contact, Color onText) {
-    // Un contact du répertoire n'a pas de compte : lui « ouvrir une
-    // discussion » ou l'appeler DANS Alanya n'a aucun sens, et proposer une
-    // action qui échoue est pire que ne pas la proposer. Il reste
-    // « Enregistrer », qui vaut pour tout le monde.
+    // Toutes les fiches partagées viennent des contacts Alanya, donc les trois
+    // actions ont toujours un sens. La garde reste néanmoins : la charge peut
+    // avoir été écrite par un autre client, et proposer « Appeler » sur une
+    // fiche sans Alanya ID donnerait un bouton qui échoue.
     final surAlanya = contact.alanyaId != null;
     return Row(children: [
       if (surAlanya)
@@ -225,15 +219,29 @@ class ContactBubble extends StatelessWidget {
             onText: onText,
           ),
         ),
-      Expanded(
-        child: _bouton(
-          context,
-          label: "Enregistrer",
-          icone: Icons.person_add_alt_1_outlined,
-          onTap: () => actions.onEnregistrer(contact),
-          onText: onText,
+      if (surAlanya)
+        Expanded(
+          child: _bouton(
+            context,
+            label: "Ajouter",
+            icone: Icons.person_add_alt_1_outlined,
+            onTap: () => actions.onAjouter(contact),
+            onText: onText,
+          ),
         ),
-      ),
+      // Fiche sans Alanya ID (client tiers) : rien à faire dans l'application,
+      // on affiche au moins le numéro, déjà rendu au-dessus.
+      if (!surAlanya)
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text("Contact hors Alanya",
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 12,
+                    color: isMe ? Colors.white70 : AlanyaColors.grey500)),
+          ),
+        ),
     ]);
   }
 
@@ -346,11 +354,13 @@ class ContactListSheet extends StatelessWidget {
                         actions.onOuvrirDiscussion(c);
                       },
                     ),
-                  IconButton(
-                    tooltip: "Enregistrer",
-                    icon: const Icon(Icons.person_add_alt_1_outlined, size: 20),
-                    onPressed: () => actions.onEnregistrer(c),
-                  ),
+                  if (c.alanyaId != null)
+                    IconButton(
+                      tooltip: "Ajouter à mes contacts",
+                      icon:
+                          const Icon(Icons.person_add_alt_1_outlined, size: 20),
+                      onPressed: () => actions.onAjouter(c),
+                    ),
                 ]),
               );
             },

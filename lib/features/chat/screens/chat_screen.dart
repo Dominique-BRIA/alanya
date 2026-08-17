@@ -15,7 +15,6 @@ import '../../../models/call_record.dart';
 import '../../calls/calls_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_contacts/flutter_contacts.dart' as fc;
 import 'package:provider/provider.dart';
 
 import '../../../core/api_client.dart';
@@ -43,6 +42,7 @@ import '../../auth/auth_controller.dart';
 import '../../calls/call_controller.dart';
 import '../../calls/message_erreur_appel.dart';
 import '../../calls/screens/active_call_screen.dart';
+import '../../contacts/contacts_repository.dart';
 import '../../contacts/screens/contact_info_screen.dart';
 import '../../group/screens/group_info_screen.dart';
 import '../../media/media_repository.dart';
@@ -1370,12 +1370,12 @@ class _ChatScreenState extends State<ChatScreen>
   // CONTACT PARTAGÉ
   // ══════════════════════════════════════════════
 
-  /// Envoie une ou plusieurs fiches de contact (message de type `CONTACT`).
+  /// Envoie une ou plusieurs fiches de contact Alanya (message `CONTACT`).
   ///
   /// La charge utile est du JSON dans `content` — format tenu par le serveur,
-  /// voir `models/message_payload.dart`. La photo d'un contact du répertoire
-  /// part comme MÉDIA du message : `content` est plafonné à 8000 caractères, et
-  /// une photo en base64 le ferait exploser.
+  /// voir `models/message_payload.dart`. Aucun média : la photo est celle du
+  /// COMPTE Alanya, déjà servie par le serveur, et la charge n'en transporte
+  /// que l'adresse.
   Future<void> _sendContacts(ContactShareResult resultat) async {
     if (resultat.contacts.isEmpty) return;
     final replyId = _replyTo?.id;
@@ -1396,20 +1396,6 @@ class _ChatScreenState extends State<ChatScreen>
     final charge = encodeContacts(resultat.contacts);
     final rt = context.read<RealtimeClient>();
     try {
-      String? mediaId;
-      final photo = resultat.photoBytes;
-      if (photo != null) {
-        // Une photo illisible ou refusée par le serveur ne doit pas empêcher le
-        // partage : le contact vaut d'être envoyé sans son portrait.
-        try {
-          final envoyee = await context.read<MediaRepository>().upload(
-              photo,
-              "contact-${DateTime.now().millisecondsSinceEpoch}.jpg",
-              resultat.photoMimeType ?? "image/jpeg");
-          mediaId = envoyee.id;
-        } catch (_) {}
-      }
-
       if (rt.connected) {
         final tempId = "tmp-${DateTime.now().microsecondsSinceEpoch}";
         // Bulle immédiate, remplacée par l'écho du serveur (qui renvoie le
@@ -1431,11 +1417,11 @@ class _ChatScreenState extends State<ChatScreen>
           _rebuildCombined();
         });
         rt.sendStructured(widget.convId, "CONTACT", charge, tempId,
-            mediaId: mediaId, replyToId: replyId);
+            replyToId: replyId);
       } else {
         final msg = await context.read<ChatRepository>().sendStructured(
             widget.convId, "CONTACT", charge,
-            mediaId: mediaId, replyToId: replyId);
+            replyToId: replyId);
         _cacheMsg(msg);
         if (mounted) {
           setState(() {
@@ -1508,21 +1494,31 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
-  /// Enregistre un contact reçu dans le répertoire du téléphone.
+  /// Ajoute un contact reçu au répertoire **Alanya**.
   ///
-  /// ⚠️ On passe par l'écran de création de contact d'Android
-  /// (`openExternalInsert`) plutôt que d'écrire nous-mêmes : cela n'exige
-  /// AUCUNE permission d'écriture, et c'est l'utilisateur qui valide. Demander
-  /// `WRITE_CONTACTS` pour cette seule action serait disproportionné, et le
-  /// Play Store le fait justifier.
-  Future<void> _enregistrerContact(SharedContact contact) async {
+  /// C'est bien celui-ci et non le carnet d'adresses du téléphone : c'est le
+  /// répertoire dont l'application se sert pour retrouver quelqu'un, l'appeler
+  /// et lui écrire — et il n'exige aucune permission système.
+  ///
+  /// Le doublon n'est pas une erreur : `ALREADY_CONTACT` est annoncé comme un
+  /// fait (« déjà dans tes contacts »), pas comme un échec.
+  Future<void> _ajouterContactAlanya(SharedContact contact) async {
+    final id = contact.alanyaId;
+    if (id == null) return;
     try {
-      final fiche = fc.Contact()
-        ..name.first = contact.name ?? ''
-        ..phones = contact.phones.map((p) => fc.Phone(p)).toList();
-      await fc.FlutterContacts.openExternalInsert(fiche);
+      await context
+          .read<ContactsRepository>()
+          .add(id, alias: contact.name);
+      if (!mounted) return;
+      showAppSnackBar("${contact.displayName} ajouté à tes contacts");
+    } on ApiException catch (e) {
+      if (e.code == "ALREADY_CONTACT") {
+        showAppSnackBar("${contact.displayName} est déjà dans tes contacts");
+        return;
+      }
+      _showError(e.message);
     } catch (_) {
-      _showError("Impossible d'ouvrir la création de contact");
+      _showError("Impossible d'ajouter ce contact");
     }
   }
 
@@ -2503,15 +2499,10 @@ class _ChatScreenState extends State<ChatScreen>
                     : isContact
                     ? ContactBubble(
                         contacts: contactsPartages,
-                        // La photo, quand il y en a une, est le média du
-                        // message : `content` ne transporte jamais d'image.
-                        photoUrl: hasMedia && m.media.first.mimeType.startsWith('image/')
-                            ? m.media.first.url
-                            : null,
                         actions: ContactBubbleActions(
                           onOuvrirDiscussion: _ouvrirDiscussionContact,
                           onAppeler: _appelerContact,
-                          onEnregistrer: _enregistrerContact,
+                          onAjouter: _ajouterContactAlanya,
                         ),
                         onLongPress: () => _openMessageActions(m),
                         timestamp: _time(m.createdAt),
