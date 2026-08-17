@@ -16,6 +16,7 @@ class MediaGrid extends StatefulWidget {
     required this.baseUrl,
     this.token,
     this.onItemTap,
+    this.onItemLongPress,
     this.onMoreTap,
     this.timestamp,
     this.statusWidget,
@@ -26,7 +27,16 @@ class MediaGrid extends StatefulWidget {
   final String baseUrl;
   final String? token;
   final void Function(int index)? onItemTap;
-  final VoidCallback? onMoreTap; // appelé quand on clique sur "+N"
+
+  /// Appui long sur UNE cellule. Nécessaire depuis le regroupement à la
+  /// lecture : les médias d'une grille peuvent appartenir à des messages
+  /// différents, et « répondre » ou « supprimer » ne veut rien dire pour la
+  /// grille entière.
+  final void Function(int index)? onItemLongPress;
+
+  /// Appui sur « +N ». Reçoit l'index du média SOUS la pastille, pour que la
+  /// visionneuse s'ouvre là où l'utilisateur a touché — elle s'ouvrait à 0.
+  final void Function(int index)? onMoreTap;
   final String? timestamp;
   final Widget? statusWidget;
   final bool isMe;
@@ -114,11 +124,17 @@ class _MediaGridState extends State<MediaGrid> {
 
   Widget _cell(int index) => GestureDetector(
         onTap: () => widget.onItemTap?.call(index),
+        onLongPress: widget.onItemLongPress != null
+            ? () => widget.onItemLongPress!(index)
+            : null,
         child: _cellStack(index),
       );
 
   Widget _moreCell(int index, int more) => GestureDetector(
-        onTap: widget.onMoreTap,
+        onTap: () => widget.onMoreTap?.call(index),
+        onLongPress: widget.onItemLongPress != null
+            ? () => widget.onItemLongPress!(index)
+            : null,
         child: Stack(
           fit: StackFit.expand,
           children: [
@@ -159,6 +175,9 @@ class _MediaGridState extends State<MediaGrid> {
 
     if (type == AlanyaMediaType.image) {
       return GestureDetector(
+        onLongPress: widget.onItemLongPress != null
+            ? () => widget.onItemLongPress!(index)
+            : null,
         onTap: () => widget.onItemTap?.call(index),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(11),

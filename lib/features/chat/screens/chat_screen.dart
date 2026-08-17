@@ -48,6 +48,7 @@ import '../../group/screens/group_info_screen.dart';
 import '../../media/media_repository.dart';
 import '../chat_repository.dart';
 import '../envoi_media.dart';
+import '../groupe_medias.dart';
 import '../widgets/activity_indicator.dart';
 import 'pdf_viewer_screen.dart';
 import 'media_caption_screen.dart';
@@ -67,7 +68,6 @@ import '../chat_media_integration.dart';
 import '../../../widgets/media/gps_preview.dart';
 import 'media_gallery_viewer.dart';
 import '../../../widgets/media/media_picker_sheet.dart';
-import 'gallery_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   static String? activeConvId;
@@ -775,13 +775,81 @@ class _ChatScreenState extends State<ChatScreen>
   DateTime _dateOfCombined(dynamic item) {
     if (item is Message) return item.createdAt;
     if (item is CallRecord) return item.startedAt;
+    if (item is GroupeMedias) return item.date;
     return DateTime.now();
   }
 
   void _rebuildCombined() {
     final all = <dynamic>[..._messages, ..._callsForConv];
     all.sort((a, b) => _dateOfCombined(a).compareTo(_dateOfCombined(b)));
-    _combined = all;
+    _combined = _regroupeMedias(all);
+  }
+
+  /// Regroupe en UNE grille les messages de médias consécutifs d'un même
+  /// expéditeur.
+  ///
+  /// 🔴 **POURQUOI C'EST INDISPENSABLE, et pas un embellissement** : le client
+  /// web n'envoie QU'UN média par message (`websocket-service.ts` n'a pas de
+  /// `mediaIds`), et l'application de l'équipe non plus. Cinq photos envoyées
+  /// depuis le web arrivent donc en CINQ messages : la grille existante, qui ne
+  /// regroupe que les médias d'un même message, ne pouvait rien y faire, et le
+  /// fil affichait cinq bulles empilées. C'est le défaut « réception de
+  /// plusieurs photos en groupe » signalé par le user.
+  ///
+  /// Sert aussi à nos propres envois : au-delà de 10 médias, l'envoi est
+  /// découpé en plusieurs messages (plafond serveur) — le regroupement les
+  /// réunit visuellement.
+  ///
+  /// ⚠️ **Ce qui est volontairement EXCLU du regroupement**, parce que le
+  /// message porte alors quelque chose que la grille ne saurait pas montrer :
+  /// une légende (elle appartient à SON message), une réaction, une étoile, une
+  /// citation, un message supprimé, et un envoi encore en cours. Mieux vaut une
+  /// bulle seule qu'une information effacée par un regroupement.
+  List<dynamic> _regroupeMedias(List<dynamic> items) {
+    bool groupable(dynamic x) {
+      if (x is! Message) return false;
+      if (x.media.isEmpty) return false;
+      if (x.isDeleted) return false;
+      if ((x.content ?? '').isNotEmpty) return false;
+      if (x.replyToId != null) return false;
+      if (x.reactions.isNotEmpty) return false;
+      if (x.starred) return false;
+      if (_envois.containsKey(x.id)) return false;
+      final t = _typeEffectif(x);
+      return t == 'IMAGE' || t == 'VIDEO';
+    }
+
+    final sortie = <dynamic>[];
+    var i = 0;
+    while (i < items.length) {
+      final courant = items[i];
+      if (!groupable(courant)) {
+        sortie.add(courant);
+        i++;
+        continue;
+      }
+      final lot = <Message>[courant as Message];
+      var j = i + 1;
+      while (j < items.length && lot.length < 10) {
+        final suivant = items[j];
+        if (!groupable(suivant)) break;
+        final msg = suivant as Message;
+        if (msg.senderId != lot.last.senderId) break;
+        // 60 s : c'est le temps qu'un envoi multiple met à s'égrener, pas celui
+        // d'une conversation. Au-delà, deux photos sont deux propos distincts et
+        // les fondre effacerait cette distinction.
+        if (msg.createdAt.difference(lot.last.createdAt).inSeconds > 60) break;
+        lot.add(msg);
+        j++;
+      }
+      if (lot.length > 1) {
+        sortie.add(GroupeMedias(lot));
+      } else {
+        sortie.add(courant);
+      }
+      i = j;
+    }
+    return sortie;
   }
 
   /// Recharge les appels de cette conversation : le cache pour l'affichage
@@ -2652,6 +2720,9 @@ class _ChatScreenState extends State<ChatScreen>
                         if (item is Message) {
                           widgets.add(
                               _bubble(item, item.senderId == myId));
+                        } else if (item is GroupeMedias) {
+                          widgets.add(
+                              _groupBubble(item, item.senderId == myId));
                         } else if (item is CallRecord) {
                           widgets.add(_callBubbleInChat(item));
                         }
@@ -2783,35 +2854,14 @@ class _ChatScreenState extends State<ChatScreen>
                         isMe: mine,
                       )
                     : isGrid
-                        ? MediaGrid(
-                            items: m.media.map((media) => MediaGridItem(
-                              url: media.url, mimeType: media.mimeType, fileName: media.filename,
-                              sizeBytes: media.sizeBytes, durationMs: media.durationMs,
-                            )).toList(),
-                            baseUrl: _baseUrl, token: _token,
-                            onItemTap: (i) {
-                              // Ouvre la visionneuse navigable (swipe) sur tous
-                              // les médias de la conversation, au média touché.
-                              if (i >= 0 && i < m.media.length) {
-                                _openGallery(m.media[i].id);
-                              }
-                            },
-                            onMoreTap: () {
-                              // Ouvre la galerie au début pour les "+N"
-                              Navigator.of(context).push(MaterialPageRoute(
-                                builder: (_) => GalleryScreen(
-                                  items: m.media.map((media) => GalleryItem(
-                                    url: media.url, mimeType: media.mimeType, fileName: media.filename,
-                                    sizeBytes: media.sizeBytes, durationMs: media.durationMs,
-                                  )).toList(),
-                                  baseUrl: _baseUrl, token: _token,
-                                  initialIndex: 0,
-                                ),
-                              ));
-                            },
-                            timestamp: _time(m.createdAt),
-                            statusWidget: mine ? _statusTicks(m.status, Colors.white) : null,
-                            isMe: mine,
+                        ? _grilleAvecLegende(
+                            medias: m.media,
+                            legende: m.content,
+                            horodatage: _time(m.createdAt),
+                            statut: mine ? _statusTicks(m.status, Colors.white) : null,
+                            mine: mine,
+                            onTapMedia: (i) => _openGallery(m.media[i].id),
+                            onLongPressMedia: (_) => _openMessageActions(m),
                           )
                         : isImage
                             ? ImageBubble(
@@ -2869,6 +2919,142 @@ class _ChatScreenState extends State<ChatScreen>
             child: _reactionsChips(m, mine),
           ),
       ]),
+    );
+  }
+
+  /// Grille de médias, avec sa légende SOUS la grille quand il y en a une.
+  ///
+  /// 🐛 **La légende d'un envoi multiple n'était JAMAIS affichée** : la branche
+  /// « grille » rendait `MediaGrid` seul et ignorait `m.content`. On pouvait donc
+  /// envoyer trois photos avec un commentaire, et il disparaissait des deux
+  /// côtés. C'est ce que ce point unique répare.
+  ///
+  /// Quand il y a une légende, l'horodatage passe SOUS le texte au lieu de la
+  /// pastille posée sur l'image : sur une photo, il doit rester lisible ; sous du
+  /// texte, il se lit comme dans une bulle ordinaire — c'est ce que fait
+  /// WhatsApp.
+  Widget _grilleAvecLegende({
+    required List<MessageMedia> medias,
+    required String? legende,
+    required String horodatage,
+    required Widget? statut,
+    required bool mine,
+    required void Function(int index) onTapMedia,
+    required void Function(int index) onLongPressMedia,
+  }) {
+    final aLegende = (legende ?? '').isNotEmpty;
+    final items = medias
+        .map((media) => MediaGridItem(
+              url: media.url,
+              mimeType: media.mimeType,
+              fileName: media.filename,
+              sizeBytes: media.sizeBytes,
+              durationMs: media.durationMs,
+            ))
+        .toList();
+
+    final grille = MediaGrid(
+      items: items,
+      baseUrl: _baseUrl,
+      token: _token,
+      onItemTap: (i) {
+        if (i >= 0 && i < medias.length) onTapMedia(i);
+      },
+      onItemLongPress: (i) {
+        if (i >= 0 && i < medias.length) onLongPressMedia(i);
+      },
+      // « +N » ouvre la visionneuse SUR le média touché, et non au début.
+      onMoreTap: (i) {
+        if (i >= 0 && i < medias.length) onTapMedia(i);
+      },
+      timestamp: aLegende ? null : horodatage,
+      statusWidget: aLegende ? null : statut,
+      isMe: mine,
+    );
+
+    if (!aLegende) return grille;
+
+    final onText = _bubbleTextColor(mine);
+    final onSub = mine ? Colors.white70 : _muted45;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      grille,
+      const SizedBox(height: 5),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 3),
+        child: Text.rich(
+          TextSpan(children: spansWhatsApp(legende!)),
+          style: TextStyle(color: onText, fontSize: 14.5),
+        ),
+      ),
+      const SizedBox(height: 2),
+      Padding(
+        padding: const EdgeInsets.only(right: 3),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          const Spacer(),
+          Text(horodatage, style: TextStyle(fontSize: 11, color: onSub)),
+          if (statut != null) ...[const SizedBox(width: 3), statut],
+        ]),
+      ),
+    ]);
+  }
+
+  /// Bulle d'un GROUPE de messages de médias — voir `groupe_medias.dart`.
+  ///
+  /// L'appui long agit sur le message du média touché, jamais sur le groupe :
+  /// « répondre » ou « supprimer » n'a de sens que pour un message.
+  Widget _groupBubble(GroupeMedias groupe, bool mine) {
+    final medias = groupe.medias;
+    final senderLabel = widget.isGroup && !mine
+        ? (widget.memberNames[groupe.senderId] ?? "Membre")
+        : null;
+
+    return Align(
+      alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+      child: Column(
+        crossAxisAlignment:
+            mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        children: [
+          if (senderLabel != null)
+            Padding(
+              padding: const EdgeInsets.only(left: 4, bottom: 2),
+              child: Text(senderLabel,
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: _positive)),
+            ),
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 400),
+            margin: const EdgeInsets.symmetric(vertical: 4),
+            padding: const EdgeInsets.all(3),
+            constraints: const BoxConstraints(maxWidth: 280),
+            decoration: BoxDecoration(
+              color: mine ? _sentBubbleColor : _recvBubbleColor,
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(mine ? 12 : 0),
+                topRight: Radius.circular(mine ? 0 : 12),
+                bottomLeft: const Radius.circular(12),
+                bottomRight: const Radius.circular(12),
+              ),
+              border: mine ? null : Border.all(color: _hairline),
+            ),
+            child: _grilleAvecLegende(
+              medias: medias,
+              // Un message porteur d'une légende n'est jamais regroupé : il n'y
+              // a donc pas de légende à afficher ici, par construction.
+              legende: null,
+              horodatage: _time(groupe.date),
+              statut: mine ? _statusTicks(groupe.statut, Colors.white) : null,
+              mine: mine,
+              onTapMedia: (i) => _openGallery(medias[i].id),
+              onLongPressMedia: (i) {
+                final msg = groupe.messageDuMedia(i);
+                if (msg != null) _openMessageActions(msg);
+              },
+            ),
+          ),
+        ],
+      ),
     );
   }
 
