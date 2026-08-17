@@ -557,7 +557,8 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                           // (`acceptById` n'a pas cette info).
                           if (cc.activeIvrFromId != null)
                             IconButton(
-                              icon: const Icon(Icons.groups_outlined, color: Colors.white70),
+                              icon: const Icon(Icons.groups_outlined,
+                                  color: Colors.white70),
                               tooltip: "Liste d'attente",
                               onPressed: () {
                                 QueueStatusSheet.show(
@@ -650,7 +651,8 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                       // aller-retour vers l'attente — le défaut signalé. Ce qui
                       // compte n'est pas OÙ elle est posée, mais qu'elle occupe
                       // toujours la même place.
-                      if (cc.ivr != null) IvrMessageBand(message: cc.ivr!.message),
+                      if (cc.ivr != null)
+                        IvrMessageBand(message: cc.ivr!.message),
                       if (cc.activeRole == ActiveCallRole.ongoing) ...[
                         const SizedBox(height: 10),
                         Text(_mediaHint(cc, afficheCommeGroupe),

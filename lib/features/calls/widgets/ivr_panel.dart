@@ -228,20 +228,31 @@ class _IvrPanelState extends State<IvrPanel> {
   /// paraissaient donc plus petites qu'avant une fois toutes visibles. Élargir
   /// est le seul levier qui les agrandit SANS reprendre de la hauteur : sur un
   /// écran de 360 points, une touche passe ainsi de 80 à 96 points de large.
-  static const _margeH = 20.0;
+  /// Marge horizontale portée de 20 à 30 le 17/08/2026 : c'est le levier qui
+  /// réduit la taille des touches d'environ 5 %, comme demandé, **sans écrire
+  /// aucune dimension de touche en dur** — elles continuent de se déduire de la
+  /// place disponible, donc de s'adapter à tous les écrans.
+  static const _margeH = 30.0;
+
+  /// Air sous le zéro. 🐛 Le pavé touchait le bouton « Raccrocher », au point
+  /// qu'un doigt visant le 0 risquait de raccrocher (signalé par le user le
+  /// 17/08/2026). Cette marge est aussi ce qui retire les ~5 % de hauteur.
+  static const _margeBas = 18.0;
 
   Widget _pave() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: _margeH),
+      padding: const EdgeInsets.fromLTRB(_margeH, 0, _margeH, _margeBas),
       child: Column(
         children: [
           for (var r = 0; r < _rangees.length; r++) ...[
-            if (r > 0) const SizedBox(height: 10),
+            // Écarts resserrés (10 → 8 et 16 → 12) : les touches étant plus
+            // petites, les mêmes espaces paraissaient béants entre elles.
+            if (r > 0) const SizedBox(height: 8),
             Expanded(
               child: Row(
                 children: [
                   for (var c = 0; c < _rangees[r].length; c++) ...[
-                    if (c > 0) const SizedBox(width: 16),
+                    if (c > 0) const SizedBox(width: 12),
                     Expanded(
                       child: _rangees[r][c] == null
                           ? const SizedBox.shrink()
