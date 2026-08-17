@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.util.Log
 import android.view.WindowManager
 import com.alanya.telecom.CallRegistry
 import io.flutter.embedding.android.FlutterActivity
@@ -29,6 +31,7 @@ class MainActivity : FlutterActivity() {
 
     private companion object {
         const val CANAL = "alanya/ecran_verrouille"
+        const val TAG_PROX = "AlanyaProximite"
     }
 
     /**
@@ -111,6 +114,12 @@ class MainActivity : FlutterActivity() {
                         }
                         resultat.success(true)
                     }
+                    // Écran éteint quand le téléphone est porté à l'oreille.
+                    "capteurProximite" -> {
+                        val actif = appel.argument<Boolean>("actif") ?: false
+                        runCatching { reglerCapteurProximite(actif) }
+                        resultat.success(true)
+                    }
                     "arreterServiceAppel" -> {
                         startService(
                             Intent(this, CallForegroundService::class.java).apply {
@@ -122,6 +131,66 @@ class MainActivity : FlutterActivity() {
                     else -> resultat.notImplemented()
                 }
             }
+    }
+
+    /** Verrou de proximité, tenu pendant un appel audio à l'écouteur. */
+    private var verrouProximite: PowerManager.WakeLock? = null
+
+    /**
+     * Éteint l'écran quand le capteur de proximité est couvert, et le rallume
+     * quand on écarte le téléphone.
+     *
+     * ⚠️ L'INTÉRÊT N'EST PAS L'ÉCRAN NOIR, C'EST LE TACTILE. Tant que ce verrou
+     * est tenu et le capteur couvert, Android IGNORE les touches : c'est ce qui
+     * empêche la joue de raccrocher. Un écran simplement masqué par
+     * l'application continuerait, lui, de recevoir les appuis.
+     *
+     * Le verrou n'est jamais compté en références (`setReferenceCounted(false)`)
+     * : on veut qu'un relâchement suffise, quel que soit le nombre de demandes
+     * qui l'ont précédé.
+     */
+    private fun reglerCapteurProximite(actif: Boolean) {
+        val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
+        if (pm == null) {
+            Log.w(TAG_PROX, "PowerManager indisponible")
+            return
+        }
+        Log.d(TAG_PROX, "reglerCapteurProximite(actif=$actif)")
+        if (actif) {
+            if (verrouProximite?.isHeld == true) {
+                Log.d(TAG_PROX, "verrou deja tenu")
+                return
+            }
+            // Beaucoup d'appareils d'entrée de gamme n'ont pas de capteur de
+            // proximité. Le verrou serait alors accordé sans jamais rien faire :
+            // autant ne pas le prendre, et laisser l'écran allumé comme avant.
+            val supporte =
+                pm.isWakeLockLevelSupported(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK)
+            Log.d(TAG_PROX, "isWakeLockLevelSupported=$supporte")
+            if (!supporte) return
+            verrouProximite = pm.newWakeLock(
+                PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK,
+                "alanya:proximite_appel",
+            ).apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+            Log.d(TAG_PROX, "verrou ACQUIS (isHeld=${verrouProximite?.isHeld})")
+        } else {
+            verrouProximite?.let { if (it.isHeld) it.release() }
+            verrouProximite = null
+            Log.d(TAG_PROX, "verrou RELACHE")
+        }
+    }
+
+    /**
+     * Filet de sécurité : un verrou de proximité oublié laisserait l'écran
+     * s'éteindre hors de tout appel, sans que rien ne le rallume depuis
+     * l'application — celle-ci n'existant plus.
+     */
+    override fun onDestroy() {
+        runCatching { reglerCapteurProximite(false) }
+        super.onDestroy()
     }
 
     private fun afficherParDessusVerrouillage(actif: Boolean) {

@@ -13,6 +13,7 @@ import '../../core/debug_overlay.dart';
 import '../../core/call_foreground_service.dart';
 import '../../core/call_ui_native.dart';
 import '../../core/lock_screen_call.dart';
+import '../../core/proximite_appel.dart';
 import '../../core/push_service.dart';
 import '../../core/realtime_client.dart';
 import '../../core/ringtone_service.dart';
@@ -867,6 +868,9 @@ class CallController extends ChangeNotifier {
       isSpeakerOn = false;
       unawaited(Helper.setSpeakerphoneOn(false).catchError((_) {}));
     }
+    // Relâché sans condition : l'appel est fini, et un verrou oublié
+    // éteindrait l'écran au premier objet passant devant le capteur.
+    unawaited(ProximiteAppel.regler(false));
     connectedSince = null;
     // Remise à zéro du compteur : l'appel est fini, plus aucun écran ne le
     // concerne. Les `dispose` qui suivront décrémenteraient dans le vide, ce
@@ -894,6 +898,10 @@ class CallController extends ChangeNotifier {
         titre: activePeerName ?? "Appel en cours",
       );
     }
+    // Ce rappel porte AUSSI les changements de caméra : c'est donc le bon
+    // endroit pour réévaluer la proximité, qu'il s'agisse de la connexion du
+    // média ou d'un passage audio ↔ vidéo en cours d'appel.
+    _majProximite();
     notifyListeners();
   }
 
@@ -912,7 +920,37 @@ class CallController extends ChangeNotifier {
     try {
       await Helper.setSpeakerphoneOn(actif);
     } catch (_) {}
+    _majProximite();
     notifyListeners();
+  }
+
+  /// Verrou de proximité : écran éteint ET tactile ignoré quand le téléphone
+  /// est à l'oreille.
+  ///
+  /// Il n'est tenu que dans le seul cas où il protège : conversation établie,
+  /// en audio, à l'écouteur.
+  ///
+  ///  * au HAUT-PARLEUR, le téléphone est posé ou tenu à distance — l'éteindre
+  ///    parce qu'une main passe devant le capteur serait une gêne, pas une
+  ///    protection ;
+  ///  * en VIDÉO, l'utilisateur regarde l'écran, c'est tout l'objet de l'appel ;
+  ///
+  /// ⚠️ LE TYPE D'APPEL SE LIT SUR [activeType], PAS SUR [isVideoEnabled].
+  /// Ce dernier retombe sur `_mesh.cameraEnabled`, qui vaut `true` DÈS LE
+  /// DÉPART (`webrtc_group_mesh.dart:42`) et n'est modifié que par `setCamera`.
+  /// Dans un appel audio aucune caméra n'est jamais démarrée, le drapeau reste
+  /// donc à `true` — et la première version de ce code n'a jamais tenu le
+  /// verrou, en croyant chaque appel audio filmé.
+  ///  * AVANT la connexion du média, il n'y a encore rien à protéger, et
+  ///    l'utilisateur manipule justement son écran.
+  ///
+  /// Appelé depuis les trois endroits qui changent l'une de ces conditions,
+  /// plus la fin d'appel. [ProximiteAppel] absorbe les répétitions.
+  void _majProximite() {
+    final vise = mediaConnected && !isSpeakerOn && activeType != "VIDEO";
+    traceAppel("proximité → $vise (média=$mediaConnected, "
+        "hp=$isSpeakerOn, type=$activeType)");
+    unawaited(ProximiteAppel.regler(vise));
   }
 
   /// 🐛 LE STANDARD ALLUME LE HAUT-PARLEUR, ET C'EST UN CORRECTIF, PAS UN CONFORT.
