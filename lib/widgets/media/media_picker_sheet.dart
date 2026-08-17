@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:file_picker/file_picker.dart';
+import '../../features/chat/screens/location_share_screen.dart';
 import '../../theme/alanya_theme.dart';
 import '../contact_share_sheet.dart';
 
@@ -19,12 +20,6 @@ class MediaPickResult {
     required this.mimeType,
     this.durationMs,
   });
-}
-
-/// Résultat de la sélection de localisation.
-class LocationPickResult {
-  final String text;
-  const LocationPickResult({required this.text});
 }
 
 /// Bottom sheet style WhatsApp pour envoyer des médias :
@@ -198,61 +193,22 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
     }
   }
 
-  // ══ LOCALISATION — envoi de position GPS / speech vendeur ══
+  // ══ POSITION — vraie position GPS (type de message LOCATION) ══
+  //
+  // ⚠️ Ceci demandait à l'utilisateur de TAPER ses coordonnées à la main, dans
+  // une boîte de dialogue, alors que `geolocator` est dans l'application depuis
+  // le chantier de géolocalisation d'entreprise. Personne ne connaît sa
+  // latitude. L'écran d'aperçu relève la position, la montre sur une carte, et
+  // conserve la saisie manuelle en action secondaire — elle servait à partager
+  // un LIEU (une boutique), ce que le GPS du téléphone ne peut pas donner.
   Future<void> _pickLocation() async {
-    Navigator.pop(context);
-    final text = await showDialog<String>(
-      context: context,
-      builder: (ctx) {
-        final ctrl = TextEditingController();
-        return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Row(
-            children: [
-              Icon(Icons.location_on, color: Color(0xFFE53935)),
-              SizedBox(width: 8),
-              Text("Partager une localisation"),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                "Saisissez votre annonce ou discours commercial et vos coordonnées GPS (ex: 3.8480, 11.5020).",
-                style: TextStyle(fontSize: 13, color: Colors.black87),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: ctrl,
-                maxLines: 3,
-                decoration: InputDecoration(
-                  hintText: "ex: Venez visiter notre boutique au centre-ville ! (3.8480, 11.5020)",
-                  hintStyle: const TextStyle(fontSize: 12, color: Colors.grey),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text("Annuler"),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AlanyaColors.forest,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
-              child: const Text("Partager", style: TextStyle(color: Colors.white)),
-            ),
-          ],
-        );
-      },
-    );
-    if (text != null && text.isNotEmpty && mounted) {
-      Navigator.pop(context, LocationPickResult(text: text));
-    }
+    final navigator = Navigator.of(context);
+    navigator.pop();
+    await Future.delayed(const Duration(milliseconds: 200));
+    if (!mounted) return;
+
+    final position = await LocationShareScreen.open(context);
+    if (position != null) navigator.pop(position);
   }
 
   String _mimeFromAsset(AssetEntity asset) {

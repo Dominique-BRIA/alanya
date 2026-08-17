@@ -59,6 +59,7 @@ import '../../../widgets/media/audio_bubble.dart';
 import '../../../widgets/media/reply_media_preview.dart';
 import '../../../widgets/media/media_grid.dart';
 import '../../../widgets/media/contact_bubble.dart';
+import '../../../widgets/media/location_bubble.dart';
 import '../../../core/media_helper.dart';
 import '../chat_media_integration.dart';
 import '../../../widgets/media/gps_preview.dart';
@@ -1303,10 +1304,9 @@ class _ChatScreenState extends State<ChatScreen>
       return;
     }
 
-    // Localisation sélectionnée → envoie le speech / position GPS
-    if (result is LocationPickResult) {
-      _inputCtrl.text = result.text;
-      _send();
+    // Position sélectionnée → vraie position (message de type LOCATION).
+    if (result is SharedLocation) {
+      await _sendLocation(result);
       return;
     }
 
@@ -1443,6 +1443,76 @@ class _ChatScreenState extends State<ChatScreen>
   /// Contacts portés par un message, ou liste vide si la charge est illisible.
   List<SharedContact> _contactsDe(Message m) =>
       contactsDepuisContenu(m.content) ?? const [];
+
+  // ══════════════════════════════════════════════
+  // POSITION PARTAGÉE
+  // ══════════════════════════════════════════════
+
+  /// Envoie une position (message de type `LOCATION`).
+  ///
+  /// Aucun média : la charge JSON de `content` suffit, et la carte est dessinée
+  /// chez le destinataire à partir des coordonnées. Envoyer une image de carte
+  /// serait plus lourd, moins net, et non zoomable.
+  Future<void> _sendLocation(SharedLocation position) async {
+    final replyId = _replyTo?.id;
+    final replyMsg = _replyTo;
+    final replySnapshot = replyMsg != null
+        ? ReplyPreview(
+            id: replyMsg.id,
+            senderId: replyMsg.senderId,
+            type: replyMsg.type,
+            content: replyMsg.isDeleted ? null : replyMsg.content,
+            isDeleted: replyMsg.isDeleted)
+        : null;
+    setState(() {
+      _uploading = true;
+      _replyTo = null;
+    });
+
+    final charge = encodeLocation(position);
+    final rt = context.read<RealtimeClient>();
+    try {
+      if (rt.connected) {
+        final tempId = "tmp-${DateTime.now().microsecondsSinceEpoch}";
+        final optimistic = Message(
+          id: tempId,
+          convId: widget.convId,
+          senderId: _myId ?? "",
+          content: charge,
+          type: "LOCATION",
+          status: "SENT",
+          replyToId: replyId,
+          replyTo: replySnapshot,
+          media: const [],
+          createdAt: DateTime.now(),
+        );
+        setState(() {
+          _messages = [..._messages, optimistic];
+          _rebuildCombined();
+        });
+        rt.sendStructured(widget.convId, "LOCATION", charge, tempId,
+            replyToId: replyId);
+      } else {
+        final msg = await context
+            .read<ChatRepository>()
+            .sendStructured(widget.convId, "LOCATION", charge, replyToId: replyId);
+        _cacheMsg(msg);
+        if (mounted) {
+          setState(() {
+            _messages = [..._messages, msg];
+            _rebuildCombined();
+          });
+        }
+      }
+      _scrollToBottom();
+    } on ApiException catch (e) {
+      _showError(e.message);
+    } catch (_) {
+      _showError(tr(context, 'send_failed'));
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
 
   /// Ouvre la discussion avec un contact reçu (compte Alanya seulement).
   ///
@@ -2463,6 +2533,10 @@ class _ChatScreenState extends State<ChatScreen>
     // affichera au moins quelque chose plutôt qu'une carte vide.
     final contactsPartages = effectif == "CONTACT" ? _contactsDe(m) : const <SharedContact>[];
     final isContact = contactsPartages.isNotEmpty;
+    // Même principe pour la position : charge illisible → bulle texte, jamais
+    // une carte vide au milieu de l'océan.
+    final positionPartagee =
+        effectif == "LOCATION" ? positionDepuisContenu(m.content) : null;
     final senderLabel = widget.isGroup && !mine ? (widget.memberNames[m.senderId] ?? "Membre") : null;
     final isHighlighted = _highlightedMessageId == m.id || _selectedMessageId == m.id;
     final isGrid = isMultiMedia; // 2+ médias → grille
@@ -2504,6 +2578,14 @@ class _ChatScreenState extends State<ChatScreen>
                           onAppeler: _appelerContact,
                           onAjouter: _ajouterContactAlanya,
                         ),
+                        onLongPress: () => _openMessageActions(m),
+                        timestamp: _time(m.createdAt),
+                        statusWidget: mine ? _statusTicks(m.status, Colors.white70) : null,
+                        isMe: mine,
+                      )
+                    : positionPartagee != null
+                    ? LocationBubble(
+                        position: positionPartagee,
                         onLongPress: () => _openMessageActions(m),
                         timestamp: _time(m.createdAt),
                         statusWidget: mine ? _statusTicks(m.status, Colors.white70) : null,
@@ -2707,10 +2789,15 @@ class _ChatScreenState extends State<ChatScreen>
         (() {
           var displayText = m.content ?? "[${m.type}]";
           if (!m.isDeleted && extractGpsCoords(displayText) != null) {
+            // On retire du texte AFFICHÉ ce que la carte montre déjà. Les
+            // motifs retirés sont EXACTEMENT ceux que `extractGpsCoords`
+            // reconnaît — le couple de décimaux nu n'en fait plus partie,
+            // sinon un montant cité dans le message disparaissait de
+            // l'affichage sans que rien ne l'explique.
             displayText = displayText
                 .replaceAll(RegExp(r'\(\s*(-?\d+\.\d{2,})\s*,\s*(-?\d+\.\d{2,})\s*\)'), '')
-                .replaceAll(RegExp(r'(?:google\.\w+/maps|maps\.google\.\w+|goo\.gl/maps).*?[/@](-?\d+\.\d+),(-?\d+\.\d+)'), '')
-                .replaceAll(RegExp(r'(-?\d+\.\d{2,})\s*,\s*(-?\d+\.\d{2,})'), '')
+                .replaceAll(RegExp(r'(?:google\.\w+/maps|maps\.google\.\w+|goo\.gl/maps)\S*'), '')
+                .replaceAll(RegExp(r'geo:\s*(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)'), '')
                 .replaceAll(RegExp(r'\(\s*\)'), '')
                 .replaceAll(RegExp(r'\s{2,}'), ' ')
                 .trim();
