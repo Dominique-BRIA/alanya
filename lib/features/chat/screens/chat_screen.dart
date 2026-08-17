@@ -1471,8 +1471,48 @@ class _ChatScreenState extends State<ChatScreen>
       return;
     }
     if (!_scrollCtrl.hasClients) return;
+
+    /*
+     * 🐛 **SAUT À L'OPPOSÉ DE LA CIBLE** (signalé sur device le 17/08/2026,
+     * après l'inversion du fil). Deux défauts, corrigés ensemble.
+     *
+     * 1. LE SENS. L'estimation valait `foundIdx / _messages.length`, c'est-à-dire
+     *    « à quelle fraction du DÉBUT se trouve ce message ». Depuis que la
+     *    liste est inversée, le décalage 0 est le message le plus RÉCENT et
+     *    `maxScrollExtent` le plus ancien : ce rapport envoyait donc à l'exact
+     *    opposé. Et comme on atterrissait loin de la cible, sa bulle n'était
+     *    jamais construite — sa clé restait vide, `ensureVisible` ne
+     *    s'exécutait pas, et RIEN n'était surligné. Le second symptôme
+     *    découlait du premier.
+     *
+     * 2. LA LISTE DE RÉFÉRENCE. Le rapport se calculait sur `_messages`, alors
+     *    que ce qui est affiché est `_combined` : il contient aussi les appels,
+     *    et le regroupement des médias fond plusieurs messages en UN élément.
+     *    Deux longueurs différentes donnaient une estimation fausse même avant
+     *    l'inversion — d'autant plus fausse que la conversation contient de
+     *    photos et d'appels.
+     */
+    var indexAffiche = -1;
+    for (var i = 0; i < _combined.length; i++) {
+      final item = _combined[i];
+      if (item is Message && item.id == id) {
+        indexAffiche = i;
+        break;
+      }
+      // Le message peut avoir été absorbé par une grille : c'est l'élément
+      // GROUPE qu'il faut alors viser, puisque c'est lui qui est à l'écran.
+      if (item is GroupeMedias && item.messages.any((m) => m.id == id)) {
+        indexAffiche = i;
+        break;
+      }
+    }
+    if (indexAffiche < 0) return;
+
     final maxScroll = _scrollCtrl.position.maxScrollExtent;
-    final ratio = foundIdx / _messages.length;
+    // Position DE LECTURE : l'élément 0 de `_combined` est le plus ancien, donc
+    // le dernier affiché — près de `maxScrollExtent`.
+    final rangAffiche = _combined.length - 1 - indexAffiche;
+    final ratio = _combined.isEmpty ? 0.0 : rangAffiche / _combined.length;
     final estimatedOffset = (ratio * maxScroll).clamp(0.0, maxScroll);
     _scrollCtrl.jumpTo(estimatedOffset);
     await Future.delayed(const Duration(milliseconds: 300));
@@ -1487,10 +1527,14 @@ class _ChatScreenState extends State<ChatScreen>
       ctx = key?.currentContext;
     }
     if (ctx != null) {
+      // ⚠️ `alignment` se compte depuis le bord de TÊTE du défilement, qui est
+      // désormais le BAS : 0.3 plaçait le message près du bas de l'écran au
+      // lieu du haut. 0.5 le centre, et cette valeur a le mérite d'être
+      // indifférente au sens de lecture.
       Scrollable.ensureVisible(ctx,
           duration: const Duration(milliseconds: 300),
           curve: Curves.easeInOut,
-          alignment: 0.3);
+          alignment: 0.5);
       _highlightMessage(id);
     } else {
       _scrollCtrl.animateTo(estimatedOffset,
@@ -3750,8 +3794,18 @@ class _ChatScreenState extends State<ChatScreen>
     final senderLabel = widget.isGroup && !mine
         ? (widget.memberNames[groupe.senderId] ?? "Membre")
         : null;
+    // Une grille regroupe PLUSIEURS messages : elle s'illumine dès que l'un
+    // d'eux est la cible. Sans cela, sauter vers une photo citée amenait au bon
+    // endroit sans que rien ne s'allume — la grille ignorait la surbrillance,
+    // qui n'était traitée que pour les bulles individuelles.
+    final enSurbrillance = groupe.messages.any(
+        (m) => _highlightedMessageId == m.id || _selectedMessageId == m.id);
 
     return Align(
+      // La clé du PREMIER message du groupe : c'est elle que cherche le saut
+      // vers un message cité pour affiner sa position.
+      key:
+          _messageKeys.putIfAbsent(groupe.messages.first.id, () => GlobalKey()),
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
       child: Column(
         crossAxisAlignment:
@@ -3772,14 +3826,19 @@ class _ChatScreenState extends State<ChatScreen>
             padding: const EdgeInsets.all(3),
             constraints: const BoxConstraints(maxWidth: 280),
             decoration: BoxDecoration(
-              color: mine ? _sentBubbleColor : _recvBubbleColor,
+              color: enSurbrillance
+                  ? AlanyaColors.gold.withValues(alpha: _dark ? 0.22 : 0.3)
+                  : (mine ? _sentBubbleColor : _recvBubbleColor),
               borderRadius: BorderRadius.only(
                 topLeft: Radius.circular(mine ? 12 : 0),
                 topRight: Radius.circular(mine ? 0 : 12),
                 bottomLeft: const Radius.circular(12),
                 bottomRight: const Radius.circular(12),
               ),
-              border: mine ? null : Border.all(color: _hairline),
+              border: mine
+                  ? null
+                  : Border.all(
+                      color: enSurbrillance ? AlanyaColors.gold : _hairline),
             ),
             child: _grilleAvecLegende(
               medias: medias,
