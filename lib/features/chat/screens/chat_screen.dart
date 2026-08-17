@@ -15,6 +15,7 @@ import '../../../models/call_record.dart';
 import '../../calls/calls_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/api_client.dart';
@@ -52,6 +53,8 @@ import '../groupe_medias.dart';
 import '../widgets/activity_indicator.dart';
 import 'pdf_viewer_screen.dart';
 import 'media_caption_screen.dart';
+import 'media_gallery_picker_screen.dart';
+import 'location_share_screen.dart';
 
 // ── Imports previews WhatsApp ──
 import '../../../widgets/media/image_bubble.dart';
@@ -1387,8 +1390,26 @@ class _ChatScreenState extends State<ChatScreen>
   // FILE PICKER + UPLOAD
   // ══════════════════════════════════════════════
     Future<void> _pickAndSendFile() async {
-    final result = await MediaPickerSheet.show(context);
-    if (result == null) return;
+    var result = await MediaPickerSheet.show(context);
+    if (result == null || !mounted) return;
+
+    // 🐛 LES SÉLECTEURS S'OUVRENT DEPUIS ICI, ET NON DEPUIS LA FEUILLE.
+    //
+    // La feuille se contente d'annoncer ce qu'il faut ouvrir : elle ne peut pas
+    // se fermer PUIS rendre un résultat, le second `Navigator.pop` s'appliquant
+    // alors à l'écran de discussion — c'est ce qui renvoyait à la liste des
+    // conversations sans rien envoyer (constaté sur device le 17/08/2026). Cet
+    // écran-ci, lui, reste vivant pendant toute la sélection.
+    if (result is OuvrirSelecteurContact) {
+      result = await ContactShareSheet.show(context);
+    } else if (result is OuvrirEcranPosition) {
+      result = await LocationShareScreen.open(context);
+    } else if (result is OuvrirGalerie) {
+      result = await MediaGalleryPickerScreen.open(context);
+    } else if (result is OuvrirCamera) {
+      result = await _prendrePhoto();
+    }
+    if (result == null || !mounted) return;
 
     // Contact sélectionné → vraie fiche de contact (message de type CONTACT).
     if (result is ContactShareResult) {
@@ -1611,6 +1632,28 @@ class _ChatScreenState extends State<ChatScreen>
       _scrollToBottom();
     } on ApiException catch (e) { _showError(e.message); } catch (_) { _showError(tr(context, 'send_failed')); }
     finally { if (mounted) setState(() => _uploading = false); }
+  }
+
+  /// Prise de vue, depuis l'écran de discussion et non depuis la feuille : la
+  /// caméra est une application externe, et la feuille aurait été détruite
+  /// pendant son affichage.
+  Future<List<MediaPickResult>?> _prendrePhoto() async {
+    try {
+      final photo = await ImagePicker()
+          .pickImage(source: ImageSource.camera, imageQuality: 85);
+      if (photo == null) return null;
+      final octets = await photo.readAsBytes();
+      return [
+        MediaPickResult(
+          bytes: octets,
+          fileName: photo.name,
+          mimeType: 'image/jpeg',
+          path: photo.path,
+        ),
+      ];
+    } catch (_) {
+      return null;
+    }
   }
 
   // ══════════════════════════════════════════════

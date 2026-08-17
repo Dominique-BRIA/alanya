@@ -49,14 +49,45 @@ class _MediaGridState extends State<MediaGrid> {
   // Cache des thumbnails vidéo générées
   final Map<String, Uint8List> _thumbCache = {};
 
+  /// Écart entre deux cases.
+  ///
+  /// 🐛 **L'espacement des grilles était mal géré (constaté sur device le
+  /// 17/08/2026).** Deux causes, et aucune n'était un simple réglage :
+  ///
+  /// 1. La grille était figée à **260 points de large**, quel que soit l'écran
+  ///    et quelle que soit la place réellement offerte par la bulle. Sur un
+  ///    téléphone étroit elle débordait, sur un large elle laissait une bande
+  ///    vide à droite — dans les deux cas l'écart apparent entre les médias
+  ///    n'avait plus rien à voir avec l'écart demandé.
+  /// 2. Un média SEUL était rendu à **274** points, soit 14 de plus que la
+  ///    grille : deux messages successifs, l'un avec une photo et l'autre avec
+  ///    trois, n'avaient donc pas la même largeur dans le fil.
+  ///
+  /// La largeur vient désormais des contraintes reçues (`LayoutBuilder`), et
+  /// elle est la MÊME pour une case seule et pour une grille. L'écart passe à 2
+  /// points, la valeur de WhatsApp : à 3, les traits entre vignettes se voyaient
+  /// plus que les vignettes elles-mêmes.
+  static const double _ecart = 2.0;
+
   @override
   Widget build(BuildContext context) {
     if (widget.items.isEmpty) return const SizedBox.shrink();
-    if (widget.items.length == 1) return _buildSingle(context, 0);
+    return LayoutBuilder(
+      builder: (context, contraintes) {
+        // `maxWidth` peut être infini si la grille est posée dans un contexte
+        // non borné : on retombe alors sur la largeur d'une bulle.
+        final largeur =
+            contraintes.maxWidth.isFinite ? contraintes.maxWidth : 260.0;
+        return _grille(context, largeur);
+      },
+    );
+  }
+
+  Widget _grille(BuildContext context, double w) {
+    if (widget.items.length == 1) return _buildSingle(context, 0, w);
 
     // Dispositions façon WhatsApp selon le nombre de médias.
-    const w = 260.0;
-    const gap = 3.0;
+    const gap = _ecart;
     final n = widget.items.length;
     Widget grid;
     if (n == 2) {
@@ -168,7 +199,7 @@ class _MediaGridState extends State<MediaGrid> {
         ]),
       );
 
-  Widget _buildSingle(BuildContext context, int index) {
+  Widget _buildSingle(BuildContext context, int index, double largeur) {
     final item = widget.items[index];
     final type = MediaHelper.detectType(item.mimeType, item.fileName);
     final url = '${widget.baseUrl}${item.url}?token=${widget.token}';
@@ -182,17 +213,33 @@ class _MediaGridState extends State<MediaGrid> {
         child: ClipRRect(
           borderRadius: BorderRadius.circular(11),
           child: Stack(children: [
-            CachedMedia(url: url, width: 274, fit: BoxFit.cover,
+            // Même largeur qu'une grille : deux messages successifs, l'un avec
+            // une photo et l'autre avec trois, s'alignent enfin.
+            CachedMedia(
+                url: url,
+                width: largeur,
+                fit: BoxFit.cover,
                 errorWidget: _placeholder(type)),
             if (widget.timestamp != null)
-              Positioned(right: 6, bottom: 6, child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.45), borderRadius: BorderRadius.circular(8)),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Text(widget.timestamp!, style: const TextStyle(fontSize: 11, color: Colors.white)),
-                  if (widget.statusWidget != null) ...[const SizedBox(width: 3), widget.statusWidget!],
-                ]),
-              )),
+              Positioned(
+                  right: 6,
+                  bottom: 6,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                    decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.45),
+                        borderRadius: BorderRadius.circular(8)),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Text(widget.timestamp!,
+                          style: const TextStyle(
+                              fontSize: 11, color: Colors.white)),
+                      if (widget.statusWidget != null) ...[
+                        const SizedBox(width: 3),
+                        widget.statusWidget!
+                      ],
+                    ]),
+                  )),
           ]),
         ),
       );
@@ -209,11 +256,13 @@ class _MediaGridState extends State<MediaGrid> {
     final url = '${widget.baseUrl}${item.url}?token=${widget.token}';
     final thumbKey = item.url;
 
-    return Stack(fit: StackFit.expand, children: [
+    return Stack(
+      fit: StackFit.expand,
+      children: [
         // Image ou thumbnail vidéo
         if (type == AlanyaMediaType.image)
-          CachedMedia(url: url, fit: BoxFit.cover,
-              errorWidget: _placeholder(type))
+          CachedMedia(
+              url: url, fit: BoxFit.cover, errorWidget: _placeholder(type))
         else if (type == AlanyaMediaType.video)
           _buildVideoThumbnail(thumbKey, url)
         else
@@ -221,29 +270,44 @@ class _MediaGridState extends State<MediaGrid> {
 
         // Play icon pour vidéos
         if (type == AlanyaMediaType.video)
-          const Center(child: Icon(Icons.play_circle_fill, color: Colors.white70, size: 28)),
+          const Center(
+              child: Icon(Icons.play_circle_fill,
+                  color: Colors.white70, size: 28)),
 
         // Badge extension pour documents
         if (type != AlanyaMediaType.image && type != AlanyaMediaType.video)
           Positioned(
-            bottom: 4, left: 4,
+            bottom: 4,
+            left: 4,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-              decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(4)),
+              decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(4)),
               child: Text(
-                MediaHelper.extension(item.fileName).toUpperCase().replaceAll('.', ''),
-                style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.w700),
+                MediaHelper.extension(item.fileName)
+                    .toUpperCase()
+                    .replaceAll('.', ''),
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 8,
+                    fontWeight: FontWeight.w700),
               ),
             ),
           ),
 
         // Badge durée pour vidéos
-        if (type == AlanyaMediaType.video && item.durationMs != null && item.durationMs! > 0)
+        if (type == AlanyaMediaType.video &&
+            item.durationMs != null &&
+            item.durationMs! > 0)
           Positioned(
-            bottom: 4, right: 4,
+            bottom: 4,
+            right: 4,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-              decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(4)),
+              decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(4)),
               child: Text(
                 MediaHelper.formatDuration(item.durationMs),
                 style: const TextStyle(color: Colors.white, fontSize: 8),
@@ -269,8 +333,10 @@ class _MediaGridState extends State<MediaGrid> {
       color: const Color(0xFF1A1A2E),
       child: const Center(
         child: SizedBox(
-          width: 16, height: 16,
-          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white30),
+          width: 16,
+          height: 16,
+          child:
+              CircularProgressIndicator(strokeWidth: 2, color: Colors.white30),
         ),
       ),
     );
@@ -302,8 +368,12 @@ class _MediaGridState extends State<MediaGrid> {
 
   Widget _placeholder(AlanyaMediaType type) {
     return Container(
-      color: widget.isMe ? AlanyaColors.terracotta.withValues(alpha: 0.15) : AlanyaColors.grey200,
-      child: Center(child: Icon(MediaHelper.iconForType(type), color: AlanyaColors.grey400, size: 28)),
+      color: widget.isMe
+          ? AlanyaColors.terracotta.withValues(alpha: 0.15)
+          : AlanyaColors.grey200,
+      child: Center(
+          child: Icon(MediaHelper.iconForType(type),
+              color: AlanyaColors.grey400, size: 28)),
     );
   }
 }

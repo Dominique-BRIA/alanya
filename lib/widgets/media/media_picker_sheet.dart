@@ -1,12 +1,8 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:file_picker/file_picker.dart';
-import '../../features/chat/screens/location_share_screen.dart';
-import '../../features/chat/screens/media_gallery_picker_screen.dart';
 import '../../theme/alanya_theme.dart';
-import '../contact_share_sheet.dart';
 
 /// Résultat de la sélection de médias.
 class MediaPickResult {
@@ -35,6 +31,30 @@ class MediaPickResult {
 
   bool get estImage => mimeType.startsWith('image/');
   bool get estVideo => mimeType.startsWith('video/');
+}
+
+/// Demandes rendues par la feuille au lieu d'un résultat : l'écran de
+/// discussion doit ouvrir un autre sélecteur.
+///
+/// ⚠️ **C'est ce qui évite le double `Navigator.pop`** qui refermait la
+/// conversation entière (bug du 17/08/2026). Une feuille modale rend son
+/// résultat EN SE FERMANT, une seule fois : elle ne peut pas se fermer, puis
+/// ouvrir autre chose, puis rendre un résultat — le second `pop` s'appliquerait
+/// à la route en dessous, c'est-à-dire à l'écran de discussion.
+class OuvrirSelecteurContact {
+  const OuvrirSelecteurContact();
+}
+
+class OuvrirEcranPosition {
+  const OuvrirEcranPosition();
+}
+
+class OuvrirGalerie {
+  const OuvrirGalerie();
+}
+
+class OuvrirCamera {
+  const OuvrirCamera();
 }
 
 /// Bottom sheet style WhatsApp pour envoyer des médias :
@@ -124,23 +144,12 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
   }
 
   // ══ CAMÉRA ══
-  Future<void> _pickCamera() async {
-    Navigator.pop(context);
-    try {
-      final picker = ImagePicker();
-      final photo = await picker.pickImage(source: ImageSource.camera, imageQuality: 85);
-      if (photo == null) return;
-      final bytes = await photo.readAsBytes();
-      final result = MediaPickResult(
-        bytes: bytes,
-        fileName: photo.name,
-        mimeType: 'image/jpeg',
-      );
-      if (Navigator.of(context).canPop()) {
-        Navigator.of(context).pop([result]);
-      }
-    } catch (_) {}
-  }
+  //
+  // Même correction que le contact : la version précédente fermait la feuille
+  // puis rappelait `pop` après la prise de vue — ce second `pop` fermait la
+  // CONVERSATION. Le `canPop()` ne protégeait de rien : il est vrai, puisqu'il
+  // reste toujours une route en dessous.
+  void _pickCamera() => Navigator.pop(context, const OuvrirCamera());
 
   // ══ GALERIE — sélecteur plein écran, ordonné, paginé ══
   //
@@ -148,17 +157,15 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
   // sélection, ne pagine pas, et n'indique pas la durée des vidéos. Il sert
   // quand l'accès à la galerie est refusé — un refus de permission ne doit pas
   // empêcher d'envoyer une photo.
-  Future<void> _pickFullGallery() async {
-    final navigator = Navigator.of(context);
+  void _pickFullGallery() {
     if (_permissionDenied) {
-      await _pickFullGalleryParSysteme(navigator);
+      // Le sélecteur système s'ouvre SANS quitter cette feuille : il ne passe
+      // pas par le navigateur de l'application, donc le résultat peut être rendu
+      // par un `pop` unique, comme pour les documents.
+      _pickFullGalleryParSysteme(Navigator.of(context));
       return;
     }
-    navigator.pop();
-    await Future.delayed(const Duration(milliseconds: 200));
-    if (!mounted) return;
-    final choisis = await MediaGalleryPickerScreen.open(context);
-    if (choisis != null && choisis.isNotEmpty) navigator.pop(choisis);
+    Navigator.pop(context, const OuvrirGalerie());
   }
 
   Future<void> _pickFullGalleryParSysteme(NavigatorState navigator) async {
@@ -238,22 +245,19 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
   //
   // La sélection est rendue à l'appelant (`ContactShareResult`) : c'est lui qui
   // téléverse la photo éventuelle et envoie le message, comme pour les médias.
-  Future<void> _pickContact() async {
-    final navigator = Navigator.of(context);
-    // La feuille de sélection remplace celle-ci : on referme d'abord, sinon
-    // deux feuilles modales se superposent et la seconde hérite de la hauteur
-    // contrainte de la première.
-    navigator.pop();
-    await Future.delayed(const Duration(milliseconds: 200));
-    if (!mounted) return;
-
-    final resultat = await ContactShareSheet.show(context);
-    if (resultat != null && resultat.contacts.isNotEmpty) {
-      // La feuille appelante est déjà fermée : on rend le résultat par le
-      // navigateur qu'elle a laissé, celui de l'écran de discussion.
-      navigator.pop(resultat);
-    }
-  }
+  /// 🐛 **CORRIGÉ LE 17/08/2026 — CE CHEMIN RENVOYAIT À LA LISTE DES
+  /// CONVERSATIONS SANS RIEN ENVOYER** (constaté sur device par le user).
+  ///
+  /// La version fautive appelait `Navigator.pop()` DEUX FOIS sur le même
+  /// navigateur : la première fermait cette feuille, la seconde — censée rendre
+  /// le résultat — s'appliquait donc à la route suivante, c'est-à-dire à
+  /// **l'écran de discussion lui-même**. D'où le retour à la liste, et le
+  /// contact perdu en route.
+  ///
+  /// Une feuille modale ne peut rendre son résultat qu'en se fermant, UNE fois.
+  /// Elle se contente donc d'annoncer ce que l'appelant doit ouvrir ; c'est
+  /// l'écran de discussion, toujours vivant, qui présente le sélecteur.
+  void _pickContact() => Navigator.pop(context, const OuvrirSelecteurContact());
 
   // ══ POSITION — vraie position GPS (type de message LOCATION) ══
   //
@@ -263,15 +267,10 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
   // latitude. L'écran d'aperçu relève la position, la montre sur une carte, et
   // conserve la saisie manuelle en action secondaire — elle servait à partager
   // un LIEU (une boutique), ce que le GPS du téléphone ne peut pas donner.
-  Future<void> _pickLocation() async {
-    final navigator = Navigator.of(context);
-    navigator.pop();
-    await Future.delayed(const Duration(milliseconds: 200));
-    if (!mounted) return;
-
-    final position = await LocationShareScreen.open(context);
-    if (position != null) navigator.pop(position);
-  }
+  /// Même correction que [_pickContact] : un seul `pop`, et l'écran de
+  /// discussion ouvre l'aperçu de position. Le double `pop` refermait la
+  /// conversation et perdait la position.
+  void _pickLocation() => Navigator.pop(context, const OuvrirEcranPosition());
 
   String _mimeFromAsset(AssetEntity asset) {
     final name = asset.title?.toLowerCase() ?? '';
