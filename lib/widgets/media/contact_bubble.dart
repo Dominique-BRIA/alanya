@@ -50,6 +50,21 @@ class ContactBubble extends StatelessWidget {
   final Widget? statusWidget;
   final bool isMe;
 
+  /// Fond de l'avatar quand le contact n'a pas de photo.
+  ///
+  /// 🐛 **Signalé sur device le 17/08/2026 : orange sur orange.** [AvatarCircle]
+  /// prend le terre cuite par défaut — la couleur de la bulle ENVOYÉE. Une
+  /// pastille terre cuite posée sur une bulle terre cuite disparaissait dans son
+  /// fond, et l'initiale blanche flottait sans support.
+  ///
+  /// Ce vert est choisi pour tenir face aux DEUX fonds, ce qui est la vraie
+  /// contrainte ici : la bulle envoyée (terre cuite) et la bulle reçue (blanche
+  /// en clair, sombre en Nuit). Il est assez soutenu pour que l'initiale blanche
+  /// reste lisible, et assez distinct du terre cuite pour ne pas s'y fondre —
+  /// vert et orange sont opposés en teinte, c'est ce qui fait ressortir la
+  /// pastille quel que soit le côté de la conversation.
+  static const Color _fondAvatar = Color(0xFF3FA971);
+
   @override
   Widget build(BuildContext context) {
     final surfaces = surfacesOf(context);
@@ -118,6 +133,7 @@ class ContactBubble extends StatelessWidget {
         name: contact.displayName,
         avatarUrl: contact.avatarUrl,
         radius: 22,
+        backgroundColor: _fondAvatar,
       ),
       const SizedBox(width: 10),
       Expanded(
@@ -336,7 +352,12 @@ class ContactListSheet extends StatelessWidget {
               final c = contacts[i];
               return ListTile(
                 leading: AvatarCircle(
-                    name: c.displayName, avatarUrl: c.avatarUrl, radius: 20),
+                    name: c.displayName,
+                    avatarUrl: c.avatarUrl,
+                    radius: 20,
+                    // Même vert que la fiche : la liste dépliée et la bulle
+                    // montrent les mêmes contacts, ils doivent se reconnaître.
+                    backgroundColor: ContactBubble._fondAvatar),
                 title: Text(c.displayName,
                     maxLines: 1, overflow: TextOverflow.ellipsis),
                 subtitle: c.subtitle != null
