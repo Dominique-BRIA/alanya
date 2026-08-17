@@ -3801,11 +3801,21 @@ class _ChatScreenState extends State<ChatScreen>
     final enSurbrillance = groupe.messages.any(
         (m) => _highlightedMessageId == m.id || _selectedMessageId == m.id);
 
+    // ⚠️ **TOUS les messages du groupe désignent LA MÊME clé.** Une `GlobalKey`
+    // ne peut être portée que par un widget, et la grille n'en est qu'un —
+    // mais le saut vers un message cité cherche la clé DU MESSAGE VISÉ.
+    // N'enregistrer que le premier laissait sans clé les 2ᵉ, 3ᵉ… photos d'une
+    // grille : on retombait alors sur le positionnement approché, sans
+    // l'ajustement fin d'`ensureVisible`. Les faire toutes pointer vers la
+    // grille règle le cas, puisque c'est elle qui est réellement à l'écran.
+    final clefGroupe =
+        _messageKeys.putIfAbsent(groupe.messages.first.id, () => GlobalKey());
+    for (final m in groupe.messages) {
+      _messageKeys[m.id] = clefGroupe;
+    }
+
     return Align(
-      // La clé du PREMIER message du groupe : c'est elle que cherche le saut
-      // vers un message cité pour affiner sa position.
-      key:
-          _messageKeys.putIfAbsent(groupe.messages.first.id, () => GlobalKey()),
+      key: clefGroupe,
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
       child: Column(
         crossAxisAlignment:
