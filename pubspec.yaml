@@ -69,6 +69,21 @@ dependencies:
   # et les deux gros boutons. L'écrire en Kotlin aurait demandé de reprendre la
   # construction de la notification et sa réception dans l'isolate d'arrière-plan.
   flutter_callkit_incoming: ^3.1.3
+  # Module natif local : ConnectionService Telecom « self-managed ».
+  #
+  # ⚠️ C'EST LUI QUI REND LA SONNERIE FIABLE, et flutter_callkit_incoming n'est
+  # plus qu'un repli. Tant qu'une `Connection` Telecom vit, Android LIE le
+  # processus de l'application et ne peut plus le geler — c'est la seule façon
+  # de tenir une sonnerie quand l'application est tuée.
+  #
+  # Le paquet, lui, démarre sa sonnerie à l'affichage de la notification
+  # (`CallkitNotificationManager.kt:1033`) au lieu d'attendre le rappel
+  # `onShowIncomingCallUi()` de Telecom, qu'il n'implémente pas. Sa sonnerie
+  # entre donc en course avec Telecom, qui réclame le focus audio de sonnerie
+  # et la coupe : mesuré à 2,21 s sur TECNO KL5. Ce module démarre le son dans
+  # ce rappel, et nulle part ailleurs.
+  alanya_telecom:
+    path: alanya_telecom
   # Base de données locale (cache des messages hors ligne)
   sqflite: ^2.4.1
   path: ^1.9.0
