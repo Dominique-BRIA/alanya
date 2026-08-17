@@ -602,23 +602,11 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                                   textColor: Colors.white,
                                 ),
                         ),
-                      // ── Bande de message du standard ────────────────────
-                      //
-                      // 🔴 Elle occupe l'espace qui séparait l'avatar du nom du
-                      // centre — que le user trouvait trop grand — et sa hauteur
-                      // est CONSTANTE. C'est ce qui empêche le pavé numérique de
-                      // rétrécir quand le message « n'a pas répondu » apparaît :
-                      // la place lui est réservée d'avance, qu'il y ait un
-                      // message ou non, donc la hauteur laissée au pavé ne varie
-                      // plus d'un état à l'autre.
-                      //
-                      // Présente seulement pendant un appel au standard : sur un
-                      // appel ordinaire, réserver 58 points de vide n'aurait
-                      // aucun sens.
-                      if (cc.ivr != null)
-                        IvrMessageBand(message: cc.ivr!.message)
-                      else if (!showVideo)
-                        const SizedBox(height: 20),
+                      // Espace avatar → nom, resserré pendant le standard
+                      // (demande du user, 17/08/2026) : chaque point repris ici
+                      // revient au pavé numérique.
+                      if (!showVideo)
+                        SizedBox(height: _menuStandardAffiche(cc) ? 6 : 20),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 24),
                         child: Text(
@@ -648,6 +636,21 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                             style: const TextStyle(
                                 color: Colors.white70, fontSize: 16)),
                       ],
+                      // ── Message du standard, SOUS le libellé du service ──
+                      //
+                      // Emplacement demandé par le user (17/08/2026) après
+                      // l'avoir vu entre l'avatar et le nom : il se lit mieux
+                      // rattaché à ce qu'il commente — le service qu'on vient
+                      // d'essayer.
+                      //
+                      // 🔴 **Sa hauteur reste CONSTANTE, et c'est tout l'enjeu**
+                      // (voir `IvrMessageBand`). Le pavé numérique prend « ce qui
+                      // reste » : si cette bande apparaissait et disparaissait
+                      // avec le message, le pavé changerait de taille à chaque
+                      // aller-retour vers l'attente — le défaut signalé. Ce qui
+                      // compte n'est pas OÙ elle est posée, mais qu'elle occupe
+                      // toujours la même place.
+                      if (cc.ivr != null) IvrMessageBand(message: cc.ivr!.message),
                       if (cc.activeRole == ActiveCallRole.ongoing) ...[
                         const SizedBox(height: 10),
                         Text(_mediaHint(cc, afficheCommeGroupe),
@@ -1044,34 +1047,45 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
        * personne en face.
        */
       if (cc.ivr != null) {
-        return Column(
-          mainAxisSize: MainAxisSize.min,
+        /*
+         * 🔴 UNE SEULE RANGÉE : micro — raccrocher — haut-parleur.
+         *
+         * Demande du user (17/08/2026), après constat sur device : les deux
+         * commandes étaient EMPILÉES au-dessus du bouton rouge, et cette
+         * colonne de trois étages recouvrait le texte du panneau.
+         *
+         * Le gain n'est pas cosmétique : la hauteur des commandes passe
+         * d'environ 190 points (56 + libellé + écart + 72 + libellé) à 90, et
+         * tout ce qui est repris ici revient au pavé numérique. C'est aussi la
+         * disposition d'un téléphone — l'action destructrice au centre, les
+         * bascules de part et d'autre, à égale distance du pouce.
+         */
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Wrap(
-              alignment: WrapAlignment.center,
-              spacing: 10,
-              runSpacing: 12,
-              children: [
-                _controlBtn(
-                  icon: cc.isMuted ? Icons.mic_off : Icons.mic,
-                  active: cc.isMuted,
-                  label: cc.isMuted ? "Muet" : "Micro",
-                  onPressed: cc.toggleMute,
-                ),
-                _controlBtn(
-                  icon: cc.isSpeakerOn ? Icons.volume_up : Icons.hearing,
-                  active: cc.isSpeakerOn,
-                  label: "Haut-parleur",
-                  onPressed: () => cc.toggleSpeaker(),
-                ),
-              ],
+            _controlBtn(
+              icon: cc.isMuted ? Icons.mic_off : Icons.mic,
+              active: cc.isMuted,
+              label: cc.isMuted ? "Muet" : "Micro",
+              onPressed: cc.toggleMute,
+              taille: 52,
             ),
-            const SizedBox(height: 16),
+            const SizedBox(width: 22),
             _roundBtn(
               icon: Icons.call_end,
               color: Colors.red,
               label: "Raccrocher",
               onPressed: () => _hangUp(cc),
+              taille: 64,
+            ),
+            const SizedBox(width: 22),
+            _controlBtn(
+              icon: cc.isSpeakerOn ? Icons.volume_up : Icons.hearing,
+              active: cc.isSpeakerOn,
+              label: "Haut-parleur",
+              onPressed: () => cc.toggleSpeaker(),
+              taille: 52,
             ),
           ],
         );
@@ -1212,11 +1226,15 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
   }
 
   /// Petit bouton de contrôle en overlay (semi-transparent) : allumé = teinté.
+  /// [taille] permet de resserrer les commandes là où la place est comptée —
+  /// la rangée du standard, où chaque point repris revient au pavé numérique.
+  /// Les autres écrans gardent la taille d'origine par défaut.
   Widget _controlBtn({
     required IconData icon,
     required bool active,
     required String label,
     required VoidCallback onPressed,
+    double taille = 56,
   }) {
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -1228,11 +1246,11 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
             customBorder: const CircleBorder(),
             onTap: onPressed,
             child: SizedBox(
-              width: 56,
-              height: 56,
+              width: taille,
+              height: taille,
               child: Icon(icon,
                   color: active ? AlanyaColors.chocolate : Colors.white,
-                  size: 26),
+                  size: taille * 0.46),
             ),
           ),
         ),
@@ -1248,6 +1266,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     required Color color,
     required String label,
     required VoidCallback onPressed,
+    double taille = 72,
   }) {
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -1260,14 +1279,15 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
             customBorder: const CircleBorder(),
             onTap: onPressed,
             child: SizedBox(
-              width: 72,
-              height: 72,
-              child: Icon(icon, color: Colors.white, size: 32),
+              width: taille,
+              height: taille,
+              child: Icon(icon, color: Colors.white, size: taille * 0.44),
             ),
           ),
         ),
         const SizedBox(height: 8),
-        Text(label, style: const TextStyle(color: Colors.white70)),
+        Text(label,
+            style: const TextStyle(color: Colors.white70, fontSize: 13)),
       ],
     );
   }
