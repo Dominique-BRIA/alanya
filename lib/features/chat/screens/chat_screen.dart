@@ -243,18 +243,8 @@ class _ChatScreenState extends State<ChatScreen>
   String _baseUrl = "";
   bool _uploading = false;
 
-  /// Envois de médias en cours ou échoués, indexés par l'identifiant provisoire
-  /// du message optimiste correspondant. Voir `envoi_media.dart`.
-  /// Vue sur les envois de CETTE conversation, lus dans le magasin global.
-  ///
-  /// La file elle-même vit dans `EnvoiMediaStore` : elle doit survivre à la
-  /// destruction de cet écran (voir l'en-tête de ce magasin). Ce getter n'existe
-  /// que pour que le reste de l'écran continue de raisonner en « envois de la
-  /// conversation courante ».
-  Map<String, EnvoiMedia> get _envois => {
-        for (final e in EnvoiMediaStore.instance.pour(widget.convId))
-          e.tempId: e
-      };
+  // Les envois de médias ne sont plus un état de cet écran : ils vivent dans
+  // `EnvoiMediaStore`, qui leur survit (voir l'en-tête de ce magasin).
 
   final _voiceRecorder = VoiceRecorder();
   bool _recording = false;
@@ -945,7 +935,9 @@ class _ChatScreenState extends State<ChatScreen>
       if (x.replyToId != null) return false;
       if (x.reactions.isNotEmpty) return false;
       if (x.starred) return false;
-      if (_envois.containsKey(x.id)) return false;
+      // Un envoi en cours ne se regroupe pas : sa bulle porte une progression,
+      // qui n'aurait aucun sens fondue dans une grille.
+      if (EnvoiMediaStore.instance.parTempId(x.id) != null) return false;
       final t = _typeEffectif(x);
       return t == 'IMAGE' || t == 'VIDEO';
     }
@@ -3404,6 +3396,11 @@ class _ChatScreenState extends State<ChatScreen>
     final contactsPartages =
         effectif == "CONTACT" ? _contactsDe(m) : const <SharedContact>[];
     final isContact = contactsPartages.isNotEmpty;
+    // ⚠️ Lu UNE fois par bulle, par identifiant. Le getter `_envois` reconstruit
+    // une table à chaque appel : l'interroger quatre fois par message revenait à
+    // parcourir et trier la file 268 fois par image sur un fil de 67 éléments.
+    // Invisible tant que la file est vide, gratuit à éviter.
+    final envoiEnCours = EnvoiMediaStore.instance.parTempId(m.id);
     // Même principe pour la position : charge illisible → bulle texte, jamais
     // une carte vide au milieu de l'océan.
     final positionPartagee =
@@ -3471,15 +3468,15 @@ class _ChatScreenState extends State<ChatScreen>
                             // LOCALE et la progression, le média n'existant pas encore
                             // côté serveur. Passe avant tout le reste, sinon le message
                             // optimiste (sans média) retomberait sur la bulle texte.
-                            : _envois[m.id] != null
+                            : envoiEnCours != null
                                 ? SendingMediaBubble(
-                                    envoi: _envois[m.id]!,
+                                    envoi: envoiEnCours,
                                     legende: m.content,
                                     isMe: mine,
                                     onReessayer: () =>
-                                        _reessayerEnvoi(_envois[m.id]!),
+                                        _reessayerEnvoi(envoiEnCours),
                                     onAbandonner: () =>
-                                        _abandonneEnvoi(_envois[m.id]!),
+                                        _abandonneEnvoi(envoiEnCours),
                                   )
                                 : isContact
                                     ? ContactBubble(
