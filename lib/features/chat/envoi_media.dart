@@ -19,14 +19,26 @@ import '../../widgets/media/media_picker_sheet.dart';
 class EnvoiMedia {
   EnvoiMedia({
     required this.tempId,
+    required this.convId,
     required this.fichiers,
     required this.msgType,
     this.legende,
     this.replyToId,
-  });
+  }) : creeA = DateTime.now();
 
   /// Identifiant provisoire, partagé avec le message optimiste du fil.
   final String tempId;
+
+  /// Conversation destinataire.
+  ///
+  /// Indispensable depuis que la file vit hors de l'écran
+  /// (`EnvoiMediaStore`) : le magasin sert plusieurs conversations à la fois et
+  /// doit savoir à laquelle rendre chaque envoi.
+  final String convId;
+
+  /// Instant de création, qui donne l'ordre d'affichage des bulles provisoires
+  /// — et qui sert d'horodatage au message provisoire dans le fil.
+  final DateTime creeA;
 
   /// Fichiers d'origine, gardés EN MÉMOIRE pour le réessai.
   ///

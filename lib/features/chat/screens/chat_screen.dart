@@ -49,6 +49,7 @@ import '../../group/screens/group_info_screen.dart';
 import '../../media/media_repository.dart';
 import '../chat_repository.dart';
 import '../envoi_media.dart';
+import '../envoi_media_store.dart';
 import '../groupe_medias.dart';
 import '../widgets/activity_indicator.dart';
 import 'pdf_viewer_screen.dart';
@@ -244,12 +245,17 @@ class _ChatScreenState extends State<ChatScreen>
 
   /// Envois de médias en cours ou échoués, indexés par l'identifiant provisoire
   /// du message optimiste correspondant. Voir `envoi_media.dart`.
-  final Map<String, EnvoiMedia> _envois = {};
+  /// Vue sur les envois de CETTE conversation, lus dans le magasin global.
+  ///
+  /// La file elle-même vit dans `EnvoiMediaStore` : elle doit survivre à la
+  /// destruction de cet écran (voir l'en-tête de ce magasin). Ce getter n'existe
+  /// que pour que le reste de l'écran continue de raisonner en « envois de la
+  /// conversation courante ».
+  Map<String, EnvoiMedia> get _envois => {
+        for (final e in EnvoiMediaStore.instance.pour(widget.convId))
+          e.tempId: e
+      };
 
-  /// Minuteurs qui bornent l'attente de l'écho du serveur (trames WebSocket
-  /// sans accusé). Annulés à la destruction de l'écran, sinon ils réveillent un
-  /// `setState` sur un État mort.
-  final Map<String, Timer> _attentesEcho = {};
   final _voiceRecorder = VoiceRecorder();
   bool _recording = false;
   DateTime? _recordStarted;
@@ -319,6 +325,10 @@ class _ChatScreenState extends State<ChatScreen>
     final rt = context.read<RealtimeClient>();
     _rt = rt;
     rt.connect();
+    // Envois en cours dans CETTE conversation, éventuellement lancés avant
+    // qu'on n'en sorte : on s'abonne pour suivre leur progression, et
+    // `_rebuildCombined` en refait les bulles.
+    EnvoiMediaStore.instance.addListener(_surEnvois);
     _rtSub = rt.events.listen(_onRealtimeEvent);
     _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) => _poll());
     // Comme pour les messages : on utilise le serveur temps réel (WebSocket / WebRTC signaling)
@@ -419,13 +429,10 @@ class _ChatScreenState extends State<ChatScreen>
     _emitRecording(false);
     _pollTimer?.cancel();
     _recordTimer?.cancel();
-    // Un minuteur d'attente d'écho qui survit à l'écran appellerait `setState`
-    // sur un État détruit — l'exception classique après avoir quitté une
-    // conversation pendant un envoi.
-    for (final t in _attentesEcho.values) {
-      t.cancel();
-    }
-    _attentesEcho.clear();
+    // ⚠️ On se DÉSABONNE de la file d'envois, on ne l'arrête pas : les
+    // téléversements en cours doivent continuer quand l'écran meurt. C'est tout
+    // l'objet du magasin.
+    EnvoiMediaStore.instance.removeListener(_surEnvois);
     _rtSub?.cancel();
     try {
       context.read<CallController>().removeListener(_onCallActivity);
@@ -530,10 +537,7 @@ class _ChatScreenState extends State<ChatScreen>
         }
         // L'écho est la seule preuve que le message existe côté serveur : c'est
         // ici, et nulle part avant, que l'envoi cesse d'être « en cours ».
-        if (tempId != null) {
-          _attentesEcho.remove(tempId)?.cancel();
-          _envois.remove(tempId);
-        }
+        if (tempId != null) EnvoiMediaStore.instance.terminer(tempId);
         _rebuildCombined();
       });
       if (msg.senderId != _myId) {
@@ -867,8 +871,40 @@ class _ChatScreenState extends State<ChatScreen>
     return DateTime.now();
   }
 
+  /// Le magasin a avancé (progression, échec, fin) : on redessine.
+  void _surEnvois() {
+    if (mounted) setState(_rebuildCombined);
+  }
+
   void _rebuildCombined() {
-    final all = <dynamic>[..._messages, ..._callsForConv];
+    // 🐛 **LES ENVOIS EN COURS SONT REBÂTIS DEPUIS LE MAGASIN** (correction du
+    // 17/08/2026 : « j'envoie un média, je sors, je reviens, ça a disparu »).
+    //
+    // Le message provisoire n'existe que dans l'état de cet écran. En quittant
+    // la conversation, il meurt avec lui, et au retour `_messages` est
+    // reconstruit depuis le cache et le serveur — où l'envoi en cours n'existe
+    // évidemment pas encore. Sans ces lignes, le média redevenait invisible
+    // alors qu'il partait toujours.
+    final enCours = EnvoiMediaStore.instance.pour(widget.convId);
+    final provisoires = <Message>[
+      for (final e in enCours)
+        if (!_messages.any((m) => m.id == e.tempId))
+          Message(
+            id: e.tempId,
+            convId: e.convId,
+            senderId: _myId ?? "",
+            content: e.legende,
+            type: e.msgType,
+            status: "SENT",
+            replyToId: e.replyToId,
+            replyTo: null,
+            media: const [],
+            // L'heure de CRÉATION de l'envoi, pas celle du retour dans la
+            // conversation : la bulle doit reprendre sa place dans le fil.
+            createdAt: e.creeA,
+          ),
+    ];
+    final all = <dynamic>[..._messages, ...provisoires, ..._callsForConv];
     all.sort((a, b) => _dateOfCombined(a).compareTo(_dateOfCombined(b)));
     final avant = _combined.length;
     _combined = _regroupeMedias(all);
@@ -1740,6 +1776,7 @@ class _ChatScreenState extends State<ChatScreen>
       final tempId = "tmp-${DateTime.now().microsecondsSinceEpoch}-$debut";
       final envoi = EnvoiMedia(
         tempId: tempId,
+        convId: widget.convId,
         fichiers: lot,
         msgType: msgType,
         // La légende accompagne le PREMIER paquet seulement : répétée sur
@@ -1763,7 +1800,6 @@ class _ChatScreenState extends State<ChatScreen>
         createdAt: DateTime.now(),
       );
       setState(() {
-        _envois[tempId] = envoi;
         _messages = [..._messages, optimiste];
         _rebuildCombined();
       });
@@ -1771,122 +1807,37 @@ class _ChatScreenState extends State<ChatScreen>
 
       // Séquentiel, et volontairement : téléverser dix fichiers en parallèle sur
       // une connexion mobile les ralentit tous et rend la progression illisible.
-      await _executeEnvoi(envoi);
+      await _lanceDansLeMagasin(envoi);
     }
   }
 
-  /// Téléverse ce qui manque puis envoie le message. Reprend là où un échec
-  /// précédent s'était arrêté.
-  Future<void> _executeEnvoi(EnvoiMedia envoi) async {
-    if (!mounted) return;
-    setState(() {
-      envoi.echoue = false;
-      envoi.erreur = null;
-    });
-
-    final mediaRepo = context.read<MediaRepository>();
-    try {
-      for (var i = envoi.mediaIdsObtenus.length;
-          i < envoi.fichiers.length;
-          i++) {
-        final f = envoi.fichiers[i];
-        if (mounted) {
-          setState(() {
-            envoi.indexCourant = i;
-            envoi.progressionFichier = 0;
-          });
-        }
-        final envoye = await mediaRepo.upload(
-          Uint8List.fromList(f.bytes),
-          f.fileName,
-          f.mimeType,
-          durationMs: f.durationMs,
-          onProgress: (envoyes, total) {
-            if (!mounted || total <= 0) return;
-            final ratio = envoyes / total;
-            // Un setState par trame réseau ferait redessiner le fil des
-            // centaines de fois : on ne remonte qu'au changement de centième.
-            if ((ratio - envoi.progressionFichier).abs() < 0.01 && ratio < 1) {
-              return;
-            }
-            setState(() => envoi.progressionFichier = ratio);
-          },
-        );
-        envoi.mediaIdsObtenus.add(envoye.id);
-      }
-
-      final rt = context.read<RealtimeClient>();
-      if (rt.connected) {
-        rt.sendMultiMedia(
-            widget.convId, envoi.mediaIdsObtenus, envoi.msgType, envoi.tempId,
-            replyToId: envoi.replyToId, content: envoi.legende);
-        // ⚠️ Trame sans accusé : si la socket tombe juste après, elle est perdue
-        // en silence et la bulle resterait « Envoi… » à vie. On borne l'attente
-        // de l'écho, qui remplace le message optimiste (`_onRealtimeEvent`).
-        _armeAttenteEcho(envoi);
-      } else {
-        final msg = await context.read<ChatRepository>().sendMultiMedia(
-            widget.convId, envoi.mediaIdsObtenus, envoi.msgType,
-            replyToId: envoi.replyToId, content: envoi.legende);
-        _cacheMsg(msg);
-        if (mounted) {
-          setState(() {
-            final idx = _messages.indexWhere((m) => m.id == envoi.tempId);
-            if (idx >= 0) {
-              _messages[idx] = msg;
-            } else {
-              _messages = [..._messages, msg];
-            }
-            _envois.remove(envoi.tempId);
-            _rebuildCombined();
-          });
-        }
-      }
-      _scrollToBottom();
-    } on ApiException catch (e) {
-      _marqueEchec(envoi, e.message);
-    } catch (_) {
-      _marqueEchec(envoi, tr(context, 'send_failed'));
-    }
-  }
-
-  void _marqueEchec(EnvoiMedia envoi, String message) {
-    if (!mounted) return;
-    // Les médias déjà téléversés RESTENT dans `envoi.mediaIdsObtenus` : c'est ce
-    // qui permet au réessai de ne pas les envoyer une seconde fois, et donc de
-    // ne pas laisser d'orphelins en base.
-    setState(() {
-      envoi.echoue = true;
-      envoi.erreur = message;
-      envoi.progressionFichier = 0;
-    });
-  }
-
-  /// Borne l'attente de l'écho du serveur pour un envoi parti par WebSocket.
-  void _armeAttenteEcho(EnvoiMedia envoi) {
-    _attentesEcho[envoi.tempId]?.cancel();
-    _attentesEcho[envoi.tempId] = Timer(const Duration(seconds: 30), () {
-      if (!mounted) return;
-      if (!_envois.containsKey(envoi.tempId)) return; // l'écho est arrivé
-      // ⚠️ Le message a PEUT-ÊTRE été enregistré côté serveur : c'est l'écho
-      // qui manque, pas nécessairement l'écriture. Un réessai peut donc créer un
-      // doublon — d'où le choix laissé à l'utilisateur plutôt qu'un réessai
-      // automatique, et le libellé qui parle de confirmation, pas d'échec.
-      _marqueEchec(envoi, "Pas de confirmation du serveur");
-    });
-  }
-
-  void _reessayerEnvoi(EnvoiMedia envoi) => _executeEnvoi(envoi);
-
-  /// Abandonne un envoi échoué : la bulle disparaît du fil.
+  /// Confie l'envoi au magasin global, qui lui survivra.
   ///
-  /// Les médias déjà téléversés deviennent alors réellement orphelins — mais
-  /// c'est un choix EXPLICITE de l'utilisateur, pas un accident silencieux comme
-  /// avant. Une purge des médias sans message reste à écrire côté serveur.
+  /// Les trois services sont lus ICI, dans le `context` de l'écran, et passés
+  /// au magasin : lui n'en garde aucune référence, ce qui est précisément ce
+  /// qui permet à l'envoi de continuer quand cet écran n'existe plus.
+  Future<void> _lanceDansLeMagasin(EnvoiMedia envoi) {
+    final media = context.read<MediaRepository>();
+    final chat = context.read<ChatRepository>();
+    final rt = context.read<RealtimeClient>();
+    final erreur = tr(context, 'send_failed');
+    return EnvoiMediaStore.instance.lancer(
+      envoi,
+      media: media,
+      chat: chat,
+      rt: rt,
+      messageErreurGenerique: () => erreur,
+    );
+  }
+
+  void _reessayerEnvoi(EnvoiMedia envoi) => _lanceDansLeMagasin(envoi);
+
+  /// Abandonne un envoi échoué : la bulle disparaît du fil. Les médias déjà
+  /// téléversés deviennent orphelins côté serveur — mais c'est un choix
+  /// explicite de l'utilisateur, pas une perte silencieuse.
   void _abandonneEnvoi(EnvoiMedia envoi) {
-    _attentesEcho.remove(envoi.tempId)?.cancel();
+    EnvoiMediaStore.instance.abandonner(envoi.tempId);
     setState(() {
-      _envois.remove(envoi.tempId);
       _messages = _messages.where((m) => m.id != envoi.tempId).toList();
       _rebuildCombined();
     });
