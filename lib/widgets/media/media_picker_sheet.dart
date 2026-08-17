@@ -4,7 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:file_picker/file_picker.dart';
 import '../../theme/alanya_theme.dart';
-import '../contact_picker_sheet.dart';
+import '../contact_share_sheet.dart';
 
 /// Résultat de la sélection de médias.
 class MediaPickResult {
@@ -19,12 +19,6 @@ class MediaPickResult {
     required this.mimeType,
     this.durationMs,
   });
-}
-
-/// Résultat de la sélection de contact.
-class ContactPickResult {
-  final List<String> publicNumbers;
-  const ContactPickResult({required this.publicNumbers});
 }
 
 /// Résultat de la sélection de localisation.
@@ -178,26 +172,29 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
     if (mounted && results.isNotEmpty) Navigator.pop(context, results);
   }
 
-  // ══ CONTACT — ouvre le ContactPickerSheet existant ══
+  // ══ CONTACT — fiche de contact partagée (type de message CONTACT) ══
+  //
+  // ⚠️ Ceci n'envoyait AUCUN contact avant le 17/08/2026 : la feuille rendait
+  // une liste de numéros, que l'écran de discussion collait dans le champ de
+  // saisie pour les envoyer en texte. Le destinataire recevait « 12345678 » et
+  // n'avait ni nom, ni photo, ni action.
+  //
+  // La sélection est rendue à l'appelant (`ContactShareResult`) : c'est lui qui
+  // téléverse la photo éventuelle et envoie le message, comme pour les médias.
   Future<void> _pickContact() async {
-    // Ferme le media picker d'abord
-    Navigator.pop(context);
-
-    // Petit délai pour que la fermeture soit terminée
+    final navigator = Navigator.of(context);
+    // La feuille de sélection remplace celle-ci : on referme d'abord, sinon
+    // deux feuilles modales se superposent et la seconde hérite de la hauteur
+    // contrainte de la première.
+    navigator.pop();
     await Future.delayed(const Duration(milliseconds: 200));
-
     if (!mounted) return;
 
-    // Ouvre le ContactPickerSheet existant
-    final numbers = await ContactPickerSheet.show(
-      context,
-      title: "Envoyer un contact",
-      confirmLabel: "Envoyer",
-    );
-
-    if (numbers != null && numbers.isNotEmpty && mounted) {
-      // Retourne un ContactPickResult via Navigator.pop
-      Navigator.pop(context, ContactPickResult(publicNumbers: numbers));
+    final resultat = await ContactShareSheet.show(context);
+    if (resultat != null && resultat.contacts.isNotEmpty) {
+      // La feuille appelante est déjà fermée : on rend le résultat par le
+      // navigateur qu'elle a laissé, celui de l'écran de discussion.
+      navigator.pop(resultat);
     }
   }
 

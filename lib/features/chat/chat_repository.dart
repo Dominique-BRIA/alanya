@@ -199,6 +199,19 @@ class ChatRepository {
     return Map<String, dynamic>.from(data as Map);
   }
 
+  /// Repli REST pour un message structuré (`CONTACT`, `LOCATION`) : la charge
+  /// utile est le `content`, le média (photo d'un contact) est facultatif.
+  Future<Message> sendStructured(String convId, String msgType, String content,
+      {String? mediaId, String? replyToId}) async {
+    final data = await _api.post("/api/conversations/$convId/messages", {
+      "type": msgType,
+      "content": content,
+      if (mediaId != null) "mediaId": mediaId,
+      if (replyToId != null) "replyToId": replyToId,
+    });
+    return Message.fromJson(data);
+  }
+
   Future<Message> sendMultiMedia(String convId, List<String> mediaIds, String msgType, {String? replyToId, String? content}) async {
     final data = await _api.post("/api/conversations/$convId/messages", {
       "type": msgType, "mediaIds": mediaIds,

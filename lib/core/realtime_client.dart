@@ -312,6 +312,25 @@ class RealtimeClient extends ChangeNotifier {
         if (replyToId != null) "replyToId": replyToId,
       });
 
+  /// Message dont la charge utile vit dans `content` : `CONTACT`, `LOCATION`.
+  ///
+  /// Le média est FACULTATIF ici, contrairement à [sendMedia] : la photo d'un
+  /// contact du répertoire en est un, une position n'en a jamais. Le serveur
+  /// refuse la trame si la charge ne respecte pas le format partagé — voir
+  /// `models/message_payload.dart` et son miroir `src/lib/message-payload.mjs`.
+  void sendStructured(
+          String convId, String msgType, String content, String tempId,
+          {String? mediaId, String? replyToId}) =>
+      _send({
+        "type": "send",
+        "convId": convId,
+        "content": content,
+        "msgType": msgType,
+        "tempId": tempId,
+        if (mediaId != null) "mediaId": mediaId,
+        if (replyToId != null) "replyToId": replyToId,
+      });
+
   void markRead(String convId) => _send({"type": "read", "convId": convId});
 
   /// Annonce aux autres sessions du compte qu'un appareil vient d'être

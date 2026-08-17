@@ -15,6 +15,7 @@ import '../../../models/call_record.dart';
 import '../../calls/calls_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_contacts/flutter_contacts.dart' as fc;
 import 'package:provider/provider.dart';
 
 import '../../../core/api_client.dart';
@@ -31,9 +32,11 @@ import '../../../core/locale_controller.dart';
 import '../../../core/translate_service.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../models/message.dart';
+import '../../../models/message_payload.dart';
 import '../../../models/conversation.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
+import '../../../widgets/contact_share_sheet.dart';
 import '../../../widgets/motif_background.dart';
 import '../../account/screens/avatar_viewer_screen.dart';
 import '../../auth/auth_controller.dart';
@@ -55,6 +58,7 @@ import '../../../widgets/media/document_bubble.dart';
 import '../../../widgets/media/audio_bubble.dart';
 import '../../../widgets/media/reply_media_preview.dart';
 import '../../../widgets/media/media_grid.dart';
+import '../../../widgets/media/contact_bubble.dart';
 import '../../../core/media_helper.dart';
 import '../chat_media_integration.dart';
 import '../../../widgets/media/gps_preview.dart';
@@ -1212,18 +1216,24 @@ class _ChatScreenState extends State<ChatScreen>
   String _replyPreviewText(Message? original, ReplyPreview? snapshot) {
     if (snapshot != null) {
       if (snapshot.isDeleted) return tr(context, 'message_deleted');
+      // ⚠️ Le libellé AVANT le contenu : un CONTACT ou une LOCATION porte du
+      // JSON dans `content`, et cette citation tient sur une ligne.
+      final structure = apercuStructure(snapshot.type, snapshot.content);
+      if (structure != null) return structure;
       if (snapshot.content != null) return sansMarqueursWhatsApp(snapshot.content!);
       return _typeLabel(snapshot.type);
     }
     if (original == null) return '...';
     if (original.isDeleted) return tr(context, 'message_deleted');
+    final structure = apercuStructure(original.type, original.content);
+    if (structure != null) return structure;
     if (original.content != null) return sansMarqueursWhatsApp(original.content!);
     if (original.media.isNotEmpty) return original.media.first.filename ?? 'Fichier';
     return _typeLabel(original.type);
   }
 
   String _typeLabel(String type) {
-    switch (type) { case 'IMAGE': return 'Photo'; case 'AUDIO': return 'Message vocal'; case 'VIDEO': return 'Vidéo'; case 'FILE': return 'Fichier'; default: return '[$type]'; }
+    switch (type) { case 'IMAGE': return 'Photo'; case 'AUDIO': return 'Message vocal'; case 'VIDEO': return 'Vidéo'; case 'FILE': return 'Fichier'; case 'CONTACT': return 'Contact'; case 'LOCATION': return 'Position'; default: return '[$type]'; }
   }
 
   String _replySenderName(Message? original, ReplyPreview? snapshot) {
@@ -1287,11 +1297,9 @@ class _ChatScreenState extends State<ChatScreen>
     final result = await MediaPickerSheet.show(context);
     if (result == null) return;
 
-    // Contact sélectionné → envoie le numéro comme message texte
-    if (result is ContactPickResult) {
-      final numbers = result.publicNumbers.join(', ');
-      _inputCtrl.text = numbers;
-      _send();
+    // Contact sélectionné → vraie fiche de contact (message de type CONTACT).
+    if (result is ContactShareResult) {
+      await _sendContacts(result);
       return;
     }
 
@@ -1356,6 +1364,166 @@ class _ChatScreenState extends State<ChatScreen>
       _scrollToBottom();
     } on ApiException catch (e) { _showError(e.message); } catch (_) { _showError(tr(context, 'send_failed')); }
     finally { if (mounted) setState(() => _uploading = false); }
+  }
+
+  // ══════════════════════════════════════════════
+  // CONTACT PARTAGÉ
+  // ══════════════════════════════════════════════
+
+  /// Envoie une ou plusieurs fiches de contact (message de type `CONTACT`).
+  ///
+  /// La charge utile est du JSON dans `content` — format tenu par le serveur,
+  /// voir `models/message_payload.dart`. La photo d'un contact du répertoire
+  /// part comme MÉDIA du message : `content` est plafonné à 8000 caractères, et
+  /// une photo en base64 le ferait exploser.
+  Future<void> _sendContacts(ContactShareResult resultat) async {
+    if (resultat.contacts.isEmpty) return;
+    final replyId = _replyTo?.id;
+    final replyMsg = _replyTo;
+    final replySnapshot = replyMsg != null
+        ? ReplyPreview(
+            id: replyMsg.id,
+            senderId: replyMsg.senderId,
+            type: replyMsg.type,
+            content: replyMsg.isDeleted ? null : replyMsg.content,
+            isDeleted: replyMsg.isDeleted)
+        : null;
+    setState(() {
+      _uploading = true;
+      _replyTo = null;
+    });
+
+    final charge = encodeContacts(resultat.contacts);
+    final rt = context.read<RealtimeClient>();
+    try {
+      String? mediaId;
+      final photo = resultat.photoBytes;
+      if (photo != null) {
+        // Une photo illisible ou refusée par le serveur ne doit pas empêcher le
+        // partage : le contact vaut d'être envoyé sans son portrait.
+        try {
+          final envoyee = await context.read<MediaRepository>().upload(
+              photo,
+              "contact-${DateTime.now().millisecondsSinceEpoch}.jpg",
+              resultat.photoMimeType ?? "image/jpeg");
+          mediaId = envoyee.id;
+        } catch (_) {}
+      }
+
+      if (rt.connected) {
+        final tempId = "tmp-${DateTime.now().microsecondsSinceEpoch}";
+        // Bulle immédiate, remplacée par l'écho du serveur (qui renvoie le
+        // `tempId`) : même mécanique que pour un message texte.
+        final optimistic = Message(
+          id: tempId,
+          convId: widget.convId,
+          senderId: _myId ?? "",
+          content: charge,
+          type: "CONTACT",
+          status: "SENT",
+          replyToId: replyId,
+          replyTo: replySnapshot,
+          media: const [],
+          createdAt: DateTime.now(),
+        );
+        setState(() {
+          _messages = [..._messages, optimistic];
+          _rebuildCombined();
+        });
+        rt.sendStructured(widget.convId, "CONTACT", charge, tempId,
+            mediaId: mediaId, replyToId: replyId);
+      } else {
+        final msg = await context.read<ChatRepository>().sendStructured(
+            widget.convId, "CONTACT", charge,
+            mediaId: mediaId, replyToId: replyId);
+        _cacheMsg(msg);
+        if (mounted) {
+          setState(() {
+            _messages = [..._messages, msg];
+            _rebuildCombined();
+          });
+        }
+      }
+      _scrollToBottom();
+    } on ApiException catch (e) {
+      _showError(e.message);
+    } catch (_) {
+      _showError(tr(context, 'send_failed'));
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  /// Contacts portés par un message, ou liste vide si la charge est illisible.
+  List<SharedContact> _contactsDe(Message m) =>
+      contactsDepuisContenu(m.content) ?? const [];
+
+  /// Ouvre la discussion avec un contact reçu (compte Alanya seulement).
+  ///
+  /// La conversation est créée à la volée si elle n'existe pas — `createDirect`
+  /// récupère l'existante ou la crée, exactement comme depuis la fiche contact.
+  Future<void> _ouvrirDiscussionContact(SharedContact contact) async {
+    final id = contact.alanyaId;
+    if (id == null) return;
+    try {
+      final convId = await context.read<ChatRepository>().createDirect(id);
+      if (!mounted) return;
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => ChatScreen(
+          convId: convId,
+          title: contact.displayName,
+          avatarUrl: contact.avatarUrl,
+          otherPublicNumber: id,
+        ),
+      ));
+    } on ApiException catch (e) {
+      _showError(e.message);
+    } catch (_) {
+      _showError("Impossible d'ouvrir la discussion");
+    }
+  }
+
+  /// Appelle un contact reçu (compte Alanya seulement).
+  Future<void> _appelerContact(SharedContact contact) async {
+    final id = contact.alanyaId;
+    if (id == null) return;
+    final cc = context.read<CallController>();
+    try {
+      final convId = await context.read<ChatRepository>().createDirect(id);
+      if (!mounted) return;
+      await cc.startOutgoing(convId, "AUDIO", contact.displayName);
+      if (!mounted) return;
+      // Sans cette ouverture, l'appel démarre sans que rien ne s'affiche —
+      // seul le bandeau global le signale (même enchaînement que la fiche
+      // contact et le clavier d'appel).
+      await Navigator.of(context).push(MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => const ActiveCallScreen(),
+      ));
+    } catch (e) {
+      // `messageErreurAppel` traite déjà l'ApiException : le message du serveur
+      // passe tel quel (« Le correspondant est déjà en appel »), et c'est le
+      // point unique des trois écrans qui lancent un appel.
+      _showError(messageErreurAppel(e));
+    }
+  }
+
+  /// Enregistre un contact reçu dans le répertoire du téléphone.
+  ///
+  /// ⚠️ On passe par l'écran de création de contact d'Android
+  /// (`openExternalInsert`) plutôt que d'écrire nous-mêmes : cela n'exige
+  /// AUCUNE permission d'écriture, et c'est l'utilisateur qui valide. Demander
+  /// `WRITE_CONTACTS` pour cette seule action serait disproportionné, et le
+  /// Play Store le fait justifier.
+  Future<void> _enregistrerContact(SharedContact contact) async {
+    try {
+      final fiche = fc.Contact()
+        ..name.first = contact.name ?? ''
+        ..phones = contact.phones.map((p) => fc.Phone(p)).toList();
+      await fc.FlutterContacts.openExternalInsert(fiche);
+    } catch (_) {
+      _showError("Impossible d'ouvrir la création de contact");
+    }
   }
 
   // ══════════════════════════════════════════════
@@ -1819,6 +1987,10 @@ class _ChatScreenState extends State<ChatScreen>
 
   String _pinnedPreviewText(Message m) {
     if (m.isDeleted) return "Message supprimé";
+    // Même raison que pour la citation d'une réponse : le bandeau ne montre
+    // qu'une ligne, et la charge d'un message structuré est du JSON.
+    final structure = apercuStructure(m.type, m.content);
+    if (structure != null) return structure;
     switch (m.type) {
       case "IMAGE":
         return "Photo";
@@ -2290,6 +2462,11 @@ class _ChatScreenState extends State<ChatScreen>
     final isVideo = !isMultiMedia && effectif == "VIDEO" && hasMedia;
     final isFile = !isMultiMedia && effectif == "FILE" && hasMedia;
     final isAudio = !isMultiMedia && effectif == "AUDIO" && hasMedia;
+    // Fiche de contact : la charge est dans `content`, le média éventuel n'est
+    // que la photo. Une charge illisible retombe sur la bulle texte, qui
+    // affichera au moins quelque chose plutôt qu'une carte vide.
+    final contactsPartages = effectif == "CONTACT" ? _contactsDe(m) : const <SharedContact>[];
+    final isContact = contactsPartages.isNotEmpty;
     final senderLabel = widget.isGroup && !mine ? (widget.memberNames[m.senderId] ?? "Membre") : null;
     final isHighlighted = _highlightedMessageId == m.id || _selectedMessageId == m.id;
     final isGrid = isMultiMedia; // 2+ médias → grille
@@ -2323,6 +2500,24 @@ class _ChatScreenState extends State<ChatScreen>
                 if (m.replyToId != null && !m.isDeleted) _replyPreviewHeader(m, mine),
                 m.isDeleted
                     ? _deletedBubble(m, mine)
+                    : isContact
+                    ? ContactBubble(
+                        contacts: contactsPartages,
+                        // La photo, quand il y en a une, est le média du
+                        // message : `content` ne transporte jamais d'image.
+                        photoUrl: hasMedia && m.media.first.mimeType.startsWith('image/')
+                            ? m.media.first.url
+                            : null,
+                        actions: ContactBubbleActions(
+                          onOuvrirDiscussion: _ouvrirDiscussionContact,
+                          onAppeler: _appelerContact,
+                          onEnregistrer: _enregistrerContact,
+                        ),
+                        onLongPress: () => _openMessageActions(m),
+                        timestamp: _time(m.createdAt),
+                        statusWidget: mine ? _statusTicks(m.status, Colors.white70) : null,
+                        isMe: mine,
+                      )
                     : isGrid
                         ? MediaGrid(
                             items: m.media.map((media) => MediaGridItem(
@@ -2489,6 +2684,12 @@ class _ChatScreenState extends State<ChatScreen>
   /// affirmation du client qui l'a envoyé — et cette affirmation a été fausse
   /// pour toutes les vidéos venues du web.
   String _typeEffectif(Message m) {
+    // ⚠️ EXCEPTION AVANT TOUT LE RESTE : un CONTACT peut porter la photo du
+    // contact comme média. Laisser le MIME primer afficherait cette photo en
+    // grand à la place de la fiche — la règle du MIME existe pour rattraper des
+    // messages MAL ÉTIQUETÉS, pas pour contredire un type structuré, dont la
+    // charge utile est dans `content`.
+    if (m.type == "CONTACT" || m.type == "LOCATION") return m.type;
     if (m.media.isEmpty) return m.type;
     final mime = m.media.first.mimeType;
     if (mime.startsWith('image/')) return 'IMAGE';
