@@ -129,7 +129,15 @@ jobs:
         # GRADLE_OPTS traverse Flutter jusqu'au Gradle qu'il lance.
         env:
           GRADLE_OPTS: -Dorg.gradle.daemon=false
-        run: flutter build apk --release
+          # Clé des tuiles de carte (bulle « position »). Secret du dépôt, car
+          # les deux dépôts de ce projet sont PUBLICS : une clé dans le code y
+          # serait ramassée par des robots en quelques minutes.
+          #
+          # ⚠️ Secret ABSENT = APK sans carte, et le build RÉUSSIT quand même.
+          # La bulle retombe alors sur une vignette sobre (repère +
+          # coordonnées) : c'est visible, mais ça ne casse rien.
+          MAPTILER_KEY: ${{ secrets.MAPTILER_KEY }}
+        run: flutter build apk --release --dart-define=MAPTILER_KEY=$MAPTILER_KEY
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

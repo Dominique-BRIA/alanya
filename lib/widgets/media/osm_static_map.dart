@@ -14,15 +14,33 @@ import '../../theme/alanya_theme.dart';
 /// n'a besoin ni de gestes, ni de couches, ni de plugins : seulement de la
 /// projection de Mercator et de quelques images.
 ///
-/// 🔴 **AVANT PUBLICATION SUR LE PLAY STORE, TRANCHER LA SOURCE DES TUILES.**
-/// La politique d'usage d'openstreetmap.org interdit qu'une application
-/// DISTRIBUÉE tire ses tuiles directement de leurs serveurs. Trois issues, et
-/// une seule ligne à changer ([_baseTuiles]) :
-///   1. une clé chez un fournisseur (MapTiler, Geoapify… ont un palier gratuit) ;
-///   2. un relais par notre backend, qui met les tuiles en cache ;
-///   3. renoncer aux tuiles et garder la carte schématique.
-/// L'en-tête `User-Agent` identifie l'application, comme leur politique
-/// l'exige, mais cela ne suffit pas à autoriser une distribution publique.
+/// **SOURCE DES TUILES : MapTiler, par clé injectée à la compilation.**
+///
+/// Les serveurs d'openstreetmap.org ont été écartés : leur politique d'usage
+/// interdit qu'une application DISTRIBUÉE y prenne ses tuiles, et le prix d'un
+/// blocage serait une carte grise chez tout le monde, sans avertissement.
+///
+/// 🔴 **LA CLÉ N'EST PAS DANS LE CODE, ET NE DOIT PAS Y ENTRER : les deux
+/// dépôts de ce projet sont PUBLICS** (vérifié le 17/08/2026 via l'API GitHub).
+/// Une clé poussée sur un dépôt public est ramassée par des robots en quelques
+/// minutes, et c'est le quota du user qui se vide. Elle est donc fournie au
+/// build :
+///
+///     flutter build apk --dart-define=MAPTILER_KEY=<clé>
+///
+/// et vient d'un secret de CI (voir les trois fichiers de CI du dépôt).
+///
+/// ⚠️ **Sans clé, il n'y a PAS de repli sur OpenStreetMap** — c'était le
+/// comportement à éviter : un build qui oublie la variable aurait produit une
+/// application en infraction, et personne ne l'aurait vu. La carte retombe sur
+/// une vignette sobre, qui reste utile (repère + coordonnées + ouverture dans
+/// l'application de cartes) et qui SE VOIT.
+///
+/// ⚠️ **Une clé de carte embarquée dans une application est extractible de
+/// l'APK** : c'est vrai de toutes les applications mobiles qui affichent une
+/// carte, et aucun réglage de compilation n'y change rien. La vraie protection
+/// est côté MapTiler — restreindre les origines autorisées et surveiller le
+/// quota.
 class OsmStaticMap extends StatelessWidget {
   const OsmStaticMap({
     super.key,
@@ -41,10 +59,24 @@ class OsmStaticMap extends StatelessWidget {
   final int zoom;
   final bool marqueur;
 
-  /// Source des tuiles — voir l'avertissement de l'en-tête de classe.
-  static const String _baseTuiles = "https://tile.openstreetmap.org";
+  /// Clé MapTiler, injectée à la compilation. Vide = pas de tuiles.
+  static const String cleMapTiler = String.fromEnvironment("MAPTILER_KEY");
 
-  /// Exigé par la politique d'usage : une application anonyme est bloquée.
+  /// Style de carte. Modifiable sans toucher au code (`basic-v2`, `topo-v2`…).
+  static const String _style =
+      String.fromEnvironment("MAPTILER_STYLE", defaultValue: "streets-v2");
+
+  /// Vrai si l'application a été compilée avec une clé de cartes.
+  static bool get tuilesDisponibles => cleMapTiler.isNotEmpty;
+
+  /// ⚠️ Le segment `/256/` n'est pas décoratif : sans lui MapTiler sert des
+  /// tuiles de **512 px**, et toute la projection de cette classe (qui place
+  /// les images au pixel près) serait décalée d'un facteur deux. Vérifié par
+  /// requête réelle : 256 → 37 Ko, sans le segment → 71 Ko.
+  String _urlTuile(int z, int x, int y) =>
+      "https://api.maptiler.com/maps/$_style/256/$z/$x/$y.png?key=$cleMapTiler";
+
+  /// Identifie l'application auprès du fournisseur de tuiles.
   static const Map<String, String> _entetes = {
     "User-Agent": "AlanyaWork/0.1 (com.alanya237.work)",
   };
@@ -79,7 +111,11 @@ class OsmStaticMap extends StatelessWidget {
     final yFin = ((origineY + height) / _tuile).floor();
 
     final images = <Widget>[];
-    for (var tx = xDebut; tx <= xFin; tx++) {
+    // Sans clé de cartes, on n'affiche AUCUNE tuile — et surtout pas celles
+    // d'OpenStreetMap en repli (voir l'en-tête de classe). La vignette sobre
+    // qui reste porte le repère, les coordonnées, et ouvre l'application de
+    // cartes : elle est utile, et son aspect signale qu'il manque la clé.
+    for (var tx = xDebut; tuilesDisponibles && tx <= xFin; tx++) {
       for (var ty = yDebut; ty <= yFin; ty++) {
         // Hors du monde en latitude : il n'existe aucune tuile, on laisse le
         // fond. En longitude, on enroule (le monde est un cylindre).
@@ -92,7 +128,7 @@ class OsmStaticMap extends StatelessWidget {
           width: _tuile,
           height: _tuile,
           child: Image.network(
-            "$_baseTuiles/$zoom/$x/$ty.png",
+            _urlTuile(zoom, x, ty),
             headers: _entetes,
             fit: BoxFit.cover,
             // Une tuile manquante ne doit pas trouer la carte : le fond neutre
@@ -133,18 +169,22 @@ class OsmStaticMap extends StatelessWidget {
                       ]),
                 ),
               ),
-            // Attribution : la licence des données l'exige, même sur une
-            // vignette.
-            Positioned(
-              right: 3,
-              bottom: 2,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
-                color: Colors.white.withValues(alpha: 0.7),
-                child: const Text("© OpenStreetMap",
-                    style: TextStyle(fontSize: 7, color: AlanyaColors.ink)),
+            // Attribution : exigée par MapTiler ET par la licence des données
+            // OpenStreetMap dont ses fonds dérivent. Elle n'apparaît que
+            // lorsqu'une carte est réellement affichée — l'écrire sur une
+            // vignette sans tuile créditerait une donnée absente.
+            if (tuilesDisponibles)
+              Positioned(
+                right: 3,
+                bottom: 2,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+                  color: Colors.white.withValues(alpha: 0.7),
+                  child: const Text("© MapTiler © OpenStreetMap",
+                      style: TextStyle(fontSize: 7, color: AlanyaColors.ink)),
+                ),
               ),
-            ),
           ],
         ),
       ),

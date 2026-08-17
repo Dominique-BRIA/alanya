@@ -176,7 +176,14 @@ jobs:
           command: |
             set -euo pipefail
             source "$BASH_ENV"
-            flutter build apk --release --split-per-abi
+            # MAPTILER_KEY : variable de projet CircleCI. Les deux dépôts sont
+            # PUBLICS, la clé des tuiles ne peut donc pas vivre dans le code.
+            # `${MAPTILER_KEY:-}` : sans la variable, `set -u` ferait échouer
+            # tout le build pour une carte manquante. L'APK sort alors sans
+            # carte — visible, et sans repli sur OpenStreetMap, que leur
+            # politique interdit à une application distribuée.
+            flutter build apk --release --split-per-abi \
+              --dart-define=MAPTILER_KEY="${MAPTILER_KEY:-}"
           no_output_timeout: 30m
 
       - save_cache:
