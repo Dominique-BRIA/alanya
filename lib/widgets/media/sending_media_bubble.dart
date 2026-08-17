@@ -79,6 +79,18 @@ class SendingMediaBubble extends StatelessWidget {
               ],
             ),
           ),
+          // Nom et taille d'un fichier en cours d'envoi : sur un document, une
+          // vignette générique ne dit pas CE qu'on envoie. Une photo, si.
+          if (apercu != null && !estImage && !apercu.estVideo) ...[
+            const SizedBox(height: 4),
+            Text(apercu.fileName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.w600, color: onText)),
+            Text(_taille(apercu.bytes.length),
+                style: TextStyle(fontSize: 11, color: onSub)),
+          ],
           if (envoi.total > 1) ...[
             const SizedBox(height: 4),
             Text(
@@ -123,6 +135,14 @@ class SendingMediaBubble extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// Taille lisible. Base 1024, comme le plafond du serveur (50 × 1024 × 1024) :
+  /// afficher « 52 Mo » pour un fichier refusé à 50 serait incompréhensible.
+  static String _taille(int octets) {
+    if (octets < 1024) return "$octets o";
+    if (octets < 1024 * 1024) return "${(octets / 1024).toStringAsFixed(0)} Ko";
+    return "${(octets / (1024 * 1024)).toStringAsFixed(1)} Mo";
   }
 
   Widget _anneau() {

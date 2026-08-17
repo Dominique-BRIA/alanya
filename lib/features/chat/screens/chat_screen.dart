@@ -2431,6 +2431,8 @@ class _ChatScreenState extends State<ChatScreen>
         ListTile(leading: Icon(Icons.forward, color: _positive), title: Text(tr(context, 'forward')), onTap: () { Navigator.pop(ctx); _forwardMessage(m); }),
         ListTile(leading: Icon(Icons.copy, color: _iconNeutral), title: Text(tr(context, 'copy')), onTap: () { Navigator.pop(ctx); if (m.content != null) { Clipboard.setData(ClipboardData(text: m.content!)); showAppSnackBar(tr(context, 'copied')); } }),
       ],
+      if (!m.isDeleted && m.media.isNotEmpty)
+        ListTile(leading: Icon(Icons.download_outlined, color: _iconNeutral), title: const Text("Enregistrer"), onTap: () { Navigator.pop(ctx); _download(m.media.first); }),
       ListTile(leading: Icon(m.isDeleted ? Icons.delete_outline : Icons.delete, color: _danger), title: Text(tr(context, 'delete')), onTap: () { Navigator.pop(ctx); _deleteMessage(m); }),
     ])));
   }
@@ -2626,6 +2628,8 @@ class _ChatScreenState extends State<ChatScreen>
               _togglePin(m);
             } else if (v == 'info') {
               _showMessageInfo(m);
+            } else if (v == 'download' && m.media.isNotEmpty) {
+              _download(m.media.first);
             }
           },
           itemBuilder: (_) => [
@@ -2636,6 +2640,21 @@ class _ChatScreenState extends State<ChatScreen>
                     Icon(Icons.info_outline, size: 20, color: _iconNeutral),
                     const SizedBox(width: 12),
                     const Text("Infos"),
+                  ])),
+            // Enregistrer dans le stockage public du téléphone.
+            //
+            // ⚠️ `_download` existait déjà, ÉCRIT ET FONCTIONNEL, mais n'était
+            // appelé de nulle part : le destinataire pouvait ouvrir un fichier,
+            // jamais le garder. C'est le « téléchargement côté destinataire »
+            // demandé pour les fichiers.
+            if (!m.isDeleted && m.media.isNotEmpty)
+              PopupMenuItem(
+                  value: 'download',
+                  child: Row(children: [
+                    Icon(Icons.download_outlined,
+                        size: 20, color: _iconNeutral),
+                    const SizedBox(width: 12),
+                    const Text("Enregistrer"),
                   ])),
             if (hasText)
               PopupMenuItem(

@@ -183,26 +183,51 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
     } catch (_) {}
   }
 
-  // ══ DOCUMENTS ══
+  // ══ DOCUMENTS — TOUS TYPES ══
+  //
+  // La liste blanche d'extensions (`pdf, doc, docx, xls, xlsx, ppt, pptx, txt,
+  // csv`) interdisait d'envoyer une archive, un APK, un fichier audio ou
+  // n'importe quoi d'autre — alors que le serveur les accepte : tout type
+  // inconnu part en `application/octet-stream`, qui est dans SA liste blanche
+  // (`storage.ts`). C'est le client qui refusait, pas le serveur.
   Future<void> _pickDocuments() async {
     final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'csv'],
+      type: FileType.any,
       allowMultiple: true,
       withData: true,
     );
     if (result == null || result.files.isEmpty || !mounted) return;
     final results = <MediaPickResult>[];
+    final tropGros = <String>[];
     for (final file in result.files) {
       if (file.bytes == null) continue;
+      // ⚠️ Plafond du serveur (MEDIA_MAX_SIZE_MB, 50 par défaut) : sans ce
+      // contrôle, un fichier de 200 Mo était intégralement TÉLÉVERSÉ avant de
+      // se faire refuser par un 413. On le dit avant, en nommant le fichier.
+      if (file.bytes!.length > _maxOctets) {
+        tropGros.add(file.name);
+        continue;
+      }
       results.add(MediaPickResult(
         bytes: file.bytes!,
         fileName: file.name,
         mimeType: _guessMime(file.name),
+        path: file.path,
       ));
     }
-    if (mounted && results.isNotEmpty) Navigator.pop(context, results);
+    if (!mounted) return;
+    if (tropGros.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(tropGros.length == 1
+            ? "« ${tropGros.first} » dépasse 50 Mo et n'a pas été joint"
+            : "${tropGros.length} fichiers dépassent 50 Mo et n'ont pas été joints"),
+      ));
+    }
+    if (results.isNotEmpty) Navigator.pop(context, results);
   }
+
+  /// Taille maximale acceptée par le serveur, en octets.
+  static const int _maxOctets = 50 * 1024 * 1024;
 
   // ══ CONTACT — fiche de contact partagée (type de message CONTACT) ══
   //
