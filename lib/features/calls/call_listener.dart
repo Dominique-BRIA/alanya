@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:alanya_telecom/alanya_telecom.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_callkit_incoming/entities/call_event.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
@@ -69,6 +70,32 @@ class _CallListenerState extends State<CallListener> {
       }
     });
 
+    // Boutons de la notification TELECOM, portée par le module natif local.
+    //
+    // C'est désormais CE canal qui compte sur Android : `afficherAppelEntrant`
+    // passe par Telecom en priorité, et le flux du paquet juste au-dessus ne
+    // sert plus qu'au repli. Sans cet écouteur, Décrocher et Refuser seraient
+    // des boutons morts pour tout appel reçu application fermée.
+    AlanyaTelecom.setListener((event, data) {
+      if (!mounted) return;
+      final callId = data['callId']?.toString();
+      switch (event) {
+        case 'answer':
+          // Écho de notre propre `answerRinging` : l'appel est déjà en cours
+          // d'acceptation, le relancer ouvrirait un second écran d'appel.
+          if (CallUiNative.consommerEchoLocal(callId)) return;
+          _onCallAction('call_accept', callId);
+        // Le délai de sonnerie compte comme un refus, pour que l'appelant cesse
+        // de sonner tout de suite plutôt que d'attendre son propre minuteur.
+        case 'reject' || 'timeout':
+          _onCallAction('call_reject', callId);
+        case 'telecom_failed':
+          unawaited(_replierSurPaquet(data));
+        default:
+          break;
+      }
+    });
+
     // ⚠️ NE PAS effacer les appels natifs au démarrage. La version précédente
     // appelait `endAllCalls()` ici pour nettoyer un écran orphelin — sauf que
     // décrocher DÉMARRE l'application : cette ligne supprimait donc l'appel que
@@ -86,6 +113,36 @@ class _CallListenerState extends State<CallListener> {
   /// actifs, eux, portent l'information — un appel marqué accepté signifie que
   /// l'utilisateur a appuyé sur Répondre.
   Future<void> _reprendreAppelNatif() async {
+    // ── TELECOM D'ABORD ────────────────────────────────────────────────────
+    // C'est lui qui porte l'appel sur Android ; le paquet n'intervient qu'en
+    // repli. Ces deux accesseurs existent précisément pour le démarrage à
+    // froid : l'événement `answer` est parti avant que cet écouteur n'existe,
+    // et il n'est jamais rejoué — seul l'état de la `Connection` en garde la
+    // trace.
+    try {
+      final accepte = await AlanyaTelecom.getAcceptedCall();
+      if (!mounted) return;
+      final idAccepte = accepte?['callId']?.toString();
+      if (idAccepte != null && idAccepte.isNotEmpty) {
+        _onCallAction('call_accept', idAccepte);
+        return;
+      }
+
+      // ⚠️ NE PAS COUPER LA SONNERIE NATIVE ICI, si tentant que ce soit.
+      //
+      // Une version précédente appelait `silenceRinger()` à ce point, en
+      // supposant que la sonnerie interne prendrait aussitôt le relais. Mesuré
+      // sur TECNO KL5 : le son natif s'arrêtait à 3,1 s et l'interne ne
+      // démarrait qu'à 16,0 s — HUIT SECONDES DE SILENCE. La raison est simple :
+      // `RingtoneService` ne peut sonner qu'une fois la trame socket
+      // `incoming_call` arrivée, et au démarrage à froid le WebSocket met une
+      // dizaine de secondes à se connecter.
+      //
+      // On laisse donc le natif sonner sans interruption. C'est
+      // `call_controller` qui s'abstient de lancer la sonnerie interne quand
+      // celle-ci tourne déjà — une seule source, et aucun trou.
+    } catch (_) {}
+
     try {
       final actifs = await FlutterCallkitIncoming.activeCalls();
       if (!mounted || actifs.isEmpty) return;
@@ -98,9 +155,34 @@ class _CallListenerState extends State<CallListener> {
     } catch (_) {}
   }
 
+  /// Telecom avait accepté la déclaration, puis n'a pas créé la `Connection` —
+  /// appel cellulaire en cours, ou compte refusé par le constructeur.
+  ///
+  /// Le repli ne pouvait pas être choisi au moment de la déclaration, puisque
+  /// celle-ci avait réussi : sans ce rattrapage, l'appel disparaîtrait sans le
+  /// moindre signe. `sansTelecom` empêche de repasser par la voie qui vient
+  /// d'échouer.
+  Future<void> _replierSurPaquet(Map<String, dynamic> data) async {
+    final callId = data['callId']?.toString();
+    if (callId == null || callId.isEmpty) return;
+    DebugOverlay.log("CL ⚠️ Telecom indisponible → repli paquet ($callId)");
+    try {
+      await CallUiNative.afficherAppelEntrant(
+        callId: callId,
+        nom: data['callerName']?.toString() ?? 'Appel entrant',
+        avatarUrl: data['callerAvatar']?.toString(),
+        video: data['callType']?.toString() == 'video',
+        sansTelecom: true,
+      );
+    } catch (e) {
+      DebugOverlay.log("CL ❌ repli paquet indisponible : $e");
+    }
+  }
+
   @override
   void dispose() {
     PushService.onCallAction = null;
+    AlanyaTelecom.setListener(null);
     _natifSub?.cancel();
     // Nettoie un éventuel heads-up d'appel encore affiché.
     InAppNotifier.instance.dismissCall();

@@ -1,0 +1,27 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- ConnectionService self-managed (Telecom) -->
+    <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application>
+        <!-- Déclaré au système Telecom : tant qu'une Connection est active
+             (sonnerie OU communication), Android LIE le processus de l'app →
+             plus de gel possible, la sonnerie joue toujours. -->
+        <service
+            android:name="com.alanya.telecom.AlanyaConnectionService"
+            android:permission="android.permission.BIND_TELECOM_CONNECTION_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.telecom.ConnectionService" />
+            </intent-filter>
+        </service>
+
+        <!-- Boutons Décrocher/Refuser de la notification d'appel -->
+        <receiver
+            android:name="com.alanya.telecom.TelecomActionReceiver"
+            android:exported="false" />
+    </application>
+</manifest>

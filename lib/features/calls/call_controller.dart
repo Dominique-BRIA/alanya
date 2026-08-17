@@ -3,6 +3,7 @@ import 'dart:async';
 // `widgets.dart` plutôt que `foundation.dart`, qu'il réexporte :
 // `WidgetsBinding.lifecycleState` sert à distinguer l'application ouverte
 // (bandeau interne) de l'application réduite ou fermée (écran d'appel natif).
+import 'package:alanya_telecom/alanya_telecom.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
@@ -1316,8 +1317,26 @@ class CallController extends ChangeNotifier {
 
       // Sonnerie interne dès que l'écran natif ne porte pas l'appel : il joue
       // la sienne, et les deux ensemble donneraient une double sonnerie.
+      //
+      // ⚠️ `natifAffiche` NE SUFFIT PAS À LE SAVOIR. Il ne dit que ceci : « ai-je
+      // déclaré l'appel à l'instant ? » Or au démarrage à froid, c'est le PUSH
+      // qui l'a déjà déclaré à Telecom, plusieurs secondes avant que la trame
+      // socket n'arrive ici — l'application est alors au premier plan, donc
+      // `natifAffiche` vaut faux, et une seconde sonnerie partirait par-dessus
+      // celle qui joue déjà.
+      //
+      // On interroge donc l'état RÉEL du natif. Mesuré sur TECNO KL5 : sans ce
+      // contrôle, la sonnerie native était coupée à 3,1 s pour laisser la place
+      // à l'interne, qui ne démarrait qu'à 16,0 s — huit secondes de silence.
       if (!natifAffiche) {
-        RingtoneService.instance.startIncoming();
+        final natifSonneDeja =
+            (await AlanyaTelecom.getRingingCall())?['callId']?.toString() ==
+                callId;
+        if (!natifSonneDeja) {
+          RingtoneService.instance.startIncoming();
+        } else {
+          traceAppel("sonnerie interne ignorée — le natif sonne déjà");
+        }
       }
       // Autorise l'écran d'appel à passer par-dessus le verrouillage, et allume
       // l'écran. Activé ICI et non au montage de l'écran d'appel : quand le

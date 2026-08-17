@@ -16,6 +16,11 @@ public final class GeneratedPluginRegistrant {
   private static final String TAG = "GeneratedPluginRegistrant";
   public static void registerWith(@NonNull FlutterEngine flutterEngine) {
     try {
+      flutterEngine.getPlugins().add(new com.alanya.telecom.AlanyaTelecomPlugin());
+    } catch (Exception e) {
+      Log.e(TAG, "Error registering plugin alanya_telecom, com.alanya.telecom.AlanyaTelecomPlugin", e);
+    }
+    try {
       flutterEngine.getPlugins().add(new com.ryanheise.audio_session.AudioSessionPlugin());
     } catch (Exception e) {
       Log.e(TAG, "Error registering plugin audio_session, com.ryanheise.audio_session.AudioSessionPlugin", e);
