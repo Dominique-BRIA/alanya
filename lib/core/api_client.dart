@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
@@ -14,6 +15,36 @@ class ApiException implements Exception {
 
   @override
   String toString() => message;
+}
+
+/// Requête multipart qui annonce sa progression.
+///
+/// POURQUOI UNE SOUS-CLASSE, et pas un paquet : `http.MultipartRequest.send()`
+/// n'expose aucun compteur, et c'est la seule raison pour laquelle l'envoi d'un
+/// média n'avait aucune barre de progression. Passer à `dio` pour ce seul besoin
+/// signifierait ajouter un paquet — donc toucher aux TROIS chaînes de CI de ce
+/// projet, pour une fonctionnalité qui tient en dix lignes. `finalize()` rend le
+/// corps sous forme de flux : il suffit de compter ce qui y passe.
+class _RequeteMultipartSuivie extends http.MultipartRequest {
+  _RequeteMultipartSuivie(super.method, super.url, {this.onProgress});
+
+  final void Function(int envoyes, int total)? onProgress;
+
+  @override
+  http.ByteStream finalize() {
+    final total = contentLength;
+    var envoyes = 0;
+    final flux = super.finalize();
+    return http.ByteStream(
+      flux.transform(StreamTransformer.fromHandlers(
+        handleData: (List<int> donnees, EventSink<List<int>> sortie) {
+          envoyes += donnees.length;
+          onProgress?.call(envoyes, total);
+          sortie.add(donnees);
+        },
+      )),
+    );
+  }
 }
 
 /// Client HTTP minimal vers le backend Alanya (Next.js).
@@ -66,6 +97,15 @@ class ApiClient {
   }
 
   /// Upload multipart d'un fichier (champ "file"), avec champs additionnels optionnels.
+  ///
+  /// [onProgress] reçoit (octets envoyés, octets total) au fil de l'émission.
+  ///
+  /// ⚠️ **Ce que la progression mesure vraiment** : les octets remis à la pile
+  /// réseau, pas ceux que le serveur a reçus. Sur un petit fichier, elle peut
+  /// donc atteindre 100 % alors que la réponse n'est pas encore là — c'est la
+  /// limite de tout indicateur d'envoi côté client, et la raison pour laquelle
+  /// l'interface doit distinguer « 100 % » de « terminé » : seul le retour de
+  /// cette fonction dit que le média existe côté serveur.
   Future<Map<String, dynamic>> uploadBytes(
     String path,
     Uint8List bytes,
@@ -73,8 +113,13 @@ class ApiClient {
     String mimeType, {
     String? bearer,
     Map<String, String>? fields,
+    void Function(int envoyes, int total)? onProgress,
   }) async {
-    final request = http.MultipartRequest("POST", Uri.parse("$baseUrl$path"));
+    final request = _RequeteMultipartSuivie(
+      "POST",
+      Uri.parse("$baseUrl$path"),
+      onProgress: onProgress,
+    );
     if (bearer != null) request.headers["Authorization"] = "Bearer $bearer";
     if (fields != null) request.fields.addAll(fields);
     request.files.add(http.MultipartFile.fromBytes(

@@ -30,15 +30,19 @@ class AuthedApi {
   Future<Map<String, dynamic>> delete(String path, {Map<String, dynamic>? body}) =>
       _withAuth((token) => _api.delete(path, bearer: token, body: body));
 
+  /// ⚠️ [onProgress] peut REPARTIR DE ZÉRO : sur 401, `_withAuth` rafraîchit la
+  /// session et rejoue la requête entière, donc le compteur recommence. L'appelant
+  /// doit afficher le dernier ratio reçu, jamais supposer qu'il ne décroît pas.
   Future<Map<String, dynamic>> uploadBytes(
     String path,
     Uint8List bytes,
     String filename,
     String mimeType, {
     Map<String, String>? fields,
+    void Function(int envoyes, int total)? onProgress,
   }) =>
-      _withAuth((token) =>
-          _api.uploadBytes(path, bytes, filename, mimeType, bearer: token, fields: fields));
+      _withAuth((token) => _api.uploadBytes(path, bytes, filename, mimeType,
+          bearer: token, fields: fields, onProgress: onProgress));
 
   Future<Map<String, dynamic>> _withAuth(
     Future<Map<String, dynamic>> Function(String token) call,

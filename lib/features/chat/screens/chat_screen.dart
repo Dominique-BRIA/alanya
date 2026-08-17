@@ -47,6 +47,7 @@ import '../../contacts/screens/contact_info_screen.dart';
 import '../../group/screens/group_info_screen.dart';
 import '../../media/media_repository.dart';
 import '../chat_repository.dart';
+import '../envoi_media.dart';
 import '../widgets/activity_indicator.dart';
 import 'pdf_viewer_screen.dart';
 import 'media_caption_screen.dart';
@@ -60,6 +61,7 @@ import '../../../widgets/media/reply_media_preview.dart';
 import '../../../widgets/media/media_grid.dart';
 import '../../../widgets/media/contact_bubble.dart';
 import '../../../widgets/media/location_bubble.dart';
+import '../../../widgets/media/sending_media_bubble.dart';
 import '../../../core/media_helper.dart';
 import '../chat_media_integration.dart';
 import '../../../widgets/media/gps_preview.dart';
@@ -226,6 +228,15 @@ class _ChatScreenState extends State<ChatScreen>
   String? _token;
   String _baseUrl = "";
   bool _uploading = false;
+
+  /// Envois de médias en cours ou échoués, indexés par l'identifiant provisoire
+  /// du message optimiste correspondant. Voir `envoi_media.dart`.
+  final Map<String, EnvoiMedia> _envois = {};
+
+  /// Minuteurs qui bornent l'attente de l'écho du serveur (trames WebSocket
+  /// sans accusé). Annulés à la destruction de l'écran, sinon ils réveillent un
+  /// `setState` sur un État mort.
+  final Map<String, Timer> _attentesEcho = {};
   final _voiceRecorder = VoiceRecorder();
   bool _recording = false;
   DateTime? _recordStarted;
@@ -395,6 +406,13 @@ class _ChatScreenState extends State<ChatScreen>
     _emitRecording(false);
     _pollTimer?.cancel();
     _recordTimer?.cancel();
+    // Un minuteur d'attente d'écho qui survit à l'écran appellerait `setState`
+    // sur un État détruit — l'exception classique après avoir quitté une
+    // conversation pendant un envoi.
+    for (final t in _attentesEcho.values) {
+      t.cancel();
+    }
+    _attentesEcho.clear();
     _rtSub?.cancel();
     try {
       context.read<CallController>().removeListener(_onCallActivity);
@@ -492,6 +510,12 @@ class _ChatScreenState extends State<ChatScreen>
           _messages[idx] = msg;
         } else if (!_messages.any((m) => m.id == msg.id)) {
           _messages = [..._messages, msg];
+        }
+        // L'écho est la seule preuve que le message existe côté serveur : c'est
+        // ici, et nulle part avant, que l'envoi cesse d'être « en cours ».
+        if (tempId != null) {
+          _attentesEcho.remove(tempId)?.cancel();
+          _envois.remove(tempId);
         }
         _rebuildCombined();
       });
@@ -1318,35 +1342,188 @@ class _ChatScreenState extends State<ChatScreen>
     final captionText = await MediaCaptionScreen.open(context, files);
     if (captionText == null) return; // Annulé par l'utilisateur
 
-    setState(() => _uploading = true);
+    await _lanceEnvoiMedias(files, captionText.isEmpty ? null : captionText);
+  }
+
+  // ══════════════════════════════════════════════
+  // ENVOI DE MÉDIAS — progression, échec, réessai
+  // ══════════════════════════════════════════════
+
+  /// Prépare et lance l'envoi de [fichiers], en découpant par paquets de 10.
+  ///
+  /// ⚠️ **LE PLAFOND DE 10 VIENT DU SERVEUR** (`mediaIds: z.array().max(10)`).
+  /// Avant, rien ne le connaissait côté client : sélectionner quinze photos les
+  /// téléversait toutes — quinze requêtes réussies — puis se faisait refuser le
+  /// message par un 422, et les quinze médias restaient orphelins en base. On
+  /// découpe donc en plusieurs messages ; le regroupement à la lecture les
+  /// réunira visuellement.
+  Future<void> _lanceEnvoiMedias(
+      List<MediaPickResult> fichiers, String? legende) async {
     final replyId = _replyTo?.id;
-    final replyMsg = _replyTo;
-    final replySnapshot = replyMsg != null
-        ? ReplyPreview(id: replyMsg.id, senderId: replyMsg.senderId, type: replyMsg.type, content: replyMsg.isDeleted ? null : replyMsg.content, isDeleted: replyMsg.isDeleted)
-        : null;
-    if (mounted) setState(() => _replyTo = null);
+    if (_replyTo != null) setState(() => _replyTo = null);
+
+    for (var debut = 0; debut < fichiers.length; debut += 10) {
+      final lot = fichiers.sublist(
+          debut, debut + 10 > fichiers.length ? fichiers.length : debut + 10);
+      final premierMime = lot.first.mimeType;
+      final msgType = premierMime.startsWith('image/')
+          ? 'IMAGE'
+          : premierMime.startsWith('video/')
+              ? 'VIDEO'
+              : premierMime.startsWith('audio/')
+                  ? 'AUDIO'
+                  : 'FILE';
+      final tempId = "tmp-${DateTime.now().microsecondsSinceEpoch}-$debut";
+      final envoi = EnvoiMedia(
+        tempId: tempId,
+        fichiers: lot,
+        msgType: msgType,
+        // La légende accompagne le PREMIER paquet seulement : répétée sur
+        // chacun, elle apparaîtrait plusieurs fois dans le fil.
+        legende: debut == 0 ? legende : null,
+        replyToId: debut == 0 ? replyId : null,
+      );
+
+      // Bulle immédiate, avec la vignette locale : plus d'attente devant un
+      // écran qui ne montre rien.
+      final optimiste = Message(
+        id: tempId,
+        convId: widget.convId,
+        senderId: _myId ?? "",
+        content: envoi.legende,
+        type: msgType,
+        status: "SENT",
+        replyToId: envoi.replyToId,
+        replyTo: null,
+        media: const [],
+        createdAt: DateTime.now(),
+      );
+      setState(() {
+        _envois[tempId] = envoi;
+        _messages = [..._messages, optimiste];
+        _rebuildCombined();
+      });
+      _scrollToBottom();
+
+      // Séquentiel, et volontairement : téléverser dix fichiers en parallèle sur
+      // une connexion mobile les ralentit tous et rend la progression illisible.
+      await _executeEnvoi(envoi);
+    }
+  }
+
+  /// Téléverse ce qui manque puis envoie le message. Reprend là où un échec
+  /// précédent s'était arrêté.
+  Future<void> _executeEnvoi(EnvoiMedia envoi) async {
+    if (!mounted) return;
+    setState(() {
+      envoi.echoue = false;
+      envoi.erreur = null;
+    });
+
     final mediaRepo = context.read<MediaRepository>();
-    final rt = context.read<RealtimeClient>();
     try {
-      final uploadedIds = <String>[];
-      String? firstMime;
-      for (final f in files) {
-        final uploaded = await mediaRepo.upload(Uint8List.fromList(f.bytes), f.fileName, f.mimeType, durationMs: f.durationMs);
-        uploadedIds.add(uploaded.id);
-        firstMime ??= f.mimeType;
+      for (var i = envoi.mediaIdsObtenus.length; i < envoi.fichiers.length; i++) {
+        final f = envoi.fichiers[i];
+        if (mounted) {
+          setState(() {
+            envoi.indexCourant = i;
+            envoi.progressionFichier = 0;
+          });
+        }
+        final envoye = await mediaRepo.upload(
+          Uint8List.fromList(f.bytes),
+          f.fileName,
+          f.mimeType,
+          durationMs: f.durationMs,
+          onProgress: (envoyes, total) {
+            if (!mounted || total <= 0) return;
+            final ratio = envoyes / total;
+            // Un setState par trame réseau ferait redessiner le fil des
+            // centaines de fois : on ne remonte qu'au changement de centième.
+            if ((ratio - envoi.progressionFichier).abs() < 0.01 && ratio < 1) {
+              return;
+            }
+            setState(() => envoi.progressionFichier = ratio);
+          },
+        );
+        envoi.mediaIdsObtenus.add(envoye.id);
       }
-      final msgType = firstMime!.startsWith('image/') ? 'IMAGE' : firstMime.startsWith('video/') ? 'VIDEO' : firstMime.startsWith('audio/') ? 'AUDIO' : 'FILE';
-      final finalContent = captionText.isNotEmpty ? captionText : null;
+
+      final rt = context.read<RealtimeClient>();
       if (rt.connected) {
-        rt.sendMultiMedia(widget.convId, uploadedIds, msgType, "tmp-${DateTime.now().microsecondsSinceEpoch}", replyToId: replyId, content: finalContent);
+        rt.sendMultiMedia(
+            widget.convId, envoi.mediaIdsObtenus, envoi.msgType, envoi.tempId,
+            replyToId: envoi.replyToId, content: envoi.legende);
+        // ⚠️ Trame sans accusé : si la socket tombe juste après, elle est perdue
+        // en silence et la bulle resterait « Envoi… » à vie. On borne l'attente
+        // de l'écho, qui remplace le message optimiste (`_onRealtimeEvent`).
+        _armeAttenteEcho(envoi);
       } else {
-        final repo = context.read<ChatRepository>();
-        final msg = await repo.sendMultiMedia(widget.convId, uploadedIds, msgType, replyToId: replyId, content: finalContent);
-        if (mounted) setState(() => _messages = [..._messages, msg]);
+        final msg = await context.read<ChatRepository>().sendMultiMedia(
+            widget.convId, envoi.mediaIdsObtenus, envoi.msgType,
+            replyToId: envoi.replyToId, content: envoi.legende);
+        _cacheMsg(msg);
+        if (mounted) {
+          setState(() {
+            final idx = _messages.indexWhere((m) => m.id == envoi.tempId);
+            if (idx >= 0) {
+              _messages[idx] = msg;
+            } else {
+              _messages = [..._messages, msg];
+            }
+            _envois.remove(envoi.tempId);
+            _rebuildCombined();
+          });
+        }
       }
       _scrollToBottom();
-    } on ApiException catch (e) { _showError(e.message); } catch (_) { _showError(tr(context, 'send_failed')); }
-    finally { if (mounted) setState(() => _uploading = false); }
+    } on ApiException catch (e) {
+      _marqueEchec(envoi, e.message);
+    } catch (_) {
+      _marqueEchec(envoi, tr(context, 'send_failed'));
+    }
+  }
+
+  void _marqueEchec(EnvoiMedia envoi, String message) {
+    if (!mounted) return;
+    // Les médias déjà téléversés RESTENT dans `envoi.mediaIdsObtenus` : c'est ce
+    // qui permet au réessai de ne pas les envoyer une seconde fois, et donc de
+    // ne pas laisser d'orphelins en base.
+    setState(() {
+      envoi.echoue = true;
+      envoi.erreur = message;
+      envoi.progressionFichier = 0;
+    });
+  }
+
+  /// Borne l'attente de l'écho du serveur pour un envoi parti par WebSocket.
+  void _armeAttenteEcho(EnvoiMedia envoi) {
+    _attentesEcho[envoi.tempId]?.cancel();
+    _attentesEcho[envoi.tempId] = Timer(const Duration(seconds: 30), () {
+      if (!mounted) return;
+      if (!_envois.containsKey(envoi.tempId)) return; // l'écho est arrivé
+      // ⚠️ Le message a PEUT-ÊTRE été enregistré côté serveur : c'est l'écho
+      // qui manque, pas nécessairement l'écriture. Un réessai peut donc créer un
+      // doublon — d'où le choix laissé à l'utilisateur plutôt qu'un réessai
+      // automatique, et le libellé qui parle de confirmation, pas d'échec.
+      _marqueEchec(envoi, "Pas de confirmation du serveur");
+    });
+  }
+
+  void _reessayerEnvoi(EnvoiMedia envoi) => _executeEnvoi(envoi);
+
+  /// Abandonne un envoi échoué : la bulle disparaît du fil.
+  ///
+  /// Les médias déjà téléversés deviennent alors réellement orphelins — mais
+  /// c'est un choix EXPLICITE de l'utilisateur, pas un accident silencieux comme
+  /// avant. Une purge des médias sans message reste à écrire côté serveur.
+  void _abandonneEnvoi(EnvoiMedia envoi) {
+    _attentesEcho.remove(envoi.tempId)?.cancel();
+    setState(() {
+      _envois.remove(envoi.tempId);
+      _messages = _messages.where((m) => m.id != envoi.tempId).toList();
+      _rebuildCombined();
+    });
   }
 
   Future<void> _uploadAndSend(List<int> bytes, String filename, String mime, String msgType, {int? durationMs}) async {
@@ -2570,6 +2747,18 @@ class _ChatScreenState extends State<ChatScreen>
                 if (m.replyToId != null && !m.isDeleted) _replyPreviewHeader(m, mine),
                 m.isDeleted
                     ? _deletedBubble(m, mine)
+                    // Envoi en cours ou échoué : la bulle montre la vignette
+                    // LOCALE et la progression, le média n'existant pas encore
+                    // côté serveur. Passe avant tout le reste, sinon le message
+                    // optimiste (sans média) retomberait sur la bulle texte.
+                    : _envois[m.id] != null
+                    ? SendingMediaBubble(
+                        envoi: _envois[m.id]!,
+                        legende: m.content,
+                        isMe: mine,
+                        onReessayer: () => _reessayerEnvoi(_envois[m.id]!),
+                        onAbandonner: () => _abandonneEnvoi(_envois[m.id]!),
+                      )
                     : isContact
                     ? ContactBubble(
                         contacts: contactsPartages,

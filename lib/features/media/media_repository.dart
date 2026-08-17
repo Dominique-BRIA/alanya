@@ -19,6 +19,7 @@ class MediaRepository {
     String filename,
     String mimeType, {
     int? durationMs,
+    void Function(int envoyes, int total)? onProgress,
   }) async {
     final data = await _api.uploadBytes(
       "/api/media",
@@ -26,6 +27,7 @@ class MediaRepository {
       filename,
       mimeType,
       fields: durationMs != null ? {"durationMs": "$durationMs"} : null,
+      onProgress: onProgress,
     );
     return UploadedMedia(
       id: data["id"] as String,
