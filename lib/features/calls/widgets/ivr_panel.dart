@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -48,6 +50,55 @@ class _IvrPanelState extends State<IvrPanel> {
   /// Touche actuellement maintenue, dont le libellé est révélé. Nulle sinon.
   int? _maintenue;
 
+  /// Battement du minuteur d'attente. Une seconde, et seulement pendant
+  /// l'attente : rien ne tourne quand le pavé est affiché.
+  Timer? _battement;
+
+  @override
+  void didUpdateWidget(IvrPanel ancien) {
+    super.didUpdateWidget(ancien);
+    _regleBattement();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _regleBattement();
+  }
+
+  @override
+  void dispose() {
+    _battement?.cancel();
+    super.dispose();
+  }
+
+  /// Démarre ou arrête le battement selon l'étape.
+  ///
+  /// ⚠️ Le minuteur ne COMPTE pas : il ne fait que redemander un affichage. Le
+  /// temps montré est toujours calculé depuis `attenteDepuis`, donc il reste
+  /// juste même si l'application a été mise en veille — un compteur incrémenté
+  /// à chaque battement, lui, aurait pris du retard.
+  void _regleBattement() {
+    final enAttente = widget.session.etape == IvrEtape.attente &&
+        widget.session.attenteDepuis != null;
+    if (enAttente && _battement == null) {
+      _battement = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (mounted) setState(() {});
+      });
+    } else if (!enAttente) {
+      _battement?.cancel();
+      _battement = null;
+    }
+  }
+
+  String _dureeAttente() {
+    final debut = widget.session.attenteDepuis;
+    if (debut == null) return "00:00";
+    final s = DateTime.now().difference(debut).inSeconds;
+    final m = s ~/ 60;
+    return "${m.toString().padLeft(2, '0')}:${(s % 60).toString().padLeft(2, '0')}";
+  }
+
   IvrOption? _optionPour(int digit) {
     for (final o in widget.session.options) {
       if (o.digit == digit) return o;
@@ -59,13 +110,22 @@ class _IvrPanelState extends State<IvrPanel> {
   Widget build(BuildContext context) {
     if (widget.session.etape == IvrEtape.attente) return _attente();
 
+    // 🔴 **LE MESSAGE N'EST PLUS AFFICHÉ ICI**, et c'est la correction du
+    // rétrécissement du pavé signalé par le user (17/08/2026).
+    //
+    // Il était posé au-dessus du pavé, dans cette même colonne. Or le pavé est
+    // le seul `Expanded` : il prend « ce qui reste ». Chaque apparition du
+    // bandeau — typiquement au retour au menu après une attente sans réponse —
+    // lui retirait donc sa hauteur, et le pavé revenait plus petit qu'il
+    // n'était parti.
+    //
+    // Le message est désormais rendu par l'écran d'appel, dans une bande de
+    // hauteur CONSTANTE placée entre l'avatar et le nom du centre. La hauteur
+    // laissée au pavé ne dépend donc plus de la présence d'un message, sans
+    // qu'aucune dimension du pavé n'ait été figée.
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        if (widget.session.message != null) ...[
-          _bandeauMessage(widget.session.message!),
-          const SizedBox(height: 12),
-        ],
         // Hauteur FIXE : sans elle, le pavé sauterait d'une dizaine de pixels
         // à chaque appui long, et la touche glisserait sous le doigt.
         _revelation(),
@@ -233,7 +293,8 @@ class _IvrPanelState extends State<IvrPanel> {
           border: option == null
               ? null
               : Border.all(
-                  color: option.disponible ? AlanyaColors.forest : Colors.white38,
+                  color:
+                      option.disponible ? AlanyaColors.forest : Colors.white38,
                   width: 2,
                 ),
         ),
@@ -285,7 +346,9 @@ class _IvrPanelState extends State<IvrPanel> {
           height: 34,
           child: CircularProgressIndicator(
             strokeWidth: 3,
-            valueColor: AlwaysStoppedAnimation(AlanyaColors.forest),
+            // Même bleu que la vague autour de l'avatar : pendant l'attente,
+            // les deux éléments animés parlent de la même chose.
+            valueColor: AlwaysStoppedAnimation(AlanyaColors.bleuAppel),
           ),
         ),
         const SizedBox(height: 18),
@@ -298,7 +361,38 @@ class _IvrPanelState extends State<IvrPanel> {
             fontWeight: FontWeight.w600,
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 10),
+        // ⏱️ Minuteur d'attente (demande du user, 17/08/2026).
+        //
+        // Mesuré sur device : 95 secondes entre le choix du service et le
+        // « n'a pas répondu », sans le moindre repère à l'écran. La durée est
+        // recalculée depuis `attenteDepuis` à chaque battement — c'est du temps
+        // réellement écoulé, pas un compteur qui s'incrémente.
+        if (widget.session.attenteDepuis != null)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              const Icon(Icons.schedule,
+                  size: 14, color: AlanyaColors.bleuAppel),
+              const SizedBox(width: 6),
+              Text(
+                _dureeAttente(),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  // Chiffres à chasse fixe : sans cela « 01:09 » puis « 01:10 »
+                  // font sauter le libellé d'un pixel à chaque seconde.
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
+            ]),
+          ),
+        const SizedBox(height: 10),
         const Text(
           "Nous vous mettons en relation.\nMerci de patienter.",
           textAlign: TextAlign.center,
@@ -307,20 +401,74 @@ class _IvrPanelState extends State<IvrPanel> {
       ],
     );
   }
+}
 
-  Widget _bandeauMessage(String message) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 20),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.orangeAccent.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Text(
-        message,
-        textAlign: TextAlign.center,
-        style: const TextStyle(color: Colors.orangeAccent, fontSize: 13),
-      ),
+/// Bande de message du standard, à hauteur CONSTANTE.
+///
+/// 🐛 **Contraste corrigé (17/08/2026)** : le message « … n'a pas répondu »
+/// s'affichait en `orangeAccent` PLEIN sur un fond `orangeAccent` à 15 % — la
+/// même couleur pour le texte et son fond, donc illisible. Il est désormais
+/// blanc sur un fond sombre, avec un liseré orange qui conserve la valeur
+/// d'alerte sans la porter à lui seul.
+///
+/// **Règle générale à reconduire** : un texte et son fond ne se distinguent
+/// jamais par l'opacité d'une même teinte. La couleur d'alerte va au liseré ou
+/// à l'icône ; le texte reste blanc.
+///
+/// ⚠️ **La hauteur ne dépend PAS de la présence d'un message** : c'est ce qui
+/// garantit que le pavé numérique garde exactement la même taille dans tous les
+/// états. Sans message, la bande est simplement vide.
+class IvrMessageBand extends StatelessWidget {
+  const IvrMessageBand({super.key, required this.message});
+
+  final String? message;
+
+  /// Au plus juste : deux lignes de texte à 13 points (~17 chacune) plus le
+  /// rembourrage vertical, soit 52. Réduite au minimum parce que **cette bande
+  /// est prise sur la hauteur du pavé numérique** : chaque point réservé ici est
+  /// un point que les touches n'ont plus. Le cas le plus long observé en
+  /// production — « Assistance technique n'a pas répondu » — tient en deux
+  /// lignes sur un écran de 360 points.
+  static const double hauteur = 52;
+
+  @override
+  Widget build(BuildContext context) {
+    final texte = message;
+    return SizedBox(
+      height: hauteur,
+      child: texte == null
+          ? const SizedBox.shrink()
+          : Center(
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 20),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.45),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                      color: Colors.orangeAccent.withValues(alpha: 0.85),
+                      width: 1),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.info_outline,
+                      size: 16, color: Colors.orangeAccent),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      texte,
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                ]),
+              ),
+            ),
     );
   }
 }

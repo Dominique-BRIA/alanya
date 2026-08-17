@@ -28,6 +28,20 @@ class AlanyaColors {
   static const Color forestLight = Color(0xFF52B788);
   static const Color forestDark  = Color(0xFF1B4332);
 
+  /// Bleu clair de l'écran d'appel — vague autour de l'avatar, indicateur
+  /// d'attente du standard (demande du user, 17/08/2026).
+  ///
+  /// POURQUOI UN JETON ET PAS UN HEXA POSÉ DANS L'ÉCRAN : la vague était en
+  /// `forest`, le vert du thème, et se voyait mal sur le fond sombre de l'appel.
+  /// Nommer la couleur permet de la changer partout d'un seul endroit — et
+  /// d'expliquer POURQUOI elle n'est pas prise dans la palette existante :
+  /// `indigoLight` tire sur le violet, `teal` est un vert-bleu sombre. Aucun des
+  /// deux ne se lit comme un « bleu clair » sur du noir.
+  ///
+  /// ⚠️ Réservé aux écrans immersifs (appel), qui sont sombres dans les quatre
+  /// thèmes. Ne pas l'introduire dans le mode clair, qui reste figé.
+  static const Color bleuAppel   = Color(0xFF4FC3F7);
+
   // --- Sable & Crème (Surface) ---
   static const Color sand       = Color(0xFFF0E6D8);
   static const Color cream      = Color(0xFFFAF6F0);

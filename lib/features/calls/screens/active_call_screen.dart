@@ -580,7 +580,10 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                         // standard, qui n'a même pas de visage.
                         CallAvatarWaves(
                           diameter: _menuStandardAffiche(cc) ? 64 : 104,
-                          color: AlanyaColors.forest,
+                          // Bleu clair et non vert (demande du user,
+                          // 17/08/2026) : le vert du thème se distinguait mal
+                          // du fond sombre de l'écran d'appel.
+                          color: AlanyaColors.bleuAppel,
                           active: cc.activeRole == ActiveCallRole.ongoing ||
                               cc.activeRole == ActiveCallRole.outgoing,
                           child: afficheCommeGroupe
@@ -599,8 +602,23 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                                   textColor: Colors.white,
                                 ),
                         ),
-                      if (!showVideo)
-                        SizedBox(height: _menuStandardAffiche(cc) ? 10 : 20),
+                      // ── Bande de message du standard ────────────────────
+                      //
+                      // 🔴 Elle occupe l'espace qui séparait l'avatar du nom du
+                      // centre — que le user trouvait trop grand — et sa hauteur
+                      // est CONSTANTE. C'est ce qui empêche le pavé numérique de
+                      // rétrécir quand le message « n'a pas répondu » apparaît :
+                      // la place lui est réservée d'avance, qu'il y ait un
+                      // message ou non, donc la hauteur laissée au pavé ne varie
+                      // plus d'un état à l'autre.
+                      //
+                      // Présente seulement pendant un appel au standard : sur un
+                      // appel ordinaire, réserver 58 points de vide n'aurait
+                      // aucun sens.
+                      if (cc.ivr != null)
+                        IvrMessageBand(message: cc.ivr!.message)
+                      else if (!showVideo)
+                        const SizedBox(height: 20),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 24),
                         child: Text(

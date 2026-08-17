@@ -367,6 +367,18 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
+  /// 🔬 **TRACE TEMPORAIRE (17/08/2026)** — le clavier est le suspect n° 1 du
+  /// saut de défilement : il change la hauteur de la fenêtre, et dans une liste
+  /// ancrée en HAUT, tout le contenu paraît alors remonter. Cette méthode est
+  /// appelée par Flutter à chaque changement de métriques de l'écran.
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _traceDefilement("métriques changées (clavier ?)");
+    });
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // App en arrière-plan → on coupe les indicateurs (évite un état figé chez
@@ -785,7 +797,13 @@ class _ChatScreenState extends State<ChatScreen>
   void _rebuildCombined() {
     final all = <dynamic>[..._messages, ..._callsForConv];
     all.sort((a, b) => _dateOfCombined(a).compareTo(_dateOfCombined(b)));
+    final avant = _combined.length;
     _combined = _regroupeMedias(all);
+    // 🔬 Trace temporaire : un changement du NOMBRE d'éléments déplace tout ce
+    // qui suit dans une liste ancrée en haut. C'est l'un des deux suspects.
+    if (avant != _combined.length) {
+      debugPrint("[DEFIL] liste recomposée — $avant → ${_combined.length} éléments");
+    }
   }
 
   /// Regroupe en UNE grille les messages de médias consécutifs d'un même
@@ -2027,10 +2045,41 @@ class _ChatScreenState extends State<ChatScreen>
   /// Sans animation à l'ouverture, volontairement : dérouler tout l'historique
   /// sous les yeux de l'utilisateur à chaque entrée n'apporte rien et donne
   /// l'impression que l'écran part tout seul.
+  /// 🔬 **TRACES TEMPORAIRES — À RETIRER une fois le saut de défilement
+  /// diagnostiqué** (posées le 17/08/2026).
+  ///
+  /// La capture `logcat` du 17/08 a prouvé qu'AUCUNE exception Dart n'accompagne
+  /// le saut : ce n'est donc pas une erreur, mais la mise en page. Elle a aussi
+  /// montré sept ouvertures du clavier pendant le test. L'hypothèse à vérifier
+  /// est l'ANCRAGE : la liste n'est pas inversée, donc son point fixe est le
+  /// HAUT — quand le clavier s'ouvre, la fenêtre rétrécit et le contenu paraît
+  /// remonter.
+  ///
+  /// Ces traces disent, à chaque instant intéressant, où en est le défilement.
+  /// À lire avec :
+  ///     adb logcat | grep DEFIL
+  void _traceDefilement(String moment) {
+    if (!_scrollCtrl.hasClients) {
+      debugPrint("[DEFIL] $moment — pas encore attaché");
+      return;
+    }
+    final p = _scrollCtrl.position;
+    final clavier = MediaQuery.maybeOf(context)?.viewInsets.bottom ?? -1;
+    debugPrint(
+      "[DEFIL] $moment — offset=${p.pixels.toStringAsFixed(1)} "
+      "max=${p.maxScrollExtent.toStringAsFixed(1)} "
+      "fenetre=${p.viewportDimension.toStringAsFixed(1)} "
+      "clavier=${clavier.toStringAsFixed(1)} "
+      "elements=${_combined.length}",
+    );
+  }
+
   void _scrollToBottom({bool immediat = false}) {
+    _traceDefilement("scrollToBottom(immediat=$immediat) AVANT");
     if (!immediat) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && _scrollCtrl.hasClients) {
+          _traceDefilement("animateTo(max) APRÈS frame");
           _scrollCtrl.animateTo(_scrollCtrl.position.maxScrollExtent,
               duration: const Duration(milliseconds: 250),
               curve: Curves.easeOut);
@@ -2045,6 +2094,7 @@ class _ChatScreenState extends State<ChatScreen>
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || !_scrollCtrl.hasClients) return;
         final fond = _scrollCtrl.position.maxScrollExtent;
+        _traceDefilement("jumpTo essai $essais (fond=${fond.toStringAsFixed(1)})");
         _scrollCtrl.jumpTo(fond);
         essais++;
         // On s'arrête dès que le fond cesse de bouger, et dans tous les cas au

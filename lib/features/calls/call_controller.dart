@@ -136,6 +136,15 @@ class IvrSession {
   /// Dernier message du serveur (« … n'est pas encore disponible »).
   String? message;
 
+  /// Instant d'entrée en attente d'un agent, ou nul hors de cet état.
+  ///
+  /// ⚠️ C'est un HORODATAGE, et non un compteur incrémenté par un minuteur : le
+  /// temps affiché doit être le temps RÉELLEMENT écoulé. Un compteur dériverait
+  /// dès que l'application est mise en veille — or attendre un agent, écran
+  /// éteint, est exactement ce que font les gens. Mesuré sur device le
+  /// 17/08/2026 : 95 secondes entre `ivr_hold` et `ivr_error`.
+  DateTime? attenteDepuis;
+
   /// Touche envoyée, réponse pas encore arrivée → clavier verrouillé.
   bool envoiEnCours = false;
 }
@@ -1401,6 +1410,9 @@ class CallController extends ChangeNotifier {
       session.nomServiceChoisi = IvrOption._texteOuNull(e["nomService"]);
       session.message = null;
       session.envoiEnCours = false;
+      // Départ du minuteur d'attente : ici et nulle part ailleurs, c'est
+      // l'instant précis où l'agent commence à sonner.
+      session.attenteDepuis = DateTime.now();
       notifyListeners();
       // L'URL est arrivée dès `ivr_menu` : le client a eu toute la durée de
       // l'invite pour la mettre en cache, la musique démarre donc à l'instant
@@ -1431,6 +1443,9 @@ class CallController extends ChangeNotifier {
         // que fait un vrai standard.
         session.etape = IvrEtape.menu;
         session.serviceChoisi = null;
+        // L'attente est finie : le minuteur s'arrête, il ne doit pas repartir
+        // du même point si l'utilisateur choisit un autre service.
+        session.attenteDepuis = null;
         notifyListeners();
 
         // Si tous les agents sont occupés et qu'on a des musiques d'attente (vocal_attente),
