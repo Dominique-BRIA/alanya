@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:file_picker/file_picker.dart';
 import '../../features/chat/screens/location_share_screen.dart';
+import '../../features/chat/screens/media_gallery_picker_screen.dart';
 import '../../theme/alanya_theme.dart';
 import '../contact_share_sheet.dart';
 
@@ -14,12 +15,26 @@ class MediaPickResult {
   final String mimeType;
   final int? durationMs;
 
+  /// Chemin du fichier sur l'appareil, quand la source en fournit un.
+  ///
+  /// Indispensable à l'APERÇU D'UNE VIDÉO : `video_player` et
+  /// `video_thumbnail` lisent un chemin, jamais des octets. Sans lui, une vidéo
+  /// sélectionnée n'était représentée que par une icône de fichier — on ne
+  /// voyait pas ce qu'on allait envoyer. Nul sur le web, et nul si le
+  /// sélecteur système ne rend que des octets : l'aperçu retombe alors sur
+  /// l'icône, ce qui reste correct.
+  final String? path;
+
   const MediaPickResult({
     required this.bytes,
     required this.fileName,
     required this.mimeType,
     this.durationMs,
+    this.path,
   });
+
+  bool get estImage => mimeType.startsWith('image/');
+  bool get estVideo => mimeType.startsWith('video/');
 }
 
 /// Bottom sheet style WhatsApp pour envoyer des médias :
@@ -100,6 +115,9 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
         fileName: name,
         mimeType: mime,
         durationMs: asset.type == AssetType.video ? (asset.duration * 1000).toInt() : null,
+        // Chemin réel de l'asset : c'est ce qui permet de LIRE une vidéo dans
+        // l'aperçu au lieu d'afficher une icône.
+        path: (await asset.file)?.path,
       ));
     }
     if (mounted && results.isNotEmpty) Navigator.pop(context, results);
@@ -124,8 +142,26 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
     } catch (_) {}
   }
 
-  // ══ GALERIE ══
+  // ══ GALERIE — sélecteur plein écran, ordonné, paginé ══
+  //
+  // Le sélecteur SYSTÈME (`FilePicker`) reste le repli : il ne numérote pas la
+  // sélection, ne pagine pas, et n'indique pas la durée des vidéos. Il sert
+  // quand l'accès à la galerie est refusé — un refus de permission ne doit pas
+  // empêcher d'envoyer une photo.
   Future<void> _pickFullGallery() async {
+    final navigator = Navigator.of(context);
+    if (_permissionDenied) {
+      await _pickFullGalleryParSysteme(navigator);
+      return;
+    }
+    navigator.pop();
+    await Future.delayed(const Duration(milliseconds: 200));
+    if (!mounted) return;
+    final choisis = await MediaGalleryPickerScreen.open(context);
+    if (choisis != null && choisis.isNotEmpty) navigator.pop(choisis);
+  }
+
+  Future<void> _pickFullGalleryParSysteme(NavigatorState navigator) async {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.media,
@@ -140,9 +176,10 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
           bytes: file.bytes!,
           fileName: file.name,
           mimeType: _guessMime(file.name),
+          path: file.path,
         ));
       }
-      if (mounted && results.isNotEmpty) Navigator.pop(context, results);
+      if (mounted && results.isNotEmpty) navigator.pop(results);
     } catch (_) {}
   }
 

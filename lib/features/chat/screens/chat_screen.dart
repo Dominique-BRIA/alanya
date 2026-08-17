@@ -1338,11 +1338,13 @@ class _ChatScreenState extends State<ChatScreen>
     final files = result as List<MediaPickResult>;
     if (files.isEmpty) return;
 
-    // Ouvre la deuxième page (prévisualisation + saisie de légende façon WhatsApp)
-    final captionText = await MediaCaptionScreen.open(context, files);
-    if (captionText == null) return; // Annulé par l'utilisateur
+    // Aperçu : balayage entre les médias, retrait de l'un d'eux, légende.
+    // ⚠️ On envoie la liste RENDUE par l'aperçu, pas celle de la sélection : un
+    // média retiré doit disparaître de l'envoi.
+    final apercu = await MediaCaptionScreen.open(context, files);
+    if (apercu == null || apercu.fichiers.isEmpty) return; // annulé
 
-    await _lanceEnvoiMedias(files, captionText.isEmpty ? null : captionText);
+    await _lanceEnvoiMedias(apercu.fichiers, apercu.legende);
   }
 
   // ══════════════════════════════════════════════
