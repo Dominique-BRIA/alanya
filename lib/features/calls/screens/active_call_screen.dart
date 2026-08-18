@@ -292,8 +292,17 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
   /// l'écran d'appel doit céder de la hauteur à ce qu'il contient. Pendant la
   /// mise en relation, le pavé a disparu au profit du rond de progression —
   /// l'avatar reprend donc sa taille normale.
+  ///
+  /// 🔴 **LA RÉPONSE VIENT DU PANNEAU LUI-MÊME** (`IvrPanel.afficheLePave`), et
+  /// n'est plus redevinée ici. Cette fonction testait `etape == menu` : dès
+  /// qu'une étape s'est ajoutée — la lecture d'un centre vocal —, le panneau
+  /// montrait le pavé pendant que cet écran croyait le contraire. L'avatar
+  /// repassait donc de 64 à 104 points au premier appui sur une touche, et le
+  /// pavé, seul `Expanded` de la colonne, payait la différence en rétrécissant.
+  /// C'est le défaut signalé par le user le 18/08/2026, de la même famille que
+  /// celui du 17/08 : **tout ce qui varie au-dessus du pavé se prend sur lui**.
   bool _menuStandardAffiche(CallController cc) =>
-      cc.ivr != null && cc.ivr!.etape == IvrEtape.menu;
+      cc.ivr != null && IvrPanel.afficheLePave(cc.ivr!);
 
   String _statusText(CallController cc) {
     if (widget.incoming && cc.incoming != null) {
@@ -305,7 +314,23 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     // « Sonnerie… » dirait exactement le contraire de ce qui se passe.
     final ivr = cc.ivr;
     if (ivr != null) {
-      if (ivr.etape == IvrEtape.menu) return "Serveur vocal";
+      /*
+       * 🔴 `ivr.vocal` AUSSI, et pas seulement l'étape « menu » (18/08/2026).
+       *
+       * Sans lui, la ligne tombait sur `nomServiceChoisi ?? ""` dès qu'un son
+       * se mettait à jouer — or ce champ n'est JAMAIS renseigné pour un centre
+       * vocal, qui ne met en relation avec personne. Elle rendait donc "" et
+       * disparaissait entièrement (le bloc appelant l'omet quand elle est vide,
+       * volontairement, pour ne pas laisser un trou sous le nom).
+       *
+       * Deux dégâts d'un coup : le sous-titre s'évanouissait au premier appui,
+       * et sa disparition rendait ~32 points au pavé, qui changeait donc de
+       * taille — le second morceau du défaut signalé.
+       *
+       * Un centre vocal reste un serveur vocal du début à la fin de l'appel :
+       * son sous-titre n'a aucune raison de bouger.
+       */
+      if (ivr.etape == IvrEtape.menu || ivr.vocal) return "Serveur vocal";
       /*
        * Sous le nom du centre : `nom_service`, et RIEN s'il est vide — demande
        * du user du 12/08/2026, qui remplace « Mise en relation — <libelle> ».
