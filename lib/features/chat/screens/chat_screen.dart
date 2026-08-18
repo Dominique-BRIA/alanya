@@ -1588,41 +1588,22 @@ class _ChatScreenState extends State<ChatScreen>
     if (snapshot != null) {
       if (snapshot.isDeleted) return tr(context, 'message_deleted');
       // ⚠️ Le libellé AVANT le contenu : un CONTACT ou une LOCATION porte du
-      // JSON dans `content`, et cette citation tient sur une ligne.
-      final structure = apercuStructure(snapshot.type, snapshot.content);
-      if (structure != null) return structure;
-      if (snapshot.content != null)
-        return sansMarqueursWhatsApp(snapshot.content!);
-      return _typeLabel(snapshot.type);
+      // JSON dans `content`, et cette citation tient sur une ligne. C'est
+      // `apercuMessage` qui en décide, pour les QUATRE endroits qui affichent
+      // un aperçu — ils en avaient chacun leur version, et elles divergeaient.
+      return apercuMessage(snapshot.type, snapshot.content,
+          nettoyerTexte: sansMarqueursWhatsApp);
     }
     if (original == null) return '...';
     if (original.isDeleted) return tr(context, 'message_deleted');
-    final structure = apercuStructure(original.type, original.content);
-    if (structure != null) return structure;
-    if (original.content != null)
-      return sansMarqueursWhatsApp(original.content!);
-    if (original.media.isNotEmpty)
-      return original.media.first.filename ?? 'Fichier';
-    return _typeLabel(original.type);
-  }
-
-  String _typeLabel(String type) {
-    switch (type) {
-      case 'IMAGE':
-        return 'Photo';
-      case 'AUDIO':
-        return 'Message vocal';
-      case 'VIDEO':
-        return 'Vidéo';
-      case 'FILE':
-        return 'Fichier';
-      case 'CONTACT':
-        return 'Contact';
-      case 'LOCATION':
-        return 'Position';
-      default:
-        return '[$type]';
-    }
+    return apercuMessage(
+      original.type,
+      original.content,
+      // Le nom du fichier vient du média, que la charge utile ne porte pas.
+      nomFichier:
+          original.media.isNotEmpty ? original.media.first.filename : null,
+      nettoyerTexte: sansMarqueursWhatsApp,
+    );
   }
 
   String _replySenderName(Message? original, ReplyPreview? snapshot) {
@@ -1661,11 +1642,75 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
+  /// La barre de réponse au-dessus du champ de saisie.
+  ///
+  /// 🔴 **MÊME VISUEL QUE LA RÉPONSE UNE FOIS ENVOYÉE** (demande du user,
+  /// 18/08/2026). Elle avait sa propre mise en page et surtout sa propre règle
+  /// d'aperçu, qui lisait `content` EN PREMIER : un contact ou une position y
+  /// apparaissait donc en JSON brut, et un fichier sans légende en ligne vide.
+  ///
+  /// Elle réemprunte désormais les deux rendus de la citation d'une bulle :
+  /// [ReplyMediaPreview] quand le message cité porte un média — c'est lui qui
+  /// donne la vignette du document ou de la photo — et le rendu texte sinon.
+  /// Le choix entre les deux se fait sur le MÊME critère qu'en bulle
+  /// (`media.isNotEmpty && !isDeleted`), sans quoi les deux se répondraient
+  /// différemment pour un même message.
+  ///
+  /// ⚠️ `isMe: false` en dur, et ce n'est pas un oubli : le paramètre sert à
+  /// accorder la citation à la couleur de SA BULLE. Ici il n'y a pas de bulle,
+  /// la barre est posée sur le fond du composer — la variante « reçu » est
+  /// celle qui s'y lit, quel que soit l'auteur du message cité.
+  Widget _barreReponse() {
+    final original = _replyTo!;
+    final auteur = original.senderId == _myId
+        ? tr(context, 'you')
+        : (widget.memberNames[original.senderId] ?? tr(context, 'reply_to'));
+    final avecMedia = original.media.isNotEmpty && !original.isDeleted;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      color: _composerBg,
+      child: Row(children: [
+        Expanded(
+          child: avecMedia
+              ? ReplyMediaPreview(
+                  replyToContent: original.content,
+                  replyToMediaUrl:
+                      '$_baseUrl${original.media.first.url}?token=$_token',
+                  replyToMimeType: original.media.first.mimeType,
+                  replyToFileName: original.media.first.filename,
+                  replyToSenderName: auteur,
+                  isMe: false,
+                )
+              : _citationTexte(
+                  auteur,
+                  _replyPreviewText(original, null),
+                  false,
+                  largeurMax: double.infinity,
+                ),
+        ),
+        const SizedBox(width: 8),
+        GestureDetector(
+            onTap: () => setState(() => _replyTo = null),
+            child: Icon(Icons.close, size: 20, color: _muted)),
+      ]),
+    );
+  }
+
   Widget _replyPreviewTextOnly(Message m, bool mine, dynamic snapshot,
-      Message? original, String senderName) {
+          Message? original, String senderName) =>
+      _citationTexte(senderName, _replyPreviewText(original, snapshot), mine);
+
+  /// Le rendu TEXTE d'une citation, partagé par la bulle et par la barre du
+  /// composer — c'est ce partage qui tient la promesse « même visuel ».
+  ///
+  /// [largeurMax] est le seul paramètre qui les sépare : en bulle la citation
+  /// ne doit pas pousser la largeur du message, au-dessus du composer elle
+  /// occupe toute la ligne disponible.
+  Widget _citationTexte(String auteur, String apercu, bool mine,
+      {double largeurMax = 220}) {
     final onColor = _bubbleTextColor(mine);
     final barColor = mine ? Colors.white70 : _accentSoft;
-    final previewText = _replyPreviewText(original, snapshot);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
@@ -1673,13 +1718,13 @@ class _ChatScreenState extends State<ChatScreen>
         borderRadius: BorderRadius.circular(8),
         border: Border(left: BorderSide(color: barColor, width: 3)),
       ),
-      constraints: const BoxConstraints(maxWidth: 220),
+      constraints: BoxConstraints(maxWidth: largeurMax),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(senderName,
+        Text(auteur,
             style: TextStyle(
                 fontSize: 11, fontWeight: FontWeight.bold, color: barColor)),
         const SizedBox(height: 2),
-        Text(previewText,
+        Text(apercu,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(fontSize: 12, color: onColor.withOpacity(0.8))),
@@ -2730,20 +2775,12 @@ class _ChatScreenState extends State<ChatScreen>
     if (m.isDeleted) return "Message supprimé";
     // Même raison que pour la citation d'une réponse : le bandeau ne montre
     // qu'une ligne, et la charge d'un message structuré est du JSON.
-    final structure = apercuStructure(m.type, m.content);
-    if (structure != null) return structure;
-    switch (m.type) {
-      case "IMAGE":
-        return "Photo";
-      case "VIDEO":
-        return "Vidéo";
-      case "AUDIO":
-        return "Message vocal";
-      case "FILE":
-        return "Fichier";
-      default:
-        return m.content ?? "";
-    }
+    return apercuMessage(
+      m.type,
+      m.content,
+      nomFichier: m.media.isNotEmpty ? m.media.first.filename : null,
+      nettoyerTexte: sansMarqueursWhatsApp,
+    );
   }
 
   Widget _pinnedBanner() {
@@ -4250,47 +4287,7 @@ class _ChatScreenState extends State<ChatScreen>
                       onTap: _cancelEdit,
                       child: Icon(Icons.close, size: 20, color: _muted)),
                 ])),
-          if (_replyTo != null && _editing == null)
-            Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                color: _composerBg,
-                child: Row(children: [
-                  Container(
-                      width: 3,
-                      height: 32,
-                      decoration: BoxDecoration(
-                          color: _accentSoft,
-                          borderRadius: BorderRadius.circular(2))),
-                  const SizedBox(width: 8),
-                  Expanded(
-                      child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                        Text(
-                            _replyTo!.senderId == _myId
-                                ? tr(context, 'you')
-                                : (widget.memberNames[_replyTo!.senderId] ??
-                                    tr(context, 'reply_to')),
-                            style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                                color: _accent)),
-                        Text(
-                            _replyTo!.isDeleted
-                                ? tr(context, 'message_deleted')
-                                : (_replyTo!.content ??
-                                    (_replyTo!.media.isNotEmpty
-                                        ? '📎 ${_replyTo!.media.first.filename ?? tr(context, 'file')}'
-                                        : '...')),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(fontSize: 12, color: _muted)),
-                      ])),
-                  GestureDetector(
-                      onTap: () => setState(() => _replyTo = null),
-                      child: Icon(Icons.close, size: 20, color: _muted)),
-                ])),
+          if (_replyTo != null && _editing == null) _barreReponse(),
           Container(
               padding: const EdgeInsets.all(8),
               color: _composerBg,

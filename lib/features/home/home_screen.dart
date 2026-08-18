@@ -48,6 +48,9 @@ import '../meetings/screens/meetings_screen.dart';
 import '../status/screens/create_status_screen.dart';
 import '../status/screens/status_viewer_screen.dart';
 import '../status/status_repository.dart';
+// L'aperçu d'une ligne d'un message, commun aux quatre écrans qui en affichent
+// un — voir `apercuMessage`.
+import '../../models/message_payload.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -213,7 +216,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 );
               } else if (v == "abandoned") {
                 Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const AbandonedClientsScreen()),
+                  MaterialPageRoute(
+                      builder: (_) => const AbandonedClientsScreen()),
                 );
               } else if (v == "logout") {
                 context.read<AuthController>().logout();
@@ -1030,21 +1034,21 @@ class _ConversationsTabState extends State<_ConversationsTab>
       }
     }
 
-    // Libellés pour les types non-texte
+    // Libellés pour les types non-texte.
+    //
+    // 🔴 `apercuMessage` et non une liste de cas locale (18/08/2026). Le
+    // `default:` d'origine rendait `last.content`, c'est-à-dire la charge JSON
+    // BRUTE d'un CONTACT ou d'une LOCATION — le défaut signalé par le user,
+    // identique à celui de la barre de réponse. La règle vit désormais dans
+    // `message_payload.dart`, seul endroit qui décide de cet aperçu pour les
+    // quatre écrans qui l'affichent.
+    //
+    // ⚠️ `LastMessage` ne porte PAS le média, donc pas de nom de fichier ici :
+    // un document apparaît en « 📎 Fichier », ou avec sa légende s'il en a une.
+    // L'ajouter demanderait de le faire remonter par l'API des conversations.
     String typeLabel() {
       if (last == null) return "—";
-      switch (last.type) {
-        case "AUDIO":
-          return "Message vocal";
-        case "IMAGE":
-          return "Photo";
-        case "VIDEO":
-          return "Vidéo";
-        case "FILE":
-          return "Fichier";
-        default:
-          return last.content ?? "[${last.type}]";
-      }
+      return apercuMessage(last.type, last.content);
     }
 
     // Construit l'aperçu formaté : si TEXT on affiche en formaté (sans *),
