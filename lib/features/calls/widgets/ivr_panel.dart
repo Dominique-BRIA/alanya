@@ -37,10 +37,15 @@ class IvrPanel extends StatefulWidget {
     super.key,
     required this.session,
     required this.onTouche,
+    required this.onRetourAccueil,
   });
 
   final IvrSession session;
   final Future<void> Function(int digit) onTouche;
+
+  /// « Retour à l'accueil » d'un centre vocal. Jamais appelé pour un centre
+  /// d'appels : le bouton n'y est pas affiché.
+  final Future<void> Function() onRetourAccueil;
 
   @override
   State<IvrPanel> createState() => _IvrPanelState();
@@ -129,6 +134,11 @@ class _IvrPanelState extends State<IvrPanel> {
         // Hauteur FIXE : sans elle, le pavé sauterait d'une dizaine de pixels
         // à chaque appui long, et la touche glisserait sous le doigt.
         _revelation(),
+        // ⚠️ MÊME RÈGLE QUE `_revelation` : hauteur CONSTANTE, occupée ou non.
+        // Un bandeau qui apparaît en lecture reprendrait sinon sa hauteur au
+        // pavé — c'est exactement le rétrécissement corrigé le 17/08/2026 —
+        // et les touches changeraient de taille au premier appui.
+        _bandeauLecture(),
         const SizedBox(height: 8),
         // `Expanded` et plus `Flexible` + `SingleChildScrollView` : le pavé
         // occupe exactement la place disponible au lieu de déborder. Voir
@@ -193,6 +203,71 @@ class _IvrPanelState extends State<IvrPanel> {
                       ),
                   ],
                 ),
+              ),
+      ),
+    );
+  }
+
+  // ── Ce qui joue, et par où revenir (centre vocal seulement) ──────────────
+
+  /// Bandeau de lecture d'un centre vocal : ce qui joue, et « Retour à
+  /// l'accueil ».
+  ///
+  /// ⚠️ Le pavé reste ACTIF pendant la lecture — le user veut pouvoir passer
+  /// d'un son à l'autre sans repasser par l'accueil. Ce bandeau n'est donc pas
+  /// un écran de lecture qui remplacerait le pavé, mais une bande au-dessus de
+  /// lui, exactement comme la révélation d'un appui long.
+  ///
+  /// Hauteur constante, occupée ou non : voir l'appel dans [build].
+  Widget _bandeauLecture() {
+    final s = widget.session;
+    final enLecture = s.vocal && s.etape == IvrEtape.lecture;
+
+    return SizedBox(
+      height: 40,
+      child: AnimatedOpacity(
+        opacity: enLecture ? 1 : 0,
+        duration: const Duration(milliseconds: 150),
+        child: !enLecture
+            ? const SizedBox.shrink()
+            : Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.graphic_eq, color: Colors.white70, size: 18),
+                  const SizedBox(width: 8),
+                  // `Flexible` + ellipse : un titre saisi depuis la plateforme
+                  // n'a aucune longueur garantie, et un débordement ferait
+                  // passer la ligne jaune et noire de Flutter par-dessus le
+                  // pavé.
+                  Flexible(
+                    child: Text(
+                      s.titreEnLecture ?? "Lecture en cours",
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  TextButton.icon(
+                    onPressed: () => widget.onRetourAccueil(),
+                    icon: const Icon(Icons.home_outlined, size: 16),
+                    label: const Text("Accueil"),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      backgroundColor: Colors.white.withValues(alpha: 0.16),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 4),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      textStyle: const TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
               ),
       ),
     );
@@ -272,6 +347,9 @@ class _IvrPanelState extends State<IvrPanel> {
     final option = _optionPour(digit);
     final maintenue = _maintenue == digit;
     final verrouille = widget.session.envoiEnCours;
+    final enLecture = widget.session.vocal &&
+        widget.session.etape == IvrEtape.lecture &&
+        widget.session.toucheEnLecture == digit;
 
     // `GestureDetector` et non `InkWell` : il faut savoir quand l'appui long se
     // TERMINE pour refermer la bulle, et `InkWell` n'expose pas ce moment.
@@ -301,13 +379,20 @@ class _IvrPanelState extends State<IvrPanel> {
           // AUTOUR du bouton plutôt qu'un point sous le chiffre — remplace
           // l'ancien indicateur, demandé plus visible. Toujours discret : il ne
           // dit pas QUOI, l'appui long le dit toujours.
-          border: option == null
-              ? null
-              : Border.all(
-                  color:
-                      option.disponible ? AlanyaColors.forest : Colors.white38,
-                  width: 2,
-                ),
+          //
+          // La touche EN LECTURE (centre vocal) reprend le même anneau dans la
+          // couleur d'accent : le pavé restant actif pendant la lecture, c'est
+          // le seul repère qui dise laquelle des dix on est en train d'écouter.
+          border: enLecture
+              ? Border.all(color: AlanyaColors.terracotta, width: 2.5)
+              : option == null
+                  ? null
+                  : Border.all(
+                      color: option.disponible
+                          ? AlanyaColors.forest
+                          : Colors.white38,
+                      width: 2,
+                    ),
         ),
         // ⚠️ LE CHIFFRE SUIT LA TAILLE DE SA CASE, il n'est plus figé à 26
         // points. Une taille fixe donnait des touches qui paraissent petites dès
