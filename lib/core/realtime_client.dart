@@ -426,6 +426,15 @@ class RealtimeClient extends ChangeNotifier {
   void ivrDtmf(String callId, int digit) =>
       _send({"type": "ivr_dtmf", "callId": callId, "digit": digit});
 
+  /// « Retour à l'accueil » d'un centre vocal : coupe le son en cours et
+  /// redemande le menu, que le serveur renvoie par un `ivr_menu`.
+  ///
+  /// ⚠️ ABSENTE de [_typesCritiques] pour la même raison qu'[ivrDtmf], et une de
+  /// plus : le serveur ne connaît la demande que tant que la session vit. Rejouée
+  /// après une reconnexion, elle ne désignerait plus rien — la session est
+  /// refermée dès que la socket tombe.
+  void ivrBack(String callId) => _send({"type": "ivr_back", "callId": callId});
+
   void meetingJoin(int meetingId) =>
       _send({"type": "meeting_join", "meetingId": meetingId});
 

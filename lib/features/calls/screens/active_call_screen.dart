@@ -691,6 +691,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                           child: IvrPanel(
                             session: cc.ivr!,
                             onTouche: cc.envoyerToucheIvr,
+                            onRetourAccueil: cc.retourAccueilIvr,
                           ),
                         )
                       else

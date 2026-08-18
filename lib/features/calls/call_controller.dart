@@ -29,7 +29,12 @@ enum ActiveCallRole { outgoing, incoming, ongoing }
 /// Il n'y en a que deux, et c'est voulu : dès que l'agent décroche, la session
 /// disparaît et l'appel redevient un appel ordinaire. Un troisième état
 /// « en communication » ferait doublon avec [ActiveCallRole].
-enum IvrEtape { menu, attente }
+/// Les étapes d'un standard, les deux sortes confondues.
+///
+/// [attente] n'existe que pour un centre d'APPELS (on attend un agent), [lecture]
+/// que pour un centre VOCAL (un son tourne en boucle). Une même énumération pour
+/// les deux : l'écran, lui, ne veut savoir qu'une chose — que montrer.
+enum IvrEtape { menu, attente, lecture }
 
 /// Une touche du menu d'un standard.
 ///
@@ -108,6 +113,7 @@ class IvrSession {
     this.promptUrl,
     this.holdUrl,
     this.queueUrls = const [],
+    this.vocal = false,
     required this.options,
   });
 
@@ -121,8 +127,26 @@ class IvrSession {
   final String? holdUrl;
   final List<String> queueUrls;
 
+  /// Ce standard est-il un CENTRE VOCAL ? (`mode: "vocal"` sur `ivr_menu`.)
+  ///
+  /// ⚠️ Faux par défaut, et c'est délibéré : un serveur plus ancien n'envoie pas
+  /// ce champ, et le seul standard qu'il sache ouvrir est un centre d'appels.
+  /// Le défaut inverse aurait transformé tous les standards existants en centres
+  /// vocaux le jour d'un retour en arrière du serveur.
+  final bool vocal;
+
   List<IvrOption> options;
   IvrEtape etape = IvrEtape.menu;
+
+  /// Ce qui joue en ce moment, pendant [IvrEtape.lecture] — nul hors de cet état.
+  ///
+  /// Vient d'`ivr_play` et non d'une recherche dans [options] par la touche : un
+  /// retour à l'accueil peut avoir remplacé la liste entre-temps. Même raison
+  /// que `nomServiceChoisi` pour un centre d'appels.
+  String? titreEnLecture;
+
+  /// La touche dont le son joue, pour la mettre en évidence sur le pavé.
+  int? toucheEnLecture;
 
   /// Libellé du service choisi, pendant que l'agent sonne.
   String? serviceChoisi;
@@ -207,6 +231,7 @@ class CallController extends ChangeNotifier {
   String? activeConvId;
   String? activePeerName;
   String? activePeerAvatarUrl;
+
   /// Centre qui a routé l'appel EN COURS vers moi (agent) — voir
   /// [IncomingCallInfo.ivrFromId]. Nul pour un appel ordinaire, ou pour un
   /// appel décroché depuis l'écran natif application tuée (`acceptById` n'a
@@ -467,15 +492,47 @@ class CallController extends ChangeNotifier {
   /// ici.
   Future<void> envoyerToucheIvr(int digit) async {
     final session = ivr;
-    if (session == null || session.etape != IvrEtape.menu) return;
+    if (session == null) return;
+    /*
+     * ⚠️ UN CENTRE VOCAL ACCEPTE UNE TOUCHE PENDANT LA LECTURE, demande du user
+     * du 18/08/2026 : on passe d'un son à l'autre sans repasser par l'accueil.
+     * Un centre d'appels, lui, n'accepte rien pendant qu'un agent sonne — la
+     * touche relancerait une seconde mise en relation.
+     */
+    final peutTaper = session.etape == IvrEtape.menu ||
+        (session.vocal && session.etape == IvrEtape.lecture);
+    if (!peutTaper) return;
     if (session.envoiEnCours) return;
     session.envoiEnCours = true;
     session.message = null;
     notifyListeners();
-    // L'invite s'arrête à l'appui : la laisser courir sous la musique d'attente
-    // donnerait deux sons superposés.
-    await RingtoneService.instance.stopIvr();
+    /*
+     * ⚠️ ON NE COUPE RIEN SUR UN CENTRE VOCAL, et c'est ce qui rend le refus
+     * indolore. Si la touche est acceptée, `ivr_play` déclenche
+     * `playIvrPrompt`, qui remplace lui-même ce qui jouait (son compteur de
+     * génération l'y oblige) : aucune superposition possible. Si elle est
+     * refusée, l'accueil ou le son en cours n'a jamais été interrompu — alors
+     * que couper d'abord aurait laissé un silence définitif derrière un simple
+     * appui à côté.
+     *
+     * Sur un centre d'appels le geste reste nécessaire : l'invite tournerait
+     * sinon sous la musique d'attente, deux sons superposés.
+     */
+    if (!session.vocal) await RingtoneService.instance.stopIvr();
     _rt.ivrDtmf(session.callId, digit);
+  }
+
+  /// « Retour à l'accueil » d'un centre vocal.
+  ///
+  /// Ne change RIEN localement : le serveur répond par un `ivr_menu` complet,
+  /// qui rebâtit la session et relance l'invite. Anticiper l'état ici ferait
+  /// diverger les deux si le message se perdait — et laisserait surtout un
+  /// écran sans son, l'invite n'étant relancée que par la réponse.
+  Future<void> retourAccueilIvr() async {
+    final session = ivr;
+    if (session == null || !session.vocal) return;
+    if (session.etape != IvrEtape.lecture) return;
+    _rt.ivrBack(session.callId);
   }
 
   Future<void> acceptIncoming() async {
@@ -1436,6 +1493,12 @@ class CallController extends ChangeNotifier {
         promptUrl: e["promptUrl"] as String?,
         holdUrl: e["holdUrl"] as String?,
         queueUrls: queueUrls,
+        // ⚠️ CE MESSAGE ARRIVE AUSSI AU RETOUR À L'ACCUEIL d'un centre vocal :
+        // le serveur y répond en renvoyant `ivr_menu` plutôt qu'en inventant un
+        // message dédié. Tout ce qui suit — session neuve, invite relancée en
+        // boucle, route audio reposée — est exactement ce qu'on veut alors, et
+        // c'est un chemin déjà éprouvé sur device.
+        vocal: e["mode"] == "vocal",
         options: IvrOption.listeDepuisJson(e["options"]),
       );
       ivr = session;
@@ -1459,6 +1522,29 @@ class CallController extends ChangeNotifier {
       if (prompt != null) {
         unawaited(RingtoneService.instance.playIvrPrompt(prompt, loop: true));
       }
+    } else if (type == "ivr_play") {
+      // Centre vocal : la touche ne fait sonner personne, elle joue un son.
+      final session = ivr;
+      if (session == null || e["callId"] != session.callId) return;
+      final url = e["audioUrl"] as String?;
+      if (url == null) return;
+      session.etape = IvrEtape.lecture;
+      session.toucheEnLecture = (e["digit"] as num?)?.toInt();
+      // `nomService` d'abord, `label` en repli — le second est le nom du centre
+      // vocal, que le serveur envoie précisément pour les touches sans titre.
+      session.titreEnLecture =
+          IvrOption._texteOuNull(e["nomService"]) ?? e["label"] as String?;
+      session.message = null;
+      session.envoiEnCours = false;
+      notifyListeners();
+      DebugOverlay.log("CC ☎️ lecture vocale : $url");
+      // ⚠️ EN BOUCLE, sur décision du user (18/08/2026), et la règle vient du
+      // SERVEUR (`loop`) plutôt que d'être écrite ici : la changer ne demandera
+      // pas un nouvel APK. `playIvrPrompt` remplace ce qui jouait — l'invite
+      // d'accueil, ou le son d'une autre touche — par son compteur de
+      // génération, donc sans risque de superposition.
+      unawaited(RingtoneService.instance
+          .playIvrPrompt(url, loop: e["loop"] != false));
     } else if (type == "ivr_hold") {
       final session = ivr;
       if (session == null || e["callId"] != session.callId) return;
@@ -1475,14 +1561,42 @@ class CallController extends ChangeNotifier {
       // l'invite pour la mettre en cache, la musique démarre donc à l'instant
       // de l'appui au lieu de laisser trois secondes de silence.
       final hold = e["holdUrl"] as String? ?? session.holdUrl;
-      if (hold != null) unawaited(RingtoneService.instance.playIvrHold(hold, loop: true));
+      if (hold != null) {
+        unawaited(RingtoneService.instance.playIvrHold(hold, loop: true));
+      }
     } else if (type == "ivr_error") {
       final callId = e["callId"] as String?;
       final retry = e["retry"] == true;
       final message =
           e["message"] as String? ?? "Le standard n'a pas pu aboutir";
-      await RingtoneService.instance.stopIvr();
+      final enCours = ivr;
+
+      /*
+       * ⚠️ UN REFUS QUI NE CHANGE RIEN NE DOIT RIEN COUPER (centre vocal).
+       *
+       * Une touche invalide ou indisponible laisse le serveur EXACTEMENT dans
+       * l'état où il était — au menu, ou en train de jouer un son. Couper
+       * l'audio et repasser au menu comme pour un centre d'appels ferait deux
+       * dégâts : le son en cours s'arrêterait pour une touche qui n'a rien
+       * lancé, et le client afficherait une étape que le serveur ne partage
+       * pas. Le message s'affiche, et c'est tout.
+       *
+       * `retry: false` (aucun menu, plafond de lecture atteint) reste traité
+       * comme partout ailleurs : c'est une vraie fin.
+       */
+      final refusSansEffet =
+          enCours != null && enCours.vocal && retry && callId == enCours.callId;
+      if (!refusSansEffet) await RingtoneService.instance.stopIvr();
+
       final session = ivr;
+      if (refusSansEffet) {
+        session!.message = message;
+        session.envoiEnCours = false;
+        final maj = IvrOption.listeDepuisJson(e["options"]);
+        if (maj.isNotEmpty) session.options = maj;
+        notifyListeners();
+        return;
+      }
       if (session == null || callId != session.callId) {
         // Refus AVANT toute session : le centre n'a aucun service joignable.
         lastError = message;
@@ -1512,8 +1626,10 @@ class CallController extends ChangeNotifier {
             ? rawQueue.map((x) => x.toString()).toList()
             : session.queueUrls;
         if (e["code"] == "busy" && queueList.isNotEmpty) {
-          DebugOverlay.log("CC ☎️ Musique d'attente en boucle (${queueList.length} titre(s))");
-          unawaited(RingtoneService.instance.playIvrQueueList(queueList, loop: true));
+          DebugOverlay.log(
+              "CC ☎️ Musique d'attente en boucle (${queueList.length} titre(s))");
+          unawaited(
+              RingtoneService.instance.playIvrQueueList(queueList, loop: true));
         }
         return;
       }
