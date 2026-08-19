@@ -68,9 +68,20 @@ class RingtoneService {
   /// fois pour un même message.
   static const _messageCueGap = Duration(milliseconds: 1500);
 
-  Future<void> startOutgoing() => _play(_outgoingAsset);
+  /// Tonalité d'attente d'un appel SORTANT.
+  ///
+  /// ⚠️ [hautParleur] est passé par l'appelant, et vaut faux par défaut : sur un
+  /// appel sortant, le téléphone est déjà à l'oreille. Ce son partageait le
+  /// contexte de la sonnerie entrante, donc `isSpeakerphoneOn: true` : le
+  /// « bip bip » partait au haut-parleur, fort, pendant que l'écran affichait
+  /// « écouteur ». Un appel VIDÉO, lui, passe `true` — la route doit suivre ce
+  /// que l'écran annonce, dans les deux sens.
+  Future<void> startOutgoing({bool hautParleur = false}) =>
+      _play(_outgoingAsset, hautParleur: hautParleur);
 
-  Future<void> startIncoming() => _play(_incomingAsset);
+  /// Sonnerie d'un appel ENTRANT — toujours au haut-parleur : le téléphone est
+  /// dans une poche ou sur une table, il faut l'entendre.
+  Future<void> startIncoming() => _play(_incomingAsset, hautParleur: true);
 
   /// Son bref signalant l'**arrivée d'un message** (one-shot, non bloquant,
   /// échec silencieux).
@@ -323,6 +334,24 @@ class RingtoneService {
   String? _urlIvrEnCours;
   bool _loopIvrEnCours = true;
 
+  /// Oublie l'état du standard — à appeler à la FIN d'un appel, jamais entre
+  /// deux sons du même appel.
+  ///
+  /// ⚠️ Sans elle, `_hautParleurIvr` survivait d'un appel à l'autre. En
+  /// pratique le défaut se rattrapait tout seul, l'ouverture d'un menu forçant
+  /// le haut-parleur ; mais c'était une correction accidentelle, pas une
+  /// garantie, et elle aurait disparu au premier standard qui n'appelle pas
+  /// `_hautParleurPourStandard`.
+  ///
+  /// Volontairement séparée de [stopIvr], qui est appelée à CHAQUE appui sur une
+  /// touche : y remettre le drapeau annulerait le choix de l'appelant dès qu'il
+  /// change de son.
+  void reinitialiserIvr() {
+    _hautParleurIvr = true;
+    _urlIvrEnCours = null;
+    _loopIvrEnCours = true;
+  }
+
   /// Le contexte audio du standard, selon la sortie choisie.
   ///
   /// ⚠️ LES DEUX SORTIES NE DIFFÈRENT PAS QUE PAR UN BOOLÉEN. Le type d'usage
@@ -424,7 +453,7 @@ class RingtoneService {
     }
   }
 
-  Future<void> _play(String asset) async {
+  Future<void> _play(String asset, {required bool hautParleur}) async {
     // Si on rejoue le même son (ex: 2 events consécutifs), on ne relance pas.
     if (_currentAsset == asset && _player != null) return;
 
@@ -440,11 +469,16 @@ class RingtoneService {
       // actif, et pour qu'elle sorte sur haut-parleur (routing appel).
       await p.setAudioContext(
         AudioContext(
-          android: const AudioContextAndroid(
-            isSpeakerphoneOn: true,
+          android: AudioContextAndroid(
+            isSpeakerphoneOn: hautParleur,
             stayAwake: true,
             contentType: AndroidContentType.sonification,
-            usageType: AndroidUsageType.notificationRingtone,
+            // ⚠️ Le type d'usage commande le routage, pas seulement le booléen —
+            // même règle que pour l'audio du standard. `notificationRingtone`
+            // sort au haut-parleur, `voiceCommunication` à l'écouteur.
+            usageType: hautParleur
+                ? AndroidUsageType.notificationRingtone
+                : AndroidUsageType.voiceCommunication,
             audioFocus: AndroidAudioFocus.gainTransientMayDuck,
           ),
           iOS: AudioContextIOS(

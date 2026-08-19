@@ -316,6 +316,27 @@ class MeetingController extends ChangeNotifier {
     );
     await _mesh!.ensureLocal();
 
+    /*
+     * 🔴 LA ROUTE AUDIO EST POSÉE ICI, ET C'EST CE QUI MANQUAIT.
+     *
+     * `isSpeakerOn` vaut `true` par défaut — ce qui est juste pour une réunion,
+     * on ne tient pas son téléphone à l'oreille pendant une conférence — mais
+     * `Helper.setSpeakerphoneOn` n'était appelé QUE dans `toggleSpeaker`. La
+     * route restait donc celle laissée par ce qui précédait, et l'appel
+     * précédent la remet à l'écouteur en se terminant.
+     *
+     * Résultat : le bouton affichait « haut-parleur activé » pendant que le son
+     * sortait de l'écouteur, et le premier appui le passait à `false` — il
+     * fallait appuyer DEUX FOIS pour obtenir le haut-parleur qu'on croyait déjà
+     * avoir. Le bouton mentait.
+     *
+     * Règle générale qui en découle : un état par défaut ne vaut rien tant
+     * qu'il n'a pas été APPLIQUÉ au système ; l'afficher ne le rend pas vrai.
+     */
+    try {
+      await Helper.setSpeakerphoneOn(isSpeakerOn);
+    } catch (_) {}
+
     // Rejoint via WebSocket. C'est le handler serveur qui inscrit la socket
     // dans la salle et renvoie la liste des participants déjà présents.
     _rt.meetingJoin(meetingId);

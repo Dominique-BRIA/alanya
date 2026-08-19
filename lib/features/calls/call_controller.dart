@@ -403,7 +403,12 @@ class CallController extends ChangeNotifier {
     });
     // Sonnerie sortante (bip d'attente) tant que le destinataire n'a pas
     // décroché. Arrêtée dans _onPeerJoined / _clear / hangUp.
-    RingtoneService.instance.startOutgoing();
+    //
+    // ⚠️ La route audio est posée AVANT la tonalité, et celle-ci la suit :
+    // écouteur pour un appel audio, haut-parleur pour la vidéo. Le « bip bip »
+    // partait auparavant toujours au haut-parleur, quel que soit l'affichage.
+    await _routeAudioInitiale();
+    RingtoneService.instance.startOutgoing(hautParleur: isSpeakerOn);
     notifyListeners();
     // Initialise le stream local immédiatement pour que l'appelant soit prêt
     // à envoyer de l'audio/vidéo dès que le destinataire accepte.
@@ -465,7 +470,10 @@ class CallController extends ChangeNotifier {
         hangUp();
       }
     });
-    RingtoneService.instance.startOutgoing();
+    // Même règle que sur un départ ordinaire : la route d'abord, la tonalité
+    // ensuite, et elle la suit.
+    await _routeAudioInitiale();
+    RingtoneService.instance.startOutgoing(hautParleur: isSpeakerOn);
     notifyListeners();
     try {
       await _ensureMesh();
@@ -647,6 +655,10 @@ class CallController extends ChangeNotifier {
     // La mesh existe enfin : rejouer l'offre arrivée pendant sa construction.
     await _viderTamponSignaux(inc.callId);
     _armerMinuteurConnexion();
+    // ⚠️ APRÈS que `activeType` a pris le type de l'appel entrant : c'est lui
+    // qui décide de la sortie. Sans cet appel, un appel vidéo REÇU sortait par
+    // l'écouteur comme un appel audio.
+    await _routeAudioInitiale();
     notifyListeners();
   }
 
@@ -934,6 +946,8 @@ class CallController extends ChangeNotifier {
       isSpeakerOn = false;
       unawaited(Helper.setSpeakerphoneOn(false).catchError((_) {}));
     }
+    // L'état audio du standard ne doit pas survivre à l'appel qui l'a produit.
+    RingtoneService.instance.reinitialiserIvr();
     // Relâché sans condition : l'appel est fini, et un verrou oublié
     // éteindrait l'écran au premier objet passant devant le capteur.
     unawaited(ProximiteAppel.regler(false));
@@ -980,6 +994,35 @@ class CallController extends ChangeNotifier {
   }
 
   Future<void> toggleSpeaker() => _appliqueHautParleur(!isSpeakerOn);
+
+  /// Pose la route audio À L'OUVERTURE de l'appel, selon son type.
+  ///
+  /// 🔴 ELLE MANQUAIT, et c'est ce qui rendait la vidéo inutilisable sans un
+  /// appui supplémentaire : `isSpeakerOn` valait `false` quel que soit le type,
+  /// donc on lançait un appel vidéo, on éloignait le téléphone pour voir
+  /// l'écran, et le son restait dans l'écouteur.
+  ///
+  /// Ce que l'incohérence avait de démontrable : l'application SAIT déjà que la
+  /// vidéo n'est pas un usage à l'oreille — `_majProximite` refuse d'éteindre
+  /// l'écran quand `activeType == "VIDEO"`. Elle refusait donc d'éteindre
+  /// l'écran parce qu'on ne colle pas le téléphone à sa joue, tout en envoyant
+  /// le son là où il aurait fallu le coller.
+  ///
+  /// ⚠️ Appelée APRÈS que `activeType` est posé, jamais avant : c'est lui qui
+  /// décide.
+  Future<void> _routeAudioInitiale() async {
+    final vise = activeType == "VIDEO";
+    if (isSpeakerOn == vise) {
+      // Le drapeau est déjà bon, mais la ROUTE SYSTÈME, elle, appartient à
+      // l'appel précédent. On la repose quand même — c'est exactement l'oubli
+      // qui fait mentir le bouton des réunions.
+      try {
+        await Helper.setSpeakerphoneOn(vise);
+      } catch (_) {}
+      return;
+    }
+    await _appliqueHautParleur(vise);
+  }
 
   Future<void> _appliqueHautParleur(bool actif) async {
     isSpeakerOn = actif;
