@@ -3,8 +3,13 @@ description: "Alanya — application de messagerie instantanée."
 publish_to: "none"
 version: 0.1.0+1
 
+# La borne basse n'est plus décorative : les paquets ML Kit de la traduction
+# sur l'appareil exigent Dart ^3.12.0 et Flutter >= 3.44.0. L'écrire ici fait
+# échouer `pub get` avec un message clair sur une CI restée en arrière, au lieu
+# d'un échec de résolution illisible.
 environment:
-  sdk: ">=3.3.0 <4.0.0"
+  sdk: ">=3.12.0 <4.0.0"
+  flutter: ">=3.44.0"
 
 dependencies:
   flutter:
@@ -92,6 +97,21 @@ dependencies:
   # n'est sollicité que pour les comptes concernés, jamais pour un particulier.
   geolocator: ^14.0.2
   flutter_foreground_task: ^10.0.0
+  # Traduction SUR L'APPAREIL (ML Kit). Remplace les serveurs publics
+  # LibreTranslate / MyMemory, à qui le contenu des messages était envoyé en
+  # clair. Les modèles sont téléchargés une fois puis utilisés hors ligne :
+  # rien ne sort du téléphone, et rien n'est facturé.
+  #
+  # ⚠️ Les modèles NE SONT PAS dans l'APK — comptez quelques dizaines de Mo par
+  # langue, téléchargés à la demande, et il en faut DEUX pour un couple. Le
+  # téléchargement doit donc partir d'un geste de l'utilisateur (voir
+  # `lib/core/traduction_appareil.dart`).
+  #
+  # ⚠️ Ces deux paquets exigent `flutter >= 3.44.0` / Dart `^3.12.0` — d'où la
+  # contrainte `environment` relevée ci-dessus. Les trois CI sont épinglées à
+  # 3.44.6, elles passent ; ne pas y revenir en arrière.
+  google_mlkit_translation: ^0.15.1
+  google_mlkit_language_id: ^0.15.1
 
 
 dev_dependencies:

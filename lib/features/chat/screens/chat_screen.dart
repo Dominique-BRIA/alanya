@@ -29,7 +29,7 @@ import '../../../core/ringtone_service.dart';
 import '../../../core/token_storage.dart';
 import '../../../core/voice_recorder.dart';
 import '../../../core/locale_controller.dart';
-import '../../../core/translate_service.dart';
+import '../../../core/traduction_appareil.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../models/message.dart';
 import '../../../models/message_payload.dart';
@@ -286,7 +286,6 @@ class _ChatScreenState extends State<ChatScreen>
   String? _highlightedMessageId;
   final Map<String, GlobalKey> _messageKeys = {};
   final Map<String, ReplyPreview> _replySnapshots = {};
-  final _translateService = TranslateService();
   final Map<String, String> _translations = {};
   final Set<String> _translating = {};
 
@@ -429,7 +428,9 @@ class _ChatScreenState extends State<ChatScreen>
     } catch (_) {}
     _lockPulse.dispose();
     _voiceRecorder.cancel();
-    _translateService.dispose();
+    // Libère les traducteurs ML Kit gardés en mémoire. Les modèles téléchargés
+    // sur l'appareil, eux, restent — c'est tout l'intérêt.
+    libererTraducteurs();
     InlineAudioPlayer.stop();
     _inputCtrl.removeListener(_onInputTextChanged);
     _inputCtrl.dispose();
@@ -4103,28 +4104,111 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
+  /// Traduit un message SUR L'APPAREIL, ou retire la traduction affichée.
+  ///
+  /// Le service en ligne a disparu : le texte du message ne quitte plus le
+  /// téléphone. Contrepartie assumée — la première traduction vers une langue
+  /// demande d'installer ses modèles, ce qui ne peut pas se faire en douce.
   Future<void> _translateMessage(Message m) async {
     final text = (m.content ?? '').trim();
     if (text.isEmpty) return;
-    final locale = context.read<LocaleController>().languageCode;
+    final cible = context.read<LocaleController>().languageCode;
     if (_translations.containsKey(m.id)) {
       setState(() => _translations.remove(m.id));
       return;
     }
     if (_translating.contains(m.id)) return;
+    if (!moteurAppareilPresent) {
+      _messageTraduction('translation_unsupported');
+      return;
+    }
     setState(() => _translating.add(m.id));
     try {
-      final translated = await _translateService.translate(
-          text: text, target: locale, source: 'auto');
+      // Mode souple : ici tout reste local, se tromper de langue source ne
+      // coûte qu'une traduction médiocre qu'on referme d'un geste, alors que
+      // renoncer prive l'utilisateur de la fonction.
+      final source = await detecterLangue(text, souple: true);
       if (!mounted) return;
-      setState(() => _translations[m.id] = translated);
+      if (source == null) {
+        _messageTraduction('translation_lang_unknown');
+        return;
+      }
+      if (source == normaliserLangue(cible)) {
+        _messageTraduction('translation_same_lang');
+        return;
+      }
+      final etat = await etatCouple(source, cible);
+      if (!mounted) return;
+      if (etat == EtatCouple.indisponible) {
+        _messageTraduction('translation_unsupported');
+        return;
+      }
+      if (etat == EtatCouple.aTelecharger) {
+        // Le téléchargement DOIT partir d'un geste : quelques dizaines de Mo
+        // ne s'imposent pas à quelqu'un qui a seulement appuyé sur « Traduire ».
+        final accepte = await _demandeTelechargementLangues(source, cible);
+        if (!mounted || !accepte) return;
+        final installe = await telechargerCouple(source, cible);
+        if (!mounted) return;
+        if (!installe) {
+          _messageTraduction('translation_download_failed');
+          return;
+        }
+      }
+      final traduit = await traduireUnTexte(source, cible, text);
+      if (!mounted) return;
+      setState(() => _translations[m.id] = traduit);
     } catch (_) {
-      if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(tr(context, 'translation_failed'))));
+      _messageTraduction('translation_failed');
     } finally {
       if (mounted) setState(() => _translating.remove(m.id));
     }
+  }
+
+  void _messageTraduction(String cle) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(tr(context, cle))));
+  }
+
+  /// Nom lisible d'une langue. Le catalogue de l'interface n'en connaît que
+  /// neuf, ML Kit en traduit cinquante-neuf : au-delà, on affiche le code
+  /// plutôt qu'un nom inventé.
+  String _nomLangue(String code) {
+    const cles = {
+      'fr': 'french',
+      'en': 'english',
+      'zh': 'chinese',
+      'no': 'norwegian',
+      'ru': 'russian',
+      'de': 'german',
+      'es': 'spanish',
+      'sv': 'swedish',
+      'pt': 'portuguese',
+    };
+    final cle = cles[code];
+    return cle == null ? code.toUpperCase() : tr(context, cle);
+  }
+
+  /// Demande l'autorisation d'installer les modèles du couple.
+  Future<bool> _demandeTelechargementLangues(String source, String cible) async {
+    final langues = "${_nomLangue(source)} + ${_nomLangue(normaliserLangue(cible))}";
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(tr(ctx, 'translation_download_title')),
+        content: Text(tr(ctx, 'translation_download_body', {'langues': langues})),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(tr(ctx, 'cancel'))),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(tr(ctx, 'download'))),
+        ],
+      ),
+    );
+    return ok == true;
   }
 
   // ══ TIME / DATE ══
