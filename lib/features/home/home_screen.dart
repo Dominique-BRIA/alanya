@@ -19,6 +19,9 @@ import '../../core/missed_calls.dart';
 import '../../models/call_record.dart';
 import '../../models/ai_message.dart';
 import '../../models/auth_user.dart';
+import '../../core/texte_recherche.dart';
+import '../../models/contact_list.dart';
+import 'filtre_conversations.dart';
 import '../../models/conversation.dart';
 import '../../models/status.dart';
 import '../../theme/alanya_theme.dart';
@@ -36,6 +39,8 @@ import '../auth/auth_controller.dart';
 import '../chat/chat_repository.dart';
 import '../chat/screens/chat_screen.dart';
 import '../calls/screens/dialer_screen.dart';
+import '../contacts/contact_lists_repository.dart';
+import '../contacts/teintes_listes.dart';
 import '../contacts/screens/contacts_screen.dart';
 import '../calls/call_controller.dart';
 import '../calls/ouvrir_appel_en_cours.dart';
@@ -326,6 +331,13 @@ class _ConversationsTabState extends State<_ConversationsTab>
   final _searchCtrl = TextEditingController();
   String _searchQuery = '';
   int _tabFilter = 0;
+
+  /// Les listes de contacts de l'utilisateur, pour la rangée de filtres.
+  List<ListeContacts> _listes = const [];
+
+  /// L'identifiant de la liste qui filtre, ou `null` — un seul filtre de liste
+  /// actif à la fois, comme sur le web.
+  String? _listeActive;
   bool _wasBusy = false;
 
   // Formalisme centralisé – voir lib/core/call_status.dart
@@ -428,6 +440,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
     WidgetsBinding.instance.addObserver(this);
     _load();
     _loadCalls();
+    _chargerListes();
     // Rafraîchit la liste + affiche une notification locale pour les nouveaux messages.
     _rtSub = context.read<RealtimeClient>().events.listen((e) {
       final t = e["type"];
@@ -769,6 +782,9 @@ class _ConversationsTabState extends State<_ConversationsTab>
               indicatorWeight: 2.5,
               onTap: (i) => setState(() => _tabFilter = i),
             ),
+            // Les listes de contacts, APRÈS les onglets système et jamais
+            // parmi eux — voir `_rangeeListes`.
+            _rangeeListes(),
             Expanded(
               child: RefreshIndicator(
                 onRefresh: _refresh,
@@ -777,6 +793,109 @@ class _ConversationsTabState extends State<_ConversationsTab>
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// Charge les listes de contacts, en échec silencieux.
+  ///
+  /// ⚠️ Un échec ne doit RIEN casser : la rangée disparaît, les conversations
+  /// restent. Ce n'est pas une donnée dont dépend l'écran, c'est un confort.
+  Future<void> _chargerListes() async {
+    try {
+      final listes = await context.read<ContactListsRepository>().list();
+      if (!mounted) return;
+      setState(() {
+        _listes = listes;
+        // Si la liste active a disparu — supprimée depuis un autre appareil —
+        // on retombe sur « toutes ». Sans cela, l'écran resterait vide sans
+        // qu'aucun filtre visible ne l'explique.
+        if (_listeActive != null && !listes.any((l) => l.id == _listeActive)) {
+          _listeActive = null;
+        }
+      });
+    } catch (_) {
+      if (mounted) setState(() => _listes = const []);
+    }
+  }
+
+  /// Restreint les conversations à la liste active, s'il y en a une.
+  List<Conversation> _appliqueListe(List<Conversation> convs) {
+    final id = _listeActive;
+    if (id == null) return convs;
+    final liste = _listes.where((l) => l.id == id).firstOrNull;
+    if (liste == null) return convs;
+
+    // Construits UNE FOIS : la liste se refiltre à chaque message reçu.
+    final filtre = MembresDuFiltre(
+      liste.members.map((m) => m.id.toLowerCase()).toSet(),
+      liste.members
+          .map((m) => chiffresSeuls(m.publicNumber))
+          .where((n) => n.isNotEmpty)
+          .toSet(),
+    );
+    final monId = context.read<AuthController>().user?.id;
+
+    return convs
+        .where((c) => estDansListe(
+              estGroupe: c.isGroup,
+              membres: c.members
+                  .map((m) => (id: m.id, numero: m.publicNumber))
+                  .toList(),
+              monId: monId,
+              filtre: filtre,
+            ))
+        .toList();
+  }
+
+  /// La rangée des listes de contacts, SOUS les onglets système.
+  ///
+  /// 🔴 SÉPARÉE DES ONGLETS, ET C'EST VOULU. Un onglet système décrit un ÉTAT de
+  /// la conversation — non lue, groupe — quand une liste désigne un CERCLE DE
+  /// PERSONNES que l'utilisateur a lui-même constitué. Les mélanger ferait
+  /// croire que « Famille » est une notion de l'application. C'est la règle
+  /// posée par le web (`chats.tsx`), et la séparation visuelle la rend ici
+  /// encore plus littérale.
+  Widget _rangeeListes() {
+    if (_listes.isEmpty) return const SizedBox.shrink();
+    final sombre = Theme.of(context).brightness == Brightness.dark;
+    final triees = List<ListeContacts>.from(_listes)
+      ..sort((a, b) => comparePourTri(a.name, b.name));
+
+    return SizedBox(
+      height: 44,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        itemCount: triees.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          final l = triees[i];
+          final actif = l.id == _listeActive;
+          final teinte = couleurDeListe(l.color, sombre: sombre);
+          return FilterChip(
+            selected: actif,
+            // Un second appui sur la liste active la RETIRE : c'est le geste
+            // attendu, et il évite d'avoir à chercher un bouton « tout ».
+            onSelected: (_) =>
+                setState(() => _listeActive = actif ? null : l.id),
+            avatar: Container(
+              width: 10,
+              height: 10,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                // Sans couleur choisie, un CONTOUR vide plutôt qu'un point
+                // couleur d'accent — repris du web : un point coloré ferait
+                // croire à une teinte qui n'a pas été choisie.
+                color: teinte,
+                border: teinte == null
+                    ? Border.all(color: faintOf(context, Colors.black38))
+                    : null,
+              ),
+            ),
+            label: Text(l.name, style: const TextStyle(fontSize: 13)),
+          );
+        },
       ),
     );
   }
@@ -908,11 +1027,14 @@ class _ConversationsTabState extends State<_ConversationsTab>
       ]);
     }
     final allConvs = _convs ?? [];
-    final baseConvs = _tabFilter == 0
+    final parOnglet = _tabFilter == 0
         ? allConvs
         : (_tabFilter == 1
             ? allConvs.where((c) => c.unread > 0).toList()
             : allConvs.where((c) => c.isGroup).toList());
+    // La liste s'applique APRÈS le filtre système, jamais à sa place : les deux
+    // répondent à des questions différentes et se cumulent naturellement.
+    final baseConvs = _appliqueListe(parOnglet);
     if (baseConvs.isEmpty) {
       return ListView(children: [
         const SizedBox(height: 100),
