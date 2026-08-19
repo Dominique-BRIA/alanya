@@ -242,16 +242,54 @@ class RingtoneService {
         }
       }
 
-      final response =
-          await http.get(Uri.parse(url)).timeout(const Duration(seconds: 8));
-      if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {
-        await file.writeAsBytes(response.bodyBytes, flush: true);
-        return DeviceFileSource(file.path);
-      }
+      /*
+       * 🔴 ON NE TÉLÉCHARGE PLUS AVANT DE JOUER — correction du 18/08/2026.
+       *
+       * Le user : « très souvent, dès le premier appel, le vocal ne se met pas
+       * à chanter ». Le mot qui compte est PREMIER, et il désignait le cache.
+       *
+       * Ce code attendait les 256 Ko du fichier complet avant la première note,
+       * avec 8 secondes de patience. Au premier appel, le cache est vide : il y
+       * avait donc un silence long, puis un repli sur `UrlSource` — c'est-à-dire
+       * sur le streaming qu'il aurait fallu faire d'emblée, mais huit secondes
+       * trop tard. Aux appels suivants le fichier était sur le disque et
+       * démarrait instantanément, ce qui explique exactement le « premier ».
+       *
+       * Pire, l'attente se transformait en silence DÉFINITIF : l'appelant qui
+       * n'entend rien tape une touche, `stopIvr()` change la génération, et le
+       * téléchargement qui s'achève est jeté. L'invite n'aura jamais joué.
+       *
+       * L'optimisation inversait donc ce qu'elle cherchait à améliorer. On rend
+       * la source réseau IMMÉDIATEMENT — la lecture commence dès les premiers
+       * octets — et on remplit le cache EN ARRIÈRE-PLAN pour la fois suivante.
+       * Les deux cas y gagnent : le premier appel démarre tout de suite, les
+       * suivants lisent le disque.
+       */
+      unawaited(_remplirCache(url, file));
     } catch (e) {
-      debugPrint("[RingtoneService] Cache fallback for $url: $e");
+      debugPrint("[RingtoneService] cache indisponible pour $url : $e");
     }
     return UrlSource(url);
+  }
+
+  /// Télécharge le son pour la PROCHAINE lecture. N'est jamais attendu.
+  ///
+  /// ⚠️ Écrit dans un fichier temporaire puis renomme : une écriture
+  /// interrompue — application tuée, disque plein — laisserait sinon un fichier
+  /// tronqué que `_resoudreSourceIvr` prendrait pour un cache valide, et le son
+  /// serait coupé à chaque appel suivant sans que rien ne l'explique.
+  Future<void> _remplirCache(String url, File destination) async {
+    try {
+      final r =
+          await http.get(Uri.parse(url)).timeout(const Duration(seconds: 30));
+      if (r.statusCode != 200 || r.bodyBytes.isEmpty) return;
+      final partiel = File('${destination.path}.part');
+      await partiel.writeAsBytes(r.bodyBytes, flush: true);
+      await partiel.rename(destination.path);
+    } catch (_) {
+      // Sans conséquence : la lecture en cours passe par le réseau, et la
+      // prochaine retentera.
+    }
   }
 
   /// Le son du standard sort-il par le HAUT-PARLEUR ?
