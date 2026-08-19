@@ -7,6 +7,7 @@ import '../../../core/alanya_id_formatter.dart';
 import '../../../core/texte_recherche.dart';
 import '../../../models/contact.dart';
 import '../../../models/contact_list.dart';
+import '../../../core/sonneries_listes.dart';
 import '../../../models/sonnerie.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
@@ -59,6 +60,11 @@ class _ContactListsScreenState extends State<ContactListsScreen> {
       final listes = await depotListes.list();
       final contacts = await depotContacts.list();
       if (!mounted) return;
+      // Cet écran est le SEUL endroit où une sonnerie de liste se change : sans
+      // cette ligne, la nouvelle sonnerie n'aurait pris effet qu'au prochain
+      // passage par l'accueil, et l'utilisateur aurait conclu qu'elle ne marche
+      // pas.
+      context.read<SonneriesDeListes>().alimenter(listes);
       setState(() {
         _listes = listes;
         _contacts = contacts;

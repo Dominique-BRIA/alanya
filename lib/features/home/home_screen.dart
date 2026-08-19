@@ -13,6 +13,7 @@ import '../geo/screens/geo_disclosure_screen.dart';
 import '../../core/push_service.dart';
 import '../../core/notification_settings.dart';
 import '../../core/realtime_client.dart';
+import '../../core/sonneries_listes.dart';
 import '../../core/call_cache.dart';
 import '../../core/call_status.dart';
 import '../../core/missed_calls.dart';
@@ -805,6 +806,10 @@ class _ConversationsTabState extends State<_ConversationsTab>
     try {
       final listes = await context.read<ContactListsRepository>().list();
       if (!mounted) return;
+      // La sonnerie d'un appelant se lit dans ces mêmes listes : on alimente
+      // le cache au passage plutôt que de refaire la requête à l'arrivée d'un
+      // appel, moment où l'on ne peut justement pas attendre le réseau.
+      context.read<SonneriesDeListes>().alimenter(listes);
       setState(() {
         _listes = listes;
         // Si la liste active a disparu — supprimée depuis un autre appareil —

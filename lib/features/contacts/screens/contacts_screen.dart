@@ -35,6 +35,15 @@ class _ContactsScreenState extends State<ContactsScreen> {
   String _recherche = "";
   final _rechercheCtrl = TextEditingController();
 
+  /// La barre de recherche occupe-t-elle l'en-tête ?
+  ///
+  /// ⚠️ ELLE A DÉMÉNAGÉ (demande du user, 19/08/2026). Elle vivait dans la
+  /// liste défilante, sous les actions rapides : il fallait donc remonter tout
+  /// en haut pour chercher, et sur un carnet un peu fourni elle était
+  /// simplement invisible. Elle est désormais dans l'en-tête, ouverte par une
+  /// loupe posée juste avant le bouton d'import — la disposition de WhatsApp.
+  bool _enRecherche = false;
+
   /// Les contacts À AFFICHER : filtrés, puis classés alphabétiquement.
   ///
   /// ⚠️ Le tri se fait ICI, à l'affichage, et non sur `_contacts` : cette liste
@@ -189,25 +198,42 @@ class _ContactsScreenState extends State<ContactsScreen> {
       appBar: backAppBar(
         context,
         "Contacts",
-        actions: [
-          // Synchronisation depuis le répertoire téléphonique
-          IconButton(
-            tooltip: "Importer depuis le téléphone",
-            icon: const Icon(Icons.contacts_outlined),
-            onPressed: () async {
-              final added = await Navigator.of(context).push<bool>(
-                MaterialPageRoute(builder: (_) => const PhoneSyncScreen()),
-              );
-              if (added == true) _load();
-            },
-          ),
-          // Bouton actualiser toujours visible
-          IconButton(
-            tooltip: "Actualiser",
-            icon: const Icon(Icons.refresh),
-            onPressed: _loading ? null : _load,
-          ),
-        ],
+        titreWidget: _enRecherche ? _champRecherche() : null,
+        actions: _enRecherche
+            ? [
+                IconButton(
+                  tooltip: "Fermer la recherche",
+                  icon: const Icon(Icons.close),
+                  onPressed: _fermerRecherche,
+                ),
+              ]
+            : [
+                // La loupe précède l'import, comme sur WhatsApp : c'est le
+                // geste le plus fréquent du carnet, il tombe donc sous le
+                // pouce avant celui qu'on ne fait qu'une fois.
+                IconButton(
+                  tooltip: "Rechercher",
+                  icon: const Icon(Icons.search),
+                  onPressed: () => setState(() => _enRecherche = true),
+                ),
+                // Synchronisation depuis le répertoire téléphonique
+                IconButton(
+                  tooltip: "Importer depuis le téléphone",
+                  icon: const Icon(Icons.contacts_outlined),
+                  onPressed: () async {
+                    final added = await Navigator.of(context).push<bool>(
+                      MaterialPageRoute(builder: (_) => const PhoneSyncScreen()),
+                    );
+                    if (added == true) _load();
+                  },
+                ),
+                // Bouton actualiser toujours visible
+                IconButton(
+                  tooltip: "Actualiser",
+                  icon: const Icon(Icons.refresh),
+                  onPressed: _loading ? null : _load,
+                ),
+              ],
       ),
       body: MotifBackground(
         overlayOpacity: 0.92,
@@ -362,7 +388,6 @@ class _ContactsScreenState extends State<ContactsScreen> {
             _tuileMoi(),
 
             Divider(height: 1, thickness: 8, color: surfacesOf(context).fond),
-            _barreRecherche(),
             // --- Liste des contacts, filtrée et classée ---
             ...affiches.map((c) => _tile(c)),
             // Un filtre qui ne rend rien doit le DIRE. Une liste vide sans
@@ -390,42 +415,28 @@ class _ContactsScreenState extends State<ContactsScreen> {
     );
   }
 
-  /// Barre de recherche du carnet d'adresses.
+  /// Ferme la recherche ET vide le filtre.
   ///
-  /// ⚠️ Elle vit DANS la liste défilante, et non dans une barre figée : le
-  /// carnet se parcourt au pouce, et une barre collée en haut mangerait une
-  /// ligne de contacts en permanence pour un usage occasionnel.
-  Widget _barreRecherche() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-      child: TextField(
-        controller: _rechercheCtrl,
-        textInputAction: TextInputAction.search,
-        onChanged: (v) => setState(() => _recherche = v),
-        decoration: InputDecoration(
-          isDense: true,
-          hintText: "Rechercher un contact",
-          prefixIcon: const Icon(Icons.search, size: 20),
-          // La croix n'apparaît que s'il y a quelque chose à effacer : un
-          // bouton toujours visible mais sans effet apprend à être ignoré.
-          suffixIcon: _recherche.isEmpty
-              ? null
-              : IconButton(
-                  icon: const Icon(Icons.close, size: 18),
-                  onPressed: () {
-                    _rechercheCtrl.clear();
-                    setState(() => _recherche = "");
-                  },
-                ),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(24),
-            borderSide: BorderSide.none,
-          ),
-          filled: true,
-          fillColor: surfacesOf(context).surfaceHaute,
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        ),
+  /// Les deux ensemble, toujours : refermer la barre en laissant le filtre
+  /// actif donnerait un carnet amputé sans plus rien à l'écran pour l'expliquer.
+  void _fermerRecherche() {
+    _rechercheCtrl.clear();
+    setState(() {
+      _recherche = "";
+      _enRecherche = false;
+    });
+  }
+
+  Widget _champRecherche() {
+    return TextField(
+      controller: _rechercheCtrl,
+      autofocus: true,
+      textInputAction: TextInputAction.search,
+      onChanged: (v) => setState(() => _recherche = v),
+      decoration: const InputDecoration(
+        isDense: true,
+        border: InputBorder.none,
+        hintText: "Rechercher un contact",
       ),
     );
   }
@@ -442,15 +453,30 @@ class _ContactsScreenState extends State<ContactsScreen> {
   /// route de conversation directe. C'est le serveur qui reconnaît le cas et
   /// crée une conversation à un seul participant — voir
   /// `findOrCreateSelfConversation`. Le client n'a aucune règle à connaître.
+  ///
+  /// 🐛 **ELLE PORTAIT UN SIGNET, PAS MA PHOTO** (signalé le 19/08/2026). Elle
+  /// passait par [_actionTile], dont la vignette est une icône sur fond de
+  /// couleur — juste pour « Ajouter un contact », faux pour moi : je suis une
+  /// PERSONNE dans cette liste, la seule qui ait un visage connu de l'appareil.
+  /// Elle a donc son propre `ListTile` avec un [AvatarCircle], qui sait déjà
+  /// retomber sur l'initiale quand aucune photo n'est posée.
   Widget _tuileMoi() {
     final moi = context.read<AuthController>().user;
     if (moi == null) return const SizedBox.shrink();
-    return _actionTile(
-      icon: Icons.bookmark_outline,
-      color: themed(context,
-          light: AlanyaColors.indigo, dark: AlanyaColors.indigoLight),
-      title: "Moi (vous)",
-      subtitle: "Notes personnelles, brouillons, liens à garder",
+    return ListTile(
+      leading: AvatarCircle(
+        name: moi.nom ?? moi.pseudo ?? "Moi",
+        avatarUrl: moi.avatarUrl,
+        radius: 22,
+        backgroundColor: themed(context,
+            light: AlanyaColors.indigo, dark: AlanyaColors.indigoLight),
+      ),
+      title: const Text("Moi (vous)",
+          style: TextStyle(fontWeight: FontWeight.w600)),
+      subtitle: Text(
+        "Notes personnelles, brouillons, liens à garder",
+        style: TextStyle(color: mutedOf(context, Colors.black54), fontSize: 13),
+      ),
       onTap: () => _ouvrirMesNotes(moi),
     );
   }

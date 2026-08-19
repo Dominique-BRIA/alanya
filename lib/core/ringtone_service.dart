@@ -81,7 +81,17 @@ class RingtoneService {
 
   /// Sonnerie d'un appel ENTRANT — toujours au haut-parleur : le téléphone est
   /// dans une poche ou sur une table, il faut l'entendre.
-  Future<void> startIncoming() => _play(_incomingAsset, hautParleur: true);
+  ///
+  /// [url] est la sonnerie propre à une LISTE DE CONTACTS, déjà rendue jouable
+  /// (base + jeton) par `SonneriesDeListes`. Absente ou injouable, on retombe
+  /// sur l'asset embarqué : une sonnerie personnalisée qui ne se télécharge pas
+  /// ne doit jamais produire un appel silencieux.
+  Future<void> startIncoming({String? url}) {
+    if (url == null || url.isEmpty) {
+      return _play(_incomingAsset, hautParleur: true);
+    }
+    return _playUrl(url, hautParleur: true);
+  }
 
   /// Son bref signalant l'**arrivée d'un message** (one-shot, non bloquant,
   /// échec silencieux).
@@ -453,6 +463,32 @@ class RingtoneService {
     }
   }
 
+  /// Contexte audio d'une sonnerie d'appel, partagé par l'asset et l'URL.
+  ///
+  /// Sur Android, on force le flux « appel » pour que la sonnerie reste audible
+  /// quand le mode « silencieux médias » est actif, et pour qu'elle sorte au
+  /// haut-parleur. ⚠️ **Le type d'usage commande le routage, pas seulement le
+  /// booléen** — même règle que pour l'audio du standard : `notificationRingtone`
+  /// sort au haut-parleur, `voiceCommunication` à l'écouteur.
+  AudioContext _contexteSonnerie(bool hautParleur) => AudioContext(
+        android: AudioContextAndroid(
+          isSpeakerphoneOn: hautParleur,
+          stayAwake: true,
+          contentType: AndroidContentType.sonification,
+          usageType: hautParleur
+              ? AndroidUsageType.notificationRingtone
+              : AndroidUsageType.voiceCommunication,
+          audioFocus: AndroidAudioFocus.gainTransientMayDuck,
+        ),
+        iOS: AudioContextIOS(
+          category: AVAudioSessionCategory.playback,
+          options: const {
+            AVAudioSessionOptions.duckOthers,
+            AVAudioSessionOptions.mixWithOthers,
+          },
+        ),
+      );
+
   Future<void> _play(String asset, {required bool hautParleur}) async {
     // Si on rejoue le même son (ex: 2 events consécutifs), on ne relance pas.
     if (_currentAsset == asset && _player != null) return;
@@ -464,32 +500,7 @@ class RingtoneService {
 
     try {
       final p = AudioPlayer();
-      // AudioContext : sur Android, on force le stream "voice call" pour que
-      // la sonnerie soit audible même quand le mode "silencieux médias" est
-      // actif, et pour qu'elle sorte sur haut-parleur (routing appel).
-      await p.setAudioContext(
-        AudioContext(
-          android: AudioContextAndroid(
-            isSpeakerphoneOn: hautParleur,
-            stayAwake: true,
-            contentType: AndroidContentType.sonification,
-            // ⚠️ Le type d'usage commande le routage, pas seulement le booléen —
-            // même règle que pour l'audio du standard. `notificationRingtone`
-            // sort au haut-parleur, `voiceCommunication` à l'écouteur.
-            usageType: hautParleur
-                ? AndroidUsageType.notificationRingtone
-                : AndroidUsageType.voiceCommunication,
-            audioFocus: AndroidAudioFocus.gainTransientMayDuck,
-          ),
-          iOS: AudioContextIOS(
-            category: AVAudioSessionCategory.playback,
-            options: const {
-              AVAudioSessionOptions.duckOthers,
-              AVAudioSessionOptions.mixWithOthers,
-            },
-          ),
-        ),
-      );
+      await p.setAudioContext(_contexteSonnerie(hautParleur));
       await p.setReleaseMode(ReleaseMode.loop);
       await p.setVolume(1.0);
       // Un arrêt est-il passé pendant la préparation ? Alors ce lecteur ne doit
@@ -505,6 +516,43 @@ class RingtoneService {
       debugPrint("[RingtoneService] ❌ échec play $asset: $e");
       _player = null;
       _currentAsset = null;
+    }
+  }
+
+  /// Même chose que [_play], mais depuis une URL distante.
+  ///
+  /// ⚠️ Il ne suffisait PAS de remplacer `AssetSource` par `UrlSource` : une
+  /// source distante ajoute un chargement réseau au milieu des quatre allers-
+  /// retours natifs, donc une fenêtre bien plus large pour que le décrochage
+  /// arrive avant le début de la lecture. Le compteur de génération est vérifié
+  /// aux mêmes endroits, et un échec retombe sur l'asset — sans ce repli, une
+  /// sonnerie de liste injoignable rendrait l'appel muet.
+  Future<void> _playUrl(String url, {required bool hautParleur}) async {
+    if (_currentAsset == url && _player != null) return;
+
+    await stop();
+    final gen = _generation;
+
+    try {
+      final p = AudioPlayer();
+      await p.setAudioContext(_contexteSonnerie(hautParleur));
+      await p.setReleaseMode(ReleaseMode.loop);
+      await p.setVolume(1.0);
+      if (gen != _generation) return _jeter(p);
+      await p.play(UrlSource(url));
+      if (gen != _generation) return _jeter(p);
+      _player = p;
+      _currentAsset = url;
+      debugPrint("[RingtoneService] ▶️ ${_finDe(url)} (liste, loop)");
+    } catch (e) {
+      debugPrint("[RingtoneService] ❌ sonnerie de liste ${_finDe(url)}: $e");
+      _player = null;
+      _currentAsset = null;
+      // L'arrêt qui a pu survenir pendant l'échec doit rester prioritaire :
+      // sans ce contrôle, le repli relancerait une sonnerie déjà annulée.
+      if (gen == _generation) {
+        await _play(_incomingAsset, hautParleur: hautParleur);
+      }
     }
   }
 

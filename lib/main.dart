@@ -17,6 +17,7 @@ import 'core/presence_store.dart';
 import 'core/device_registry.dart';
 import 'core/push_service.dart';
 import 'core/realtime_client.dart';
+import 'core/sonneries_listes.dart';
 import 'core/theme_controller.dart';
 import 'core/token_storage.dart';
 import 'features/auth/auth_controller.dart';
@@ -86,6 +87,12 @@ void main() async {
             value: ContactsRepository(authedApi)),
         Provider<ContactListsRepository>.value(
             value: ContactListsRepository(authedApi)),
+        // La sonnerie d'un appelant se lit dans SES listes de contacts. Le
+        // service les garde en mémoire : un appel ne doit jamais attendre le
+        // réseau pour sonner.
+        Provider<SonneriesDeListes>.value(
+            value: SonneriesDeListes(
+                ContactListsRepository(authedApi), api, storage)),
         Provider<ChatRepository>.value(value: ChatRepository(authedApi)),
         Provider<AccountRepository>.value(value: AccountRepository(authedApi)),
         Provider<StatusRepository>.value(value: StatusRepository(authedApi)),
@@ -122,6 +129,7 @@ void main() async {
           create: (ctx) => CallController(
             ctx.read<CallsRepository>(),
             ctx.read<RealtimeClient>(),
+            ctx.read<SonneriesDeListes>(),
           ),
         ),
         ChangeNotifierProvider<MeetingController>(

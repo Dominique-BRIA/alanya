@@ -18,6 +18,7 @@ import '../../core/proximite_appel.dart';
 import '../../core/push_service.dart';
 import '../../core/realtime_client.dart';
 import '../../core/ringtone_service.dart';
+import '../../core/sonneries_listes.dart';
 import '../../models/call_record.dart';
 import 'calls_repository.dart';
 import 'webrtc_group_mesh.dart';
@@ -178,12 +179,16 @@ class IvrSession {
 
 /// Appels directs et de groupe — mesh WebRTC (une connexion par participant).
 class CallController extends ChangeNotifier {
-  CallController(this._calls, this._rt) {
+  CallController(this._calls, this._rt, this._sonneriesListes) {
     _sub = _rt.events.listen(_onEvent);
+    // Sans préchargement, le PREMIER appel de la session sonnerait toujours par
+    // défaut : les listes n'arrivent qu'avec l'écran d'accueil.
+    _sonneriesListes.prechargerSiBesoin();
   }
 
   final CallsRepository _calls;
   final RealtimeClient _rt;
+  final SonneriesDeListes _sonneriesListes;
   StreamSubscription<Map<String, dynamic>>? _sub;
   Timer? _ringTimeout;
 
@@ -1496,7 +1501,17 @@ class CallController extends ChangeNotifier {
             (await AlanyaTelecom.getRingingCall())?['callId']?.toString() ==
                 callId;
         if (!natifSonneDeja) {
-          RingtoneService.instance.startIncoming();
+          // Sonnerie propre à la LISTE DE CONTACTS de l'appelant, s'il y en a
+          // une. ⚠️ Le délai est BORNÉ et l'échec vaut « pas de sonnerie
+          // personnalisée » : un appel ne doit jamais attendre le réseau pour
+          // sonner. Le cache est en mémoire, donc la réponse est immédiate dans
+          // le cas normal ; la borne ne couvre que la lecture du jeton.
+          final urlListe = await _sonneriesListes
+              .urlPourAppelant(callerId: incoming!.callerId)
+              .timeout(const Duration(milliseconds: 400),
+                  onTimeout: () => null)
+              .catchError((_) => null);
+          RingtoneService.instance.startIncoming(url: urlListe);
         } else {
           traceAppel("sonnerie interne ignorée — le natif sonne déjà");
         }
