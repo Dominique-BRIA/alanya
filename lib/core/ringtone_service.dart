@@ -242,9 +242,8 @@ class RingtoneService {
         }
       }
 
-      final response = await http
-          .get(Uri.parse(url))
-          .timeout(const Duration(seconds: 8));
+      final response =
+          await http.get(Uri.parse(url)).timeout(const Duration(seconds: 8));
       if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {
         await file.writeAsBytes(response.bodyBytes, flush: true);
         return DeviceFileSource(file.path);
@@ -255,32 +254,92 @@ class RingtoneService {
     return UrlSource(url);
   }
 
+  /// Le son du standard sort-il par le HAUT-PARLEUR ?
+  ///
+  /// 🔴 CE DRAPEAU EXISTE PARCE QUE `Helper.setSpeakerphoneOn` NE SUFFIT PAS.
+  /// Cette fonction route la session **WebRTC** ; or l'audio d'un standard est
+  /// joué par `audioplayers`, avec son propre contexte. Tant que celui-ci
+  /// forçait `isSpeakerphoneOn: true` en dur, couper le haut-parleur pendant un
+  /// appel de centre ne changeait strictement rien — la bascule agissait sur un
+  /// flux qui ne jouait rien (signalé par le user le 18/08/2026).
+  ///
+  /// Même famille que le défaut du 12/08 : quand un son se comporte mal, la
+  /// question n'est pas ce qu'il contient, c'est PAR OÙ il sort.
+  bool _hautParleurIvr = true;
+
+  /// Bascule la sortie du son du standard, et l'applique à la lecture EN COURS.
+  ///
+  /// ⚠️ Le contexte est reposé **puis la lecture est relancée**. Android ne
+  /// réoriente pas un flux déjà démarré sur un simple changement de contexte :
+  /// sans reprise, le réglage ne prendrait qu'au son suivant, c'est-à-dire
+  /// jamais du point de vue de quelqu'un qui écoute une invite en boucle.
+  Future<void> reglerHautParleurIvr(bool actif) async {
+    if (_hautParleurIvr == actif) return;
+    _hautParleurIvr = actif;
+    final url = _urlIvrEnCours;
+    if (url == null) return;
+    await _playIvr(url, loop: _loopIvrEnCours);
+  }
+
+  /// La lecture en cours, pour pouvoir la reprendre sur l'autre sortie.
+  String? _urlIvrEnCours;
+  bool _loopIvrEnCours = true;
+
+  /// Le contexte audio du standard, selon la sortie choisie.
+  ///
+  /// ⚠️ LES DEUX SORTIES NE DIFFÈRENT PAS QUE PAR UN BOOLÉEN. Le type d'usage
+  /// commande le routage sous Android : `media`/`music` sort au haut-parleur,
+  /// `voiceCommunication`/`speech` à l'écouteur. Ne changer que
+  /// `isSpeakerphoneOn` laisserait le son sortir au mauvais endroit — c'est
+  /// exactement ce qui avait fait croire à un problème de format le 12/08/2026,
+  /// où trois causes plausibles ont été avancées avant de constater que le son
+  /// sortait par l'écouteur.
+  AudioContext _contexteIvr() {
+    if (_hautParleurIvr) {
+      return AudioContext(
+        android: const AudioContextAndroid(
+          isSpeakerphoneOn: true,
+          stayAwake: true,
+          contentType: AndroidContentType.music,
+          usageType: AndroidUsageType.media,
+          audioFocus: AndroidAudioFocus.gainTransientMayDuck,
+        ),
+        iOS: AudioContextIOS(
+          category: AVAudioSessionCategory.playback,
+          options: const {
+            AVAudioSessionOptions.duckOthers,
+            AVAudioSessionOptions.defaultToSpeaker,
+          },
+        ),
+      );
+    }
+    return AudioContext(
+      android: const AudioContextAndroid(
+        isSpeakerphoneOn: false,
+        stayAwake: true,
+        contentType: AndroidContentType.speech,
+        usageType: AndroidUsageType.voiceCommunication,
+        audioFocus: AndroidAudioFocus.gainTransientMayDuck,
+      ),
+      iOS: AudioContextIOS(
+        category: AVAudioSessionCategory.playAndRecord,
+        options: const {AVAudioSessionOptions.duckOthers},
+      ),
+    );
+  }
+
   Future<void> _playIvr(String url,
       {required bool loop, void Function()? onComplete}) async {
     await stopIvr();
     final gen = _generationIvr;
     try {
+      // Mémorisé AVANT la lecture : c'est ce qui permet de reprendre le même
+      // son sur l'autre sortie quand l'appelant bascule le haut-parleur.
+      _urlIvrEnCours = url;
+      _loopIvrEnCours = loop;
+
       final p = AudioPlayer();
-      // Configuration mains-libres & média robuste : force le haut-parleur principal
-      // et empêche le basculement silencieux vers l'écouteur d'oreille sur Android/iOS.
-      await p.setAudioContext(
-        AudioContext(
-          android: const AudioContextAndroid(
-            isSpeakerphoneOn: true,
-            stayAwake: true,
-            contentType: AndroidContentType.music,
-            usageType: AndroidUsageType.media,
-            audioFocus: AndroidAudioFocus.gainTransientMayDuck,
-          ),
-          iOS: AudioContextIOS(
-            category: AVAudioSessionCategory.playback,
-            options: const {
-              AVAudioSessionOptions.duckOthers,
-              AVAudioSessionOptions.defaultToSpeaker,
-            },
-          ),
-        ),
-      );
+      await p.setAudioContext(_contexteIvr());
       await p.setReleaseMode(loop ? ReleaseMode.loop : ReleaseMode.release);
       await p.setVolume(1.0);
       if (gen != _generationIvr) return _jeter(p);

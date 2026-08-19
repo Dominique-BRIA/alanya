@@ -986,6 +986,17 @@ class CallController extends ChangeNotifier {
     try {
       await Helper.setSpeakerphoneOn(actif);
     } catch (_) {}
+    /*
+     * 🔴 LE SON DU STANDARD DOIT SUIVRE, et c'est ce qui manquait.
+     *
+     * `Helper.setSpeakerphoneOn` route la session WebRTC. Or pendant un
+     * standard — et pendant TOUT l'appel d'un centre vocal, qui n'établit
+     * jamais de conversation — le son est joué par `audioplayers`, avec son
+     * propre contexte audio. La bascule agissait donc sur un flux muet, et
+     * couper le haut-parleur ne changeait rien (signalé par le user le
+     * 18/08/2026).
+     */
+    unawaited(RingtoneService.instance.reglerHautParleurIvr(actif));
     _majProximite();
     notifyListeners();
   }
