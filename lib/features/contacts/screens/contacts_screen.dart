@@ -17,6 +17,7 @@ import '../../chat/chat_repository.dart';
 import '../../chat/screens/chat_screen.dart';
 import '../../chat/screens/new_group_screen.dart';
 import '../contacts_repository.dart';
+import 'contact_lists_screen.dart';
 import 'new_chat_screen.dart';
 import 'phone_sync_screen.dart';
 
@@ -344,6 +345,19 @@ class _ContactsScreenState extends State<ContactsScreen> {
               },
             ),
 
+            const Divider(height: 1),
+            _actionTile(
+              icon: Icons.playlist_add_check,
+              color: AlanyaColors.gold,
+              title: "Listes de contacts",
+              subtitle: "Regrouper famille, équipe, clients…",
+              onTap: () async {
+                await Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const ContactListsScreen()),
+                );
+                _load();
+              },
+            ),
             const Divider(height: 1),
             _tuileMoi(),
 

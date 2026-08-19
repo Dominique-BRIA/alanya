@@ -29,6 +29,7 @@ import 'features/calls/call_controller.dart';
 import 'features/calls/call_listener.dart';
 import 'features/calls/calls_repository.dart';
 import 'features/chat/chat_repository.dart';
+import 'features/contacts/contact_lists_repository.dart';
 import 'features/contacts/contacts_repository.dart';
 import 'features/home/home_screen.dart';
 import 'widgets/offline_banner.dart';
@@ -82,6 +83,8 @@ void main() async {
         Provider<AuthedApi>.value(value: authedApi),
         Provider<ContactsRepository>.value(
             value: ContactsRepository(authedApi)),
+        Provider<ContactListsRepository>.value(
+            value: ContactListsRepository(authedApi)),
         Provider<ChatRepository>.value(value: ChatRepository(authedApi)),
         Provider<AccountRepository>.value(value: AccountRepository(authedApi)),
         Provider<StatusRepository>.value(value: StatusRepository(authedApi)),
