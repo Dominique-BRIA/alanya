@@ -37,6 +37,7 @@ import '../../../models/conversation.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
 import '../../../widgets/contact_share_sheet.dart';
+import '../../../widgets/dialogues_traduction.dart';
 import '../../../widgets/motif_background.dart';
 import '../../account/screens/avatar_viewer_screen.dart';
 import '../../auth/auth_controller.dart';
@@ -4146,9 +4147,17 @@ class _ChatScreenState extends State<ChatScreen>
       if (etat == EtatCouple.aTelecharger) {
         // Le téléchargement DOIT partir d'un geste : quelques dizaines de Mo
         // ne s'imposent pas à quelqu'un qui a seulement appuyé sur « Traduire ».
-        final accepte = await _demandeTelechargementLangues(source, cible);
+        final libelle =
+            "${_nomLangue(source)} + ${_nomLangue(normaliserLangue(cible))}";
+        final accepte = await confirmerInstallationLangues(context, libelle);
         if (!mounted || !accepte) return;
-        final installe = await telechargerCouple(source, cible);
+        var installe = await telechargerCouple(source, cible);
+        // Le téléchargement n'accepte que le Wi-Fi par défaut. Sans cette
+        // seconde question, un utilisateur en données mobiles restait devant un
+        // « impossible » sans savoir pourquoi ni quoi faire.
+        if (!installe && mounted && await proposerDonneesMobiles(context)) {
+          installe = await telechargerCouple(source, cible, wifiSeulement: false);
+        }
         if (!mounted) return;
         if (!installe) {
           _messageTraduction('translation_download_failed');
@@ -4190,26 +4199,6 @@ class _ChatScreenState extends State<ChatScreen>
     return cle == null ? code.toUpperCase() : tr(context, cle);
   }
 
-  /// Demande l'autorisation d'installer les modèles du couple.
-  Future<bool> _demandeTelechargementLangues(String source, String cible) async {
-    final langues = "${_nomLangue(source)} + ${_nomLangue(normaliserLangue(cible))}";
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(tr(ctx, 'translation_download_title')),
-        content: Text(tr(ctx, 'translation_download_body', {'langues': langues})),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: Text(tr(ctx, 'cancel'))),
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: Text(tr(ctx, 'download'))),
-        ],
-      ),
-    );
-    return ok == true;
-  }
 
   // ══ TIME / DATE ══
   String _time(DateTime d) {

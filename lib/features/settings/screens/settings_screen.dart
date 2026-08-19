@@ -17,6 +17,7 @@ import '../../account/screens/delete_account_screen.dart';
 import '../../account/screens/profile_screen.dart';
 import 'notification_settings_screen.dart';
 import 'ringtones_screen.dart';
+import 'translation_screen.dart';
 import 'privacy_settings_screen.dart';
 import 'login_history_screen.dart';
 import '../../blocked/screens/blocked_users_screen.dart';
@@ -243,6 +244,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
             trailing: _chevron(),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const RingtonesScreen()),
+            ),
+          ),
+          _settingsTile(
+            icon: Icons.translate,
+            iconColor: _accent,
+            title: "Traduction",
+            subtitle: "Langues installées sur l'appareil",
+            trailing: _chevron(),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const TranslationScreen()),
             ),
           ),
           _settingsTile(

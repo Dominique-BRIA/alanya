@@ -19,6 +19,8 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:google_mlkit_language_id/google_mlkit_language_id.dart';
 import 'package:google_mlkit_translation/google_mlkit_translation.dart';
 
+import 'texte_recherche.dart';
+
 /// Le moteur n'existe que sur mobile : ML Kit n'a pas d'implémentation web ni
 /// bureau. Ailleurs, il n'y a PAS de repli vers un service en ligne — envoyer
 /// le contenu d'un message à un tiers est précisément ce que ce lot supprime.
@@ -148,6 +150,166 @@ Future<bool> telechargerCouple(
     // Un échec ne doit pas laisser un « présent » optimiste derrière lui.
     _modelesPresents.remove(s.bcpCode);
     _modelesPresents.remove(c.bcpCode);
+    return false;
+  }
+}
+
+/* ------------------------------------------------- Gestion des langues */
+
+/// Nom d'une langue **dans sa propre langue** (autonyme).
+///
+/// Choix assumé : l'interface existe en 9 langues, ML Kit en traduit 59.
+/// Traduire 59 noms × 9 langues, ce sont 531 libellés à écrire et à tenir à
+/// jour — pour un écran que l'on ouvre trois fois dans sa vie. L'autonyme, lui,
+/// ne dépend d'aucune langue d'interface : « Deutsch » se lit Deutsch en
+/// français comme en chinois, et c'est précisément le mot que cherche celui qui
+/// installe SA langue. La recherche accepte en plus le code et le nom anglais,
+/// pour que « arabe » se trouve en tapant « ar » ou « arabic ».
+const Map<String, String> _autonymes = {
+  'af': 'Afrikaans',
+  'sq': 'Shqip',
+  'ar': 'العربية',
+  'be': 'Беларуская',
+  'bn': 'বাংলা',
+  'bg': 'Български',
+  'ca': 'Català',
+  'zh': '中文',
+  'hr': 'Hrvatski',
+  'cs': 'Čeština',
+  'da': 'Dansk',
+  'nl': 'Nederlands',
+  'en': 'English',
+  'eo': 'Esperanto',
+  'et': 'Eesti',
+  'fi': 'Suomi',
+  'fr': 'Français',
+  'gl': 'Galego',
+  'ka': 'ქართული',
+  'de': 'Deutsch',
+  'el': 'Ελληνικά',
+  'gu': 'ગુજરાતી',
+  'ht': 'Kreyòl ayisyen',
+  'he': 'עברית',
+  'hi': 'हिन्दी',
+  'hu': 'Magyar',
+  'is': 'Íslenska',
+  'id': 'Bahasa Indonesia',
+  'ga': 'Gaeilge',
+  'it': 'Italiano',
+  'ja': '日本語',
+  'kn': 'ಕನ್ನಡ',
+  'ko': '한국어',
+  'lv': 'Latviešu',
+  'lt': 'Lietuvių',
+  'mk': 'Македонски',
+  'ms': 'Bahasa Melayu',
+  'mt': 'Malti',
+  'mr': 'मराठी',
+  'no': 'Norsk',
+  'fa': 'فارسی',
+  'pl': 'Polski',
+  'pt': 'Português',
+  'ro': 'Română',
+  'ru': 'Русский',
+  'sk': 'Slovenčina',
+  'sl': 'Slovenščina',
+  'es': 'Español',
+  'sw': 'Kiswahili',
+  'sv': 'Svenska',
+  'tl': 'Tagalog',
+  'ta': 'தமிழ்',
+  'te': 'తెలుగు',
+  'th': 'ไทย',
+  'tr': 'Türkçe',
+  'uk': 'Українська',
+  'ur': 'اردو',
+  'vi': 'Tiếng Việt',
+  'cy': 'Cymraeg',
+};
+
+/// Nom lisible d'une langue, ou son code si on ne le connaît pas.
+String nomAutonyme(String bcpCode) =>
+    _autonymes[bcpCode] ?? bcpCode.toUpperCase();
+
+/// Les 59 langues traduisibles hors ligne, rangées par autonyme.
+///
+/// Le tri passe par `comparePourTri` et non par `compareTo` : Dart compare les
+/// points de code, ce qui placerait « Íslenska » et « Čeština » après
+/// « Türkçe ». Même helper que le carnet d'adresses, pour la même raison.
+List<TranslateLanguage> languesTraduisibles() {
+  final liste = TranslateLanguage.values.toList();
+  liste.sort(
+    (a, b) => comparePourTri(nomAutonyme(a.bcpCode), nomAutonyme(b.bcpCode)),
+  );
+  return liste;
+}
+
+/// La langue correspond-elle à ce que l'utilisateur a tapé ?
+///
+/// On accepte l'autonyme, le code BCP-47 et le nom anglais de l'énumération :
+/// « arabe » ne se trouverait pas dans « العربية », mais « ar » et « arabic »
+/// y mènent tous les deux.
+bool langueCorrespond(TranslateLanguage langue, String recherche) {
+  if (recherche.trim().isEmpty) return true;
+  return contientRecherche(nomAutonyme(langue.bcpCode), recherche) ||
+      contientRecherche(langue.bcpCode, recherche) ||
+      contientRecherche(langue.name, recherche);
+}
+
+/// Les langues réellement installées sur l'appareil, sondées maintenant.
+///
+/// ⚠️ Le greffon n'expose **aucune liste** : `ModelManager` ne sait répondre
+/// que « ce modèle-ci est-il là ? ». Il faut donc poser les 59 questions. Elles
+/// partent par paquets de dix plutôt que toutes d'un coup — le pont natif est
+/// unique, et l'inonder ne rendrait pas la réponse plus rapide.
+Future<Set<String>> languesInstallees() async {
+  if (!moteurAppareilPresent) return {};
+  const toutes = TranslateLanguage.values;
+  final installees = <String>{};
+  for (var debut = 0; debut < toutes.length; debut += 10) {
+    final lot = toutes.skip(debut).take(10).toList();
+    final presents = await Future.wait(lot.map(_modelePresent));
+    for (var i = 0; i < lot.length; i++) {
+      if (presents[i]) installees.add(lot[i].bcpCode);
+    }
+  }
+  return installees;
+}
+
+/// Installe UNE langue. Voir [telechargerCouple] pour la règle du geste
+/// utilisateur et celle du Wi-Fi.
+Future<bool> telechargerLangue(
+  TranslateLanguage langue, {
+  bool wifiSeulement = true,
+}) async {
+  if (!moteurAppareilPresent) return false;
+  try {
+    final ok = await _gestionnaire.downloadModel(
+      langue.bcpCode,
+      isWifiRequired: wifiSeulement,
+    );
+    if (ok) _modelesPresents[langue.bcpCode] = true;
+    return ok;
+  } catch (_) {
+    _modelesPresents.remove(langue.bcpCode);
+    return false;
+  }
+}
+
+/// Désinstalle une langue et libère l'espace disque qu'elle occupait.
+///
+/// ⚠️ Les traducteurs du pool qui s'appuyaient dessus deviennent caducs : on
+/// les ferme tous, sinon le suivant échouerait sur un modèle disparu.
+Future<bool> supprimerLangue(TranslateLanguage langue) async {
+  if (!moteurAppareilPresent) return false;
+  try {
+    final ok = await _gestionnaire.deleteModel(langue.bcpCode);
+    if (ok) {
+      _modelesPresents[langue.bcpCode] = false;
+      await libererTraducteurs();
+    }
+    return ok;
+  } catch (_) {
     return false;
   }
 }
