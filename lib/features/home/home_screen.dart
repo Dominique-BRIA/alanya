@@ -1608,10 +1608,16 @@ class _StatusTabState extends State<_StatusTab> {
     if (published == true) _load();
   }
 
-  Future<void> _openViewer(StatusGroup group, {required bool isMine}) async {
+  /// Ouvre la visionneuse sur TOUTE la liste, pas sur une seule personne :
+  /// c'est ce qui lui permet d'enchaîner sur la suivante quand les statuts de
+  /// celle qu'on regarde sont épuisés.
+  Future<void> _openViewer(List<StatusGroup> groups,
+      {required int index, required bool isMine}) async {
     await Navigator.of(context).push(
       MaterialPageRoute(
-          builder: (_) => StatusViewerScreen(group: group, isMine: isMine)),
+        builder: (_) => StatusViewerScreen(
+            groups: groups, initialGroup: index, isMine: isMine),
+      ),
     );
     _load();
   }
@@ -1648,7 +1654,8 @@ class _StatusTabState extends State<_StatusTab> {
                       style:
                           TextStyle(color: muted, fontWeight: FontWeight.bold)),
                 ),
-                ...others.map((g) => _statusTile(g, isMine: false)),
+                ...List.generate(others.length,
+                    (i) => _statusTile(others, i, isMine: false)),
               ] else if (!_error && _feed != null && me == null)
                 Padding(
                   padding: const EdgeInsets.all(24),
@@ -1705,7 +1712,8 @@ class _StatusTabState extends State<_StatusTab> {
           style: TextStyle(fontWeight: FontWeight.w600)),
       subtitle: Text(
           has ? "${me!.statuses.length} statut(s)" : "Appuie pour ajouter"),
-      onTap: has ? () => _openViewer(me!, isMine: true) : _openCreate,
+      onTap:
+          has ? () => _openViewer([me], index: 0, isMine: true) : _openCreate,
       trailing: has
           ? IconButton(
               icon: Icon(Icons.camera_alt,
@@ -1718,7 +1726,9 @@ class _StatusTabState extends State<_StatusTab> {
     );
   }
 
-  Widget _statusTile(StatusGroup g, {required bool isMine}) {
+  Widget _statusTile(List<StatusGroup> groups, int index,
+      {required bool isMine}) {
+    final g = groups[index];
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final unviewedRing =
         isDark ? AlanyaColors.terracottaNuit : AlanyaColors.forest;
@@ -1743,7 +1753,7 @@ class _StatusTabState extends State<_StatusTab> {
       title: Text(g.displayName,
           style: const TextStyle(fontWeight: FontWeight.w600)),
       subtitle: Text(g.hasUnviewed ? "Nouveau" : "Vu"),
-      onTap: () => _openViewer(g, isMine: isMine),
+      onTap: () => _openViewer(groups, index: index, isMine: isMine),
     );
   }
 }
