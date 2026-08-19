@@ -7,11 +7,13 @@ import '../../../core/alanya_id_formatter.dart';
 import '../../../core/texte_recherche.dart';
 import '../../../models/contact.dart';
 import '../../../models/contact_list.dart';
+import '../../../models/sonnerie.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../../../widgets/motif_background.dart';
 import '../contact_lists_repository.dart';
 import '../contacts_repository.dart';
+import '../../settings/ringtones_repository.dart';
 import '../teintes_listes.dart';
 
 /// Listes de contacts personnalisées — « Famille », « Équipe », « Clients ».
@@ -263,6 +265,14 @@ class _EditeurListeState extends State<_EditeurListe> {
   /// Teinte retenue, parmi les cinq du contrat partagé avec le web.
   late String _teinte;
 
+  /// Sonnerie retenue — l'URL `/api/media/<id>`, ou `null` pour celle par
+  /// défaut. C'est la MÊME valeur que le catalogue porte, comparable telle
+  /// quelle : ne jamais la transformer avant de l'envoyer.
+  String? _sonnerie;
+
+  /// Le catalogue de l'utilisateur, chargé une fois à l'ouverture.
+  List<Sonnerie> _catalogue = const [];
+
   @override
   void initState() {
     super.initState();
@@ -273,9 +283,24 @@ class _EditeurListeState extends State<_EditeurListe> {
     final actuelle = widget.existante?.color;
     _teinte =
         paletteListes.contains(actuelle) ? actuelle! : paletteListes.first;
+    _sonnerie = widget.existante?.ringtone;
+    _chargerCatalogue();
     // Les membres déjà en place, par identifiant de COMPTE — c'est ce que le
     // serveur attend dans `memberIds`.
     _choisis = {...?widget.existante?.members.map((m) => m.id)};
+  }
+
+  /// Charge le catalogue de sonneries, en échec silencieux.
+  ///
+  /// ⚠️ Un catalogue vide ou inaccessible ne doit PAS empêcher de créer une
+  /// liste : le choix de sonnerie disparaît, tout le reste fonctionne.
+  Future<void> _chargerCatalogue() async {
+    try {
+      final c = await context.read<RingtonesRepository>().list();
+      if (mounted) setState(() => _catalogue = c);
+    } catch (_) {
+      if (mounted) setState(() => _catalogue = const []);
+    }
   }
 
   @override
@@ -310,9 +335,15 @@ class _EditeurListeState extends State<_EditeurListe> {
       // remplace les membres, elle n'ajoute pas.
       final r = widget.existante == null
           ? await depot.creer(
-              nom: nom, membreIds: _choisis.toList(), couleur: _teinte)
+              nom: nom,
+              membreIds: _choisis.toList(),
+              couleur: _teinte,
+              sonnerie: (url: _sonnerie))
           : await depot.modifier(widget.existante!.id,
-              nom: nom, membreIds: _choisis.toList(), couleur: _teinte);
+              nom: nom,
+              membreIds: _choisis.toList(),
+              couleur: _teinte,
+              sonnerie: (url: _sonnerie));
 
       if (!mounted) return;
       if (r.numerosInconnus.isNotEmpty) {
@@ -422,6 +453,47 @@ class _EditeurListeState extends State<_EditeurListe> {
               }),
             ]),
           ),
+          // --- Sonnerie de la liste ---
+          //
+          // ⚠️ N'APPARAÎT QUE SI LE CATALOGUE N'EST PAS VIDE. Proposer un choix
+          // sans option laisserait croire à une fonctionnalité cassée ; renvoyer
+          // vers l'import depuis ici mêlerait deux tâches. Le libellé de l'état
+          // vide, lui, dit où aller.
+          if (_catalogue.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 2, 20, 6),
+              child: Row(children: [
+                Text("Sonnerie",
+                    style: TextStyle(
+                        fontSize: 13, color: mutedOf(context, Colors.black54))),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String?>(
+                      isExpanded: true,
+                      value: _catalogue.any((s) => s.url == _sonnerie)
+                          ? _sonnerie
+                          // Une sonnerie retirée du catalogue depuis : on
+                          // retombe sur « par défaut » plutôt que d'afficher un
+                          // choix vide, et l'enregistrement la corrigera.
+                          : null,
+                      items: [
+                        const DropdownMenuItem<String?>(
+                          value: null,
+                          child: Text("Par défaut"),
+                        ),
+                        ..._catalogue.map((s) => DropdownMenuItem<String?>(
+                              value: s.url,
+                              child: Text(s.label,
+                                  maxLines: 1, overflow: TextOverflow.ellipsis),
+                            )),
+                      ],
+                      onChanged: (v) => setState(() => _sonnerie = v),
+                    ),
+                  ),
+                ),
+              ]),
+            ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
             child: TextField(

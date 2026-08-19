@@ -16,6 +16,7 @@ import '../../account/screens/change_password_screen.dart';
 import '../../account/screens/delete_account_screen.dart';
 import '../../account/screens/profile_screen.dart';
 import 'notification_settings_screen.dart';
+import 'ringtones_screen.dart';
 import 'privacy_settings_screen.dart';
 import 'login_history_screen.dart';
 import '../../blocked/screens/blocked_users_screen.dart';
@@ -74,7 +75,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       // Active directement sans vérifier (comme WhatsApp)
       await BiometricService.setEnabled(true);
       setState(() => _biometricEnabled = true);
-      _snack("Verrouillage biométrique activé. L'app se verrouillera à la prochaine ouverture.");
+      _snack(
+          "Verrouillage biométrique activé. L'app se verrouillera à la prochaine ouverture.");
     } else {
       await BiometricService.setEnabled(false);
       setState(() => _biometricEnabled = false);
@@ -100,7 +102,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _sectionHeader("Profil"),
           _card(
             child: ListTile(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               leading: AvatarCircle(
                 name: user?.pseudo ?? "?",
                 avatarUrl: user?.avatarUrl,
@@ -108,7 +111,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 backgroundColor: AlanyaColors.terracotta,
               ),
               title: Text(user?.pseudo ?? "Utilisateur",
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 16)),
               // Le repli « — » reste hors du formateur : celui-ci ne garde que
               // les chiffres et effacerait le tiret.
               subtitle: Text(
@@ -157,7 +161,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           _settingsTile(
-            icon: _biometricEnabled ? Icons.fingerprint : Icons.fingerprint_outlined,
+            icon: _biometricEnabled
+                ? Icons.fingerprint
+                : Icons.fingerprint_outlined,
             iconColor: _biometricEnabled ? _positive : _mutedIcon,
             title: "Verrouillage biométrique",
             subtitle: _loadingBiometric
@@ -168,9 +174,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ? "Activé — $_biometricType (appuyer pour désactiver)"
                         : "Désactivé (appuyer pour activer)")),
             trailing: _loadingBiometric
-                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2))
                 : Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
                       color: _biometricEnabled
                           ? _positive.withValues(alpha: 0.1)
@@ -186,7 +196,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ),
                   ),
-            onTap: _loadingBiometric ? null : () => _toggleBiometric(!_biometricEnabled),
+            onTap: _loadingBiometric
+                ? null
+                : () => _toggleBiometric(!_biometricEnabled),
           ),
           _settingsTile(
             icon: Icons.star,
@@ -200,8 +212,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           _settingsTile(
             icon: Icons.block,
-            iconColor:
-                themed(context, light: Colors.red.shade400, dark: AlanyaColors.erreurNuit),
+            iconColor: themed(context,
+                light: Colors.red.shade400, dark: AlanyaColors.erreurNuit),
             title: "Utilisateurs bloqués",
             subtitle: "Gérer les personnes bloquées",
             trailing: _chevron(),
@@ -219,7 +231,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: "Messages, appels, aperçu",
             trailing: _chevron(),
             onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const NotificationSettingsScreen()),
+              MaterialPageRoute(
+                  builder: (_) => const NotificationSettingsScreen()),
+            ),
+          ),
+          _settingsTile(
+            icon: Icons.library_music_outlined,
+            iconColor: _accent,
+            title: "Mes sonneries",
+            subtitle: "Importer et gérer vos sonneries",
+            trailing: _chevron(),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const RingtonesScreen()),
             ),
           ),
           _settingsTile(
@@ -231,7 +254,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onTap: () => _showThemePicker(themeCtrl),
           ),
           _settingsTile(
-            icon: _dataSaverEnabled ? Icons.data_saver_on : Icons.data_saver_off,
+            icon:
+                _dataSaverEnabled ? Icons.data_saver_on : Icons.data_saver_off,
             iconColor: _dataSaverEnabled ? _positive : _mutedIcon,
             title: "Économie de données",
             subtitle: _dataSaverEnabled
@@ -267,14 +291,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: _currentLanguageName(localeCtrl),
             trailing: DropdownButtonHideUnderline(
               child: DropdownButton<String>(
-                value: LocaleController.supported.any((l) => l.code == localeCtrl.languageCode)
+                value: LocaleController.supported
+                        .any((l) => l.code == localeCtrl.languageCode)
                     ? localeCtrl.languageCode
                     : 'fr',
                 icon: Icon(Icons.expand_more, color: _mutedIcon, size: 20),
                 items: LocaleController.supported.map((l) {
                   return DropdownMenuItem(
                     value: l.code,
-                    child: Text('${l.flag}  ${l.nativeName}', style: const TextStyle(fontSize: 14)),
+                    child: Text('${l.flag}  ${l.nativeName}',
+                        style: const TextStyle(fontSize: 14)),
                   );
                 }).toList(),
                 onChanged: (code) {
@@ -296,8 +322,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           _settingsTile(
             icon: Icons.delete_forever_outlined,
-            iconColor:
-                themed(context, light: AlanyaColors.error, dark: AlanyaColors.erreurNuit),
+            iconColor: themed(context,
+                light: AlanyaColors.error, dark: AlanyaColors.erreurNuit),
             title: "Supprimer mon compte",
             subtitle: "Effacer définitivement le compte et les données",
             trailing: _chevron(),
@@ -314,15 +340,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   context: context,
                   builder: (_) => AlertDialog(
                     title: const Text("Se déconnecter ?"),
-                    content: const Text("Vous devrez vous reconnecter pour accéder à vos messages."),
+                    content: const Text(
+                        "Vous devrez vous reconnecter pour accéder à vos messages."),
                     actions: [
-                      TextButton(onPressed: () => Navigator.pop(context), child: const Text("Annuler")),
+                      TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text("Annuler")),
                       TextButton(
                         onPressed: () {
                           Navigator.pop(context);
                           context.read<AuthController>().logout();
                         },
-                        child: Text("Déconnexion", style: TextStyle(color: _danger)),
+                        child: Text("Déconnexion",
+                            style: TextStyle(color: _danger)),
                       ),
                     ],
                   ),
@@ -336,7 +366,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     color: themed(context,
                         light: Colors.red.shade200,
                         dark: AlanyaColors.erreurNuit.withValues(alpha: 0.35))),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
               ),
             ),
           ),
@@ -350,7 +381,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
       child: Text(title.toUpperCase(),
-          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _muted, letterSpacing: 1.2)),
+          style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: _muted,
+              letterSpacing: 1.2)),
     );
   }
 
@@ -358,7 +393,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       decoration: BoxDecoration(
-        color: themed(context, light: Colors.white, dark: surfacesOf(context).surface),
+        color: themed(context,
+            light: Colors.white, dark: surfacesOf(context).surface),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
             color: themed(context,
@@ -381,8 +417,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Color get _danger =>
       themed(context, light: Colors.red, dark: AlanyaColors.erreurNuit);
   // Fond de la pastille ON/OFF à l'état éteint.
-  Color get _chipOffBg =>
-      themed(context, light: AlanyaColors.grey200, dark: surfacesOf(context).surfaceHaute);
+  Color get _chipOffBg => themed(context,
+      light: AlanyaColors.grey200, dark: surfacesOf(context).surfaceHaute);
 
   Widget _chevron() => Icon(Icons.chevron_right,
       color: themed(context, light: Colors.grey, dark: AlanyaColors.craie2));
@@ -407,7 +443,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           child: Icon(icon, color: iconColor, size: 22),
         ),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 15)),
+        title: Text(title,
+            style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 15)),
         subtitle: subtitle != null
             ? Text(subtitle, style: TextStyle(fontSize: 12, color: _muted))
             : null,
@@ -418,7 +455,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   String _currentLanguageName(LocaleController localeCtrl) {
-    final match = LocaleController.supported.where((l) => l.code == localeCtrl.languageCode);
+    final match = LocaleController.supported
+        .where((l) => l.code == localeCtrl.languageCode);
     return match.isNotEmpty ? match.first.nativeName : 'Français';
   }
 
@@ -472,10 +510,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 width: 72,
                 height: 72,
                 decoration: BoxDecoration(
-                  gradient: const LinearGradient(colors: [AlanyaColors.terracotta, AlanyaColors.terracottaDark]),
+                  gradient: const LinearGradient(colors: [
+                    AlanyaColors.terracotta,
+                    AlanyaColors.terracottaDark
+                  ]),
                   borderRadius: BorderRadius.circular(18),
                 ),
-                child: const Center(child: Icon(Icons.chat_bubble, size: 36, color: Colors.white)),
+                child: const Center(
+                    child:
+                        Icon(Icons.chat_bubble, size: 36, color: Colors.white)),
               ),
             ),
             const SizedBox(height: 16),
@@ -483,13 +526,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 4),
             Text("Version 1.0.0", style: TextStyle(color: _muted)),
             const SizedBox(height: 8),
-            Text("Application de messagerie instantanée", style: TextStyle(color: _muted, fontSize: 13)),
+            Text("Application de messagerie instantanée",
+                style: TextStyle(color: _muted, fontSize: 13)),
             const SizedBox(height: 16),
-            Text("© 2026 Dominique BRIA", style: TextStyle(color: _mutedIcon, fontSize: 11)),
+            Text("© 2026 Dominique BRIA",
+                style: TextStyle(color: _mutedIcon, fontSize: 11)),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Fermer")),
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Fermer")),
         ],
       ),
     );

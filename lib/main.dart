@@ -35,6 +35,7 @@ import 'features/home/home_screen.dart';
 import 'widgets/offline_banner.dart';
 import 'widgets/biometric_gate.dart';
 import 'features/media/media_repository.dart';
+import 'features/settings/ringtones_repository.dart';
 import 'features/blocked/blocked_repository.dart';
 import 'features/meetings/meeting_banner.dart';
 import 'features/meetings/meeting_controller.dart';
@@ -90,6 +91,10 @@ void main() async {
         Provider<StatusRepository>.value(value: StatusRepository(authedApi)),
         Provider<AiRepository>.value(value: AiRepository(authedApi)),
         Provider<MediaRepository>.value(value: MediaRepository(authedApi)),
+        // Le catalogue de sonneries s'appuie sur le téléversement de médias :
+        // l'import se fait en deux temps, fichier puis inscription.
+        Provider<RingtonesRepository>.value(
+            value: RingtonesRepository(authedApi, MediaRepository(authedApi))),
         Provider<CallsRepository>.value(value: CallsRepository(authedApi)),
         Provider<MeetingsRepository>.value(
             value: MeetingsRepository(authedApi)),

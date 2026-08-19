@@ -26,19 +26,26 @@ class ContactListsRepository {
   /// (`unknownNumbers`). Les taire ferait croire à un ajout réussi : l'appelant
   /// doit pouvoir dire lesquels n'ont pas été retenus, sinon l'utilisateur
   /// cherchera longtemps pourquoi sa liste compte trois membres au lieu de cinq.
+  /// ⚠️ [sonnerie] DISTINGUE « ne pas toucher » de « retirer ».
+  ///
+  /// Laisser le paramètre absent ne change rien ; passer `(url: null)` envoie un
+  /// `null` explicite, que le serveur accepte pour REVENIR à la sonnerie par
+  /// défaut. Sans cette distinction — un simple `String?` — choisir « Par
+  /// défaut » aurait été indiscernable de « ne rien changer », et la sonnerie
+  /// n'aurait jamais pu être retirée.
   Future<({ListeContacts liste, List<String> numerosInconnus})> creer({
     required String nom,
     List<String>? membreIds,
     List<String>? numeros,
     String? couleur,
-    String? sonnerie,
+    ({String? url})? sonnerie,
   }) async {
     final data = await _api.post("/api/contact-lists", {
       "name": nom,
       if (membreIds != null) "memberIds": membreIds,
       if (numeros != null) "memberNumbers": numeros,
       if (couleur != null) "color": couleur,
-      if (sonnerie != null) "ringtone": sonnerie,
+      if (sonnerie != null) "ringtone": sonnerie.url,
     });
     return _resultat(data);
   }
@@ -54,14 +61,15 @@ class ContactListsRepository {
     List<String>? membreIds,
     List<String>? numeros,
     String? couleur,
-    String? sonnerie,
+    ({String? url})? sonnerie,
   }) async {
     final data = await _api.patch("/api/contact-lists/$id", {
       if (nom != null) "name": nom,
       if (membreIds != null) "memberIds": membreIds,
       if (numeros != null) "memberNumbers": numeros,
       if (couleur != null) "color": couleur,
-      if (sonnerie != null) "ringtone": sonnerie,
+      // Voir `creer` : le record présent avec `url: null` retire la sonnerie.
+      if (sonnerie != null) "ringtone": sonnerie.url,
     });
     return _resultat(data);
   }
