@@ -7,6 +7,7 @@ import 'package:alanya_telecom/alanya_telecom.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
+import '../../core/alanya_id_formatter.dart';
 import '../../core/api_client.dart';
 import '../../core/call_permissions.dart';
 import '../../core/debug_overlay.dart';
@@ -391,7 +392,9 @@ class CallController extends ChangeNotifier {
       _initialMemberIds.add(myUserId!);
     }
     for (final c in started.callees) {
-      participantNames[c.userId] = c.pseudo ?? c.publicNumber ?? "Membre";
+      participantNames[c.userId] = c.pseudo ??
+          (c.publicNumber == null ? null : formatAlanyaId(c.publicNumber!)) ??
+          "Membre";
       if (c.avatarUrl != null) participantAvatars[c.userId] = c.avatarUrl!;
       _initialMemberIds.add(c.userId); // membres appelés dès le départ
     }
@@ -460,7 +463,9 @@ class CallController extends ChangeNotifier {
       _initialMemberIds.add(myUserId!);
     }
     for (final c in started.callees) {
-      participantNames[c.userId] = c.pseudo ?? c.publicNumber ?? "Membre";
+      participantNames[c.userId] = c.pseudo ??
+          (c.publicNumber == null ? null : formatAlanyaId(c.publicNumber!)) ??
+          "Membre";
       if (c.avatarUrl != null) participantAvatars[c.userId] = c.avatarUrl!;
       _initialMemberIds.add(c.userId);
     }

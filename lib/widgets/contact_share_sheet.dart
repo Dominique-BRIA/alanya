@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../core/alanya_id_formatter.dart';
 import '../features/contacts/contacts_repository.dart';
 import '../models/contact.dart' as modele;
 import '../models/message_payload.dart';
@@ -236,7 +237,9 @@ class _ContactShareSheetState extends State<ContactShareSheet> {
               name: c.displayName, avatarUrl: c.avatarUrl, radius: 20),
           title:
               Text(c.displayName, maxLines: 1, overflow: TextOverflow.ellipsis),
-          subtitle: Text(c.publicNumber,
+          // Formaté comme partout ailleurs : c'est le seul endroit qui affichait
+          // encore `publicNumber` tel quel, sous un titre déjà formaté.
+          subtitle: Text(formatAlanyaId(c.publicNumber),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 12.5, color: onSub)),

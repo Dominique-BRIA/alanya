@@ -1,3 +1,5 @@
+import '../core/alanya_id_formatter.dart';
+
 /// Utilisateur bloqué — correspond à la table « blocked » du PDF.
 class BlockedUser {
   final int idBlock;
@@ -16,7 +18,11 @@ class BlockedUser {
     required this.dateBlock,
   });
 
-  String get displayName => pseudo ?? publicNumber ?? "Inconnu";
+  /// Repli FORMATE — voir la note detaillee sur `Contact.displayName`.
+  String get displayName =>
+      pseudo ??
+      (publicNumber == null ? null : formatAlanyaId(publicNumber!)) ??
+      "Inconnu";
 
   factory BlockedUser.fromJson(Map<String, dynamic> j) => BlockedUser(
         idBlock: (j["idBlock"] as num).toInt(),

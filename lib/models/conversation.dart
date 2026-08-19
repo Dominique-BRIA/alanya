@@ -1,3 +1,4 @@
+import '../core/alanya_id_formatter.dart';
 import 'call_record.dart';
 
 class LastMessage {
@@ -39,7 +40,8 @@ class ConvMember {
     this.lastSeen,
   });
 
-  String get displayName => pseudo ?? publicNumber;
+  /// Repli FORMATE — voir la note detaillee sur `Contact.displayName`.
+  String get displayName => pseudo ?? formatAlanyaId(publicNumber);
   bool get online => isOnline == 1;
 
   /// "en ligne" ou "vu il y a 5 min"
@@ -58,7 +60,9 @@ class ConvMember {
         pseudo: j["pseudo"] as String?,
         publicNumber: j["publicNumber"] as String,
         isOnline: (j["isOnline"] as num?)?.toInt() ?? 0,
-        lastSeen: j["lastSeen"] != null ? DateTime.tryParse(j["lastSeen"] as String) : null,
+        lastSeen: j["lastSeen"] != null
+            ? DateTime.tryParse(j["lastSeen"] as String)
+            : null,
       );
 }
 
