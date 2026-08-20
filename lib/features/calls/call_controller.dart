@@ -36,7 +36,11 @@ enum ActiveCallRole { outgoing, incoming, ongoing }
 /// [attente] n'existe que pour un centre d'APPELS (on attend un agent), [lecture]
 /// que pour un centre VOCAL (un son tourne en boucle). Une même énumération pour
 /// les deux : l'écran, lui, ne veut savoir qu'une chose — que montrer.
-enum IvrEtape { menu, attente, lecture }
+/// ⚠️ `enregistrement` est l'étape de la PLAINTE VOCALE (touche 0 d'un centre
+/// vocal). Elle se comporte comme `lecture` pour tout ce qui touche à la mise
+/// en page — le pavé reste affiché et à la même taille — et s'en distingue
+/// pour ce qui se joue dessus. Voir `IvrPanel`.
+enum IvrEtape { menu, attente, lecture, enregistrement }
 
 /// Une touche du menu d'un standard.
 ///
@@ -149,6 +153,20 @@ class IvrSession {
 
   /// La touche dont le son joue, pour la mettre en évidence sur le pavé.
   int? toucheEnLecture;
+
+  /// Le bip à jouer AVANT de démarrer l'enregistrement d'une plainte, ou nul.
+  ///
+  /// ⚠️ Nul est un cas NORMAL, pas une panne : la variable d'environnement peut
+  /// ne pas être renseignée. L'enregistrement démarre alors sans annonce plutôt
+  /// que de ne pas démarrer — voir `urlBipEnregistrement` côté serveur.
+  String? bipEnregistrementUrl;
+
+  /// Plafond de durée d'une plainte, donné par le serveur avec `ivr_record`.
+  ///
+  /// Reçu et non codé en dur : la borne pourra changer sans nouvel APK, comme
+  /// la règle de boucle d'`ivr_play`. Le défaut ne sert qu'au cas où un serveur
+  /// plus ancien l'omettrait.
+  int plainteMaxMs = 3 * 60 * 1000;
 
   /// Libellé du service choisi, pendant que l'agent sonne.
   String? serviceChoisi;
@@ -1619,6 +1637,26 @@ class CallController extends ChangeNotifier {
       // génération, donc sans risque de superposition.
       unawaited(RingtoneService.instance
           .playIvrPrompt(url, loop: e["loop"] != false));
+    } else if (type == "ivr_record") {
+      // Touche 0 d'un centre vocal : l'appelant va dicter une plainte.
+      //
+      // ⚠️ ON NE DÉMARRE PAS LE MICRO ICI. Le serveur donne le départ, le
+      // panneau enchaîne : bip d'abord, enregistrement ensuite. C'est le seul
+      // endroit qui sache quand la lecture se termine — le serveur ne connaît
+      // ni la durée du fichier ni le temps de mise en cache.
+      final session = ivr;
+      if (session == null || e["callId"] != session.callId) return;
+      session.etape = IvrEtape.enregistrement;
+      session.toucheEnLecture = null;
+      session.titreEnLecture = null;
+      session.bipEnregistrementUrl = e["bipUrl"] as String?;
+      final borne = (e["maxMs"] as num?)?.toInt();
+      if (borne != null && borne > 0) session.plainteMaxMs = borne;
+      session.message = null;
+      session.envoiEnCours = false;
+      notifyListeners();
+      DebugOverlay.log(
+          "CC ☎️ plainte vocale — bip ${session.bipEnregistrementUrl ?? "ABSENT"}");
     } else if (type == "ivr_hold") {
       final session = ivr;
       if (session == null || e["callId"] != session.callId) return;
