@@ -44,6 +44,20 @@ class AuthedApi {
       _withAuth((token) => _api.uploadBytes(path, bytes, filename, mimeType,
           bearer: token, fields: fields, onProgress: onProgress));
 
+  /// Upload EN FLUX depuis un fichier (voir `api_client.uploadFile`). Même
+  /// rejeu sur 401 que [uploadBytes] : le fichier étant relu depuis le disque,
+  /// le second essai repart proprement de zéro.
+  Future<Map<String, dynamic>> uploadFile(
+    String path,
+    String filePath,
+    String filename,
+    String mimeType, {
+    Map<String, String>? fields,
+    void Function(int envoyes, int total)? onProgress,
+  }) =>
+      _withAuth((token) => _api.uploadFile(path, filePath, filename, mimeType,
+          bearer: token, fields: fields, onProgress: onProgress));
+
   Future<Map<String, dynamic>> _withAuth(
     Future<Map<String, dynamic>> Function(String token) call,
   ) async {

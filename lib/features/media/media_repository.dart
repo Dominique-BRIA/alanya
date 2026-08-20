@@ -35,4 +35,29 @@ class MediaRepository {
       mimeType: data["mimeType"] as String,
     );
   }
+
+  /// Comme [upload], mais lit le fichier EN FLUX depuis le disque — sans le
+  /// charger en mémoire. À utiliser pour tout média dont la taille n'est pas
+  /// bornée (enregistrements d'appel notamment).
+  Future<UploadedMedia> uploadFromFile(
+    String filePath,
+    String filename,
+    String mimeType, {
+    int? durationMs,
+    void Function(int envoyes, int total)? onProgress,
+  }) async {
+    final data = await _api.uploadFile(
+      "/api/media",
+      filePath,
+      filename,
+      mimeType,
+      fields: durationMs != null ? {"durationMs": "$durationMs"} : null,
+      onProgress: onProgress,
+    );
+    return UploadedMedia(
+      id: data["id"] as String,
+      url: data["url"] as String,
+      mimeType: data["mimeType"] as String,
+    );
+  }
 }

@@ -31,6 +31,7 @@ class MainActivity : FlutterActivity() {
 
     private companion object {
         const val CANAL = "alanya/ecran_verrouille"
+        const val CANAL_ENREGISTREMENT = "alanya/enregistrement"
         const val TAG_PROX = "AlanyaProximite"
     }
 
@@ -159,6 +160,45 @@ class MainActivity : FlutterActivity() {
                                 action = CallForegroundService.ACTION_ARRETER
                             },
                         )
+                        resultat.success(true)
+                    }
+                    else -> resultat.notImplemented()
+                }
+            }
+
+        // Enregistrement des appels d'agents autorisés. Le détail de la voie
+        // (AudioTrackSink sur les pistes locale/distante, et pourquoi pas le
+        // MediaRecorder du greffon) vit dans AppelEnregistreur.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CANAL_ENREGISTREMENT)
+            .setMethodCallHandler { appel, resultat ->
+                when (appel.method) {
+                    "demarrer" -> {
+                        val callId = appel.argument<String>("callId") ?: ""
+                        val localTrackId = appel.argument<String>("localTrackId") ?: ""
+                        // ⚠️ `filesDir` et NON `cacheDir` : un enregistrement peut
+                        // attendre son dépôt à travers un redémarrage, or Android
+                        // vide le cache sous pression de stockage. Le stockage
+                        // privé persistant, lui, survit — le nettoyage est fait
+                        // par Dart une fois le dépôt confirmé.
+                        val dossier = java.io.File(filesDir, "enregistrements").apply { mkdirs() }
+                        // Jamais laisser une exception remonter : un
+                        // enregistrement raté ne doit pas faire échouer un appel.
+                        val ok = runCatching {
+                            AppelEnregistreur.demarrer(callId, localTrackId, dossier)
+                        }.getOrDefault(false)
+                        resultat.success(ok)
+                    }
+                    "attacherDistant" -> {
+                        val remoteTrackId = appel.argument<String>("remoteTrackId") ?: ""
+                        runCatching { AppelEnregistreur.attacherDistant(remoteTrackId) }
+                        resultat.success(true)
+                    }
+                    "arreter" -> {
+                        val chemins = runCatching { AppelEnregistreur.arreter() }.getOrNull()
+                        resultat.success(chemins)
+                    }
+                    "abandonner" -> {
+                        runCatching { AppelEnregistreur.abandonner() }
                         resultat.success(true)
                     }
                     else -> resultat.notImplemented()

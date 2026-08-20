@@ -209,6 +209,9 @@ class CallController extends ChangeNotifier {
     // Sans préchargement, le PREMIER appel de la session sonnerait toujours par
     // défaut : les listes n'arrivent qu'avec l'écran d'accueil.
     _sonneriesListes.prechargerSiBesoin();
+    // Reprise des enregistrements qu'une session précédente n'a pas pu déposer
+    // (coupure réseau, app tuée). Non attendu : c'est un rattrapage de fond.
+    unawaited(_enregistrements.traiterEnAttente());
   }
 
   final CallsRepository _calls;
@@ -955,15 +958,54 @@ class CallController extends ChangeNotifier {
   void _demarrerEnregistrementSiAutorise(
       String callId, AcceptCallResult result) {
     if (!result.enregistrer) return;
-    _companyEnregistrement = result.enregistrementCompanyId;
-    unawaited(EnregistreurAppel.instance.demarrer(callId).then((ok) {
+    // Sans entreprise de destination, le dépôt ne pourra JAMAIS aboutir (le
+    // serveur l'exige) : ne rien enregistrer plutôt que produire des fichiers
+    // qu'on ne saurait où déposer. Cas réel : un centre `enregistrement = true`
+    // dont l'`idCompany` est nul.
+    final entreprise = result.enregistrementCompanyId;
+    if (entreprise == null) {
+      traceAppel("enregistrement REFUSÉ (entreprise absente)");
+      return;
+    }
+    // La voix de l'agent, c'est la piste audio locale. Sans elle, rien à
+    // enregistrer — le natif refuserait de toute façon.
+    final pistesLocales =
+        _mesh?.localStream?.getAudioTracks() ?? const <MediaStreamTrack>[];
+    if (pistesLocales.isEmpty) {
+      traceAppel("enregistrement REFUSÉ (aucune piste audio locale)");
+      return;
+    }
+    final localTrackId = pistesLocales.first.id;
+    if (localTrackId == null || localTrackId.isEmpty) return;
+    _companyEnregistrement = entreprise;
+    unawaited(EnregistreurAppel.instance.demarrer(callId, localTrackId).then((ok) {
       if (!ok) {
         // Refus du natif : on oublie l'entreprise, sinon `_clore` croirait
         // avoir des pistes à déposer et chercherait des fichiers absents.
         _companyEnregistrement = null;
+      } else {
+        // La voix du correspondant n'existe peut-être pas encore (négociation
+        // en cours) ; on tente tout de suite, `_onMeshUpdated` retentera dès
+        // que le flux distant apparaît.
+        _brancherVoixDistanteSiPossible();
       }
       traceAppel(ok ? "enregistrement démarré" : "enregistrement REFUSÉ");
     }));
+  }
+
+  /// Branche la voix du correspondant sur l'enregistrement en cours, si sa
+  /// piste distante est déjà là. Idempotent (la façade native garde l'état) :
+  /// on peut l'appeler à chaque mise à jour du mesh sans risque de doublon.
+  void _brancherVoixDistanteSiPossible() {
+    if (!EnregistreurAppel.instance.enCours) return;
+    for (final flux in (_mesh?.remoteStreams ?? const {}).values) {
+      final audios = flux.getAudioTracks();
+      if (audios.isEmpty) continue;
+      final id = audios.first.id;
+      if (id == null || id.isEmpty) continue;
+      unawaited(EnregistreurAppel.instance.attacherDistant(id));
+      return;
+    }
   }
 
   /// L'entreprise qui recevra l'enregistrement de l'appel en cours, ou nulle.
@@ -983,15 +1025,20 @@ class CallController extends ChangeNotifier {
     if (!EnregistreurAppel.instance.enCours) return;
     unawaited(() async {
       try {
-        final pistes = await EnregistreurAppel.instance.arreter();
-        if (pistes == null || entreprise == null) return;
-        await _enregistrements.deposer(
+        final fichiers = await EnregistreurAppel.instance.arreter();
+        if (fichiers == null || entreprise == null) return;
+        // On INSCRIT en file plutôt que de déposer directement : ce qui échoue
+        // ici (réseau coupé au raccrochage) sera repris plus tard, et les
+        // fichiers restent sur disque jusqu'à confirmation du serveur.
+        await _enregistrements.enfiler(
           callId: callId,
           companyId: entreprise,
-          pistes: pistes,
+          cheminAgent: fichiers.agent,
+          cheminClient: fichiers.client,
+          dureeMs: fichiers.dureeMs,
         );
       } catch (e) {
-        debugPrint("[CallController] dépôt de l'enregistrement : $e");
+        debugPrint("[CallController] mise en file de l'enregistrement : $e");
       }
     }());
   }
@@ -1097,6 +1144,10 @@ class CallController extends ChangeNotifier {
     // endroit pour réévaluer la proximité, qu'il s'agisse de la connexion du
     // média ou d'un passage audio ↔ vidéo en cours d'appel.
     _majProximite();
+    // Le flux distant peut apparaître ICI, après le décrochage : c'est le seul
+    // moment fiable pour brancher la voix du correspondant sur un enregistrement
+    // déjà démarré. Sans coût si elle l'est déjà, ou s'il n'y a rien à enregistrer.
+    _brancherVoixDistanteSiPossible();
     notifyListeners();
   }
 

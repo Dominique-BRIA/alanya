@@ -133,6 +133,41 @@ class ApiClient {
     return _decode(res);
   }
 
+  /// Comme [uploadBytes], mais lit le fichier EN FLUX depuis le disque plutôt
+  /// que de le charger entièrement en mémoire.
+  ///
+  /// 🔴 **POURQUOI.** Un enregistrement d'appel non compressé pèse ~11 Mo par
+  /// minute ; un appel de 30 min tenu en `Uint8List` (comme le fait
+  /// [uploadBytes]) menace l'OOM. `MultipartFile.fromPath` envoie le fichier
+  /// morceau par morceau, sans jamais le tenir en entier — c'est la seule voie
+  /// tenable pour un flux dont on ne borne pas la durée.
+  Future<Map<String, dynamic>> uploadFile(
+    String path,
+    String filePath,
+    String filename,
+    String mimeType, {
+    String? bearer,
+    Map<String, String>? fields,
+    void Function(int envoyes, int total)? onProgress,
+  }) async {
+    final request = _RequeteMultipartSuivie(
+      "POST",
+      Uri.parse("$baseUrl$path"),
+      onProgress: onProgress,
+    );
+    if (bearer != null) request.headers["Authorization"] = "Bearer $bearer";
+    if (fields != null) request.fields.addAll(fields);
+    request.files.add(await http.MultipartFile.fromPath(
+      "file",
+      filePath,
+      filename: filename,
+      contentType: MediaType.parse(mimeType),
+    ));
+    final streamed = await request.send();
+    final res = await http.Response.fromStream(streamed);
+    return _decode(res);
+  }
+
   Map<String, String> _headers(String? bearer) => {
         "Content-Type": "application/json",
         if (bearer != null) "Authorization": "Bearer $bearer",
