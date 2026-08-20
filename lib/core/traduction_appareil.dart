@@ -114,6 +114,30 @@ Future<EtatCouple> etatCouple(String source, String cible) async {
   return presents.every((p) => p) ? EtatCouple.pret : EtatCouple.aTelecharger;
 }
 
+/// Les langues du couple qui restent à installer — souvent UNE SEULE.
+///
+/// 🐛 **LE DIALOGUE NOMMAIT LES DEUX** (signalé le 19/08/2026) : « j'ai déjà
+/// téléchargé ma langue et on me propose quand même un téléchargement ». C'était
+/// exact et trompeur à la fois — il manquait bien un modèle, celui de la langue
+/// du MESSAGE, mais le texte réclamait aussi celui qu'on venait d'installer. On
+/// ne cite désormais que ce qui manque réellement.
+///
+/// Rend des NOMS et non des `TranslateLanguage` : l'appelant est un écran, et
+/// lui faire importer le paquet ML Kit ferait fuir la dépendance jusque dans le
+/// fil de discussion pour l'unique besoin d'afficher un mot.
+Future<List<String>> nomsLanguesManquantes(String source, String cible) async {
+  final s = langueSupportee(source);
+  final c = langueSupportee(cible);
+  if (s == null || c == null || s == c) return const [];
+  final manquantes = <String>[];
+  for (final langue in {s, c}) {
+    if (!await _modelePresent(langue)) {
+      manquantes.add(nomAutonyme(langue.bcpCode));
+    }
+  }
+  return manquantes;
+}
+
 /// Installe les modèles manquants d'un couple.
 ///
 /// **DOIT partir d'un geste de l'utilisateur** : chaque modèle pèse quelques

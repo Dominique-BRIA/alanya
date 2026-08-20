@@ -4147,8 +4147,12 @@ class _ChatScreenState extends State<ChatScreen>
       if (etat == EtatCouple.aTelecharger) {
         // Le téléchargement DOIT partir d'un geste : quelques dizaines de Mo
         // ne s'imposent pas à quelqu'un qui a seulement appuyé sur « Traduire ».
+        // Ne citer QUE ce qui manque : nommer une langue déjà installée faisait
+        // croire que le téléchargement recommençait à chaque fois.
+        final manquantes = await nomsLanguesManquantes(source, cible);
+        if (!mounted) return;
         final libelle =
-            "${_nomLangue(source)} + ${_nomLangue(normaliserLangue(cible))}";
+            manquantes.isEmpty ? nomAutonyme(source) : manquantes.join(" + ");
         final accepte = await confirmerInstallationLangues(context, libelle);
         if (!mounted || !accepte) return;
         var installe = await telechargerCouple(source, cible);
@@ -4178,25 +4182,6 @@ class _ChatScreenState extends State<ChatScreen>
     if (!mounted) return;
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(tr(context, cle))));
-  }
-
-  /// Nom lisible d'une langue. Le catalogue de l'interface n'en connaît que
-  /// neuf, ML Kit en traduit cinquante-neuf : au-delà, on affiche le code
-  /// plutôt qu'un nom inventé.
-  String _nomLangue(String code) {
-    const cles = {
-      'fr': 'french',
-      'en': 'english',
-      'zh': 'chinese',
-      'no': 'norwegian',
-      'ru': 'russian',
-      'de': 'german',
-      'es': 'spanish',
-      'sv': 'swedish',
-      'pt': 'portuguese',
-    };
-    final cle = cles[code];
-    return cle == null ? code.toUpperCase() : tr(context, cle);
   }
 
 
