@@ -13,6 +13,44 @@ class VoiceRecorder {
 
   bool get isSupported => true;
 
+  /// Cumul des segments déjà enregistrés, pauses exclues — voir la version
+  /// native, dont ce fichier doit exposer la MÊME surface : les deux sont
+  /// choisies à la compilation, un membre manquant ici ne casserait que le
+  /// build web, et bien plus tard.
+  Duration _cumul = Duration.zero;
+
+  bool get enCours => _recording;
+  bool get enPause => _recording && _startedAt == null;
+
+  Duration get duree {
+    final debut = _startedAt;
+    return debut == null ? _cumul : _cumul + DateTime.now().difference(debut);
+  }
+
+  Future<bool> pause() async {
+    if (!_recording || _startedAt == null || _recorder == null) return false;
+    _cumul += DateTime.now().difference(_startedAt!);
+    _startedAt = null;
+    try {
+      _recorder!.pause();
+      return true;
+    } catch (_) {
+      _startedAt = DateTime.now();
+      return false;
+    }
+  }
+
+  Future<bool> resume() async {
+    if (!_recording || _startedAt != null || _recorder == null) return false;
+    try {
+      _recorder!.resume();
+      _startedAt = DateTime.now();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<bool> start() async {
     if (_recording) return true;
     try {
@@ -27,6 +65,7 @@ class VoiceRecorder {
       });
       _recorder!.start();
       _startedAt = DateTime.now();
+      _cumul = Duration.zero;
       _recording = true;
       return true;
     } catch (_) {
@@ -37,7 +76,9 @@ class VoiceRecorder {
 
   Future<({Uint8List bytes, int durationMs})?> stop() async {
     if (!_recording || _recorder == null) return null;
-    final started = _startedAt ?? DateTime.now();
+    // Fermé AVANT l'arrêt natif, comme côté io : la durée envoyée doit être
+    // celle qu'affichait le minuteur, pauses exclues.
+    final dureeFinale = duree;
     final completer = Completer<({Uint8List bytes, int durationMs})?>();
 
     void onStop(html.Event _) async {
@@ -47,8 +88,10 @@ class VoiceRecorder {
         reader.onLoadEnd.listen((_) {
           final result = reader.result;
           if (result is ByteBuffer) {
-            final durationMs = DateTime.now().difference(started).inMilliseconds;
-            completer.complete((bytes: result.asUint8List(), durationMs: durationMs));
+            completer.complete((
+              bytes: result.asUint8List(),
+              durationMs: dureeFinale.inMilliseconds,
+            ));
           } else {
             completer.complete(null);
           }
@@ -81,6 +124,9 @@ class VoiceRecorder {
     _chunks.clear();
     _recorder = null;
     _startedAt = null;
+    // Sans cette remise, le cumul d'un enregistrement abandonné s'ajouterait au
+    // suivant : le minuteur repartirait de la durée du précédent.
+    _cumul = Duration.zero;
     for (final track in _stream?.getAudioTracks() ?? <html.MediaStreamTrack>[]) {
       track.stop();
     }
