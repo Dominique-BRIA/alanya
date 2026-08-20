@@ -269,8 +269,15 @@ class _TranslationScreenState extends State<TranslationScreen> {
         nomAutonyme(code),
         style: const TextStyle(fontWeight: FontWeight.w600),
       ),
+      // Pendant l'installation, la ligne dit ce que le rond tournant ne dit
+      // pas : ML Kit n'expose aucun avancement, donc ni pourcentage ni durée.
+      // Sans ce mot, un rond qui tourne longtemps se lit comme un blocage.
       subtitle: Text(
-        estCible ? "$code · langue de l'application" : "$code · ${langue.name}",
+        occupee
+            ? "Installation… durée inconnue, elle continue en arrière-plan"
+            : estCible
+            ? "$code · langue de l'application"
+            : "$code · ${langue.name}",
       ),
       trailing: occupee
           ? const SizedBox(

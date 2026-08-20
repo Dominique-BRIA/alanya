@@ -83,6 +83,16 @@ class Transfert {
   /// transfert dont on ignore la taille ferait croire à un blocage.
   String get sousTitreNotification {
     if (echoue) return titre;
+    // 🔴 UNE LANGUE N'AURA JAMAIS DE POURCENTAGE — signalé par le user le
+    // 19/08/2026 : « je ne vois pas de progression, juste [la barre] qui
+    // défile ». ML Kit ne rend qu'un booléen a la fin, aucun rappel
+    // d'avancement n'existe dans son API. La barre indeterminee est donc juste,
+    // mais muette : elle ne distingue pas « ça avance » de « c'est bloqué ». Le
+    // TEXTE porte ce que la barre ne peut pas dire — le poids et le fait que
+    // la durée est inconnue — au lieu de laisser deviner.
+    if (sorte == SorteTransfert.langue) {
+      return "$titre · quelques dizaines de Mo, durée inconnue";
+    }
     final f = fraction;
     if (f == null) return titre;
     return "$titre · ${(f * 100).round().clamp(0, 100)} %";
