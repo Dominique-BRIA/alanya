@@ -5,6 +5,7 @@ import 'package:media_store_plus/media_store_plus.dart';
 import 'package:provider/provider.dart';
 
 import 'core/api_client.dart';
+import 'core/centre_transferts.dart';
 import 'core/authed_api.dart';
 import 'core/connectivity_service.dart';
 import 'core/data_saver_service.dart';
@@ -65,6 +66,22 @@ void main() async {
   final realtime = RealtimeClient(storage);
 
   await PushService.instance.tryInitialize(api: api, storage: storage);
+  // Les transferts s'annoncent dans les notifications. Le lien se fait ICI et
+  // non dans le magasin : lui ne doit connaître ni l'écran ni le système, c'est
+  // ce qui lui permet de servir aussi bien un envoi qu'un modèle de langue.
+  CentreTransferts.instance.surChangement = (transfert, {required retire}) {
+    if (retire) {
+      PushService.instance.retireTransfert(transfert.id);
+      return;
+    }
+    PushService.instance.showTransfert(
+      id: transfert.id,
+      titre: transfert.titreNotification,
+      sousTitre: transfert.sousTitreNotification,
+      fraction: transfert.fraction,
+      echoue: transfert.echoue,
+    );
+  };
   // Registre des appareils : simple câblage, aucun appel réseau ici.
   // L'enregistrement a lieu à l'authentification (voir AuthController).
   DeviceRegistry.instance.init(api: api, storage: storage);

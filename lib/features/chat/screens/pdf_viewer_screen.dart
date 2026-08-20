@@ -3,6 +3,7 @@ import 'package:flutter_pdfview/flutter_pdfview.dart';
 
 import '../../../core/app_snackbar.dart';
 import '../../../core/downloader.dart';
+import '../../../core/telechargement_suivi.dart';
 import '../../../theme/alanya_theme.dart';
 
 /// Visionneuse PDF plein écran (style WhatsApp).
@@ -62,7 +63,9 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     if (_downloading) return;
     setState(() => _downloading = true);
     try {
-      final path = await downloadUrl(widget.downloadUrl, widget.filename);
+      final path = await telechargerEnSuivant(
+          widget.downloadUrl, widget.filename,
+          idTransfert: "dl-pdf-${widget.filename}");
       if (!mounted) return;
       showAppSnackBar(path != null
           ? "Enregistré dans Alanya/"

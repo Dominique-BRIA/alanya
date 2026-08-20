@@ -315,6 +315,79 @@ class PushService {
     );
   }
 
+  // ── Transferts (envois, téléchargements, modèles de langue) ──────────────
+
+  /// Canal DISTINCT des messages, et volontairement discret.
+  ///
+  /// Une barre de progression qui vibre et sonne à chaque pour cent serait
+  /// insupportable : `Importance.low` la pose sans bruit ni bandeau, et
+  /// `onlyAlertOnce` garantit que les mises à jour suivantes ne réveillent rien.
+  /// Un canal séparé laisse en plus l'utilisateur la couper dans les réglages
+  /// Android sans perdre ses notifications de messages.
+  static const _canalTransferts = 'transferts';
+
+  /// L'identité d'un transfert donne celle de sa notification : deux
+  /// avancements du même fichier se REMPLACENT au lieu de s'empiler.
+  static int idTransfert(String id) => id.hashCode & 0x7fffffff;
+
+  /// Affiche (ou met à jour) la progression d'un transfert.
+  ///
+  /// [fraction] nulle = barre INDÉTERMINÉE. C'est le cas des modèles de langue,
+  /// dont ML Kit ne rend jamais l'avancement, et d'une réponse HTTP sans
+  /// `Content-Length`. Afficher 0 % dans ces cas ferait croire à un blocage.
+  Future<void> showTransfert({
+    required String id,
+    required String titre,
+    required String sousTitre,
+    double? fraction,
+    bool echoue = false,
+  }) async {
+    try {
+      final pourcent = fraction == null ? 0 : (fraction * 100).round().clamp(0, 100);
+      final details = AndroidNotificationDetails(
+        _canalTransferts,
+        'Transferts',
+        channelDescription:
+            "Progression des envois, téléchargements et installations de langues",
+        importance: Importance.low,
+        priority: Priority.low,
+        icon: '@mipmap/ic_launcher',
+        color: const Color(0xFFB85C38),
+        playSound: false,
+        onlyAlertOnce: true,
+        // Un transfert EN COURS n'est pas balayable : l'écarter laisserait
+        // l'utilisateur sans aucun moyen de savoir où il en est. Un ÉCHEC, si —
+        // il n'y a plus rien à suivre, seulement à constater.
+        ongoing: !echoue,
+        autoCancel: echoue,
+        showProgress: !echoue,
+        maxProgress: 100,
+        progress: pourcent,
+        indeterminate: !echoue && fraction == null,
+      );
+      await _localPlugin.show(
+        idTransfert(id),
+        titre,
+        sousTitre,
+        NotificationDetails(
+          android: details,
+          // iOS n'a pas de notification à progression : on n'en pose aucune
+          // plutôt qu'une alerte par pour cent.
+          iOS: null,
+        ),
+      );
+    } catch (_) {
+      // L'affichage ne doit jamais interrompre le transfert lui-même.
+    }
+  }
+
+  /// Retire la notification d'un transfert abouti ou abandonné.
+  Future<void> retireTransfert(String id) async {
+    try {
+      await _localPlugin.cancel(idTransfert(id));
+    } catch (_) {}
+  }
+
   /// Charge utile du rappel, commune aux deux isolats.
   static String get payloadRappelLocalisation =>
       jsonEncode({'type': 'geo_rappel'});

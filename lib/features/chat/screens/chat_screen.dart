@@ -22,6 +22,7 @@ import '../../../core/api_client.dart';
 import '../../../core/app_snackbar.dart';
 import '../../../core/audio_player.dart';
 import '../../../core/downloader.dart';
+import '../../../core/telechargement_suivi.dart';
 import '../../../core/notification_settings.dart';
 import '../../../core/presence_store.dart';
 import '../../../core/realtime_client.dart';
@@ -2314,7 +2315,8 @@ class _ChatScreenState extends State<ChatScreen>
     final token = await _freshToken();
     final url = "$_baseUrl${m.url}?download=1&token=$token";
     final name = m.filename ?? "fichier-${m.id}";
-    final path = await downloadUrl(url, name);
+    final path = await telechargerEnSuivant(url, name,
+        idTransfert: "dl-${m.id}", ouvrirEnsuite: true);
     if (!mounted) return;
     if (path != null) {
       showAppSnackBar("Enregistré dans Alanya/ : $name");

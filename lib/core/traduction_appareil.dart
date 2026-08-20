@@ -19,6 +19,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:google_mlkit_language_id/google_mlkit_language_id.dart';
 import 'package:google_mlkit_translation/google_mlkit_translation.dart';
 
+import 'centre_transferts.dart';
 import 'texte_recherche.dart';
 
 /// Le moteur n'existe que sur mobile : ML Kit n'a pas d'implémentation web ni
@@ -162,12 +163,9 @@ Future<bool> telechargerCouple(
   try {
     for (final langue in {s, c}) {
       if (await _modelePresent(langue)) continue;
-      final ok = await _gestionnaire.downloadModel(
-        langue.bcpCode,
-        isWifiRequired: wifiSeulement,
-      );
-      if (!ok) return false;
-      _modelesPresents[langue.bcpCode] = true;
+      if (!await telechargerLangue(langue, wifiSeulement: wifiSeulement)) {
+        return false;
+      }
     }
     return true;
   } catch (_) {
@@ -307,15 +305,34 @@ Future<bool> telechargerLangue(
   bool wifiSeulement = true,
 }) async {
   if (!moteurAppareilPresent) return false;
+  // L'installation s'annonce dans les notifications, au même titre qu'un envoi
+  // ou un téléchargement : c'est une attente de plusieurs dizaines de Mo, et
+  // rien ne la signalait hors de l'écran.
+  //
+  // 🚫 **SANS POURCENTAGE, ET C'EST DÉFINITIF** : `downloadModel` ne rend qu'un
+  // booléen, à la fin. Aucune API ML Kit n'expose l'avancement — le navigateur,
+  // lui, le donne. Une barre indéterminée est la seule chose honnête ici.
+  final idTransfert = "langue-${langue.bcpCode}";
+  CentreTransferts.instance.demarrer(
+    id: idTransfert,
+    sorte: SorteTransfert.langue,
+    titre: nomAutonyme(langue.bcpCode),
+  );
   try {
     final ok = await _gestionnaire.downloadModel(
       langue.bcpCode,
       isWifiRequired: wifiSeulement,
     );
-    if (ok) _modelesPresents[langue.bcpCode] = true;
+    if (ok) {
+      _modelesPresents[langue.bcpCode] = true;
+      CentreTransferts.instance.reussir(idTransfert);
+    } else {
+      CentreTransferts.instance.echouer(idTransfert);
+    }
     return ok;
   } catch (_) {
     _modelesPresents.remove(langue.bcpCode);
+    CentreTransferts.instance.echouer(idTransfert);
     return false;
   }
 }

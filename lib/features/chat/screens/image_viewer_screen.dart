@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/downloader.dart';
+import '../../../core/telechargement_suivi.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/media/cached_media.dart';
 
@@ -37,7 +38,9 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
 
   Future<void> _download() async {
     setState(() => _downloading = true);
-    final path = await downloadOnly(widget.downloadUrl, widget.filename);
+    final path = await telechargerEnSuivant(
+        widget.downloadUrl, widget.filename,
+        idTransfert: "dl-image-${widget.filename}");
     setState(() => _downloading = false);
     if (!mounted) return;
     if (path != null) {

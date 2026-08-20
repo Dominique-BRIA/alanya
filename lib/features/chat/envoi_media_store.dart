@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 
 import '../../core/api_client.dart';
+import '../../core/centre_transferts.dart';
 import '../../core/realtime_client.dart';
 import '../media/media_repository.dart';
 import 'chat_repository.dart';
@@ -51,6 +52,9 @@ class EnvoiMediaStore extends ChangeNotifier {
   /// la seule preuve que le message existe vraiment.
   void terminer(String tempId) {
     _attentesEcho.remove(tempId)?.cancel();
+    // La notification disparaît : la preuve de l'envoi est la bulle dans la
+    // conversation, pas une ligne « terminé » à balayer.
+    CentreTransferts.instance.reussir(tempId);
     if (_envois.remove(tempId) != null) notifyListeners();
   }
 
@@ -77,6 +81,17 @@ class EnvoiMediaStore extends ChangeNotifier {
     envoi.erreur = null;
     notifyListeners();
 
+    // La progression sort de l'application : elle se suit désormais dans les
+    // notifications, sans ouvrir Alanya. Le libellé dit le NOMBRE de fichiers
+    // plutôt que leurs noms — « photo_2026_08_19_143022.jpg » ne rentre pas et
+    // n'apprend rien.
+    CentreTransferts.instance.demarrer(
+      id: envoi.tempId,
+      sorte: SorteTransfert.envoi,
+      titre: envoi.total > 1 ? "${envoi.total} fichiers" : _nomLisible(envoi),
+      fraction: envoi.progression,
+    );
+
     try {
       for (var i = envoi.mediaIdsObtenus.length;
           i < envoi.fichiers.length;
@@ -100,10 +115,12 @@ class EnvoiMediaStore extends ChangeNotifier {
               return;
             }
             envoi.progressionFichier = ratio;
+            CentreTransferts.instance.avancer(envoi.tempId, envoi.progression);
             notifyListeners();
           },
         );
         envoi.mediaIdsObtenus.add(envoye.id);
+        CentreTransferts.instance.avancer(envoi.tempId, envoi.progression);
         notifyListeners();
       }
 
@@ -127,12 +144,24 @@ class EnvoiMediaStore extends ChangeNotifier {
     }
   }
 
+  /// Nom court du premier fichier, pour la notification.
+  String _nomLisible(EnvoiMedia envoi) {
+    final nom = envoi.fichiers.isEmpty ? "" : envoi.fichiers.first.fileName;
+    if (nom.isEmpty) return "Fichier";
+    // Un nom d'appareil photo tient sur 30 caractères de bruit : on garde la
+    // fin, qui porte l'extension, plutôt que le début qui n'apprend rien.
+    return nom.length <= 28 ? nom : "…${nom.substring(nom.length - 27)}";
+  }
+
   void _echec(EnvoiMedia envoi, String message) {
     // Les médias déjà téléversés RESTENT dans `mediaIdsObtenus` : c'est ce qui
     // permet au réessai de ne pas les envoyer une seconde fois.
     envoi.echoue = true;
     envoi.erreur = message;
     envoi.progressionFichier = 0;
+    // L'échec, LUI, reste affiché : un envoi qui disparaît sans rien dire fait
+    // croire qu'il est parti.
+    CentreTransferts.instance.echouer(envoi.tempId);
     notifyListeners();
   }
 
