@@ -572,10 +572,24 @@ class CallController extends ChangeNotifier {
   /// qui rebâtit la session et relance l'invite. Anticiper l'état ici ferait
   /// diverger les deux si le message se perdait — et laisserait surtout un
   /// écran sans son, l'invite n'étant relancée que par la réponse.
+  /// Retour au menu d'accueil d'un centre vocal.
+  ///
+  /// 🔴 **`enregistrement` DOIT ÊTRE ACCEPTÉ ICI AUSSI.** La garde ne laissait
+  /// passer que `lecture` : après une plainte envoyée, l'étape vaut
+  /// `enregistrement`, la fonction sortait sans rien émettre, le serveur ne
+  /// renvoyait jamais le menu — et le panneau tournait indéfiniment sur
+  /// « Envoi… ». Le bouton « Accueil » était inerte pour la même raison.
+  ///
+  /// ⚠️ **J'AVAIS CORRIGÉ LA MÊME GARDE CÔTÉ SERVEUR** (`handleIvrBack`) et
+  /// laissé celle-ci. Une règle partagée entre deux bouts se corrige des DEUX
+  /// côtés — c'est la troisième fois que ce projet paie cet oubli.
   Future<void> retourAccueilIvr() async {
     final session = ivr;
     if (session == null || !session.vocal) return;
-    if (session.etape != IvrEtape.lecture) return;
+    if (session.etape != IvrEtape.lecture &&
+        session.etape != IvrEtape.enregistrement) {
+      return;
+    }
     _rt.ivrBack(session.callId);
   }
 

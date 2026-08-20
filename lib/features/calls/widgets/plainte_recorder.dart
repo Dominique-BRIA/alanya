@@ -17,7 +17,15 @@ import 'ivr_panel.dart';
 import '../plaintes_repository.dart';
 
 /// Les états visibles d'une plainte vocale, du bip à l'envoi.
-enum _EtatPlainte { bip, enregistrement, pause, relecture, envoi, echec }
+enum _EtatPlainte {
+  bip,
+  enregistrement,
+  pause,
+  relecture,
+  envoi,
+  envoye,
+  echec,
+}
 
 /// Enregistrement d'une plainte vocale, sur la touche 0 d'un centre vocal.
 ///
@@ -279,6 +287,19 @@ class _PlainteRecorderState extends State<PlainteRecorder> {
         dureeMs: _duree.inMilliseconds,
       );
       if (!mounted) return;
+      /*
+       * ⚠️ ON QUITTE L'ÉTAT « ENVOI » AVANT de demander le retour au menu, et
+       * ce n'est pas de la cosmétique.
+       *
+       * Le panneau ne disparaît que lorsque le SERVEUR renvoie le menu. Tant
+       * qu'on laissait le rond tourner en attendant, la moindre trame perdue —
+       * ou une garde côté contrôleur, ce qui est arrivé le 20/08/2026 —
+       * laissait l'appelant devant un chargement infini sur une plainte
+       * pourtant DÉJÀ ENREGISTRÉE, avec son 201 en base.
+       *
+       * « Envoyée ✓ » dit la vérité même si le menu ne revient jamais.
+       */
+      setState(() => _etat = _EtatPlainte.envoye);
       widget.onTermine();
     } on ApiException catch (e) {
       if (mounted) {
@@ -384,6 +405,7 @@ class _PlainteRecorderState extends State<PlainteRecorder> {
       _EtatPlainte.pause => "Pause",
       _EtatPlainte.relecture => "Écoutez",
       _EtatPlainte.envoi => "Envoi…",
+      _EtatPlainte.envoye => "Envoyée",
       _EtatPlainte.echec => "",
     };
     return Row(
@@ -430,6 +452,13 @@ class _PlainteRecorderState extends State<PlainteRecorder> {
             height: 18,
             child: CircularProgressIndicator(strokeWidth: 2),
           ),
+        ];
+      // Aucune action : la plainte est partie, il n'y a plus rien à faire. Le
+      // panneau disparaîtra au retour du menu ; s'il tarde, l'appelant lit au
+      // moins que c'est fini au lieu de regarder un rond tourner.
+      case _EtatPlainte.envoye:
+        return const [
+          Icon(Icons.check_circle, size: 18, color: Colors.lightGreenAccent),
         ];
       case _EtatPlainte.enregistrement:
       case _EtatPlainte.pause:
