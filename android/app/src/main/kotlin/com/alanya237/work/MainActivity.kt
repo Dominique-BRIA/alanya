@@ -9,6 +9,7 @@ import android.os.PowerManager
 import android.util.Log
 import android.view.WindowManager
 import com.alanya.telecom.CallRegistry
+import com.cloudwebrtc.webrtc.FlutterWebRTCPlugin
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -85,8 +86,17 @@ class MainActivity : FlutterActivity() {
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
             runCatching { CallRegistry.ringingData() != null }.getOrDefault(false)
 
+    /**
+     * Le moteur Flutter de CETTE activité — celui qui exécute l'appel. Retenu
+     * pour aller y chercher le plugin WebRTC qui possède les pistes de l'appel,
+     * et NON le `sharedSingleton` statique qui peut désigner un moteur
+     * secondaire (voir `AppelEnregistreur.plugin`).
+     */
+    private var moteurFlutter: FlutterEngine? = null
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        moteurFlutter = flutterEngine
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CANAL)
             .setMethodCallHandler { appel, resultat ->
@@ -181,10 +191,15 @@ class MainActivity : FlutterActivity() {
                         // privé persistant, lui, survit — le nettoyage est fait
                         // par Dart une fois le dépôt confirmé.
                         val dossier = java.io.File(filesDir, "enregistrements").apply { mkdirs() }
+                        // Le plugin WebRTC DU MOTEUR DE L'APPEL (celui-ci), seul à
+                        // contenir les pistes — pas le singleton statique.
+                        val pluginWebrtc = moteurFlutter
+                            ?.plugins
+                            ?.get(FlutterWebRTCPlugin::class.java) as? FlutterWebRTCPlugin
                         // Jamais laisser une exception remonter : un
                         // enregistrement raté ne doit pas faire échouer un appel.
                         val ok = runCatching {
-                            AppelEnregistreur.demarrer(callId, localTrackId, dossier)
+                            AppelEnregistreur.demarrer(callId, localTrackId, dossier, pluginWebrtc)
                         }.getOrDefault(false)
                         resultat.success(ok)
                     }

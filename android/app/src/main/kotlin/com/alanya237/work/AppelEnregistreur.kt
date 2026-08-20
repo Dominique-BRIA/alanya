@@ -57,6 +57,20 @@ object AppelEnregistreur {
     private var pisteAgent: LocalAudioTrack? = null
     private var pisteClient: AudioTrack? = null
 
+    /**
+     * Le plugin WebRTC DU MOTEUR DE L'APPEL, fourni par `MainActivity`.
+     *
+     * 🔴 **PAS `FlutterWebRTCPlugin.sharedSingleton`.** Ce singleton statique
+     * pointe vers le DERNIER moteur Flutter attaché — or l'application en a
+     * plusieurs dans le même process (CallKit, tâche de premier plan). Le
+     * `getUserMedia` de l'appel inscrit la piste dans la table du moteur de l'UI,
+     * mais `sharedSingleton.getLocalTrack` interrogeait la table VIDE d'un moteur
+     * secondaire, et rendait toujours « piste introuvable » (constaté au logcat
+     * le 20/08/2026). On prend donc le plugin du moteur qui possède notre canal,
+     * seul à contenir les pistes de l'appel.
+     */
+    private var plugin: FlutterWebRTCPlugin? = null
+
     val enCours: Boolean get() = callId != null
 
     /**
@@ -66,13 +80,18 @@ object AppelEnregistreur {
      * décrochage.
      */
     @Synchronized
-    fun demarrer(nouvelAppel: String, localTrackId: String, dossier: File): Boolean {
+    fun demarrer(
+        nouvelAppel: String,
+        localTrackId: String,
+        dossier: File,
+        pluginWebrtc: FlutterWebRTCPlugin?,
+    ): Boolean {
         if (callId == nouvelAppel) return true
         if (callId != null) abandonner()
         return try {
-            val plugin = FlutterWebRTCPlugin.sharedSingleton
-                ?: run { Log.e(TAG, "plugin WebRTC absent"); return false }
-            val locale = plugin.getLocalTrack(localTrackId) as? LocalAudioTrack
+            val p = pluginWebrtc
+                ?: run { Log.e(TAG, "plugin WebRTC du moteur d'appel absent"); return false }
+            val locale = p.getLocalTrack(localTrackId) as? LocalAudioTrack
                 ?: run { Log.e(TAG, "piste locale $localTrackId introuvable"); return false }
 
             val base = File(dossier, "appel-$nouvelAppel").absolutePath
@@ -86,6 +105,7 @@ object AppelEnregistreur {
             encodeurClient = client
             sinkAgent = sa
             pisteAgent = locale
+            plugin = p
             callId = nouvelAppel
             Log.i(TAG, "démarré sur $nouvelAppel (agent branché)")
             true
@@ -104,8 +124,10 @@ object AppelEnregistreur {
     fun attacherDistant(remoteTrackId: String) {
         if (callId == null || sinkClient != null) return
         try {
-            val plugin = FlutterWebRTCPlugin.sharedSingleton ?: return
-            val distante = plugin.getRemoteTrack(remoteTrackId) as? AudioTrack
+            // Le MÊME plugin (moteur de l'appel) que pour la piste locale — voir
+            // le champ `plugin`. `sharedSingleton` echouerait de la meme facon.
+            val p = plugin ?: return
+            val distante = p.getRemoteTrack(remoteTrackId) as? AudioTrack
                 ?: run { Log.w(TAG, "piste distante $remoteTrackId introuvable"); return }
             val client = encodeurClient ?: return
             val sc = AudioTrackSink { data, _, rate, ch, _, _ -> pousser(client, data, rate, ch) }
@@ -180,6 +202,7 @@ object AppelEnregistreur {
         sinkClient = null
         pisteAgent = null
         pisteClient = null
+        plugin = null
     }
 }
 
