@@ -180,8 +180,14 @@ class RingtoneService {
   int _generationIvr = 0;
 
   /// Invite vocale du standard : « tapez 1 pour… ». En boucle par défaut.
-  Future<void> playIvrPrompt(String url, {bool loop = true}) =>
-      _playIvr(url, loop: loop);
+  /// [onComplete] n'est appelé que si [loop] vaut faux — une boucle n'a pas de
+  /// fin. Il sert au BIP de la plainte vocale : l'enregistrement doit démarrer
+  /// quand l'annonce se termine, et le lecteur est le seul à le savoir. Le
+  /// mécanisme existait déjà en interne pour enchaîner les musiques d'attente ;
+  /// il est simplement rendu accessible plutôt que réécrit.
+  Future<void> playIvrPrompt(String url,
+          {bool loop = true, void Function()? onComplete}) =>
+      _playIvr(url, loop: loop, onComplete: onComplete);
 
   /// Musique d'attente pendant que l'agent sonne. En boucle.
   Future<void> playIvrHold(String url, {bool loop = true}) =>

@@ -15,6 +15,7 @@ import '../../chat/screens/chat_screen.dart';
 import '../call_controller.dart';
 import '../widgets/call_avatar_waves.dart';
 import '../widgets/ivr_panel.dart';
+import '../widgets/plainte_recorder.dart';
 import '../widgets/queue_status_sheet.dart';
 
 class ActiveCallScreen extends StatefulWidget {
@@ -676,8 +677,43 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                       // aller-retour vers l'attente — le défaut signalé. Ce qui
                       // compte n'est pas OÙ elle est posée, mais qu'elle occupe
                       // toujours la même place.
+                      // 🔴 LE LECTEUR DE PLAINTE FLOTTE ICI, ET NE PREND AUCUNE
+                      // HAUTEUR. Emplacement demandé par le user (20/08/2026) :
+                      // l'espace entre le nom du centre et la bande « Accueil ».
+                      //
+                      // Il est posé en SURCOUCHE et non dans la colonne, parce
+                      // que le pavé numérique est un `Expanded` qui prend « ce
+                      // qui reste » : l'ajouter comme un frère lui aurait pris
+                      // sa hauteur et l'aurait fait rétrécir — le défaut
+                      // signalé deux fois (17/08 puis 18/08), qu'un test
+                      // surveille depuis. `Clip.none` lui permet de déborder de
+                      // la bande sans que la géométrie bouge d'un pixel.
+                      //
+                      // L'espace qu'il recouvre est vide pendant un
+                      // enregistrement : le message est effacé par `ivr_record`,
+                      // et aucune touche n'est maintenue.
                       if (cc.ivr != null)
-                        IvrMessageBand(message: cc.ivr!.message),
+                        Stack(
+                          clipBehavior: Clip.none,
+                          alignment: Alignment.center,
+                          children: [
+                            IvrMessageBand(message: cc.ivr!.message),
+                            if (cc.ivr!.etape == IvrEtape.enregistrement)
+                              Positioned(
+                                left: 0,
+                                right: 0,
+                                child: PlainteRecorder(
+                                  // La clé porte l'identifiant de l'appel : un
+                                  // second appel dans la même session d'écran
+                                  // doit repartir d'un panneau NEUF, pas
+                                  // reprendre l'état du précédent.
+                                  key: ValueKey("plainte-${cc.ivr!.callId}"),
+                                  session: cc.ivr!,
+                                  onTermine: cc.retourAccueilIvr,
+                                ),
+                              ),
+                          ],
+                        ),
                       if (cc.activeRole == ActiveCallRole.ongoing) ...[
                         const SizedBox(height: 10),
                         Text(_mediaHint(cc, afficheCommeGroupe),

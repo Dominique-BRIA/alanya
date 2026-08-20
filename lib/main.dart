@@ -31,6 +31,7 @@ import 'features/calls/call_banner.dart';
 import 'features/calls/call_controller.dart';
 import 'features/calls/call_listener.dart';
 import 'features/calls/calls_repository.dart';
+import 'features/calls/plaintes_repository.dart';
 import 'features/chat/chat_repository.dart';
 import 'features/contacts/contact_lists_repository.dart';
 import 'features/contacts/contacts_repository.dart';
@@ -131,6 +132,9 @@ void main() async {
         Provider<RingtonesRepository>.value(
             value: RingtonesRepository(authedApi, MediaRepository(authedApi))),
         Provider<CallsRepository>.value(value: CallsRepository(authedApi)),
+        // Plaintes vocales laissées sur la touche 0 d'un centre vocal.
+        Provider<PlaintesRepository>.value(
+            value: PlaintesRepository(authedApi)),
         Provider<MeetingsRepository>.value(
             value: MeetingsRepository(authedApi)),
         Provider<BlockedRepository>.value(value: BlockedRepository(authedApi)),
