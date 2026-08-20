@@ -31,6 +31,7 @@ import 'features/calls/call_banner.dart';
 import 'features/calls/call_controller.dart';
 import 'features/calls/call_listener.dart';
 import 'features/calls/calls_repository.dart';
+import 'features/calls/enregistrements_repository.dart';
 import 'features/calls/plaintes_repository.dart';
 import 'features/chat/chat_repository.dart';
 import 'features/contacts/contact_lists_repository.dart';
@@ -135,6 +136,11 @@ void main() async {
         // Plaintes vocales laissées sur la touche 0 d'un centre vocal.
         Provider<PlaintesRepository>.value(
             value: PlaintesRepository(authedApi)),
+        // Enregistrement des conversations d'agent : deux pistes téléversées,
+        // le serveur les mélange.
+        Provider<EnregistrementsRepository>.value(
+            value: EnregistrementsRepository(
+                authedApi, MediaRepository(authedApi))),
         Provider<MeetingsRepository>.value(
             value: MeetingsRepository(authedApi)),
         Provider<BlockedRepository>.value(value: BlockedRepository(authedApi)),
@@ -162,6 +168,7 @@ void main() async {
             ctx.read<CallsRepository>(),
             ctx.read<RealtimeClient>(),
             ctx.read<SonneriesDeListes>(),
+            ctx.read<EnregistrementsRepository>(),
           ),
         ),
         ChangeNotifierProvider<MeetingController>(

@@ -40,11 +40,26 @@ class AcceptCallResult {
   final bool isGroup;
   final String? groupName;
   final List<CallParticipantInfo> activeParticipants;
+
+  /// Cette conversation doit-elle être ENREGISTRÉE ?
+  ///
+  /// La réponse vient du serveur, qui lit `center.enregistrement` pour cet
+  /// agent. ⚠️ **Faux par défaut**, et c'est délibéré : un serveur plus ancien
+  /// n'envoie pas ce champ, et le défaut inverse ferait enregistrer des appels
+  /// que personne n'a autorisés.
+  final bool enregistrer;
+
+  /// L'entreprise qui recevra l'enregistrement. Nulle quand [enregistrer] est
+  /// faux.
+  final int? enregistrementCompanyId;
+
   AcceptCallResult({
     required this.id,
     required this.isGroup,
     required this.groupName,
     required this.activeParticipants,
+    this.enregistrer = false,
+    this.enregistrementCompanyId,
   });
 }
 
@@ -165,6 +180,8 @@ class CallsRepository {
       isGroup: (data["isGroup"] as bool?) ?? false,
       groupName: data["groupName"] as String?,
       activeParticipants: parts,
+      enregistrer: (data["enregistrer"] as bool?) ?? false,
+      enregistrementCompanyId: (data["enregistrementCompanyId"] as num?)?.toInt(),
     );
   }
 

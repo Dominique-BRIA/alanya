@@ -17,8 +17,10 @@ import '../../core/lock_screen_call.dart';
 import '../../core/proximite_appel.dart';
 import '../../core/push_service.dart';
 import '../../core/realtime_client.dart';
+import '../../core/enregistreur_appel.dart';
 import '../../core/ringtone_service.dart';
 import '../../core/sonneries_listes.dart';
+import 'enregistrements_repository.dart';
 import '../../models/call_record.dart';
 import 'calls_repository.dart';
 import 'webrtc_group_mesh.dart';
@@ -197,7 +199,12 @@ class IvrSession {
 
 /// Appels directs et de groupe — mesh WebRTC (une connexion par participant).
 class CallController extends ChangeNotifier {
-  CallController(this._calls, this._rt, this._sonneriesListes) {
+  CallController(
+    this._calls,
+    this._rt,
+    this._sonneriesListes,
+    this._enregistrements,
+  ) {
     _sub = _rt.events.listen(_onEvent);
     // Sans préchargement, le PREMIER appel de la session sonnerait toujours par
     // défaut : les listes n'arrivent qu'avec l'écran d'accueil.
@@ -207,6 +214,7 @@ class CallController extends ChangeNotifier {
   final CallsRepository _calls;
   final RealtimeClient _rt;
   final SonneriesDeListes _sonneriesListes;
+  final EnregistrementsRepository _enregistrements;
   StreamSubscription<Map<String, dynamic>>? _sub;
   Timer? _ringTimeout;
 
@@ -674,6 +682,7 @@ class CallController extends ChangeNotifier {
     traceAppel(
         "acceptIncoming — moi=$myUserId, participants actifs renvoyes par /accept : "
         "${result.activeParticipants.map((p) => p.userId).toList()}, mesh=${_mesh != null ? "pret" : "ABSENT"}");
+    _demarrerEnregistrementSiAutorise(inc.callId, result);
     for (final p in result.activeParticipants) {
       if (p.userId != myUserId) {
         // J'ARRIVE dans l'appel : ceux qui y sont déjà m'enverront leur offre.
@@ -771,6 +780,7 @@ class CallController extends ChangeNotifier {
       traceAppel(
           "acceptById — moi=$myUserId, participants actifs renvoyes par /accept : "
           "${result.activeParticipants.map((p) => p.userId).toList()}, mesh=${_mesh != null ? "pret" : "ABSENT"}");
+      _demarrerEnregistrementSiAutorise(callId, result);
       for (final p in result.activeParticipants) {
         // Même règle que dans `acceptIncoming` : j'arrive, je ne suis pas
         // l'offreur — ceux déjà présents m'offriront.
@@ -917,6 +927,61 @@ class CallController extends ChangeNotifier {
   /// minuteur compris, et le paquet gardait l'appel dans ses « appels actifs ».
   /// La reprise au démarrage y retrouvait alors un appel fantôme et tentait de
   /// l'accepter — d'où « Cet appel n'est plus disponible » à l'appel suivant.
+  /// Démarre l'enregistrement si, et seulement si, le SERVEUR l'a autorisé.
+  ///
+  /// ⚠️ La décision n'est jamais prise ici : le client ne fait qu'obéir à
+  /// `enregistrer`, calculé par le serveur depuis `center.enregistrement`. La
+  /// dupliquer côté client ferait deux règles à tenir d'accord — et celle qui
+  /// compte, juridiquement comme fonctionnellement, est celle du serveur.
+  ///
+  /// ⚠️ **NI CONSENTEMENT NI ANNONCE AU CORRESPONDANT** — décision explicite du
+  /// user (20/08/2026). Rien n'est joué, rien n'est affiché de son côté.
+  ///
+  /// Non attendu : l'appel ne doit pas attendre le micro pour se connecter.
+  void _demarrerEnregistrementSiAutorise(
+      String callId, AcceptCallResult result) {
+    if (!result.enregistrer) return;
+    _companyEnregistrement = result.enregistrementCompanyId;
+    unawaited(EnregistreurAppel.instance.demarrer(callId).then((ok) {
+      if (!ok) {
+        // Refus du natif : on oublie l'entreprise, sinon `_clore` croirait
+        // avoir des pistes à déposer et chercherait des fichiers absents.
+        _companyEnregistrement = null;
+      }
+      traceAppel(ok ? "enregistrement démarré" : "enregistrement REFUSÉ");
+    }));
+  }
+
+  /// L'entreprise qui recevra l'enregistrement de l'appel en cours, ou nulle.
+  ///
+  /// Retenue au décrochage : à la fin de l'appel, `activeCallId` est déjà
+  /// neutralisé et le serveur ne nous redemandera rien.
+  int? _companyEnregistrement;
+
+  /// Arrête l'enregistrement et dépose les deux pistes, s'il y en a un.
+  ///
+  /// ⚠️ **N'ATTEND RIEN ET NE LÈVE RIEN.** L'appel est terminé : ni l'écran ni
+  /// l'utilisateur n'attendent cette opération, et un échec de téléversement ne
+  /// doit surtout pas remonter dans un chemin de fin d'appel.
+  void _cloreEnregistrement(String? callId) {
+    final entreprise = _companyEnregistrement;
+    _companyEnregistrement = null;
+    if (!EnregistreurAppel.instance.enCours) return;
+    unawaited(() async {
+      try {
+        final pistes = await EnregistreurAppel.instance.arreter();
+        if (pistes == null || entreprise == null) return;
+        await _enregistrements.deposer(
+          callId: callId,
+          companyId: entreprise,
+          pistes: pistes,
+        );
+      } catch (e) {
+        debugPrint("[CallController] dépôt de l'enregistrement : $e");
+      }
+    }());
+  }
+
   void _clear({String? idAppel}) {
     _ringTimeout?.cancel();
     _ringTimeout = null;
@@ -925,6 +990,14 @@ class CallController extends ChangeNotifier {
     // Le standard meurt avec l'appel. `_clear` étant le point de passage de
     // TOUTES les fins d'appel, c'est le seul endroit où l'oubli est impossible.
     ivr = null;
+    // L'enregistrement s'arrête ICI pour la MÊME raison : raccroché, refusé,
+    // expiré, terminé d'en face — tout passe par `_clear`. Le poser dans
+    // `hangUp` aurait laissé le micro tourner sur toutes les autres sorties.
+    //
+    // Volontairement NON attendu : `_clear` est synchrone et appelé depuis des
+    // chemins qui ne peuvent pas l'attendre. Le téléversement se poursuit tout
+    // seul, l'appel est déjà fini.
+    _cloreEnregistrement(idAppel ?? activeCallId);
     RingtoneService.instance.stopIvr();
     _annulerMinuteurConnexion();
     // Filet de sécurité : coupe toute sonnerie encore en cours.
