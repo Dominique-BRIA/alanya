@@ -18,6 +18,7 @@ import 'core/presence_store.dart';
 import 'core/device_registry.dart';
 import 'core/push_service.dart';
 import 'core/realtime_client.dart';
+import 'core/service_transferts.dart';
 import 'core/sonneries_listes.dart';
 import 'core/theme_controller.dart';
 import 'core/token_storage.dart';
@@ -69,6 +70,10 @@ void main() async {
   // Les transferts s'annoncent dans les notifications. Le lien se fait ICI et
   // non dans le magasin : lui ne doit connaître ni l'écran ni le système, c'est
   // ce qui lui permet de servir aussi bien un envoi qu'un modèle de langue.
+  // Et ils SURVIVENT à la fermeture de l'application : un service de premier
+  // plan tient le processus — donc l'isolat Dart, donc la requête — en vie.
+  // Une barre de progression montre l'avancement, elle ne le produit pas.
+  ServiceTransferts.brancher();
   CentreTransferts.instance.surChangement = (transfert, {required retire}) {
     if (retire) {
       PushService.instance.retireTransfert(transfert.id);

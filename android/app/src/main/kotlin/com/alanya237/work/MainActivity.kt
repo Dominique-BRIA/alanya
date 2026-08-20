@@ -120,6 +120,39 @@ class MainActivity : FlutterActivity() {
                         runCatching { reglerCapteurProximite(actif) }
                         resultat.success(true)
                     }
+                    // Service de premier plan qui maintient les envois et
+                    // téléchargements vivants application fermée. Voir
+                    // TransferForegroundService pour les limites du type
+                    // `dataSync`.
+                    "demarrerServiceTransferts" -> {
+                        val texte = appel.argument<String>("texte") ?: "Transfert en cours"
+                        val i = Intent(this, TransferForegroundService::class.java).apply {
+                            action = TransferForegroundService.ACTION_DEMARRER
+                            putExtra(TransferForegroundService.EXTRA_TEXTE, texte)
+                        }
+                        // ⚠️ Peut ÉCHOUER : un service `dataSync` ne se démarre
+                        // pas depuis l'arrière-plan (Android 12+). On ne laisse
+                        // pas l'exception remonter — le transfert doit continuer
+                        // même si le système refuse de le protéger.
+                        runCatching {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                startForegroundService(i)
+                            } else {
+                                startService(i)
+                            }
+                        }
+                        resultat.success(true)
+                    }
+                    "arreterServiceTransferts" -> {
+                        runCatching {
+                            startService(
+                                Intent(this, TransferForegroundService::class.java).apply {
+                                    action = TransferForegroundService.ACTION_ARRETER
+                                },
+                            )
+                        }
+                        resultat.success(true)
+                    }
                     "arreterServiceAppel" -> {
                         startService(
                             Intent(this, CallForegroundService::class.java).apply {
