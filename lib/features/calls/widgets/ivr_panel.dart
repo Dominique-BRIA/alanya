@@ -132,9 +132,33 @@ class _IvrPanelState extends State<IvrPanel> {
     return "${m.toString().padLeft(2, '0')}:${(s % 60).toString().padLeft(2, '0')}";
   }
 
+  /// Libellé de la touche 0 d'un centre vocal, révélé à l'appui long.
+  static const libellePlainte = "Service plainte";
+
+  /// L'option d'une touche, `null` si elle ne mène nulle part.
+  ///
+  /// 🔴 **LA TOUCHE 0 D'UN CENTRE VOCAL EST UNE OPTION IMPLICITE**, et elle ne
+  /// vient PAS de `center_audio` : le serveur la réserve à l'enregistrement
+  /// d'une plainte, quoi que porte la table (voir `handleIvrDtmfVocal`). Sans
+  /// cette synthèse, elle restait la seule touche SANS anneau et sans libellé
+  /// à l'appui long — signalé sur device le 20/08/2026 — alors qu'elle mène
+  /// quelque part, et même à la seule touche qui écrit quelque chose.
+  ///
+  /// Fabriquée ICI plutôt qu'ajoutée aux `options` reçues : ces options sont ce
+  /// que le SERVEUR a envoyé, et y glisser une entrée maison ferait mentir tout
+  /// ce qui les compte ou les parcourt.
   IvrOption? _optionPour(int digit) {
     for (final o in widget.session.options) {
       if (o.digit == digit) return o;
+    }
+    if (widget.session.vocal && digit == 0) {
+      return const IvrOption(
+        digit: 0,
+        label: libellePlainte,
+        // Toujours joignable : il n'y a aucun agent à trouver derrière, c'est
+        // le téléphone lui-même qui enregistre.
+        disponible: true,
+      );
     }
     return null;
   }
