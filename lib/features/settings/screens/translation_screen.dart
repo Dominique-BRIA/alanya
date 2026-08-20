@@ -65,7 +65,7 @@ class _TranslationScreenState extends State<TranslationScreen> {
     var ok = await telechargerLangue(langue);
     // Échec en Wi-Fi seul : on expose la restriction au lieu de laisser
     // l'utilisateur devant un « impossible » sans recours.
-    if (!ok && mounted && await proposerDonneesMobiles(context)) {
+    if (!ok && wifiExige && mounted && await proposerDonneesMobiles(context)) {
       ok = await telechargerLangue(langue, wifiSeulement: false);
     }
     if (!mounted) return;

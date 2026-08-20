@@ -4161,8 +4161,13 @@ class _ChatScreenState extends State<ChatScreen>
         // Le téléchargement n'accepte que le Wi-Fi par défaut. Sans cette
         // seconde question, un utilisateur en données mobiles restait devant un
         // « impossible » sans savoir pourquoi ni quoi faire.
-        if (!installe && mounted && await proposerDonneesMobiles(context)) {
-          installe = await telechargerCouple(source, cible, wifiSeulement: false);
+        // Le repli n'est proposé que si le Wi-Fi était bien la contrainte.
+        if (!installe &&
+            wifiExige &&
+            mounted &&
+            await proposerDonneesMobiles(context)) {
+          installe =
+              await telechargerCouple(source, cible, wifiSeulement: false);
         }
         if (!mounted) return;
         if (!installe) {

@@ -20,7 +20,32 @@ import 'package:google_mlkit_language_id/google_mlkit_language_id.dart';
 import 'package:google_mlkit_translation/google_mlkit_translation.dart';
 
 import 'centre_transferts.dart';
+import 'data_saver_service.dart';
 import 'texte_recherche.dart';
+
+/// Faut-il exiger le Wi-Fi pour installer un modèle ?
+///
+/// 🔴 **C'ÉTAIT `true` EN DUR, ET C'EST CE QUI CASSAIT TOUT** (signalé le
+/// 19/08/2026 : « ce message continue de s'afficher malgré que la langue est
+/// déjà téléchargée »). Sur un téléphone en données mobiles, ML Kit ne
+/// téléchargeait JAMAIS : Play Services met la tâche en attente d'un Wi-Fi qui
+/// ne vient pas. L'utilisateur appuyait sur « Télécharger », rien ne se passait,
+/// et le dialogue revenait au message suivant — indéfiniment.
+///
+/// La règle est désormais celle que l'application applique déjà à ses médias :
+/// **l'économie de données décide**. Activée, on attend le Wi-Fi ; désactivée,
+/// on télécharge par n'importe quel réseau. Un seul interrupteur pour toutes les
+/// dépenses de données, à l'endroit où l'utilisateur le cherche.
+bool get wifiExige => DataSaverService.instance.isOn;
+
+/// Au-delà, on considère l'installation perdue.
+///
+/// ⚠️ **SANS CETTE BORNE, L'ATTENTE ÉTAIT INFINIE.** `downloadModel` rend une
+/// tâche qui ne se termine qu'au succès : conditionnée au Wi-Fi et sans Wi-Fi,
+/// elle reste en attente pour toujours. La bulle affichait « Traduction… » à vie
+/// — c'est visible sur la capture du 19/08. Cinq minutes couvrent largement
+/// quelques dizaines de mégaoctets, même sur un réseau lent.
+const _delaiInstallationMax = Duration(minutes: 5);
 
 /// Le moteur n'existe que sur mobile : ML Kit n'a pas d'implémentation web ni
 /// bureau. Ailleurs, il n'y a PAS de repli vers un service en ligne — envoyer
@@ -150,12 +175,11 @@ Future<List<String>> nomsLanguesManquantes(String source, String cible) async {
 /// est « terminé » ou « échoué ». L'écran ne peut donc afficher qu'une attente
 /// indéterminée, là où le web a une fraction.
 ///
-/// `wifiSeulement` est vrai par défaut : télécharger 60 Mo sur des données
-/// mobiles, sans le dire, serait une dépense imposée.
+/// `wifiSeulement` suit l'**économie de données** — voir [wifiExige].
 Future<bool> telechargerCouple(
   String source,
   String cible, {
-  bool wifiSeulement = true,
+  bool? wifiSeulement,
 }) async {
   final s = langueSupportee(source);
   final c = langueSupportee(cible);
@@ -302,7 +326,7 @@ Future<Set<String>> languesInstallees() async {
 /// utilisateur et celle du Wi-Fi.
 Future<bool> telechargerLangue(
   TranslateLanguage langue, {
-  bool wifiSeulement = true,
+  bool? wifiSeulement,
 }) async {
   if (!moteurAppareilPresent) return false;
   // L'installation s'annonce dans les notifications, au même titre qu'un envoi
@@ -319,10 +343,12 @@ Future<bool> telechargerLangue(
     titre: nomAutonyme(langue.bcpCode),
   );
   try {
-    final ok = await _gestionnaire.downloadModel(
-      langue.bcpCode,
-      isWifiRequired: wifiSeulement,
-    );
+    final ok = await _gestionnaire
+        .downloadModel(
+          langue.bcpCode,
+          isWifiRequired: wifiSeulement ?? wifiExige,
+        )
+        .timeout(_delaiInstallationMax);
     if (ok) {
       _modelesPresents[langue.bcpCode] = true;
       CentreTransferts.instance.reussir(idTransfert);

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../core/traduction_appareil.dart' show wifiExige;
 import '../l10n/app_localizations.dart';
 
 /// Les deux boîtes de dialogue de la traduction sur l'appareil.
@@ -22,8 +23,15 @@ Future<bool> confirmerInstallationLangues(
     context: context,
     builder: (ctx) => AlertDialog(
       title: Text(tr(ctx, 'translation_download_title')),
+      // La mention du Wi-Fi n'apparaît QUE si elle est vraie. Elle était écrite
+      // en dur : quelqu'un qui a coupé l'économie de données lisait « en
+      // Wi-Fi » alors que le téléchargement allait partir sur ses données —
+      // une promesse fausse sur une dépense qui lui est facturée.
       content: Text(
-        tr(ctx, 'translation_download_body', {'langues': libelleLangues}),
+        wifiExige
+            ? "${tr(ctx, 'translation_download_body', {'langues': libelleLangues})}\n\n"
+                  "${tr(ctx, 'translation_download_wifi_only')}"
+            : tr(ctx, 'translation_download_body', {'langues': libelleLangues}),
       ),
       actions: [
         TextButton(
@@ -48,6 +56,10 @@ Future<bool> confirmerInstallationLangues(
 /// impossible » sans le moindre recours. Impossible de distinguer « pas de
 /// Wi-Fi » d'« aucun réseau » (ML Kit ne rend qu'un booléen), donc le texte ne
 /// l'affirme pas : il expose la restriction et laisse décider.
+/// ⚠️ **N'A DE SENS QUE SI LE WI-FI ÉTAIT EXIGÉ.** Économie de données coupée,
+/// le téléchargement partait déjà sur n'importe quel réseau : proposer de
+/// « réessayer sans Wi-Fi » désignerait alors une cause qui n'existe pas, et
+/// ferait chercher au mauvais endroit. Les appelants gardent donc `wifiExige`.
 Future<bool> proposerDonneesMobiles(BuildContext context) async {
   final ok = await showDialog<bool>(
     context: context,
