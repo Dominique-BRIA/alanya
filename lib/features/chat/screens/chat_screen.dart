@@ -4127,17 +4127,17 @@ class _ChatScreenState extends State<ChatScreen>
     }
     setState(() => _translating.add(m.id));
     try {
-      // Mode souple : ici tout reste local, se tromper de langue source ne
-      // coûte qu'une traduction médiocre qu'on referme d'un geste, alors que
-      // renoncer prive l'utilisateur de la fonction.
-      final source = await detecterLangue(text, souple: true);
+      // ⚠️ PLUS AUCUN REFUS ICI (demande du user). `sourceProbable` prend le
+      // meilleur candidat quelle que soit sa confiance, et écarte la langue
+      // cible pour ne jamais buter sur « déjà dans ta langue ».
+      final source = await sourceProbable(text, cible);
       if (!mounted) return;
       if (source == null) {
-        _messageTraduction('translation_lang_unknown');
-        return;
-      }
-      if (source == normaliserLangue(cible)) {
-        _messageTraduction('translation_same_lang');
+        // Rien à traduire : le message est DÉJÀ dans la langue des réglages, ou
+        // ne porte aucune langue (chiffres, émojis). Traduire un texte vers sa
+        // propre langue, c'est ce texte — on le montre, plutôt que d'opposer un
+        // message d'erreur à quelqu'un qui a simplement appuyé sur « Traduire ».
+        setState(() => _translations[m.id] = text);
         return;
       }
       final etat = await etatCouple(source, cible);

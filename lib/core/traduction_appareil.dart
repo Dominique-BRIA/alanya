@@ -496,28 +496,53 @@ Future<String> traduireUnTexte(
 /// `LanguageIdentifier`, il ne se règle pas appel par appel.
 final Map<double, LanguageIdentifier> _detecteurs = {};
 
-/// Langue d'un texte, détectée sur l'appareil, ou null.
+/// Seuil de confiance quasi nul : on veut TOUS les candidats que ML Kit a
+/// envisagés, y compris les plus faibles, et c'est nous qui trions ensuite.
+const double _seuilOuvert = 0.01;
+
+/// La langue SOURCE à utiliser pour traduire [texte] vers [cible], ou `null`.
 ///
-/// `souple` abaisse les deux garde-fous. Repris du web, où il n'était réservé
-/// qu'au moteur local : s'y tromper ne coûte qu'une traduction médiocre, que
-/// l'on peut refermer d'un geste. Ici tout est local, donc le mode souple est
-/// le bon défaut dès qu'il s'agit de décider s'il faut PROPOSER de traduire.
-Future<String?> detecterLangue(String texte, {bool souple = false}) async {
+/// 🔴 **CETTE FONCTION NE REFUSE JAMAIS RIEN** (demande du user, 19/08/2026 :
+/// « je ne veux pas de ce comportement… tu laisses le mécanisme de traduction
+/// faire son travail »). L'ancienne version rendait `null` dans deux cas qui
+/// remontaient jusqu'à l'écran sous forme de refus :
+///
+///  - « Langue non reconnue » : la détection n'osait pas se prononcer, faute
+///    d'atteindre un seuil de confiance, ou parce que le texte faisait moins de
+///    trois caractères. Ces deux garde-fous sont **retirés** — on interroge
+///    désormais `identifyPossibleLanguages`, qui rend la liste ORDONNÉE des
+///    candidats avec leur score, et on prend simplement le meilleur exploitable ;
+///  - « Ce message est déjà dans ta langue » : la source valait la cible, et ML
+///    Kit ne sait pas traduire X → X. On **écarte la cible des candidats** et on
+///    descend dans la liste plutôt que de s'arrêter là.
+///
+/// `null` ne veut donc plus dire « je refuse » mais « il n'y a rien à traduire » :
+/// le texte est déjà dans la langue voulue, ou ne porte aucune langue
+/// identifiable (chiffres, émojis). ⚠️ L'appelant doit alors afficher le texte
+/// TEL QUEL en guise de traduction — c'est littéralement ce que « traduire vers
+/// sa propre langue » produit — et surtout pas un message d'erreur.
+Future<String?> sourceProbable(String texte, String cible) async {
   if (!moteurAppareilPresent) return null;
   final propre = texte.trim();
-  // Sur deux ou trois caractères, la détection tire au sort.
-  final longueurMinimale = souple ? 3 : 8;
-  if (propre.length < longueurMinimale) return null;
-  final seuil = souple ? 0.25 : 0.5;
+  if (propre.isEmpty) return null;
+  final cibleNormalisee = normaliserLangue(cible);
   try {
     final detecteur = _detecteurs.putIfAbsent(
-      seuil,
-      () => LanguageIdentifier(confidenceThreshold: seuil),
+      _seuilOuvert,
+      () => LanguageIdentifier(confidenceThreshold: _seuilOuvert),
     );
-    final brut = await _enfiler(() => detecteur.identifyLanguage(propre));
-    final langue = normaliserLangue(brut);
-    return langue.isEmpty ? null : langue;
+    final candidats = await _enfiler(
+      () => detecteur.identifyPossibleLanguages(propre),
+    );
+    // La liste vient triée par confiance décroissante : le premier candidat
+    // exploitable est le meilleur, aussi faible soit son score.
+    for (final candidat in candidats) {
+      final code = normaliserLangue(candidat.languageTag);
+      if (code.isEmpty || code == cibleNormalisee) continue;
+      if (langueSupportee(code) != null) return code;
+    }
   } catch (_) {
-    return null;
+    // Détecteur indisponible : on rend `null`, l'appelant montrera le texte.
   }
+  return null;
 }
