@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import '../features/contacts/contact_lists_repository.dart';
 import '../models/contact_list.dart';
 import 'api_client.dart';
@@ -19,24 +21,46 @@ String _chiffres(String brut) => brut.replaceAll(RegExp(r'\D'), '');
 /// sont donc tenues EN MÉMOIRE et alimentées par les écrans qui les chargent
 /// déjà ; si elles ne sont pas encore là, on rend `null` et l'appel sonne avec
 /// la sonnerie par défaut. Mieux vaut la mauvaise sonnerie que le silence.
-class SonneriesDeListes {
-  SonneriesDeListes(this._listes, this._api, this._jetons);
+///
+/// 🔴 **C'EST AUSSI LA SOURCE UNIQUE DE LA RANGÉE DE FILTRES** (19/08/2026).
+/// L'écran des conversations en gardait sa PROPRE copie, chargée une seule fois
+/// dans son `initState` : créer ou renommer une liste depuis le carnet ne se
+/// voyait qu'au redémarrage de l'application. Deux copies de la même donnée, et
+/// une seule des deux se rafraîchissait. En faire un `ChangeNotifier` supprime
+/// la classe de problème : qui modifie une liste appelle [alimenter], et tout ce
+/// qui l'affiche se remet à jour.
+class SonneriesDeListes extends ChangeNotifier {
+  SonneriesDeListes(this._depot, this._api, this._jetons);
 
-  final ContactListsRepository _listes;
+  final ContactListsRepository _depot;
   final ApiClient _api;
   final TokenStorage _jetons;
 
   List<ListeContacts> _cache = const [];
   bool _chargementLance = false;
 
+  /// Les listes connues. Jamais nulle : vide tant que rien n'est chargé.
+  List<ListeContacts> get listes => _cache;
+
   /// Alimente le cache depuis un écran qui vient de charger les listes.
   ///
   /// Passer par là plutôt que de refaire l'appel évite une seconde requête pour
   /// la même donnée, et garde le cache frais à chaque création ou modification
-  /// de liste — les deux écrans concernés appellent cette méthode.
+  /// de liste — les écrans concernés appellent cette méthode.
   void alimenter(List<ListeContacts> listes) {
     _cache = listes;
     _chargementLance = true;
+    notifyListeners();
+  }
+
+  /// Recharge depuis le serveur. Rend `false` en cas d'échec, sans lever.
+  Future<bool> rafraichir() async {
+    try {
+      alimenter(await _depot.list());
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Charge les listes une fois, en tâche de fond, sans jamais lever.
@@ -47,7 +71,7 @@ class SonneriesDeListes {
     if (_chargementLance) return;
     _chargementLance = true;
     try {
-      _cache = await _listes.list();
+      alimenter(await _depot.list());
     } catch (_) {
       // Silencieux : une sonnerie personnalisée est un confort, jamais un dû.
       _chargementLance = false;

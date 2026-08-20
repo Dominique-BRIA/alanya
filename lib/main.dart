@@ -87,10 +87,16 @@ void main() async {
             value: ContactsRepository(authedApi)),
         Provider<ContactListsRepository>.value(
             value: ContactListsRepository(authedApi)),
-        // La sonnerie d'un appelant se lit dans SES listes de contacts. Le
-        // service les garde en mémoire : un appel ne doit jamais attendre le
-        // réseau pour sonner.
-        Provider<SonneriesDeListes>.value(
+        // La sonnerie d'un appelant se lit dans SES listes de contacts, et la
+        // rangée de filtres des conversations affiche les MÊMES listes. Ce
+        // service en est la source unique : il les garde en mémoire — un appel
+        // ne doit jamais attendre le réseau pour sonner — et prévient ce qui les
+        // affiche dès qu'elles changent.
+        //
+        // ⚠️ `ChangeNotifierProvider` et non `Provider` : avec ce dernier, un
+        // `context.watch` ne serait jamais rebâti et la rangée resterait figée
+        // — exactement le défaut que ce lot corrige.
+        ChangeNotifierProvider<SonneriesDeListes>.value(
             value: SonneriesDeListes(
                 ContactListsRepository(authedApi), api, storage)),
         Provider<ChatRepository>.value(value: ChatRepository(authedApi)),

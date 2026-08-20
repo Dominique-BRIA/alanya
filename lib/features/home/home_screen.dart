@@ -40,7 +40,6 @@ import '../auth/auth_controller.dart';
 import '../chat/chat_repository.dart';
 import '../chat/screens/chat_screen.dart';
 import '../calls/screens/dialer_screen.dart';
-import '../contacts/contact_lists_repository.dart';
 import '../contacts/teintes_listes.dart';
 import '../contacts/screens/contacts_screen.dart';
 import '../calls/call_controller.dart';
@@ -334,7 +333,13 @@ class _ConversationsTabState extends State<_ConversationsTab>
   int _tabFilter = 0;
 
   /// Les listes de contacts de l'utilisateur, pour la rangée de filtres.
-  List<ListeContacts> _listes = const [];
+  ///
+  /// 🐛 **ELLE NE SE METTAIT À JOUR QU'AU DÉMARRAGE** (signalé le 19/08/2026).
+  /// Cet écran gardait sa PROPRE copie, chargée une seule fois dans `initState` :
+  /// une liste créée ou renommée depuis le carnet n'apparaissait qu'au
+  /// redémarrage de l'application. La copie est supprimée — la source est
+  /// désormais `SonneriesDeListes`, qui prévient tout le monde quand elle change.
+  List<ListeContacts> get _listes => context.watch<SonneriesDeListes>().listes;
 
   /// L'identifiant de la liste qui filtre, ou `null` — un seul filtre de liste
   /// actif à la fois, comme sur le web.
@@ -585,6 +590,9 @@ class _ConversationsTabState extends State<_ConversationsTab>
     if (state == AppLifecycleState.resumed) {
       _rafraichitAppels();
       _poll();
+      // Une liste a pu être créée ou renommée depuis un autre appareil — ou
+      // depuis le carnet, sur celui-ci.
+      _chargerListes();
     }
   }
 
@@ -671,6 +679,10 @@ class _ConversationsTabState extends State<_ConversationsTab>
   Future<void> _refresh() async {
     await _load();
     await _loadCalls();
+    // Tirer pour rafraîchir doit rafraîchir CE QUE L'ÉCRAN MONTRE, rangée de
+    // filtres comprise : c'est le geste que l'utilisateur fait quand quelque
+    // chose lui paraît périmé.
+    await _chargerListes();
   }
 
   @override
@@ -803,25 +815,9 @@ class _ConversationsTabState extends State<_ConversationsTab>
   /// ⚠️ Un échec ne doit RIEN casser : la rangée disparaît, les conversations
   /// restent. Ce n'est pas une donnée dont dépend l'écran, c'est un confort.
   Future<void> _chargerListes() async {
-    try {
-      final listes = await context.read<ContactListsRepository>().list();
-      if (!mounted) return;
-      // La sonnerie d'un appelant se lit dans ces mêmes listes : on alimente
-      // le cache au passage plutôt que de refaire la requête à l'arrivée d'un
-      // appel, moment où l'on ne peut justement pas attendre le réseau.
-      context.read<SonneriesDeListes>().alimenter(listes);
-      setState(() {
-        _listes = listes;
-        // Si la liste active a disparu — supprimée depuis un autre appareil —
-        // on retombe sur « toutes ». Sans cela, l'écran resterait vide sans
-        // qu'aucun filtre visible ne l'explique.
-        if (_listeActive != null && !listes.any((l) => l.id == _listeActive)) {
-          _listeActive = null;
-        }
-      });
-    } catch (_) {
-      if (mounted) setState(() => _listes = const []);
-    }
+    // L'échec est silencieux et sans effet : la rangée garde ce qu'elle
+    // affichait, plutôt que de disparaître sur une coupure réseau passagère.
+    await context.read<SonneriesDeListes>().rafraichir();
   }
 
   /// Restreint les conversations à la liste active, s'il y en a une.

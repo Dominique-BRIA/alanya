@@ -11,6 +11,7 @@ import '../../../core/sonneries_listes.dart';
 import '../../../models/sonnerie.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
+import '../../../widgets/contact_picker_sheet.dart';
 import '../../../widgets/motif_background.dart';
 import '../contact_lists_repository.dart';
 import '../contacts_repository.dart';
@@ -279,6 +280,15 @@ class _EditeurListeState extends State<_EditeurListe> {
   /// Le catalogue de l'utilisateur, chargé une fois à l'ouverture.
   List<Sonnerie> _catalogue = const [];
 
+  /// Numéros Alanya saisis à la main, à rattacher par le SERVEUR.
+  ///
+  /// 🐛 **ON NE POUVAIT AJOUTER QUE DES CONTACTS DÉJÀ ENREGISTRÉS** (signalé le
+  /// 19/08/2026). Le dépôt acceptait pourtant `memberNumbers` depuis le premier
+  /// jour, et le serveur renvoyait déjà `unknownNumbers` — mais l'écran
+  /// n'envoyait jamais de numéro, si bien que la branche qui traite les numéros
+  /// non rattachés était du code mort. Il manquait la saisie.
+  final Set<String> _numeros = {};
+
   @override
   void initState() {
     super.initState();
@@ -316,6 +326,63 @@ class _EditeurListeState extends State<_EditeurListe> {
     super.dispose();
   }
 
+  /// Les membres déjà dans la liste qui ne sont PAS dans le répertoire.
+  ///
+  /// 🐛 **ILS ÉTAIENT INVISIBLES, DONC IMPOSSIBLES À RETIRER.** L'éditeur ne
+  /// listait que le carnet d'adresses ; quelqu'un ajouté par son numéro, ou
+  /// sorti du répertoire depuis, restait membre sans apparaître nulle part. Le
+  /// modèle prévenait pourtant que `isContact` peut être faux — « le client doit
+  /// savoir afficher quelqu'un qu'il ne connaît plus ». C'est ici que ça se joue.
+  List<MembreDeListe> get _horsRepertoire {
+    final membres = widget.existante?.members;
+    if (membres == null) return const [];
+    final connus = widget.contacts.map((c) => c.userId).toSet();
+    return membres.where((m) => !connus.contains(m.id)).toList()
+      ..sort((a, b) => comparePourTri(a.displayName, b.displayName));
+  }
+
+  /// Ouvre le sélecteur du transfert d'appel — celui qui sait saisir un numéro.
+  ///
+  /// Réutilisé tel quel plutôt que redéveloppé : c'est déjà le pavé que
+  /// l'utilisateur connaît, et en écrire un second aurait fait deux règles de
+  /// validation d'Alanya ID à tenir accordées.
+  Future<void> _ajouterParNumero() async {
+    final dejaLa = <String>[
+      ..._numeros,
+      ...widget.contacts
+          .where((c) => _choisis.contains(c.userId))
+          .map((c) => stripAlanyaId(c.publicNumber)),
+    ];
+    final choisis = await ContactPickerSheet.show(
+      context,
+      title: "Ajouter à la liste",
+      confirmLabel: "Ajouter",
+      excludeNumbers: dejaLa,
+    );
+    if (choisis == null || choisis.isEmpty || !mounted) return;
+    setState(() {
+      for (final brut in choisis) {
+        final propre = stripAlanyaId(brut);
+        if (propre.isEmpty) continue;
+        // Un numéro qui EST déjà un contact rejoint `_choisis` : le serveur
+        // n'aurait pas à le résoudre, et il apparaîtrait alors deux fois —
+        // coché dans la liste, et en pastille juste au-dessus.
+        Contact? connu;
+        for (final c in widget.contacts) {
+          if (stripAlanyaId(c.publicNumber) == propre) {
+            connu = c;
+            break;
+          }
+        }
+        if (connu != null) {
+          _choisis.add(connu.userId);
+        } else {
+          _numeros.add(propre);
+        }
+      }
+    });
+  }
+
   List<Contact> get _visibles {
     final filtres = _recherche.trim().isEmpty
         ? List<Contact>.from(widget.contacts)
@@ -343,11 +410,13 @@ class _EditeurListeState extends State<_EditeurListe> {
           ? await depot.creer(
               nom: nom,
               membreIds: _choisis.toList(),
+              numeros: _numeros.toList(),
               couleur: _teinte,
               sonnerie: (url: _sonnerie))
           : await depot.modifier(widget.existante!.id,
               nom: nom,
               membreIds: _choisis.toList(),
+              numeros: _numeros.toList(),
               couleur: _teinte,
               sonnerie: (url: _sonnerie));
 
@@ -371,6 +440,7 @@ class _EditeurListeState extends State<_EditeurListe> {
   @override
   Widget build(BuildContext context) {
     final visibles = _visibles;
+    final hors = _horsRepertoire;
     return DraggableScrollableSheet(
       initialChildSize: 0.85,
       minChildSize: 0.5,
@@ -518,6 +588,44 @@ class _EditeurListeState extends State<_EditeurListe> {
               ),
             ),
           ),
+          // --- Ajout par numéro ---
+          //
+          // Le bouton est posé SOUS la recherche et AU-DESSUS de la liste : on
+          // cherche d'abord dans son carnet, on saisit un numéro seulement
+          // quand la personne n'y est pas.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: _ajouterParNumero,
+                icon: const Icon(Icons.dialpad, size: 18),
+                label: const Text("Ajouter par numéro"),
+              ),
+            ),
+          ),
+          if (_numeros.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: _numeros
+                      .map((n) => InputChip(
+                            label: Text(formatAlanyaId(n),
+                                style: alanyaIdStyleOf(context)),
+                            avatar: const Icon(Icons.dialpad, size: 16),
+                            // Retirable tant que la liste n'est pas enregistrée :
+                            // après, la personne devient un membre ordinaire et
+                            // se décoche comme les autres.
+                            onDeleted: () => setState(() => _numeros.remove(n)),
+                          ))
+                      .toList(),
+                ),
+              ),
+            ),
           // Le compteur est affiché en permanence : sur une longue liste, on
           // perd sinon le fil de ce qu'on a coché.
           Padding(
@@ -525,16 +633,21 @@ class _EditeurListeState extends State<_EditeurListe> {
             child: Align(
               alignment: Alignment.centerLeft,
               child: Text(
-                _choisis.isEmpty
-                    ? "Aucun membre sélectionné"
-                    : "${_choisis.length} membre${_choisis.length > 1 ? "s" : ""} sélectionné${_choisis.length > 1 ? "s" : ""}",
+                // Les numéros saisis comptent : ils seront membres eux aussi.
+                // Les omettre ferait lire « 2 membres » sur une liste qui va en
+                // compter quatre.
+                (() {
+                  final n = _choisis.length + _numeros.length;
+                  if (n == 0) return "Aucun membre sélectionné";
+                  return "$n membre${n > 1 ? "s" : ""} sélectionné${n > 1 ? "s" : ""}";
+                })(),
                 style: TextStyle(
                     fontSize: 12.5, color: mutedOf(context, Colors.black54)),
               ),
             ),
           ),
           Expanded(
-            child: visibles.isEmpty
+            child: visibles.isEmpty && hors.isEmpty
                 ? Center(
                     child: Padding(
                       padding: const EdgeInsets.all(24),
@@ -550,9 +663,30 @@ class _EditeurListeState extends State<_EditeurListe> {
                   )
                 : ListView.builder(
                     controller: controleur,
-                    itemCount: visibles.length,
+                    // Les membres hors répertoire PASSENT DEVANT : ils ne sont
+                    // trouvables par aucune recherche du carnet, et c'est
+                    // justement eux qu'on vient retirer.
+                    itemCount: hors.length + visibles.length,
                     itemBuilder: (_, i) {
-                      final c = visibles[i];
+                      if (i < hors.length) {
+                        final m = hors[i];
+                        return CheckboxListTile(
+                          value: _choisis.contains(m.id),
+                          onChanged: (v) => setState(() {
+                            if (v == true) {
+                              _choisis.add(m.id);
+                            } else {
+                              _choisis.remove(m.id);
+                            }
+                          }),
+                          title: Text(m.displayName),
+                          subtitle: Text(
+                            "${formatAlanyaId(m.publicNumber)} · hors répertoire",
+                            style: alanyaIdStyleOf(context),
+                          ),
+                        );
+                      }
+                      final c = visibles[i - hors.length];
                       return CheckboxListTile(
                         value: _choisis.contains(c.userId),
                         onChanged: (v) => setState(() {
