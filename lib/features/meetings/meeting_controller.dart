@@ -109,11 +109,42 @@ class MeetingController extends ChangeNotifier {
   /// serveur, qui n'en inspecte pas le contenu.
   final Map<String, bool> _peerMuted = {};
 
-  /// Mains levées des pairs, annoncées via la signalisation applicative.
+  /// Mains levées des pairs, telles que le SERVEUR les relaie (`meeting_hand`).
+  ///
+  /// Rien n'est conservé côté serveur : qui arrive en cours de route ne voit
+  /// pas les mains déjà levées. C'est aussi ce que fait le web — le geste est
+  /// bref par nature, et une main levée finit par se baisser.
   final Set<String> _raisedHands = {};
 
-  /// Mon propre état de main levée.
+  /// Mon propre état de main levée, posé lui aussi par la réponse du serveur et
+  /// non par le clic : tout le monde voit la même main au même instant.
   bool myHandRaised = false;
+
+  /// Qui présente son écran, dans l'ordre où les annonces sont arrivées.
+  ///
+  /// La vedette revient au DERNIER encore actif — même règle que le web, sans
+  /// quoi les deux plateformes mettraient des participants différents en grand.
+  /// Le serveur accepte délibérément DEUX présentateurs à la fois et relaie les
+  /// deux : ne retenir qu'un nom ferait disparaître la vedette dès que le
+  /// second s'arrête, alors que le premier présente toujours — son écran
+  /// retomberait en vignette, recadrée au format visage.
+  final List<String> _presentateurs = [];
+
+  /// Le participant dont la piste vidéo est un ÉCRAN et doit passer en grand,
+  /// ou nul si personne ne présente.
+  ///
+  /// Seul `meeting_screen` porte cette information : rien dans WebRTC ne
+  /// distingue une piste d'écran d'une piste de caméra, les deux empruntant le
+  /// même tuyau.
+  String? get presentateurId =>
+      _presentateurs.isEmpty ? null : _presentateurs.last;
+
+  /// Le pair [peerId] partage-t-il son écran ?
+  ///
+  /// Vrai pour les DEUX présentateurs quand il y en a deux, alors que
+  /// [presentateurId] n'en désigne qu'un : le second présente bel et bien,
+  /// même si ce n'est pas lui qui occupe le grand cadre.
+  bool isSharingScreen(String peerId) => _presentateurs.contains(peerId);
 
   /// Messages de chat reçus pendant la réunion (éphémères, non persistés).
   final List<MeetingChatMessage> _chatMessages = [];
@@ -179,8 +210,17 @@ class MeetingController extends ChangeNotifier {
     if (id == null || !isActive) return;
     debugPrint('[MeetingController] reconnexion WS → réinscription salle $id');
     _rt.meetingJoin(id);
-    // Rediffuse mon état courant aux pairs (muet/caméra/main levée).
-    _broadcastState();
+    // On n'annonce RIEN ici : ni l'état muet, ni la main levée.
+    //
+    // `meeting_join` traverse trois requêtes de base côté serveur AVANT que ma
+    // socket ne soit inscrite dans la salle, alors que `meeting_hand` et les
+    // signaux, eux, refusent immédiatement quiconque n'y figure pas encore.
+    // Deux trames envoyées dos à dos sur la même boucle arrivaient donc pendant
+    // que le join était encore suspendu, et étaient jetées sans la moindre
+    // erreur — la réannonce ne réannonçait rien.
+    //
+    // Tout part de `_handleJoined`, à la RÉCEPTION de `meeting_joined`, c'est-à-
+    // dire une fois le serveur prêt à m'écouter.
   }
 
   void bindUser(String userId, String displayName) {
@@ -390,11 +430,14 @@ class MeetingController extends ChangeNotifier {
   void _broadcastState({String? onlyTo}) {
     final id = activeMeetingId;
     if (id == null) return;
+    // ⚠️ LA MAIN LEVÉE N'EST PLUS ICI. Elle a son propre verbe serveur,
+    // `meeting_hand`, que le web parle aussi. La laisser dans cette annonce
+    // donnerait DEUX sources pour un même booléen — celle du serveur et
+    // celle-ci, posée sur ma seule foi — qui finiraient par se contredire.
     final payload = {
       "kind": "meeting_state",
       "muted": isMuted,
       "cameraOff": isCameraOff,
-      "handRaised": myHandRaised,
     };
     if (onlyTo != null) {
       _rt.meetingSignal(id, onlyTo, payload);
@@ -407,46 +450,33 @@ class MeetingController extends ChangeNotifier {
     }
   }
 
-  /// Bascule la main levée et prévient les autres participants.
+  /// Lève ou baisse ma main.
+  ///
+  /// ⚠️ RIEN N'EST APPLIQUÉ LOCALEMENT : [myHandRaised] est posé à la réception
+  /// de `meeting_hand`, que le serveur renvoie à l'auteur comme aux autres.
+  /// L'allumer ici sur la seule foi du clic ferait diverger ma vignette de
+  /// celle que les autres voient si la trame se perdait — et le web, lui,
+  /// attend déjà la réponse du serveur.
   void toggleHandRaised() {
-    myHandRaised = !myHandRaised;
-    _broadcastState();
-    notifyListeners();
+    final id = activeMeetingId;
+    if (id == null) return;
+    _rt.meetingHand(id, !myHandRaised);
   }
 
-  /// Envoie un message de chat à tous les participants. Le message est aussi
-  /// ajouté localement (les autres le recevront par [meeting_signal]).
+  /// Envoie un message dans le fil de la salle.
+  ///
+  /// ⚠️ RIEN N'EST AJOUTÉ LOCALEMENT, et c'est un changement de fond. Le
+  /// serveur renvoie le message à son auteur comme aux autres, et c'est SON
+  /// ordre qui fait foi : poser la bulle tout de suite la placerait ailleurs
+  /// chez soi que chez les autres, dès que deux personnes écrivent en même
+  /// temps. La bulle apparaît donc à la réception de [_handleMeetingMessage],
+  /// avec `mine` déduit de l'expéditeur que le serveur a posé.
   void sendChatMessage(String text) {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
     final id = activeMeetingId;
     if (id == null) return;
-
-    final now = DateTime.now();
-    final msg = MeetingChatMessage(
-      fromUserId: myUserId ?? "",
-      fromName: myDisplayName ?? "Moi",
-      text: trimmed,
-      sentAt: now,
-      mine: true,
-    );
-    _chatMessages.add(msg);
-
-    final payload = <String, dynamic>{
-      "kind": "meeting_chat",
-      "text": trimmed,
-      "fromName": myDisplayName ?? "Participant",
-      "ts": now.toUtc().toIso8601String(),
-    };
-    for (final peerId in _connectedPeerIds) {
-      if (peerId != myUserId) {
-        _rt.meetingSignal(id, peerId, payload);
-      }
-    }
-    // La salle de chat est peut-être fermée : on incrémente le compteur de
-    // non-lus. Réinitialisé quand on ouvre le panneau.
-    if (!_chatOpen) _unreadChatCount++;
-    notifyListeners();
+    _rt.meetingMessage(id, trimmed);
   }
 
   bool _chatOpen = false;
@@ -572,6 +602,11 @@ class MeetingController extends ChangeNotifier {
     _participantAvatars.remove(peerId);
     _connectedPeerIds.remove(peerId);
     _peerMuted.remove(peerId);
+    // Même ménage que sur un départ annoncé : une main levée ou une
+    // présentation laissées derrière un pair perdu resteraient à l'écran pour
+    // quelqu'un qui n'est plus là.
+    _raisedHands.remove(peerId);
+    _presentateurs.remove(peerId);
     _mesh?.removePeer(peerId);
     notifyListeners();
   }
@@ -600,6 +635,15 @@ class MeetingController extends ChangeNotifier {
         break;
       case "meeting_signal":
         _handleSignal(e);
+        break;
+      case "meeting_message":
+        _handleMeetingMessage(e);
+        break;
+      case "meeting_hand":
+        _handleMeetingHand(e);
+        break;
+      case "meeting_screen":
+        _handleMeetingScreen(e);
         break;
       case "meeting_extended":
         // L'organisateur a repoussé le terme. La nouvelle durée vient du
@@ -653,6 +697,11 @@ class MeetingController extends ChangeNotifier {
     _hydrateParticipants(meetingId);
     // Annonce mon état muet courant à ceux déjà présents.
     _broadcastState();
+    // ET MA MAIN, si elle était levée. Le serveur ne conserve rien : la salle
+    // que je viens d'intégrer ignore tout de ma demande de parole, alors que ma
+    // propre vignette l'affiche encore. Sans cette réannonce après une coupure
+    // réseau, mon écran montrerait une main que plus personne ne voit.
+    if (myHandRaised) _rt.meetingHand(meetingId, true);
     notifyListeners();
   }
 
@@ -689,6 +738,12 @@ class MeetingController extends ChangeNotifier {
     _connectedPeerIds.remove(userId);
     _peerMuted.remove(userId);
     _raisedHands.remove(userId);
+    // Le présentateur s'en va : le serveur annonce lui-même la fin de son
+    // partage avant son départ, mais on referme aussi ici, au cas où la trame
+    // se perdrait. Il faut le retirer de la LISTE et pas seulement de la
+    // vedette : l'y laisser le ferait revenir en grand cadre — absent, et sur
+    // son dernier cadre figé — dès que le présentateur SUIVANT s'arrêterait.
+    _presentateurs.remove(userId);
     _mesh?.removePeer(userId);
     RingtoneService.instance.playParticipantLeft();
     notifyListeners();
@@ -704,46 +759,18 @@ class MeetingController extends ChangeNotifier {
 
     final kind = signal["kind"] as String?;
 
-    // Signal applicatif : état d'un participant (muet/caméra/main levée).
+    // Signal applicatif : état d'un participant (muet/caméra).
+    //
+    // ⚠️ CE CANAL RESTE ENTRE MOBILES. Le serveur ne l'inspecte pas — il ne
+    // fait que relayer de pair à pair — et le web n'en émet ni n'en lit. L'état
+    // muet d'un participant web reste donc inconnu ici : voir le compte rendu,
+    // c'est une divergence à traiter à part, sur le serveur.
+    //
+    // La main levée n'y est plus : elle a son propre verbe serveur.
     if (kind == "meeting_state") {
-      var changed = false;
       final muted = signal["muted"] == true;
       if (_peerMuted[fromUserId] != muted) {
         _peerMuted[fromUserId] = muted;
-        changed = true;
-      }
-      final hand = signal["handRaised"] == true;
-      final hadHand = _raisedHands.contains(fromUserId);
-      if (hand && !hadHand) {
-        _raisedHands.add(fromUserId);
-        changed = true;
-      } else if (!hand && hadHand) {
-        _raisedHands.remove(fromUserId);
-        changed = true;
-      }
-      if (changed) notifyListeners();
-      return;
-    }
-
-    // Signal applicatif : message de chat.
-    if (kind == "meeting_chat") {
-      final text = signal["text"] as String?;
-      final fromName = signal["fromName"] as String? ??
-          _participantNames[fromUserId] ??
-          "Participant";
-      final tsRaw = signal["ts"] as String?;
-      final ts = tsRaw != null
-          ? DateTime.tryParse(tsRaw) ?? DateTime.now()
-          : DateTime.now();
-      if (text != null && text.trim().isNotEmpty) {
-        _chatMessages.add(MeetingChatMessage(
-          fromUserId: fromUserId,
-          fromName: fromName,
-          text: text,
-          sentAt: ts.toLocal(),
-          mine: false,
-        ));
-        if (!_chatOpen) _unreadChatCount++;
         notifyListeners();
       }
       return;
@@ -751,6 +778,108 @@ class MeetingController extends ChangeNotifier {
 
     // Sinon : signal de négociation WebRTC.
     _mesh?.handleSignal(fromUserId, signal);
+  }
+
+  /// Message reçu dans le fil de la salle (`meeting_message`).
+  ///
+  /// C'est le verbe du serveur, celui que le web parle aussi. Le mobile
+  /// écrivait auparavant dans un `meeting_signal` de pair à pair : le fil ne
+  /// franchissait pas la frontière entre les deux plateformes.
+  ///
+  /// MON PROPRE MESSAGE REPASSE PAR ICI, le serveur le renvoyant à tout le
+  /// monde y compris à son auteur. C'est la seule façon d'avoir le même fil
+  /// dans le même ordre partout ; `mine` se déduit de l'expéditeur que le
+  /// serveur a posé, jamais du client, qui pourrait écrire au nom d'un autre.
+  void _handleMeetingMessage(Map<String, dynamic> e) {
+    final meetingId = e["meetingId"] as int?;
+    if (meetingId != activeMeetingId) return;
+
+    final fromUserId = e["fromUserId"] as String?;
+    final text = e["text"] as String?;
+    if (fromUserId == null || text == null || text.trim().isEmpty) return;
+
+    final mine = fromUserId == myUserId;
+    // Le nom vient du serveur ; on ne retombe sur le répertoire local que s'il
+    // manque, et sur « Moi » pour ses propres messages.
+    final fromName = (e["displayName"] as String?)?.trim().isNotEmpty == true
+        ? e["displayName"] as String
+        : mine
+            ? (myDisplayName ?? "Moi")
+            : (_participantNames[fromUserId] ?? "Participant");
+    // L'horodatage aussi est celui du serveur : deux téléphones mal réglés
+    // rangeraient sinon le fil différemment.
+    final sentAt =
+        DateTime.tryParse(e["sentAt"] as String? ?? "")?.toLocal() ??
+            DateTime.now();
+
+    _chatMessages.add(MeetingChatMessage(
+      fromUserId: fromUserId,
+      fromName: fromName,
+      text: text,
+      sentAt: sentAt,
+      mine: mine,
+    ));
+    // Ses propres messages ne se comptent pas comme non lus : on vient de les
+    // écrire. Le panneau peut s'être refermé entre l'envoi et l'écho.
+    if (!_chatOpen && !mine) _unreadChatCount++;
+    notifyListeners();
+  }
+
+  /// Main levée ou baissée (`meeting_hand`), relayée par le serveur à toute la
+  /// salle — l'auteur compris, d'où le traitement de mon propre identifiant.
+  void _handleMeetingHand(Map<String, dynamic> e) {
+    final meetingId = e["meetingId"] as int?;
+    if (meetingId != activeMeetingId) return;
+
+    final fromUserId = e["fromUserId"] as String?;
+    if (fromUserId == null) return;
+    final levee = e["levee"] == true;
+
+    if (fromUserId == myUserId) {
+      if (myHandRaised == levee) return;
+      myHandRaised = levee;
+      notifyListeners();
+      return;
+    }
+
+    final avant = _raisedHands.contains(fromUserId);
+    if (levee == avant) return;
+    if (levee) {
+      _raisedHands.add(fromUserId);
+    } else {
+      _raisedHands.remove(fromUserId);
+    }
+    notifyListeners();
+  }
+
+  /// Qui présente son écran (`meeting_screen`).
+  ///
+  /// POURQUOI CE VERBE COMPTE. La piste vidéo d'un écran emprunte exactement le
+  /// même tuyau que celle d'une caméra, et rien dans WebRTC ne dit ce qu'elle
+  /// montre. Sans cette annonce, l'écran d'un participant web arriverait ici
+  /// comme une vignette de visage : recadrée au format portrait, donc amputée
+  /// de la barre d'outils ou de la dernière colonne du tableau qu'on partageait
+  /// justement.
+  ///
+  /// Le mobile n'ÉMET pas de partage — flutter_webrtc ne l'offre pas
+  /// simplement, et ce n'est pas demandé. Il ne fait que le recevoir.
+  ///
+  /// Le serveur rejoue ce message à qui entre au milieu d'une présentation : le
+  /// nouveau venu sait donc lui aussi ce qu'il regarde.
+  void _handleMeetingScreen(Map<String, dynamic> e) {
+    final meetingId = e["meetingId"] as int?;
+    if (meetingId != activeMeetingId) return;
+
+    final fromUserId = e["fromUserId"] as String?;
+    if (fromUserId == null) return;
+
+    if (e["partage"] == true) {
+      if (_presentateurs.contains(fromUserId)) return;
+      _presentateurs.add(fromUserId);
+    } else {
+      if (!_presentateurs.remove(fromUserId)) return;
+    }
+    notifyListeners();
   }
 
   void _clear() {
@@ -772,6 +901,9 @@ class MeetingController extends ChangeNotifier {
     _connectedPeerIds.clear();
     _peerMuted.clear();
     _raisedHands.clear();
+    // Un reste de la réunion précédente mettrait un absent en grand dès
+    // l'entrée dans la suivante.
+    _presentateurs.clear();
     _chatMessages.clear();
     myHandRaised = false;
     _chatOpen = false;

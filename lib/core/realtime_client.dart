@@ -458,6 +458,39 @@ class RealtimeClient extends ChangeNotifier {
         "signal": signal,
       });
 
+  /// Écrit dans le fil de la salle.
+  ///
+  /// Passe par le SERVEUR et non par [meetingSignal] de pair à pair : c'est le
+  /// verbe que le serveur et le web parlent déjà. Un fil relayé de pair à pair
+  /// n'atteignait que les autres mobiles, et jamais un participant web —
+  /// chacun écrivait dans le vide.
+  ///
+  /// Rien n'est affiché localement en attendant : le serveur renvoie le message
+  /// à son auteur comme aux autres, et c'est son ordre qui fait foi. Poser la
+  /// bulle tout de suite la placerait ailleurs chez soi que chez les autres.
+  ///
+  /// ⚠️ VOLONTAIREMENT ABSENTE de [_typesCritiques], comme la main levée. Le
+  /// fil est éphémère : un message rejoué trente secondes après une coupure
+  /// arriverait après ceux qu'on a écrits depuis, donc dans le désordre — et il
+  /// se retape, alors qu'un ordre faux ne se rattrape pas.
+  void meetingMessage(int meetingId, String texte) => _send({
+        "type": "meeting_message",
+        "meetingId": meetingId,
+        "text": texte,
+      });
+
+  /// Lève ou baisse la main.
+  ///
+  /// Même règle que le fil : le serveur renvoie l'état à l'auteur comme aux
+  /// autres, donc tout le monde voit la même main au même instant. Rien n'est
+  /// conservé côté serveur — qui arrive ensuite ne voit pas les mains déjà
+  /// levées, sur mobile comme sur le web.
+  void meetingHand(int meetingId, bool levee) => _send({
+        "type": "meeting_hand",
+        "meetingId": meetingId,
+        "levee": levee,
+      });
+
   void disconnect() {
     _reconnectTimer?.cancel();
     _pingTimer?.cancel();

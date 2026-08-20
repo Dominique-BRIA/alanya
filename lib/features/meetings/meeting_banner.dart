@@ -60,6 +60,14 @@ class _MeetingBannerState extends State<MeetingBanner> {
         ? "Réunion en cours · $elapsed"
         : "Réunion en cours…";
 
+    // Combien de mains sont levées, la mienne comprise. Le bandeau est la SEULE
+    // surface visible quand la salle est réduite : sans ce compte, une demande
+    // de parole passerait inaperçue tant qu'on lit ses messages ailleurs. Une
+    // pastille et un chiffre, pas les noms — le bandeau ne fait qu'appeler, la
+    // salle dit qui.
+    final mains = mc.peerIds.where(mc.isHandRaised).length +
+        (mc.myHandRaised ? 1 : 0);
+
     // Décalé sous le bandeau d'appel si jamais les deux coexistent (peu
     // probable, les réunions ne verrouillent pas l'état occupé).
     return Positioned(
@@ -110,6 +118,32 @@ class _MeetingBannerState extends State<MeetingBanner> {
                             color: Colors.white, fontWeight: FontWeight.w600),
                       ),
                     ),
+                    if (mains > 0) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        margin: const EdgeInsets.only(right: 10),
+                        decoration: BoxDecoration(
+                          color: AlanyaColors.gold,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.back_hand,
+                                color: Colors.white, size: 13),
+                            const SizedBox(width: 4),
+                            Text(
+                              "$mains",
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     const Text("Revenir",
                         style: TextStyle(color: Colors.white70)),
                   ],

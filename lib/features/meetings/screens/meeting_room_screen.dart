@@ -277,6 +277,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
               : Column(
                   children: [
                     _buildHeader(),
+                    _buildMainsLevees(),
                     Expanded(child: _buildVideoGrid()),
                     _buildControls(),
                   ],
@@ -431,6 +432,79 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     return Colors.white54;
   }
 
+  /// Bandeau des mains levées : QUI demande la parole, en une ligne.
+  ///
+  /// Les pastilles posées sur les vignettes ne suffisent pas sur un téléphone :
+  /// une main levée peut se trouver dans une case minuscule, dans la bande d'une
+  /// présentation, ou hors de l'écran quand la grille défile. Cette ligne, elle,
+  /// est toujours au même endroit et se lit d'un coup d'œil.
+  ///
+  /// Elle DISPARAÎT complètement dès qu'aucune main n'est levée : c'est ce qui
+  /// permet de la mettre là sans encombrer. Un toucher ouvre la fiche des
+  /// participants, où chaque main est de nouveau signalée nom par nom.
+  Widget _buildMainsLevees() {
+    return ListenableBuilder(
+      listenable: context.read<MeetingController>(),
+      builder: (_, __) {
+        final ctrl = context.read<MeetingController>();
+        // Les autres d'abord, moi en dernier : ce bandeau sert surtout à
+        // repérer qui attend la parole, pas à se relire soi-même.
+        final noms = <String>[
+          for (final id in ctrl.peerIds)
+            if (ctrl.isHandRaised(id))
+              ctrl.participantNames[id] ?? "Participant",
+          if (ctrl.myHandRaised) "Vous",
+        ];
+        if (noms.isEmpty) return const SizedBox.shrink();
+
+        return GestureDetector(
+          onTap: _showParticipants,
+          child: Container(
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              color: AlanyaColors.gold.withValues(alpha: 0.18),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.back_hand, color: AlanyaColors.gold, size: 16),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _texteMainsLevees(noms, ctrl.myHandRaised),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: AlanyaColors.gold,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// Phrase du bandeau des mains levées.
+  ///
+  /// Trois formes, et pas une de moins : au singulier la troisième personne
+  /// (« Awa demande »), pour soi seul la deuxième (« Vous demandez »), et au
+  /// pluriel un décompte suivi des noms — un verbe accordé sur une liste
+  /// mêlant « Vous » et des tiers n'existe pas en français correct.
+  String _texteMainsLevees(List<String> noms, bool laMienne) {
+    if (noms.length == 1) {
+      return laMienne
+          ? "Vous demandez la parole"
+          : "${noms.first} demande la parole";
+    }
+    return "${noms.length} mains levées · ${noms.join(', ')}";
+  }
+
   /// Zone centrale : vignettes des participants.
   ///
   /// En RÉUNION AUDIO, on n'instancie AUCUN [RTCVideoRenderer] : le flux local
@@ -446,6 +520,22 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
 
         if (!ctrl.activeIsVideo) {
           return _buildAudioGrid(ctrl);
+        }
+
+        // QUELQU'UN PRÉSENTE : son écran passe en grand tout seul, sans que
+        // personne ait à le demander, et les autres se rangent dans une bande
+        // dessous. C'est ce qu'on attend d'une réunion.
+        //
+        // ⚠️ Le présentateur est DÉSIGNÉ PAR LE SERVEUR (`meeting_screen`), il
+        // n'est jamais deviné d'une piste vidéo : rien dans WebRTC ne distingue
+        // un écran d'un visage, la piste emprunte le même tuyau que la caméra.
+        // Sans cette annonce, un écran partagé arriverait ici comme une vignette
+        // de plus, rognée pour remplir sa case.
+        final presentateurId = ctrl.presentateurId;
+        final fluxPresente =
+            presentateurId != null ? ctrl.remoteStreams[presentateurId] : null;
+        if (presentateurId != null && fluxPresente != null) {
+          return _buildPresentation(ctrl, presentateurId, fluxPresente);
         }
 
         final remoteIds = ctrl.remoteStreams.keys.toList();
@@ -513,6 +603,116 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     );
   }
 
+  /// Disposition « quelqu'un présente » : l'écran en grand, les autres dessous.
+  ///
+  /// Le grand cadre est en `contain` et jamais en miroir — voir
+  /// [RTCVideoRendererObject.estUnEcran], c'est là que se joue toute la
+  /// différence avec un visage.
+  ///
+  /// Le présentateur ne se retrouve PAS dans la bande du bas : il est déjà en
+  /// grand, sa vignette n'y ajouterait qu'un doublon plus petit. Ma propre image
+  /// ouvre la bande, comme elle ouvre la grille ordinaire.
+  Widget _buildPresentation(
+    MeetingController ctrl,
+    String presentateurId,
+    MediaStream flux,
+  ) {
+    final nom = ctrl.participantNames[presentateurId] ?? "Participant";
+    final autres = ctrl.peerIds.where((id) => id != presentateurId).toList();
+
+    return Column(
+      children: [
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  // Fond NOIR sous l'écran : affiché en entier, il ne remplit
+                  // pas la case et laisse deux bandes. Du noir franc les rend
+                  // muettes ; le gris des vignettes vides, lui, ferait croire à
+                  // un flux manquant.
+                  const ColoredBox(color: Colors.black),
+                  RTCVideoRendererObject(stream: flux, estUnEcran: true),
+                  // CE QUI DIT « ÉCRAN » ET NON « CAMÉRA ». Sans cette
+                  // étiquette, une présentation n'est qu'une image de plus, en
+                  // plus grand : rien ne la distinguerait d'un gros plan.
+                  Positioned(
+                    left: 10,
+                    bottom: 10,
+                    right: 10,
+                    child: Row(
+                      children: [
+                        Flexible(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.65),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.screen_share,
+                                    color: AlanyaColors.gold, size: 14),
+                                const SizedBox(width: 6),
+                                Flexible(
+                                  child: Text(
+                                    "$nom · Écran partagé",
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        // La bande défile horizontalement plutôt que de se comprimer : sur un
+        // téléphone, six vignettes réparties de force sur la largeur ne
+        // montreraient plus personne.
+        SizedBox(
+          height: 96,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            children: [
+              SizedBox(
+                width: 124,
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: _localVideo(isLarge: false),
+                ),
+              ),
+              for (final id in autres)
+                SizedBox(
+                  width: 124,
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: _remoteVideoTile(id),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   /// Grille affichée en réunion AUDIO : avatars uniquement, pas de renderer.
   Widget _buildAudioGrid(MeetingController ctrl) {
     final me = context.read<AuthController>().user;
@@ -526,6 +726,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       String? avatar,
       bool muted,
       bool hand,
+      bool partage,
       bool me
     })>[
       (
@@ -534,6 +735,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         avatar: me?.avatarUrl,
         muted: ctrl.isMuted,
         hand: ctrl.myHandRaised,
+        partage: false,
         me: true,
       ),
       for (final id in ctrl.peerIds)
@@ -543,6 +745,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
           avatar: ctrl.participantAvatars[id],
           muted: ctrl.isPeerMuted(id),
           hand: ctrl.isHandRaised(id),
+          partage: ctrl.isSharingScreen(id),
           me: false,
         ),
     ];
@@ -609,6 +812,21 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                     style: const TextStyle(color: Colors.white70, fontSize: 13),
                   ),
                 ),
+                // Une MENTION et non une pastille : en réunion audio, aucune
+                // piste vidéo n'est demandée au correspondant, l'écran partagé
+                // ne nous parvient donc pas. On dit ce qui se passe plutôt que
+                // de faire croire à une image qu'on pourrait ouvrir.
+                if (e.partage)
+                  const SizedBox(
+                    width: 96,
+                    child: Text(
+                      "Partage son écran",
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: AlanyaColors.gold, fontSize: 10),
+                    ),
+                  ),
               ],
             );
           }).toList(),
@@ -673,6 +891,10 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     final avatarUrl = ctrl.participantAvatars[peerId];
     final muted = ctrl.isPeerMuted(peerId);
     final hand = ctrl.isHandRaised(peerId);
+    // Le serveur accepte DEUX présentateurs à la fois et laisse le client
+    // trancher : celui qui n'a pas le grand cadre garde sa vignette, mais son
+    // écran y reste montré en entier, pas rogné comme un visage.
+    final partage = ctrl.isSharingScreen(peerId);
     final hasVideo = stream != null;
 
     return ClipRRect(
@@ -680,9 +902,10 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (hasVideo)
-            RTCVideoRendererObject(stream: stream)
-          else
+          if (hasVideo) ...[
+            if (partage) const ColoredBox(color: Colors.black),
+            RTCVideoRendererObject(stream: stream, estUnEcran: partage),
+          ] else
             _avatarPlaceholder(
                 name: name, isLarge: false, avatarUrl: avatarUrl),
           // Bandeau nom + état muet
@@ -729,6 +952,18 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(Icons.back_hand,
+                        color: Colors.white, size: 14),
+                  ),
+                ],
+                if (partage) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: const BoxDecoration(
+                      color: AlanyaColors.forest,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.screen_share,
                         color: Colors.white, size: 14),
                   ),
                 ],
@@ -869,6 +1104,41 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     );
   }
 
+  /// Colonne de droite d'une ligne de la fiche participants : ce que fait la
+  /// personne, dans l'ordre où on le cherche — sa main, son écran, son micro.
+  ///
+  /// Le micro y figure TOUJOURS, les deux autres seulement quand ils ont lieu
+  /// d'être : c'est la fiche qu'on ouvre pour savoir qui demande la parole
+  /// quand le bandeau n'annonce qu'un décompte.
+  Widget _etatParticipant({
+    required bool muted,
+    required bool hand,
+    required bool partage,
+  }) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (hand) ...[
+          const Icon(Icons.back_hand, color: AlanyaColors.gold, size: 18),
+          const SizedBox(width: 10),
+        ],
+        if (partage) ...[
+          // `forestLight` et non `forest` : le vert du thème se lit mal sur le
+          // fond sombre de la salle — la palette le dit déjà pour l'écran
+          // d'appel. Ici l'icône n'a pas de pastille pleine pour la porter.
+          const Icon(Icons.screen_share,
+              color: AlanyaColors.forestLight, size: 18),
+          const SizedBox(width: 10),
+        ],
+        Icon(
+          muted ? Icons.mic_off : Icons.mic,
+          color: muted ? Colors.red : Colors.white54,
+          size: 20,
+        ),
+      ],
+    );
+  }
+
   void _showChat() {
     final ctrl = context.read<MeetingController>();
     ctrl.setChatOpen(true);
@@ -961,10 +1231,10 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                           ),
                           title: Text(me?.pseudo ?? "Vous",
                               style: const TextStyle(color: Colors.white)),
-                          trailing: Icon(
-                            ctrl.isMuted ? Icons.mic_off : Icons.mic,
-                            color: ctrl.isMuted ? Colors.red : Colors.white54,
-                            size: 20,
+                          trailing: _etatParticipant(
+                            muted: ctrl.isMuted,
+                            hand: ctrl.myHandRaised,
+                            partage: false,
                           ),
                         ),
                         const Divider(color: Colors.white12, height: 1),
@@ -983,10 +1253,10 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                             ),
                             title: Text(name,
                                 style: const TextStyle(color: Colors.white)),
-                            trailing: Icon(
-                              muted ? Icons.mic_off : Icons.mic,
-                              color: muted ? Colors.red : Colors.white54,
-                              size: 20,
+                            trailing: _etatParticipant(
+                              muted: muted,
+                              hand: ctrl.isHandRaised(peerId),
+                              partage: ctrl.isSharingScreen(peerId),
                             ),
                           );
                         }),
@@ -1017,6 +1287,9 @@ class _MeetingChatPanelState extends State<_MeetingChatPanel> {
   final _inputCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
 
+  /// Nombre de messages au dernier recalage du défilement. Voir [build].
+  int _dernierCompte = 0;
+
   @override
   void dispose() {
     _inputCtrl.dispose();
@@ -1024,20 +1297,15 @@ class _MeetingChatPanelState extends State<_MeetingChatPanel> {
     super.dispose();
   }
 
+  /// Envoie et vide le champ. RIEN N'EST AFFICHÉ ICI : le message revient par le
+  /// serveur, qui le renvoie à toute la salle, l'expéditeur compris. C'est ce
+  /// retour qui l'ajoute au fil — et donc son arrivée, et non ce clic, qui fait
+  /// descendre le défilement.
   void _send() {
     final text = _inputCtrl.text;
     if (text.trim().isEmpty) return;
     widget.controller.sendChatMessage(text);
     _inputCtrl.clear();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollCtrl.hasClients) {
-        _scrollCtrl.animateTo(
-          _scrollCtrl.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-        );
-      }
-    });
   }
 
   @override
@@ -1049,11 +1317,22 @@ class _MeetingChatPanelState extends State<_MeetingChatPanel> {
         listenable: widget.controller,
         builder: (_, __) {
           final messages = widget.controller.chatMessages;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (_scrollCtrl.hasClients) {
-              _scrollCtrl.jumpTo(_scrollCtrl.position.maxScrollExtent);
-            }
-          });
+          /*
+           * ⚠️ LE DÉFILEMENT NE SE RECALE QUE SI UN MESSAGE EST ARRIVÉ.
+           *
+           * Le contrôleur notifie CHAQUE SECONDE — c'est son minuteur de salle
+           * qui bat — et ce panneau se reconstruit d'autant. Recaler à chaque
+           * reconstruction arrachait le fil des mains de qui remontait le lire :
+           * une seconde plus tard, il était rejeté tout en bas.
+           */
+          if (messages.length != _dernierCompte) {
+            _dernierCompte = messages.length;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (_scrollCtrl.hasClients) {
+                _scrollCtrl.jumpTo(_scrollCtrl.position.maxScrollExtent);
+              }
+            });
+          }
           return SafeArea(
             top: false,
             child: Column(
@@ -1212,8 +1491,26 @@ class _ChatBubble extends StatelessWidget {
 
 /// Wrapper simple pour afficher un flux WebRTC.
 class RTCVideoRendererObject extends StatefulWidget {
-  const RTCVideoRendererObject({super.key, required this.stream});
+  const RTCVideoRendererObject({
+    super.key,
+    required this.stream,
+    this.estUnEcran = false,
+  });
   final MediaStream stream;
+
+  /// Ce flux est un ÉCRAN PARTAGÉ, et non un visage. Deux conséquences, et
+  /// c'est tout le sujet :
+  ///
+  ///  - l'image est montrée EN ENTIER (`contain`) au lieu d'être rognée pour
+  ///    remplir la case. Un visage recadré reste un visage ; un écran recadré
+  ///    perd la barre d'outils, la ligne de code ou la colonne du tableau
+  ///    qu'on partageait justement ;
+  ///  - elle n'est JAMAIS retournée en miroir : on y lit du texte.
+  ///
+  /// Le drapeau vient du verbe serveur `meeting_screen` et de nulle part
+  /// ailleurs : la piste d'un écran emprunte le même tuyau que celle d'une
+  /// caméra, et rien dans WebRTC ne dit ce qu'elle montre.
+  final bool estUnEcran;
 
   @override
   State<RTCVideoRendererObject> createState() => _RTCVideoRendererObjectState();
@@ -1261,7 +1558,15 @@ class _RTCVideoRendererObjectState extends State<RTCVideoRendererObject> {
       return const Center(
           child: CircularProgressIndicator(color: Colors.white));
     }
-    return RTCVideoView(_renderer,
-        objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover);
+    return RTCVideoView(
+      _renderer,
+      // Écrit noir sur blanc plutôt que laissé à la valeur par défaut : le jour
+      // où l'on retournera la vignette de sa propre caméra — c'est l'usage —,
+      // il faudra que ce faux-là reste vrai pour un écran.
+      mirror: false,
+      objectFit: widget.estUnEcran
+          ? RTCVideoViewObjectFit.RTCVideoViewObjectFitContain
+          : RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+    );
   }
 }
