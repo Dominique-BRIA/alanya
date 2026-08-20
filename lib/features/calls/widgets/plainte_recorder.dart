@@ -13,6 +13,7 @@ import '../../../core/ringtone_service.dart';
 import '../../../core/voice_recorder.dart';
 import '../../media/media_repository.dart';
 import '../call_controller.dart';
+import 'ivr_panel.dart';
 import '../plaintes_repository.dart';
 
 /// Les états visibles d'une plainte vocale, du bip à l'envoi.
@@ -20,13 +21,21 @@ enum _EtatPlainte { bip, enregistrement, pause, relecture, envoi, echec }
 
 /// Enregistrement d'une plainte vocale, sur la touche 0 d'un centre vocal.
 ///
-/// 🔴 **POSÉ EN SURCOUCHE, ET C'EST TOUT L'ENJEU DE MISE EN PAGE.** Le pavé
-/// numérique est un `Expanded` qui prend « ce qui reste » : tout widget ajouté
-/// au-dessus lui prendrait sa hauteur, et le ferait rétrécir — le défaut
-/// signalé deux fois (17/08 puis 18/08/2026), qu'un test surveille désormais.
-/// Ce panneau ne participe donc PAS à la colonne : il flotte dans l'espace déjà
-/// réservé entre le nom du centre et la bande « Accueil », qui est vide pendant
-/// un enregistrement. La géométrie de l'écran ne change pas d'un pixel.
+/// 🔴 **IL PREND LA PLACE DE `IvrMessageBand`, IL NE FLOTTE PAS AU-DESSUS.**
+///
+/// Le pavé numérique est un `Expanded` qui prend « ce qui reste » : tout widget
+/// ajouté au-dessus lui prendrait sa hauteur et le ferait rétrécir — défaut
+/// signalé deux fois (17/08 puis 18/08/2026), qu'un test surveille. La bande de
+/// message, elle, réserve déjà **52 points** en permanence : s'y installer ne
+/// coûte donc rien aux touches. Les deux ne peuvent pas coexister — `ivr_record`
+/// efface le message en posant l'étape.
+///
+/// ⚠️ **UNE PREMIÈRE VERSION FLOTTAIT EN `Stack` + `Clip.none`, ET ELLE ÉTAIT
+/// INVISIBLE.** Le panneau était pourtant construit et vivant : c'est lui qui
+/// joue le bip, et le bip s'entendait. Mais dans une `Column`, les enfants
+/// déclarés APRÈS se peignent par-dessus — le pavé recouvrait tout le
+/// débordement vers le bas. « Ni le minuteur ni rien », signalé sur device le
+/// 20/08/2026. **Un débordement n'est pas un emplacement.**
 ///
 /// ⚠️ **L'ENREGISTREMENT NE DÉMARRE PAS À L'APPUI SUR 0**, mais à la FIN DU BIP
 /// — demande explicite du user. Le serveur donne le départ et l'URL ; c'est ici
@@ -307,168 +316,200 @@ class _PlainteRecorderState extends State<PlainteRecorder> {
   }
 
   @override
+  /// ⚠️ **LA HAUTEUR EST IMPOSÉE, ET C'EST ELLE QUI DESSINE CE PANNEAU.** Il
+  /// prend la place de `IvrMessageBand`, dont les 52 points sont déjà réservés
+  /// sur la hauteur du pavé numérique. Dépasser reviendrait à rogner les
+  /// touches — ce que le user a explicitement exclu et qu'un test surveille.
+  /// D'où UNE SEULE LIGNE : pastille, minuteur, puis les actions en icônes.
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 24),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.55),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white24),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [_ligneEtat(), const SizedBox(height: 8), _actions()],
+    return SizedBox(
+      height: IvrMessageBand.hauteur,
+      child: Center(
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.55),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _pastille(),
+              const SizedBox(width: 6),
+              // `Flexible` : un message d'échec n'a aucune longueur garantie, et
+              // un débordement ferait passer la rayure jaune et noire de Flutter
+              // par-dessus le pavé.
+              Flexible(child: _texteEtat()),
+              const SizedBox(width: 6),
+              ..._actions(),
+            ],
+          ),
+        ),
       ),
     );
   }
 
-  Widget _ligneEtat() {
+  /// Le point qui dit l'état d'un coup d'œil : rouge quand ça enregistre
+  /// vraiment, blanc en pause — sinon rien ne distinguerait les deux.
+  Widget _pastille() {
     final enregistre = _etat == _EtatPlainte.enregistrement;
-    final texte = switch (_etat) {
-      _EtatPlainte.bip => "Annonce en cours…",
-      _EtatPlainte.enregistrement => "Parlez, on vous écoute",
-      _EtatPlainte.pause => "En pause",
-      _EtatPlainte.relecture => "Réécoutez avant d'envoyer",
+    return Icon(
+      _etat == _EtatPlainte.echec ? Icons.error_outline : Icons.mic,
+      size: 16,
+      color: _etat == _EtatPlainte.echec
+          ? Colors.orangeAccent
+          : (enregistre ? Colors.redAccent : Colors.white70),
+    );
+  }
+
+  /// Le minuteur, ou le motif d'un échec.
+  ///
+  /// ⚠️ Sur une seule ligne, le CHRONO prime sur la phrase : c'est lui qu'on
+  /// regarde en parlant. Les libellés sont donc courts, et le message complet
+  /// n'apparaît qu'en cas d'échec, où il n'y a plus de durée à montrer.
+  Widget _texteEtat() {
+    if (_etat == _EtatPlainte.echec) {
+      return Text(
+        _erreur ?? "Échec",
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(color: Colors.orangeAccent, fontSize: 12),
+      );
+    }
+    final libelle = switch (_etat) {
+      _EtatPlainte.bip => "Annonce…",
+      _EtatPlainte.enregistrement => "",
+      _EtatPlainte.pause => "Pause",
+      _EtatPlainte.relecture => "Écoutez",
       _EtatPlainte.envoi => "Envoi…",
-      _EtatPlainte.echec => _erreur ?? "Échec",
+      _EtatPlainte.echec => "",
     };
     return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        // Le point rouge ne clignote QUE pendant l'enregistrement réel : en
-        // pause il reste fixe, sinon rien ne distinguerait les deux états.
-        Icon(
-          _etat == _EtatPlainte.echec ? Icons.error_outline : Icons.mic,
-          size: 16,
-          color: _etat == _EtatPlainte.echec
-              ? Colors.orangeAccent
-              : (enregistre ? Colors.redAccent : Colors.white70),
-        ),
-        const SizedBox(width: 8),
-        Flexible(
-          child: Text(
-            texte,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Colors.white, fontSize: 13),
-          ),
-        ),
-        if (_etat != _EtatPlainte.echec) ...[
-          const SizedBox(width: 10),
-          Text(
-            _mmss(_duree),
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              fontFeatures: [FontFeature.tabularFigures()],
+        if (libelle.isNotEmpty) ...[
+          Flexible(
+            child: Text(
+              libelle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
             ),
           ),
+          const SizedBox(width: 6),
         ],
+        Text(
+          _mmss(_duree),
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            // Chiffres à chasse fixe : sans eux le minuteur tressaute à chaque
+            // seconde, et tout ce qui le suit bouge avec.
+            fontFeatures: [FontFeature.tabularFigures()],
+          ),
+        ),
       ],
     );
   }
 
-  Widget _actions() {
+  /// Les actions, en ICÔNES et non en boutons libellés : sur une seule ligne de
+  /// 52 points, trois libellés ne rentrent pas, et les tronquer les rendrait
+  /// illisibles. L'icône seule est comprise partout — ce sont les symboles d'un
+  /// magnétophone.
+  List<Widget> _actions() {
     switch (_etat) {
       case _EtatPlainte.bip:
-        return const SizedBox(height: 32);
+        return const [SizedBox(width: 4)];
       case _EtatPlainte.envoi:
-        return const SizedBox(
-          height: 32,
-          child: Center(
-            child: SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
+        return const [
+          SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
           ),
-        );
+        ];
       case _EtatPlainte.enregistrement:
       case _EtatPlainte.pause:
-        return Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            _bouton(
-              icone: _etat == _EtatPlainte.pause
-                  ? Icons.play_arrow
-                  : Icons.pause,
-              libelle: _etat == _EtatPlainte.pause ? "Reprendre" : "Pause",
-              onTap: _basculerPause,
-            ),
-            const SizedBox(width: 10),
-            _bouton(icone: Icons.stop, libelle: "Terminer", onTap: _arreter),
-          ],
-        );
+        return [
+          _bouton(
+            icone: _etat == _EtatPlainte.pause ? Icons.play_arrow : Icons.pause,
+            infobulle: _etat == _EtatPlainte.pause ? "Reprendre" : "Pause",
+            onTap: _basculerPause,
+          ),
+          _bouton(icone: Icons.stop, infobulle: "Terminer", onTap: _arreter),
+        ];
       case _EtatPlainte.relecture:
         final joue = _relecture.state == PlayerState.playing;
-        return Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            _bouton(
-              icone: joue ? Icons.pause : Icons.play_arrow,
-              libelle: joue ? "Pause" : "Écouter",
-              onTap: _cheminRelecture == null ? null : _basculerRelecture,
-            ),
-            const SizedBox(width: 10),
-            _bouton(
-              icone: Icons.refresh,
-              libelle: "Refaire",
-              onTap: _recommencer,
-            ),
-            const SizedBox(width: 10),
+        return [
+          _bouton(
+            icone: joue ? Icons.pause : Icons.play_arrow,
+            infobulle: joue ? "Pause" : "Écouter",
+            onTap: _cheminRelecture == null ? null : _basculerRelecture,
+          ),
+          _bouton(
+            icone: Icons.refresh,
+            infobulle: "Refaire",
+            onTap: _recommencer,
+          ),
+          _bouton(
+            icone: Icons.send,
+            infobulle: "Envoyer",
+            accent: true,
+            onTap: _envoyer,
+          ),
+        ];
+      case _EtatPlainte.echec:
+        return [
+          _bouton(
+            icone: Icons.refresh,
+            infobulle: "Refaire",
+            onTap: _recommencer,
+          ),
+          // « Réessayer » n'apparaît que s'il y a quelque chose à renvoyer : un
+          // échec de micro n'a produit aucun fichier.
+          if (_octets != null)
             _bouton(
               icone: Icons.send,
-              libelle: "Envoyer",
+              infobulle: "Réessayer",
               accent: true,
               onTap: _envoyer,
             ),
-          ],
-        );
-      case _EtatPlainte.echec:
-        return Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            _bouton(
-              icone: Icons.refresh,
-              libelle: "Refaire",
-              onTap: _recommencer,
-            ),
-            // « Réessayer » n'apparaît que s'il y a quelque chose à renvoyer :
-            // un échec de micro n'a produit aucun fichier.
-            if (_octets != null) ...[
-              const SizedBox(width: 10),
-              _bouton(
-                icone: Icons.send,
-                libelle: "Réessayer",
-                accent: true,
-                onTap: _envoyer,
-              ),
-            ],
-          ],
-        );
+        ];
     }
   }
 
   Widget _bouton({
     required IconData icone,
-    required String libelle,
+    required String infobulle,
     required VoidCallback? onTap,
     bool accent = false,
   }) {
-    return TextButton.icon(
-      onPressed: onTap,
-      icon: Icon(icone, size: 16),
-      label: Text(libelle, style: const TextStyle(fontSize: 12)),
-      style: TextButton.styleFrom(
-        foregroundColor: Colors.white,
-        backgroundColor: accent
-            ? Colors.redAccent.withValues(alpha: 0.85)
-            : Colors.white24,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        minimumSize: const Size(0, 32),
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    return Padding(
+      padding: const EdgeInsets.only(left: 4),
+      child: Tooltip(
+        message: infobulle,
+        child: InkResponse(
+          onTap: onTap,
+          radius: 22,
+          child: Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: accent
+                  ? Colors.redAccent.withValues(alpha: 0.85)
+                  : Colors.white24,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              icone,
+              size: 17,
+              color: onTap == null ? Colors.white38 : Colors.white,
+            ),
+          ),
+        ),
       ),
     );
   }
