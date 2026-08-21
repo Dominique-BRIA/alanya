@@ -85,6 +85,30 @@ class MeetingController extends ChangeNotifier {
   final StreamController<MeetingCoupure> _coupures =
       StreamController<MeetingCoupure>.broadcast();
 
+  /// Refus d'entrée prononcé par le serveur : salle pleine, réunion terminée,
+  /// invitation absente.
+  ///
+  /// Un flux, pour la même raison que [alertes] et [coupures] : c'est un
+  /// événement ponctuel. Ce qu'il laisse derrière lui n'est pas un état à
+  /// afficher mais une salle DÉMONTÉE — le contrôleur a déjà tout refermé quand
+  /// l'événement arrive.
+  Stream<MeetingRefus> get refus => _refus.stream;
+  final StreamController<MeetingRefus> _refus =
+      StreamController<MeetingRefus>.broadcast();
+
+  /// Une inscription est partie vers le serveur et attend sa réponse.
+  ///
+  /// ⚠️ C'EST LE SEUL MOYEN DE LIRE JUSTE UNE TRAME `error`. Le serveur en émet
+  /// pour des choses très différentes qui portent toutes le même `meetingId` :
+  /// un refus d'entrée, mais aussi « seul l'organisateur peut prolonger » au
+  /// beau milieu d'une séance qui se déroule très bien. Démonter la salle sur
+  /// la seconde serait pire que de ne rien faire sur la première.
+  ///
+  /// Posé avant CHAQUE `meeting_join` — l'entrée comme la réinscription après
+  /// une coupure réseau, où la place peut avoir été prise entre-temps — et
+  /// retiré à la réception de `meeting_joined`.
+  bool _inscriptionEnAttente = false;
+
   /// Secondes écoulées depuis mon entrée dans la salle, ou nul si je n'y suis
   /// pas encore.
   int? get secondesEcoulees {
@@ -219,6 +243,11 @@ class MeetingController extends ChangeNotifier {
     final id = activeMeetingId;
     if (id == null || !isActive) return;
     debugPrint('[MeetingController] reconnexion WS → réinscription salle $id');
+    // La place n'est PAS acquise pour autant : le serveur compte les sockets de
+    // la salle, et la mienne vient de mourir. Quelqu'un a pu prendre la place
+    // pendant la coupure — cette réinscription peut donc être refusée comme une
+    // première entrée, et doit être lue comme telle.
+    _inscriptionEnAttente = true;
     _rt.meetingJoin(id);
     // On n'annonce RIEN ici : ni l'état muet, ni la main levée.
     //
@@ -388,7 +417,10 @@ class MeetingController extends ChangeNotifier {
     } catch (_) {}
 
     // Rejoint via WebSocket. C'est le handler serveur qui inscrit la socket
-    // dans la salle et renvoie la liste des participants déjà présents.
+    // dans la salle et renvoie la liste des participants déjà présents — ou qui
+    // REFUSE, la salle pouvant être pleine. Rien n'est acquis à cet instant :
+    // seul `meeting_joined` fait de nous un participant.
+    _inscriptionEnAttente = true;
     _rt.meetingJoin(meetingId);
     _startTicker();
     notifyListeners();
@@ -672,6 +704,9 @@ class MeetingController extends ChangeNotifier {
           notifyListeners();
         }
         break;
+      case "error":
+        _handleErreur(e);
+        break;
       case "meeting_ended":
         // L'organisateur a terminé la réunion : tout le monde est déconnecté.
         final meetingId = e["meetingId"];
@@ -691,9 +726,92 @@ class MeetingController extends ChangeNotifier {
     }
   }
 
+  /// Le serveur REFUSE quelque chose (`{ type: "error" }`).
+  ///
+  /// 🔴 CETTE TRAME ÉTAIT JETÉE, et c'est le bug que ce bloc referme. Le
+  /// `switch` ci-dessus ne connaissait aucun `case "error"` : quand la salle
+  /// était pleine, le serveur répondait un refus parfaitement clair, personne ne
+  /// l'écoutait, et l'utilisateur restait seul dans une salle fantôme —
+  /// caméra allumée, micro ouvert, service de premier plan démarré, minuteur qui
+  /// tourne — sans le moindre message. Il ne pouvait que raccrocher lui-même,
+  /// sans jamais savoir pourquoi personne n'arrivait.
+  ///
+  /// TROIS FILTRES, ET AUCUN N'EST FACULTATIF.
+  ///
+  ///   1. `meetingId` doit être le mien. Le serveur émet aussi des `error` pour
+  ///      la messagerie (« Conversation interdite »), qui portent un `tempId` et
+  ///      aucun `meetingId` : elles ne me concernent pas ici.
+  ///
+  ///   2. Il faut qu'une INSCRIPTION SOIT EN ATTENTE, sinon on démonterait la
+  ///      salle sur « Seul l'organisateur peut prolonger la réunion » — un refus
+  ///      qui arrive au beau milieu d'une séance qui se porte très bien.
+  ///
+  ///   3. Sauf pour `MEETING_FULL`, qui démonte dans tous les cas. Le serveur ne
+  ///      l'émet que depuis l'entrée en salle : le recevoir signifie que ma
+  ///      socket n'est PAS dans la salle, quel que soit ce que je croyais.
+  ///
+  /// Une erreur qui passe les filtres ferme tout AVANT de prévenir : on coupe
+  /// d'abord la caméra et le micro, on explique ensuite. L'inverse laisserait
+  /// filmer pendant qu'on lit.
+  void _handleErreur(Map<String, dynamic> e) {
+    final meetingId = (e["meetingId"] as num?)?.toInt();
+    if (meetingId == null || meetingId != activeMeetingId) return;
+
+    final code = e["code"] as String?;
+    final pleine = code == MeetingRefus.codeSallePleine;
+    if (!_inscriptionEnAttente && !pleine) {
+      // Un refus en cours de séance, sur autre chose que l'entrée. On ne
+      // démonte rien : le serveur a écarté UNE demande, pas ma participation.
+      debugPrint('[MeetingController] refus serveur ignoré : ${e["message"]}');
+      return;
+    }
+
+    final refus = MeetingRefus(
+      code: code,
+      // Repli sur une phrase à nous quand le serveur n'en donne pas : un
+      // dialogue vide serait pire que le silence.
+      messageServeur: (e["message"] as String?)?.trim().isNotEmpty == true
+          ? e["message"] as String
+          : "Le serveur a refusé l'entrée dans cette réunion.",
+      plafond: (e["plafond"] as num?)?.toInt(),
+      actuel: (e["actuel"] as num?)?.toInt(),
+      // Le type de la RÉUNION, que seul le serveur connaît. `activeIsVideo` dit
+      // comment MOI j'entrais — une réunion vidéo rejointe en audio après un
+      // échec caméra vaut 2 ici et `false` là-bas.
+      typeMedia: (e["typeMedia"] as num?)?.toInt(),
+      // Capturé MAINTENANT, avant le démontage qui remet ce compteur à zéro.
+      // C'est ce qui décide qui parle : la salle si elle est ouverte, le bandeau
+      // global sinon — sans quoi un refus reçu salle réduite ne dirait rien à
+      // personne, ou serait annoncé deux fois.
+      salleAffichee: roomVisible,
+    );
+
+    _demonteSansPrevenirLeServeur();
+    if (!_refus.isClosed) _refus.add(refus);
+  }
+
+  /// Referme tout ce que [join] avait monté, SANS envoyer `meeting_leave`.
+  ///
+  /// Pas de `meeting_leave` parce qu'on n'est jamais entré : le serveur nous a
+  /// refusé la porte, sa salle ne nous contient pas. Lui annoncer un départ le
+  /// ferait chercher un participant qui n'existe pas — et, dans le cas d'une
+  /// réinscription refusée, diffuserait un `meeting_user_left` à toute la salle
+  /// pour quelqu'un qu'elle a déjà oublié.
+  void _demonteSansPrevenirLeServeur() {
+    _stopMesh();
+    CallForegroundService.arreter();
+    // `_clear()` arrête le ticker et remet l'état à neuf, `isActive` compris :
+    // le bandeau global disparaît de lui-même.
+    _clear();
+  }
+
   void _handleJoined(Map<String, dynamic> e) {
     final meetingId = e["meetingId"] as int?;
     if (meetingId == null || meetingId != activeMeetingId) return;
+
+    // La place est ACQUISE : les erreurs qui suivront ne parleront plus de mon
+    // entrée, et ne doivent donc plus démonter la salle.
+    _inscriptionEnAttente = false;
 
     final participants = (e["participants"] as List?)?.cast<String>() ?? [];
     // Connecte WebRTC aux participants déjà présents : j'entre dans la salle,
@@ -1015,6 +1133,10 @@ class MeetingController extends ChangeNotifier {
     organiserId = null;
     _finProcheEmise = false;
     _depassementEmis = false;
+    // Sans cette remise à zéro, une erreur reçue longtemps après la réunion
+    // suivante serait lue comme un refus d'entrée et démonterait une salle où
+    // l'on est parfaitement installé.
+    _inscriptionEnAttente = false;
     _roomScreensOpen = 0;
     _participantNames.clear();
     _participantAvatars.clear();
@@ -1037,6 +1159,7 @@ class MeetingController extends ChangeNotifier {
     _ticker?.cancel();
     _alertes.close();
     _coupures.close();
+    _refus.close();
     _stopMesh();
     super.dispose();
   }
@@ -1063,6 +1186,104 @@ class MeetingCoupure {
   final String? parNom;
 
   bool get estAudio => media == "audio";
+}
+
+/// Refus d'entrée en salle prononcé par le serveur.
+///
+/// ⚠️ LA SALLE EST DÉJÀ DÉMONTÉE quand cet objet arrive : caméra éteinte, micro
+/// fermé, service de premier plan arrêté. Il ne reste à l'écran qu'à EXPLIQUER —
+/// et à se refermer, puisqu'il n'y a plus de réunion derrière lui.
+class MeetingRefus {
+  const MeetingRefus({
+    required this.code,
+    required this.messageServeur,
+    required this.salleAffichee,
+    this.plafond,
+    this.actuel,
+    this.typeMedia,
+  });
+
+  /// Le code que le serveur pose sur un refus de plafond, sur la socket comme
+  /// sur les routes HTTP. Les autres refus d'entrée n'en portent aucun.
+  static const codeSallePleine = "MEETING_FULL";
+
+  /// `MEETING_FULL`, ou nul pour un refus qui n'en porte pas (« Réunion
+  /// introuvable », « Cette réunion est terminée », « Vous n'êtes pas invité »).
+  final String? code;
+
+  /// La phrase du serveur, toujours en français.
+  ///
+  /// ⚠️ ELLE NE SERT QUE DE REPLI. Un texte de serveur n'est jamais traduit,
+  /// alors que cette application se veut multilingue : quand on sait refaire la
+  /// phrase à partir des chiffres, on la refait. C'est d'ailleurs pour cela que
+  /// le serveur envoie `plafond` et `actuel` en plus du message.
+  final String messageServeur;
+
+  /// L'écran de salle était-il affiché au moment du refus ?
+  ///
+  /// Départage les deux surfaces qui écoutent ce flux — la salle et le bandeau
+  /// global — pour que le refus soit annoncé UNE fois, et jamais zéro.
+  final bool salleAffichee;
+
+  /// Nombre de places de la réunion, organisateur compris. Nul hors
+  /// [estSallePleine].
+  final int? plafond;
+
+  /// Nombre de personnes présentes au moment du refus. Nul hors
+  /// [estSallePleine].
+  final int? actuel;
+
+  /// Type de la réunion : 1 = audio, 2 = vidéo. Celui de la RÉUNION, pas le
+  /// mien — une réunion vidéo rejointe en audio faute de caméra vaut 2.
+  final int? typeMedia;
+
+  bool get estSallePleine => code == codeSallePleine;
+
+  bool get estVideo => typeMedia == 2;
+
+  String get titre => estSallePleine ? "Réunion pleine" : "Entrée refusée";
+
+  /// Ce qu'on montre à l'utilisateur.
+  ///
+  /// TROIS CHOSES, DANS CET ORDRE : combien de places, combien sont prises, et
+  /// ce qui peut aider. Sans le dernier point, le message ne fait qu'annoncer un
+  /// échec ; avec lui, il ouvre une porte — une réunion audio accueille plus de
+  /// monde qu'une vidéo, parce qu'une image coûte bien plus cher qu'une voix sur
+  /// un maillage où chacun émet vers tous les autres.
+  ///
+  /// La suggestion audio ne s'affiche QUE pour une réunion vidéo : la proposer
+  /// dans une réunion déjà audio serait absurde, et ferait douter du reste du
+  /// message.
+  String get texte {
+    // Sans les chiffres, on n'a rien de mieux à dire que le serveur : lui seul
+    // connaît la raison de ce refus-là.
+    if (!estSallePleine || plafond == null) return messageServeur;
+
+    final media = estVideo ? "vidéo" : "audio";
+    final prises = actuel == null
+        ? "Toutes les places sont prises."
+        : "$actuel ${actuel == 1 ? "personne y est déjà" : "personnes y sont déjà"} : il n'en reste aucune.";
+    final suite = estVideo
+        ? "Une réunion audio accueille plus de monde qu'une réunion vidéo — "
+            "une image coûte environ dix fois plus cher qu'une voix. Demandez-en "
+            "une à l'organisateur, ou réessayez dès qu'une place se libère."
+        : "Réessayez dès qu'une place se libère.";
+    return "Cette réunion $media est limitée à $plafond participants, "
+        "organisateur compris. $prises\n\n$suite";
+  }
+
+  /// La même chose en une phrase, pour le bandeau global.
+  ///
+  /// Une version courte et non le [texte] tronqué : ce message-là s'affiche
+  /// quand la salle était RÉDUITE, donc par-dessus autre chose et sans qu'on
+  /// l'ait demandé. Il doit se lire d'un coup d'œil, dire que la réunion s'est
+  /// arrêtée et pourquoi — le conseil sur l'audio, lui, n'a pas sa place dans un
+  /// bandeau qui disparaît en quatre secondes.
+  String get texteCourt {
+    if (!estSallePleine || plafond == null) return messageServeur;
+    return "Réunion quittée : elle est limitée à $plafond participants, "
+        "et toutes les places sont prises.";
+  }
 }
 
 /// Message de chat échangé pendant une réunion. Éphémère, non persisté.

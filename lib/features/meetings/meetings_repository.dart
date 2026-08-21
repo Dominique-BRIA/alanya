@@ -51,7 +51,17 @@ class MeetingsRepository {
     return (id as num).toInt();
   }
 
-  /// Rejoindre une réunion.
+  /// Rejoindre une réunion par la route REST.
+  ///
+  /// ⚠️ AUCUN APPELANT AUJOURD'HUI : l'entrée en salle passe entièrement par la
+  /// socket (`meeting_join`), c'est elle qui inscrit le participant et qui
+  /// tranche le plafond en comptant les sockets présentes.
+  ///
+  /// Si on la rebranche un jour, il faudra traiter son refus : elle répond un
+  /// 409 portant `code: "MEETING_FULL"` quand la salle est pleine, et ce code
+  /// remonte dans le champ `code` d'`ApiException`. Les chiffres qui l'accompagnent
+  /// (`plafond`, `actuel`, `demandes`), eux, sont écartés par le décodage
+  /// commun — seul le message français du serveur survit.
   Future<void> joinMeeting(int idMeeting) async {
     await _api.post("/api/meetings/$idMeeting/join", {});
   }

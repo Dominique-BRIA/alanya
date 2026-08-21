@@ -52,6 +52,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   bool _joinAsAudio = false;
   StreamSubscription<MeetingAlerte>? _alertesSub;
   StreamSubscription<MeetingCoupure>? _coupuresSub;
+  StreamSubscription<MeetingRefus>? _refusSub;
 
   @override
   void initState() {
@@ -128,6 +129,48 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     _alertesSub ??= context.read<MeetingController>().alertes.listen(_onAlerte);
     _coupuresSub ??=
         context.read<MeetingController>().coupures.listen(_onCoupure);
+    _refusSub ??= context.read<MeetingController>().refus.listen(_onRefus);
+  }
+
+  /// Le serveur a refusé l'entrée — salle pleine, le plus souvent.
+  ///
+  /// 🔴 SANS CET ÉCRAN-CI, IL NE SE PASSAIT RIEN. `ctrl.join()` rend la main dès
+  /// que le `meeting_join` est parti, sans attendre la réponse : `_joining`
+  /// retombait à `false`, la grille s'affichait avec notre seule vignette, et on
+  /// attendait indéfiniment des participants qui ne viendraient jamais — filmé,
+  /// micro ouvert, dans une salle où l'on n'était jamais entré.
+  ///
+  /// UN DIALOGUE ET NON UN BANDEAU, contrairement aux coupures de micro. Un
+  /// bandeau s'efface au bout de cinq secondes et laisse l'écran en place ; ici
+  /// il n'y a plus rien derrière, la salle est déjà démontée. L'échec est
+  /// bloquant, il se ferme d'un geste — c'est déjà ce que fait « Caméra
+  /// indisponible » au-dessus.
+  ///
+  /// Un seul bouton : il n'y a rien à réessayer tant qu'une place ne s'est pas
+  /// libérée, et un bouton « Réessayer » qui rejouerait le même refus ne serait
+  /// qu'une promesse en l'air.
+  Future<void> _onRefus(MeetingRefus refus) async {
+    if (!mounted) return;
+    // Le voile « Connexion en cours… » n'a plus lieu d'être : plus rien ne se
+    // connecte. Il resterait sinon derrière le dialogue, à promettre une entrée
+    // qui vient d'être refusée.
+    setState(() => _joining = false);
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(refus.titre),
+        content: Text(refus.texte),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Fermer"),
+          ),
+        ],
+      ),
+    );
+    // On quitte la salle une fois le message lu, et pas avant : refermer
+    // l'écran d'abord ferait disparaître le dialogue avec lui.
+    if (mounted) Navigator.of(context).maybePop();
   }
 
   /// L'organisateur vient de couper mon micro ou ma caméra : on le DIT.
@@ -270,6 +313,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   void dispose() {
     _alertesSub?.cancel();
     _coupuresSub?.cancel();
+    _refusSub?.cancel();
     // L'écran disparaît : le bandeau global reprend si la réunion continue.
     // On ne quitte PAS la réunion ici — c'est le rôle du bouton rouge.
     context.read<MeetingController>().setRoomVisible(false);

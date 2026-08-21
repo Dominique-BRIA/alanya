@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'package:alanya/core/app_snackbar.dart';
 import 'package:alanya/core/push_service.dart';
 import 'package:alanya/theme/alanya_theme.dart';
 import 'meeting_controller.dart';
@@ -24,6 +25,7 @@ class MeetingBanner extends StatefulWidget {
 
 class _MeetingBannerState extends State<MeetingBanner> {
   Timer? _ticker;
+  StreamSubscription<MeetingRefus>? _refusSub;
 
   @override
   void initState() {
@@ -35,8 +37,35 @@ class _MeetingBannerState extends State<MeetingBanner> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Une seule souscription, même si les dépendances changent plusieurs fois.
+    _refusSub ??= context.read<MeetingController>().refus.listen(_onRefus);
+  }
+
+  /// Le serveur a refusé l'entrée ALORS QUE LA SALLE ÉTAIT RÉDUITE.
+  ///
+  /// POURQUOI ICI ET PAS SEULEMENT DANS LA SALLE. Le refus n'arrive pas
+  /// uniquement à l'entrée : après une coupure réseau, le contrôleur se
+  /// réinscrit dans la salle, et la place a pu être prise entre-temps. On peut
+  /// donc être expulsé en lisant ses messages ailleurs dans l'application —
+  /// l'écran de salle n'est alors pas monté, personne n'écoute, et le bandeau
+  /// vert disparaîtrait sans un mot.
+  ///
+  /// Ce bandeau-ci est la SEULE surface toujours vivante : son `State` survit
+  /// même quand son `build` ne rend rien.
+  ///
+  /// [MeetingRefus.salleAffichee] évite le doublon : quand la salle est ouverte,
+  /// c'est elle qui parle, avec un vrai dialogue et le message complet.
+  void _onRefus(MeetingRefus refus) {
+    if (refus.salleAffichee) return;
+    showAppSnackBar(refus.texteCourt);
+  }
+
+  @override
   void dispose() {
     _ticker?.cancel();
+    _refusSub?.cancel();
     super.dispose();
   }
 
