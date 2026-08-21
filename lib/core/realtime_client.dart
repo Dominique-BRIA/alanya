@@ -491,6 +491,31 @@ class RealtimeClient extends ChangeNotifier {
         "levee": levee,
       });
 
+  /// Demande à un participant de couper son micro ([media] = `"audio"`) ou sa
+  /// caméra ([media] = `"video"`). Organisateur seul, contrôlé par le SERVEUR.
+  ///
+  /// ON NE COUPE PAS UN FLUX À DISTANCE : la piste appartient à l'appareil du
+  /// participant, et rien ici ni dans WebRTC ne peut l'éteindre depuis
+  /// l'extérieur. Ce verbe DEMANDE, et l'application d'en face obéit — c'est un
+  /// message de protocole, pas une commande.
+  ///
+  /// ⚠️ L'AUTORISATION NE SE VÉRIFIE PAS ICI. Le serveur relit l'organisateur en
+  /// base à chaque coupure, et ignore la trame en silence si l'expéditeur n'est
+  /// pas lui. Un contrôle côté client seul se contournerait en forgeant la
+  /// trame, et n'importe quel participant ferait taire toute la salle.
+  ///
+  /// ⚠️ VOLONTAIREMENT ABSENTE de [_typesCritiques], comme la main levée. Une
+  /// coupure rejouée trente secondes après une coupure réseau éteindrait un
+  /// micro alors que la raison de le couper a disparu depuis longtemps — et
+  /// elle se redemande d'un geste, alors qu'une coupure surprise ne se rattrape
+  /// pas.
+  void meetingMute(int meetingId, String toUserId, String media) => _send({
+        "type": "meeting_mute",
+        "meetingId": meetingId,
+        "toUserId": toUserId,
+        "media": media,
+      });
+
   void disconnect() {
     _reconnectTimer?.cancel();
     _pingTimer?.cancel();

@@ -75,6 +75,16 @@ class MeetingController extends ChangeNotifier {
   bool _finProcheEmise = false;
   bool _depassementEmis = false;
 
+  /// Coupures que l'organisateur m'impose, à annoncer à l'écran.
+  ///
+  /// Un flux et non un état, pour la même raison que [alertes] : c'est un
+  /// ÉVÉNEMENT ponctuel — « on vient de vous couper » — et non quelque chose à
+  /// afficher en permanence. L'état durable qui en découle, lui, est déjà porté
+  /// par [isMuted] et [isCameraOff], que la coupure a posés.
+  Stream<MeetingCoupure> get coupures => _coupures.stream;
+  final StreamController<MeetingCoupure> _coupures =
+      StreamController<MeetingCoupure>.broadcast();
+
   /// Secondes écoulées depuis mon entrée dans la salle, ou nul si je n'y suis
   /// pas encore.
   int? get secondesEcoulees {
@@ -645,6 +655,9 @@ class MeetingController extends ChangeNotifier {
       case "meeting_screen":
         _handleMeetingScreen(e);
         break;
+      case "meeting_mute":
+        _handleMeetingMute(e);
+        break;
       case "meeting_extended":
         // L'organisateur a repoussé le terme. La nouvelle durée vient du
         // serveur, pour tout le monde en même temps — l'organisateur compris,
@@ -852,6 +865,113 @@ class MeetingController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// L'organisateur a coupé le micro ou la caméra de quelqu'un
+  /// (`meeting_mute`), et le serveur l'annonce à TOUTE la salle.
+  ///
+  /// DEUX LECTURES DE LA MÊME TRAME, selon qui est visé :
+  ///  - c'est moi → j'obéis, en éteignant réellement la piste ;
+  ///  - c'est un autre → je note son micro coupé, pour que ma grille l'affiche.
+  ///
+  /// Sans ce second cas, un micro s'éteindrait dans la salle sans que personne
+  /// comprenne pourquoi — c'est précisément pour cela que le serveur diffuse à
+  /// tout le monde et pas au seul destinataire.
+  ///
+  /// ⚠️ AUCUN CONTRÔLE D'AUTORISATION ICI : le serveur a déjà relu l'organisateur
+  /// en base avant de relayer, et lui seul peut le faire honnêtement. Revérifier
+  /// sur [organiserId] — que le client tient de sa propre initialisation —
+  /// n'ajouterait aucune sécurité et refuserait à tort une coupure légitime si
+  /// cet identifiant manquait (salle rouverte depuis le bandeau, par exemple).
+  void _handleMeetingMute(Map<String, dynamic> e) {
+    final meetingId = e["meetingId"] as int?;
+    if (meetingId != activeMeetingId) return;
+
+    final fromUserId = e["fromUserId"] as String?;
+    final toUserId = e["toUserId"] as String?;
+    final media = e["media"] as String?;
+    // Le test de nullité est SÉPARÉ de celui des valeurs admises : comparer à
+    // deux constantes ne suffit pas à promouvoir `media` en non-nullable aux
+    // yeux de l'analyseur, et [MeetingCoupure] en attend un vrai.
+    if (fromUserId == null || toUserId == null || media == null) return;
+    if (media != "audio" && media != "video") return;
+
+    if (toUserId != myUserId) {
+      // Un AUTRE vient d'être coupé. Seul le micro a un état affiché ici — une
+      // caméra coupée se voit d'elle-même, sa vignette retombant sur l'avatar.
+      //
+      // ⚠️ CET ÉTAT PEUT VIEILLIR POUR UN PARTICIPANT WEB. `_peerMuted` est
+      // normalement tenu à jour par le signal `meeting_state`, que le web
+      // n'émet pas : s'il se rallume aussitôt, ma vignette le montrera coupé à
+      // tort. C'est l'envers de la divergence déjà notée dans [_handleSignal],
+      // où l'état muet du web restait inconnu — afficher la coupure au moment
+      // où elle a lieu vaut mieux que ne jamais rien montrer, et un mobile,
+      // lui, se corrige de lui-même dès son prochain basculement.
+      if (media == "audio" && _peerMuted[toUserId] != true) {
+        _peerMuted[toUserId] = true;
+        notifyListeners();
+      }
+      return;
+    }
+
+    // C'est MOI qu'on coupe. On emprunte exactement le chemin des boutons
+    // [toggleMute] et [toggleCamera] : changer l'icône sans toucher à la piste
+    // laisserait le micro ouvert derrière un cadenas dessiné.
+    if (media == "audio") {
+      if (isMuted) return;
+      isMuted = true;
+      _mesh?.localStream?.getAudioTracks().forEach((track) {
+        track.enabled = false;
+      });
+      // Même annonce qu'après un appui sur « Muet » : les autres mobiles lisent
+      // l'état muet dans ce signal, et non dans la coupure elle-même.
+      _broadcastState();
+    } else {
+      // ⚠️ RIEN EN AUDIO SEUL, et c'est ce qui garantit qu'on peut se rallumer.
+      // Le bouton caméra n'existe dans la salle que si [activeIsVideo] : couper
+      // une caméra que je n'ai pas m'enfermerait dans un état sans interrupteur
+      // pour en sortir — donc un verrou, précisément ce qu'on ne veut pas.
+      if (!activeIsVideo) return;
+      if (isCameraOff) return;
+      isCameraOff = true;
+      _mesh?.localStream?.getVideoTracks().forEach((track) {
+        track.enabled = false;
+      });
+    }
+
+    // On le DIT à celui qu'on coupe : un micro qui s'éteint tout seul passe
+    // pour une panne. Le nom vient du répertoire de la salle, avec un repli sur
+    // la fonction — l'organisateur peut ne pas être encore résolu.
+    if (!_coupures.isClosed) {
+      _coupures.add(MeetingCoupure(
+        media: media,
+        parNom: _participantNames[fromUserId],
+      ));
+    }
+    notifyListeners();
+  }
+
+  /// Demande à [userId] de couper son micro (`"audio"`) ou sa caméra
+  /// (`"video"`).
+  ///
+  /// COUPE, MAIS NE VERROUILLE PAS : l'autre peut se rallumer aussitôt, comme
+  /// dans Zoom, Meet et Teams. Couper sert à faire taire un micro oublié, pas à
+  /// bâillonner quelqu'un.
+  ///
+  /// Le test sur [jeSuisOrganisateur] n'est qu'un confort d'interface, à
+  /// l'image de [prolonger] : c'est le SERVEUR qui tranche, en relisant
+  /// l'organisateur en base, et il ignore la trame en silence s'il refuse.
+  ///
+  /// Rien n'est appliqué localement : ni la piste de l'autre, qu'on ne peut pas
+  /// atteindre, ni son état muet affiché, qui arrive par l'écho du serveur.
+  void couperParticipant(String userId, String media) {
+    final id = activeMeetingId;
+    if (id == null || !jeSuisOrganisateur) return;
+    // Se couper soi-même par ce chemin n'aurait pas de sens : mes propres
+    // boutons agissent sur mes pistes sans passer par le serveur.
+    if (userId == myUserId) return;
+    if (media != "audio" && media != "video") return;
+    _rt.meetingMute(id, userId, media);
+  }
+
   /// Qui présente son écran (`meeting_screen`).
   ///
   /// POURQUOI CE VERBE COMPTE. La piste vidéo d'un écran emprunte exactement le
@@ -916,6 +1036,7 @@ class MeetingController extends ChangeNotifier {
     _sub?.cancel();
     _ticker?.cancel();
     _alertes.close();
+    _coupures.close();
     _stopMesh();
     super.dispose();
   }
@@ -928,6 +1049,20 @@ enum MeetingAlerte {
 
   /// La durée prévue vient d'être atteinte ; on est en dépassement.
   depassement,
+}
+
+/// Coupure imposée par l'organisateur : mon micro ou ma caméra vient d'être
+/// éteint par quelqu'un d'autre que moi.
+class MeetingCoupure {
+  const MeetingCoupure({required this.media, this.parNom});
+
+  /// `"audio"` (micro) ou `"video"` (caméra).
+  final String media;
+
+  /// Nom de l'organisateur, ou nul s'il n'est pas encore résolu dans la salle.
+  final String? parNom;
+
+  bool get estAudio => media == "audio";
 }
 
 /// Message de chat échangé pendant une réunion. Éphémère, non persisté.

@@ -51,6 +51,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   bool _joining = true;
   bool _joinAsAudio = false;
   StreamSubscription<MeetingAlerte>? _alertesSub;
+  StreamSubscription<MeetingCoupure>? _coupuresSub;
 
   @override
   void initState() {
@@ -125,6 +126,32 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     });
     // Une seule souscription, même si les dépendances changent plusieurs fois.
     _alertesSub ??= context.read<MeetingController>().alertes.listen(_onAlerte);
+    _coupuresSub ??=
+        context.read<MeetingController>().coupures.listen(_onCoupure);
+  }
+
+  /// L'organisateur vient de couper mon micro ou ma caméra : on le DIT.
+  ///
+  /// La piste est déjà éteinte quand ce bandeau s'affiche — le contrôleur a
+  /// obéi avant de prévenir. Il ne reste ici qu'à expliquer, faute de quoi un
+  /// micro qui s'éteint seul passe pour une panne de l'application.
+  ///
+  /// Aucun bouton pour se rallumer : celui des contrôles est juste en dessous et
+  /// n'a pas été verrouillé. En proposer un second ferait croire à une faveur
+  /// que l'on accorde, alors que le droit n'a jamais été retiré.
+  void _onCoupure(MeetingCoupure c) {
+    if (!mounted) return;
+    final par = c.parNom ?? "l'organisateur";
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(c.estAudio
+            ? "Votre micro a été coupé par $par."
+            : "Votre caméra a été coupée par $par."),
+        duration: const Duration(seconds: 5),
+      ),
+    );
   }
 
   /// Réagit au franchissement d'un seuil de la durée prévue : une tonalité et un
@@ -242,6 +269,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   @override
   void dispose() {
     _alertesSub?.cancel();
+    _coupuresSub?.cancel();
     // L'écran disparaît : le bandeau global reprend si la réunion continue.
     // On ne quitte PAS la réunion ici — c'est le rôle du bouton rouge.
     context.read<MeetingController>().setRoomVisible(false);
@@ -1139,6 +1167,61 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     );
   }
 
+  /// Les actions de l'organisateur sur un participant : couper son micro, ou sa
+  /// caméra.
+  ///
+  /// COUPER N'EST PAS BÂILLONNER. L'autre pourra se rallumer aussitôt, et c'est
+  /// voulu : ce geste sert à faire taire un micro oublié dans une pièce
+  /// bruyante. Les libellés le disent donc au présent — « Couper le micro » — et
+  /// jamais « Interdire » ou « Verrouiller », qui promettraient un pouvoir que
+  /// le protocole n'a pas.
+  ///
+  /// Pas de confirmation avant d'agir : le geste est immédiat et se répare d'un
+  /// mot, comme dans Meet. Le bandeau qui suit sert d'accusé de réception, sans
+  /// quoi l'organisateur ne saurait pas si sa demande est partie — le serveur,
+  /// lui, ne répond rien quand il refuse.
+  Widget _menuOrganisateur(MeetingController ctrl, String peerId, String nom) {
+    return PopupMenuButton<String>(
+      icon: const Icon(Icons.more_vert, color: Colors.white54, size: 20),
+      tooltip: "Actions",
+      color: const Color(0xFF2A2A2A),
+      onSelected: (media) {
+        ctrl.couperParticipant(peerId, media);
+        showAppSnackBar(media == "audio"
+            ? "Micro de $nom coupé."
+            : "Caméra de $nom coupée.");
+      },
+      itemBuilder: (_) => [
+        const PopupMenuItem(
+          value: "audio",
+          child: ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.mic_off, color: Colors.white),
+            title:
+                Text("Couper le micro", style: TextStyle(color: Colors.white)),
+          ),
+        ),
+        // ⚠️ `widget.isVideo` ET NON `ctrl.activeIsVideo` : le second dit
+        // comment MOI j'ai rejoint, pas ce qu'est la réunion. L'organisateur
+        // dont la caméra a échoué au démarrage entre en audio seul, et ne
+        // pourrait alors plus couper la caméra de personne dans une réunion qui
+        // en est pourtant une.
+        if (widget.isVideo)
+          const PopupMenuItem(
+            value: "video",
+            child: ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.videocam_off, color: Colors.white),
+              title: Text("Couper la caméra",
+                  style: TextStyle(color: Colors.white)),
+            ),
+          ),
+      ],
+    );
+  }
+
   void _showChat() {
     final ctrl = context.read<MeetingController>();
     ctrl.setChatOpen(true);
@@ -1253,10 +1336,21 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                             ),
                             title: Text(name,
                                 style: const TextStyle(color: Colors.white)),
-                            trailing: _etatParticipant(
-                              muted: muted,
-                              hand: ctrl.isHandRaised(peerId),
-                              partage: ctrl.isSharingScreen(peerId),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _etatParticipant(
+                                  muted: muted,
+                                  hand: ctrl.isHandRaised(peerId),
+                                  partage: ctrl.isSharingScreen(peerId),
+                                ),
+                                // Réservé à l'organisateur, et c'est la fiche
+                                // des participants qui l'accueille : c'est déjà
+                                // là qu'on vient voir qui a la main levée et
+                                // quel micro reste ouvert.
+                                if (ctrl.jeSuisOrganisateur)
+                                  _menuOrganisateur(ctrl, peerId, name),
+                              ],
                             ),
                           );
                         }),
