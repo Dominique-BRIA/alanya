@@ -540,7 +540,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             Text("Application de messagerie instantanée",
                 style: TextStyle(color: _muted, fontSize: 13)),
             const SizedBox(height: 16),
-            Text("© 2026 Dominique BRIA",
+            Text("© 2026 Alanya Communication",
                 style: TextStyle(color: _mutedIcon, fontSize: 11)),
           ],
         ),
