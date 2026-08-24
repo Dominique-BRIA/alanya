@@ -465,6 +465,18 @@ class _ConversationsTabState extends State<_ConversationsTab>
         }
       } else if (t == "read") {
         _poll();
+      } else if (t == "message_edited") {
+        // Un message modifié peut être le DERNIER de sa conversation : le libellé
+        // de la liste change alors, et il vient du serveur (voir
+        // `apercu-conversation.mjs`). `lastMessage` absent ou nul dit que la
+        // modification portait sur un message plus ancien — la liste n'a rien à
+        // montrer de nouveau, on s'épargne la requête.
+        //
+        // Sans cette branche, la correction finissait tout de même par
+        // apparaître, mais au prochain tour du `Timer.periodic` : jusqu'à cinq
+        // secondes pendant lesquelles l'utilisateur voit son ancien texte et
+        // croit sa modification perdue.
+        if (e["lastMessage"] != null) _poll();
       } else if (t == "call_ended") {
         // Le serveur pousse l'appel COMPLET : on l'insère, sans rien recharger.
         final brut = e["call"];
