@@ -51,6 +51,20 @@ class DebugOverlay extends StatefulWidget {
 
   /// Log une ligne. Appelable depuis n'importe où (RealtimeClient, CallController, etc.).
   static void log(String line) {
+    // 🔴 FILTRE DE DIAGNOSTIC (24/08/2026) — À RETIRER AVEC
+    // [tracesAppelsVisibles].
+    //
+    // Mesuré sur les captures du user : la négociation produit une QUINZAINE
+    // de lignes ICE PAR SECONDE. À 60 lignes de journal, elles chassent les
+    // lignes `CHIP` en moins de cinq secondes — l'utilisateur a vu passer
+    // « chip retiré » sans jamais pouvoir le photographier.
+    //
+    // C'est le même piège que celui qui avait fait passer le journal de 20 à
+    // 60 lignes en août, mais l'augmentation ne suffit plus : il faut écarter
+    // le bruit, pas agrandir le seau. Les lignes ICE restent dans `adb logcat`
+    // (`debugPrint`), où elles ne coûtent rien — seul l'AFFICHAGE les ignore.
+    if (line.contains(' ice ') || line.endsWith('call_signal')) return;
+
     final ts = DateTime.now().toIso8601String().substring(11, 19);
     _log.insert(0, '$ts $line');
     // 60 et non 20 : une négociation produit une rafale de candidats ICE qui
