@@ -54,6 +54,36 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   StreamSubscription<MeetingCoupure>? _coupuresSub;
   StreamSubscription<MeetingRefus>? _refusSub;
 
+  /// Ce que CET écran a ajouté au compteur `_roomScreensOpen` du contrôleur :
+  /// 0 ou 1, jamais plus.
+  ///
+  /// 🔴 SANS CE DRAPEAU, LE BANDEAU GLOBAL DES RÉUNIONS DISPARAISSAIT
+  /// DÉFINITIVEMENT. `didChangeDependencies` est rejoué à CHAQUE
+  /// `notifyListeners()` du contrôleur — cet écran en dépend par
+  /// `context.watch<MeetingController>()` — et il y programmait un post-frame
+  /// de plus, donc un `setRoomVisible(true)` de plus. Une réunion un peu
+  /// animée montait le compteur à plusieurs dizaines ; en sortant, les deux
+  /// `setRoomVisible(false)` (celui du retour, celui de `dispose`) n'en
+  /// retiraient que deux. Le compteur restait au-dessus de zéro, `roomVisible`
+  /// restait vrai, et le bandeau ne revenait plus — pour toute la durée de vie
+  /// de l'application.
+  ///
+  /// L'écran d'APPEL n'a jamais eu le défaut : son `didChangeDependencies`
+  /// sort par un `if (_calls == cc) return;` dès la deuxième invocation. Ici,
+  /// les trois abonnements voisins se protègent bien par `??=` — seul le
+  /// compteur avait été oublié.
+  bool _compteDansLeCompteur = false;
+
+  /// Fait que cet écran pèse exactement [visible] dans le compteur, quel que
+  /// soit le nombre d'appels. Idempotent dans les deux sens : le retour système
+  /// et `dispose` peuvent donc tous deux demander le retrait sans se marcher
+  /// dessus.
+  void _signaleSalleVisible(bool visible) {
+    if (visible == _compteDansLeCompteur) return;
+    _compteDansLeCompteur = visible;
+    context.read<MeetingController>().setRoomVisible(visible);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -123,7 +153,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     // La salle est affichée → masque le bandeau global. Posé en post-frame car
     // il peut être appelé plusieurs fois au fil des dépendances.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) context.read<MeetingController>().setRoomVisible(true);
+      if (mounted) _signaleSalleVisible(true);
     });
     // Une seule souscription, même si les dépendances changent plusieurs fois.
     _alertesSub ??= context.read<MeetingController>().alertes.listen(_onAlerte);
@@ -316,7 +346,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     _refusSub?.cancel();
     // L'écran disparaît : le bandeau global reprend si la réunion continue.
     // On ne quitte PAS la réunion ici — c'est le rôle du bouton rouge.
-    context.read<MeetingController>().setRoomVisible(false);
+    _signaleSalleVisible(false);
     super.dispose();
   }
 
@@ -328,7 +358,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       // continuer. Pour raccrocher, le bouton rouge reste le geste explicite.
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) {
-          context.read<MeetingController>().setRoomVisible(false);
+          _signaleSalleVisible(false);
         }
       },
       child: Scaffold(
