@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 import '../../core/app_snackbar.dart';
 import '../../core/call_ui_native.dart';
 import '../../core/debug_overlay.dart';
+import '../../core/diagnostic_chip.dart';
 import '../../core/in_app_notifier.dart';
 import '../../core/push_service.dart';
 import 'call_controller.dart';
@@ -81,6 +82,16 @@ class _CallListenerState extends State<CallListener> {
       final callId = data['callId']?.toString();
       switch (event) {
         case 'answer':
+          // Traces du chip, POSÉES AVANT la garde d'écho : sur le chemin de
+          // l'écho la branche sort tout de suite, et le diagnostic serait
+          // perdu justement quand on décroche depuis l'application.
+          // Deux relevés : le natif écrit en `apply()` (asynchrone) et le
+          // service ne pose sa notification qu'un instant plus tard — un seul
+          // relevé raterait la ligne décisive.
+          unawaited(Future.delayed(
+              const Duration(milliseconds: 1500), verserTracesChip));
+          unawaited(Future.delayed(
+              const Duration(seconds: 5), verserTracesChip));
           // Écho de notre propre `answerRinging` : l'appel est déjà en cours
           // d'acceptation, le relancer ouvrirait un second écran d'appel.
           if (CallUiNative.consommerEchoLocal(callId)) return;
@@ -109,6 +120,14 @@ class _CallListenerState extends State<CallListener> {
     // s'il arrivait à l'instant. Un écran vraiment orphelin disparaît seul au
     // bout des 60 s de sonnerie.
     _reprendreAppelNatif();
+
+    // ── DIAGNOSTIC DU CHIP VERT ────────────────────────────────────────────
+    // Trace-témoin : elle PROUVE que l'APK installé contient bien cette
+    // version. Sans elle, un overlay vide se lit de deux façons — « le natif
+    // n'a rien écrit » ou « ce n'est pas le bon APK » — et on a déjà perdu
+    // plusieurs allers-retours sur cette ambiguïté.
+    DebugOverlay.log('CL ✅ diagnostic chip actif');
+    unawaited(verserTracesChip());
   }
 
   /// Récupère une action décidée AVANT que cet écouteur n'existe.

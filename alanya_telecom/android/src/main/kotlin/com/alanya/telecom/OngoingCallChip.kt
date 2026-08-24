@@ -102,12 +102,46 @@ object OngoingCallChip {
      * de millisecondes plus tard, et bien davantage si le système tarde à le
      * lancer.
      */
+    /**
+     * Journalise une étape du chip — en logcat ET dans les préférences Flutter.
+     *
+     * ⚠️ POURQUOI PASSER PAR LES PRÉFÉRENCES ET NON PAR `emit`. Le diagnostic
+     * doit être lisible SANS câble : la seule surface disponible est l'overlay
+     * de débogage, qui vit côté Dart. Or tout ce fichier s'exécute en natif, et
+     * souvent AVANT qu'un moteur Flutter ne soit attaché — décrocher DÉMARRE
+     * l'application. Un `emit` partirait alors vers zéro moteur et la trace
+     * serait perdue, précisément dans le cas qu'on cherche à observer.
+     *
+     * Le fichier `FlutterSharedPreferences` est déjà lu par ce même greffon
+     * (sonnerie choisie, jeton du refus natif) : le chemin est éprouvé en
+     * production. Dart relit la clé et la vide.
+     */
+    internal fun journalise(ctx: Context, msg: String) {
+        Log.d(TAG, msg)
+        try {
+            val prefs = ctx.getSharedPreferences(
+                "FlutterSharedPreferences", Context.MODE_PRIVATE
+            )
+            val heure = android.text.format.DateFormat
+                .format("HH:mm:ss", System.currentTimeMillis())
+            val avant = prefs.getString("flutter.chip_diag", "") ?: ""
+            // Borné à 20 : l'overlay ne tient que 60 lignes au total, et une
+            // préférence qui grossit sans fin pèserait sur chaque lecture.
+            val lignes = (avant.split("\n").filter { it.isNotEmpty() } + "$heure $msg")
+                .takeLast(20)
+            prefs.edit().putString("flutter.chip_diag", lignes.joinToString("\n")).apply()
+        } catch (e: Exception) {
+            Log.w(TAG, "journalise: $e")
+        }
+    }
+
     fun start(ctx: Context, data: Map<String, String>) {
+        journalise(ctx, "start() appelé (API ${Build.VERSION.SDK_INT})")
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
             // Avant Android 12, `CallStyle` n'existe pas et le système ne
             // dessine aucun chip. La notification d'appel en cours existante
             // reste seule, ce qui est le comportement d'avant ce fichier.
-            Log.d(TAG, "API ${Build.VERSION.SDK_INT} < 31 : pas de chip, rien à faire")
+            journalise(ctx, "ABANDON : API < 31, CallStyle n'existe pas")
             return
         }
         val nom = data["callerName"]?.takeIf { it.isNotEmpty() } ?: "Appel en cours"
@@ -116,6 +150,7 @@ object OngoingCallChip {
             .putExtra(EXTRA_SINCE, System.currentTimeMillis())
         try {
             ctx.startForegroundService(intent)
+            journalise(ctx, "startForegroundService() OK, service demandé")
         } catch (e: Exception) {
             // Android 12+ interdit de démarrer un service de premier plan
             // depuis l'arrière-plan. On y échappe normalement : Telecom LIE le
@@ -123,7 +158,7 @@ object OngoingCallChip {
             // autorisation. Si la garantie saute un jour, l'appel doit
             // continuer sans chip plutôt que de planter — mais SANS silence :
             // un échec muet ferait chercher le défaut du mauvais côté.
-            Log.w(TAG, "démarrage du service refusé, appel sans chip : $e")
+            journalise(ctx, "ÉCHEC startForegroundService : ${e.javaClass.simpleName} — $e")
         }
     }
 
@@ -137,7 +172,12 @@ object OngoingCallChip {
      */
     fun stop(ctx: Context) {
         try {
-            ctx.stopService(Intent(ctx, OngoingCallService::class.java))
+            // `stopService` rend vrai seulement s'il y avait un service à
+            // arrêter : c'est ce booléen qui distingue « le chip a été retiré »
+            // de « il n'y en avait jamais eu ». Sans lui, un retrait prématuré
+            // et une absence pure et simple donneraient la même trace.
+            val yAvait = ctx.stopService(Intent(ctx, OngoingCallService::class.java))
+            if (yAvait) journalise(ctx, "stop() — chip retiré")
         } catch (e: Exception) {
             Log.w(TAG, "arrêt du service : $e")
         }
@@ -253,11 +293,13 @@ class OngoingCallService : Service() {
             // possible sur certaines surcouches constructeur. On abandonne le
             // chip proprement plutôt que de laisser un service fantôme sans
             // notification, qu'Android tuerait de toute façon par ANR.
-            Log.w(TAG, "startForeground(phoneCall) refusé : $e")
+            OngoingCallChip.journalise(
+                this, "ÉCHEC startForeground(phoneCall) : ${e.javaClass.simpleName} — $e"
+            )
             stopSelf()
             return START_NOT_STICKY
         }
-        Log.d(TAG, "chip affiché (depuis=$depuis)")
+        OngoingCallChip.journalise(this, "CHIP POSÉ — notification affichée, chrono lancé")
         return START_NOT_STICKY
     }
 

@@ -17,7 +17,17 @@ import 'package:flutter/material.dart';
 /// ⚠️ Les traces elles-mêmes RESTENT en place, et c'est délibéré : `traceAppel`
 /// continue d'écrire dans le journal système, où elle ne coûte rien et où `adb
 /// logcat` la retrouvera. Seul l'affichage est coupé.
-const bool tracesAppelsVisibles = false;
+/// 🔴 RALLUMÉ LE 24/08/2026, TROISIÈME FOIS — chip vert « appel en cours » qui
+/// n'apparaît pas. Même raison que les deux précédentes : le user teste **sans
+/// câble**, `adb logcat` est donc hors d'atteinte, et les décisions qui font
+/// apparaître ou non le chip se prennent toutes en Kotlin (autorisation de
+/// démarrer un service de premier plan, acceptation du type `phoneCall`, pose
+/// de la notification). `OngoingCallChip.journalise` recopie ces étapes dans
+/// les préférences Flutter, `verserTracesChip()` les remonte ici.
+///
+/// ⚠️ À REPASSER À `false` une fois la cause trouvée. Le bandeau recouvre le
+/// haut de l'écran et n'a rien à faire dans une version remise au user.
+const bool tracesAppelsVisibles = true;
 
 /// Trace de négociation d'appel : journal système ET overlay à l'écran.
 ///
