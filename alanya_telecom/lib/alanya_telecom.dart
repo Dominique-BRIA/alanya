@@ -75,6 +75,32 @@ class AlanyaTelecom {
     } catch (_) {}
   }
 
+  /// Pose le chip vert « appel en cours » dans la barre d'état (Android 12+).
+  ///
+  /// À appeler quand l'appel est ÉTABLI. Sans effet en dessous d'Android 12,
+  /// où le style d'appel n'existe pas.
+  ///
+  /// POURQUOI DEPUIS DART. Le chip était accroché au décroché natif de Telecom,
+  /// qui ne connaît qu'un seul cas : un appel entrant reçu application en
+  /// arrière-plan. Application déjà ouverte, l'appel n'est jamais déclaré au
+  /// système ; un appel sortant non plus. Dans ces deux cas il n'existe aucune
+  /// `Connection`, donc aucun chip. Dart, lui, sait toujours qu'un appel tourne.
+  ///
+  /// Idempotent : un second appel pour la MÊME communication rafraîchit la
+  /// notification sans remettre le chronomètre à zéro.
+  static Future<void> chipDemarrer({required String nom}) async {
+    try {
+      await _ch.invokeMethod('chipDemarrer', {'nom': nom});
+    } catch (_) {}
+  }
+
+  /// Retire le chip. Idempotent : sans effet si aucun n'est posé.
+  static Future<void> chipArreter() async {
+    try {
+      await _ch.invokeMethod('chipArreter');
+    } catch (_) {}
+  }
+
   /// Décroche l'appel qui sonne (équivalent au bouton de la notification).
   static Future<void> answerRinging() async {
     try {

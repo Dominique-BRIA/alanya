@@ -135,6 +135,23 @@ object OngoingCallChip {
         }
     }
 
+    /**
+     * Instant de départ du chronomètre, ou 0 si aucun chip n'est posé.
+     *
+     * ⚠️ SANS CE CHAMP, LE CHRONOMÈTRE REPARTAIT DE ZÉRO. Deux chemins peuvent
+     * désormais demander le chip pour le MÊME appel : le natif, quand Telecom
+     * porte l'appel (`onAnswer`), et Dart, quand il ne le porte pas (appel
+     * décroché application déjà ouverte, ou appel sortant). Les deux se
+     * produisent parfois pour un même appel, à quelques centaines de
+     * millisecondes d'écart. Recalculer l'instant de départ au second appel
+     * ferait visiblement reculer le compteur sous les yeux de l'utilisateur.
+     *
+     * Le premier qui pose gagne ; les suivants ne font que rafraîchir la
+     * notification, sans toucher au temps.
+     */
+    @Volatile
+    private var debutMs: Long = 0L
+
     fun start(ctx: Context, data: Map<String, String>) {
         journalise(ctx, "start() appelé (API ${Build.VERSION.SDK_INT})")
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
@@ -144,10 +161,11 @@ object OngoingCallChip {
             journalise(ctx, "ABANDON : API < 31, CallStyle n'existe pas")
             return
         }
+        if (debutMs == 0L) debutMs = System.currentTimeMillis()
         val nom = data["callerName"]?.takeIf { it.isNotEmpty() } ?: "Appel en cours"
         val intent = Intent(ctx, OngoingCallService::class.java)
             .putExtra(EXTRA_NAME, nom)
-            .putExtra(EXTRA_SINCE, System.currentTimeMillis())
+            .putExtra(EXTRA_SINCE, debutMs)
         try {
             ctx.startForegroundService(intent)
             journalise(ctx, "startForegroundService() OK, service demandé")
@@ -171,6 +189,10 @@ object OngoingCallChip {
      * ne peut laisser un chip orphelin dans la barre d'état.
      */
     fun stop(ctx: Context) {
+        // Remis à zéro AVANT l'arrêt : le prochain appel doit repartir de son
+        // propre décroché. L'oublier ici ferait démarrer le chip suivant avec
+        // le chronomètre du précédent.
+        debutMs = 0L
         try {
             // `stopService` rend vrai seulement s'il y avait un service à
             // arrêter : c'est ce booléen qui distingue « le chip a été retiré »

@@ -1078,6 +1078,11 @@ class CallController extends ChangeNotifier {
     // refusé, expiré, terminé d'en face : c'est le seul endroit où l'arrêt ne
     // peut pas être oublié.
     CallForegroundService.arreter();
+    // Retrait du chip, au même point de passage obligé. Le natif le retire déjà
+    // de son côté quand Telecom porte l'appel (`cleanupUi`) ; ici on couvre les
+    // cas où Telecom n'a jamais rien porté — appel décroché application ouverte,
+    // appel sortant. Idempotent : sans effet si aucun chip n'est posé.
+    AlanyaTelecom.chipArreter();
     incoming = null;
     activeCallId = null;
     activeConvId = null;
@@ -1139,6 +1144,22 @@ class CallController extends ChangeNotifier {
       CallForegroundService.demarrer(
         titre: activePeerName ?? "Appel en cours",
       );
+      // Chip vert de la barre d'état, au MÊME endroit et pour la même raison :
+      // c'est ici, et nulle part ailleurs, qu'on sait qu'une communication est
+      // réellement établie — quel que soit son sens et quel que soit l'état de
+      // l'application.
+      //
+      // Le chip natif ne couvrait qu'un cas : un appel ENTRANT reçu
+      // application en arrière-plan, seul cas où Telecom porte l'appel et où
+      // `onAnswer` se déclenche. Application déjà ouverte, l'appel n'est jamais
+      // déclaré au système (voir plus bas dans ce fichier) ; un appel SORTANT
+      // ne l'est pas non plus, faute d'`onCreateOutgoingConnection`. Ce point
+      // d'appel-ci couvre les trois.
+      //
+      // Sans risque de doublon : quand Telecom a DÉJÀ posé le chip au décroché,
+      // cet appel-ci ne fait que rafraîchir la notification — le natif garde
+      // l'instant de départ du chronomètre.
+      AlanyaTelecom.chipDemarrer(nom: activePeerName ?? "Appel en cours");
     }
     // Ce rappel porte AUSSI les changements de caméra : c'est donc le bon
     // endroit pour réévaluer la proximité, qu'il s'agisse de la connexion du

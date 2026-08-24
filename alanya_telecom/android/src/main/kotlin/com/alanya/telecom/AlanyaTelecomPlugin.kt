@@ -73,6 +73,30 @@ class AlanyaTelecomPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             }
             "getRingingCall" -> result.success(CallRegistry.ringingData())
             "getAcceptedCall" -> result.success(CallRegistry.acceptedData())
+            // ── Chip vert de la barre d'état, piloté depuis Dart ────────────
+            //
+            // POURQUOI DART DOIT POUVOIR LE POSER. Le chip est né accroché à
+            // Telecom (`AlanyaConnection.onAnswer`), et Telecom ne voit qu'un
+            // seul cas : un appel ENTRANT reçu application en arrière-plan.
+            // Application déjà ouverte, l'appel n'est jamais déclaré au
+            // système (`call_controller` : « l'interface de l'application est
+            // plus soignée que celle du système ») ; et un appel SORTANT ne
+            // passe pas non plus par Telecom, faute de
+            // `onCreateOutgoingConnection`. Dans ces deux cas il n'existe
+            // aucune `Connection`, donc aucun décroché natif — et il n'y avait
+            // pas de chip.
+            //
+            // Dart, lui, sait dans TOUS les cas qu'un appel est en cours :
+            // c'est déjà lui qui démarre et arrête `CallForegroundService`.
+            "chipDemarrer" -> {
+                val nom = call.argument<String>("nom") ?: ""
+                OngoingCallChip.start(ctx, mapOf("callerName" to nom))
+                result.success(true)
+            }
+            "chipArreter" -> {
+                OngoingCallChip.stop(ctx)
+                result.success(true)
+            }
             else -> result.notImplemented()
         }
     }
