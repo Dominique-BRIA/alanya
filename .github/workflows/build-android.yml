@@ -2,9 +2,9 @@ name: Build Android APK
 
 on:
   push:
-    branches: [main, backup/pre-harmonisation-2026-07-24, arena/019f9ff6-alanya, arena/019fa167-alanya, arena/019fbc55-alanya, arena/019fe0e6-alanya, feature/vocal-attente-loop, integration/telecom-vocal]
+    branches: [main, backup/pre-harmonisation-2026-07-24, arena/019f9ff6-alanya, arena/019fa167-alanya, arena/019fbc55-alanya, arena/019fe0e6-alanya, feature/vocal-attente-loop, integration/telecom-vocal, feat/chip-appel-callstyle]
   pull_request:
-    branches: [main, backup/pre-harmonisation-2026-07-24, arena/019f9ff6-alanya, arena/019fa167-alanya, arena/019fbc55-alanya, arena/019fe0e6-alanya, feature/vocal-attente-loop, integration/telecom-vocal]
+    branches: [main, backup/pre-harmonisation-2026-07-24, arena/019f9ff6-alanya, arena/019fa167-alanya, arena/019fbc55-alanya, arena/019fe0e6-alanya, feature/vocal-attente-loop, integration/telecom-vocal, feat/chip-appel-callstyle]
   workflow_dispatch:
 
 jobs:
