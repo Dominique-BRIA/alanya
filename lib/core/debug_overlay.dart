@@ -17,17 +17,18 @@ import 'package:flutter/material.dart';
 /// ⚠️ Les traces elles-mêmes RESTENT en place, et c'est délibéré : `traceAppel`
 /// continue d'écrire dans le journal système, où elle ne coûte rien et où `adb
 /// logcat` la retrouvera. Seul l'affichage est coupé.
-/// 🔴 RALLUMÉ LE 24/08/2026, TROISIÈME FOIS — chip vert « appel en cours » qui
-/// n'apparaît pas. Même raison que les deux précédentes : le user teste **sans
-/// câble**, `adb logcat` est donc hors d'atteinte, et les décisions qui font
-/// apparaître ou non le chip se prennent toutes en Kotlin (autorisation de
-/// démarrer un service de premier plan, acceptation du type `phoneCall`, pose
-/// de la notification). `OngoingCallChip.journalise` recopie ces étapes dans
-/// les préférences Flutter, `verserTracesChip()` les remonte ici.
+/// ✅ REPASSÉ À `false` LE 24/08/2026 : troisième allumage, et cette fois il n'y
+/// avait rien à corriger. Le chip vert était bel et bien posé — les traces
+/// `CHIP start() / startForegroundService() OK / CHIP POSÉ` l'ont montré, et
+/// les deux notifications d'appel aux chronomètres décalés l'ont confirmé.
+/// L'outil a donc servi à PROUVER qu'un comportement fonctionnait, pas à
+/// trouver un défaut : c'est le même service rendu.
 ///
-/// ⚠️ À REPASSER À `false` une fois la cause trouvée. Le bandeau recouvre le
-/// haut de l'écran et n'a rien à faire dans une version remise au user.
-const bool tracesAppelsVisibles = true;
+/// ⚠️ Le chemin de diagnostic reste en place et ne coûte rien tant que ce
+/// drapeau est faux : `OngoingCallChip.journalise` écrit dans le journal
+/// système et dans les préférences, `verserTracesChip()` les draine.
+/// Rallumer ce drapeau suffit à revoir les étapes du chip sans câble.
+const bool tracesAppelsVisibles = false;
 
 /// Trace de négociation d'appel : journal système ET overlay à l'écran.
 ///
@@ -51,20 +52,6 @@ class DebugOverlay extends StatefulWidget {
 
   /// Log une ligne. Appelable depuis n'importe où (RealtimeClient, CallController, etc.).
   static void log(String line) {
-    // 🔴 FILTRE DE DIAGNOSTIC (24/08/2026) — À RETIRER AVEC
-    // [tracesAppelsVisibles].
-    //
-    // Mesuré sur les captures du user : la négociation produit une QUINZAINE
-    // de lignes ICE PAR SECONDE. À 60 lignes de journal, elles chassent les
-    // lignes `CHIP` en moins de cinq secondes — l'utilisateur a vu passer
-    // « chip retiré » sans jamais pouvoir le photographier.
-    //
-    // C'est le même piège que celui qui avait fait passer le journal de 20 à
-    // 60 lignes en août, mais l'augmentation ne suffit plus : il faut écarter
-    // le bruit, pas agrandir le seau. Les lignes ICE restent dans `adb logcat`
-    // (`debugPrint`), où elles ne coûtent rien — seul l'AFFICHAGE les ignore.
-    if (line.contains(' ice ') || line.endsWith('call_signal')) return;
-
     final ts = DateTime.now().toIso8601String().substring(11, 19);
     _log.insert(0, '$ts $line');
     // 60 et non 20 : une négociation produit une rafale de candidats ICE qui
