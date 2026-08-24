@@ -72,6 +72,22 @@ object OngoingCallChip {
 
     const val ACTION_HANGUP = "com.alanya.telecom.CHIP_HANGUP"
 
+    /**
+     * Appui sur le chip lui-même (et sur le corps de la notification).
+     *
+     * ⚠️ POURQUOI PAS SIMPLEMENT L'INTENT DE LANCEMENT DE L'APPLICATION. C'est
+     * ce que faisait la première version, et ça ramenait l'application « là où
+     * on l'avait laissée ». Après un décroché suivi d'un aller dans une
+     * conversation, l'appui sur le chip ramenait donc sur LA CONVERSATION, pas
+     * sur l'appel — il fallait ensuite passer par le bandeau vert pour revenir.
+     * Deux gestes au lieu d'un, là où WhatsApp en demande un seul.
+     *
+     * On passe donc par un récepteur qui fait DEUX choses : ramener
+     * l'application au premier plan, puis demander à Dart de rouvrir l'écran
+     * d'appel.
+     */
+    const val ACTION_REOPEN = "com.alanya.telecom.CHIP_REOPEN"
+
     const val EXTRA_NAME = "chip_name"
     const val EXTRA_SINCE = "chip_since"
 
@@ -170,8 +186,15 @@ object OngoingCallChip {
             flags
         )
 
-        val ouvrir = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)
-        val ouvrirPi = PendingIntent.getActivity(ctx, 5, ouvrir, flags)
+        // Identifiant de requête 6 : 1, 2 et 3 appartiennent à
+        // `IncomingNotifier`, 4 au bouton Raccrocher ci-dessus. Deux
+        // PendingIntent de même identifiant ET de même Intent sont LE MÊME
+        // objet pour Android — se tromper ici détournerait un bouton existant.
+        val ouvrirPi = PendingIntent.getBroadcast(
+            ctx, 6,
+            Intent(ctx, OngoingCallActionReceiver::class.java).setAction(ACTION_REOPEN),
+            flags
+        )
 
         val person = Person.Builder().setName(nom).setImportant(true).build()
 
@@ -260,16 +283,44 @@ class OngoingCallService : Service() {
  */
 class OngoingCallActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != OngoingCallChip.ACTION_HANGUP) return
-        Log.d(TAG, "raccrocher depuis le chip")
-        // Même garde de version que les autres points d'entrée du registre
-        // (`CallRegistry.answerCurrent` / `rejectCurrent`) : `AlanyaConnection`
-        // est annotée `@RequiresApi(O)`.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            CallRegistry.current?.onDisconnect()
+        when (intent.action) {
+            OngoingCallChip.ACTION_HANGUP -> {
+                Log.d(TAG, "raccrocher depuis le chip")
+                // Même garde de version que les autres points d'entrée du
+                // registre (`CallRegistry.answerCurrent` / `rejectCurrent`) :
+                // `AlanyaConnection` est annotée `@RequiresApi(O)`.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    CallRegistry.current?.onDisconnect()
+                }
+                // Filet : si la Connection avait déjà disparu, personne
+                // n'appellerait `cleanupUi()` et le chip resterait affiché
+                // sans appel derrière.
+                OngoingCallChip.stop(context)
+            }
+
+            OngoingCallChip.ACTION_REOPEN -> {
+                Log.d(TAG, "retour à l'appel depuis le chip")
+                // 1. Ramener l'application au premier plan. Sans ça, Dart
+                //    pousserait un écran dans une application invisible.
+                try {
+                    val launch = context.packageManager
+                        .getLaunchIntentForPackage(context.packageName)
+                    launch?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(launch)
+                } catch (e: Exception) {
+                    Log.w(TAG, "lancement de l'application : $e")
+                }
+                // 2. Demander l'écran d'appel. La charge est vide À DESSEIN :
+                //    c'est `CallController.activeCallId` qui fait foi côté
+                //    Dart, pas un identifiant recopié ici qui pourrait être
+                //    périmé après un transfert d'appel.
+                //
+                //    Sans effet si aucun moteur Flutter n'est attaché (`emit`
+                //    diffuse alors à zéro moteur). Ce cas est déjà couvert
+                //    autrement : au démarrage à froid, `CallListener` lit
+                //    `getAcceptedCall()` et ouvre l'écran de lui-même.
+                AlanyaTelecomPlugin.emit("reopen", HashMap())
+            }
         }
-        // Filet : si la Connection avait déjà disparu, personne n'appellerait
-        // `cleanupUi()` et le chip resterait affiché sans appel derrière.
-        OngoingCallChip.stop(context)
     }
 }

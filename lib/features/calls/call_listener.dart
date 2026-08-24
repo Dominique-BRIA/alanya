@@ -91,6 +91,11 @@ class _CallListenerState extends State<CallListener> {
           _onCallAction('call_reject', callId);
         case 'telecom_failed':
           unawaited(_replierSurPaquet(data));
+        // Appui sur le chip vert de la barre d'état : on REVIENT à un appel
+        // déjà décroché, on n'en accepte aucun. D'où une branche à part et
+        // non un `call_accept`, qui relancerait une acceptation.
+        case 'reopen':
+          _rouvrirEcranAppel();
         default:
           break;
       }
@@ -270,6 +275,36 @@ class _CallListenerState extends State<CallListener> {
   /// Le navigateur GLOBAL est utilisé plutôt que celui du contexte local, et on
   /// lui laisse le temps d'apparaître : une seconde par pas de 100 ms, largement
   /// au-delà du temps de construction observé.
+  /// Retour à l'écran d'appel depuis le chip vert de la barre d'état.
+  ///
+  /// Distinct de [_openCallScreen] sur trois points, et chacun compte :
+  ///
+  /// 1. L'écran n'est PAS marqué `incoming`. Le marquer entrant déclencherait
+  ///    `notifyRingingDisplayed()`, qui annonce « en train de sonner… » à
+  ///    l'appelant — d'un appel qu'on a déjà décroché.
+  /// 2. On ne pousse rien si l'écran est DÉJÀ affiché. Sans ce garde-fou, un
+  ///    appui sur le chip alors qu'on est sur l'écran d'appel empilerait un
+  ///    second écran par-dessus le premier, et il faudrait deux retours pour
+  ///    en sortir.
+  /// 3. Aucune boucle de reprise du navigateur : le chip n'existe que tant que
+  ///    le processus vit, donc l'application tourne déjà. Le cas du démarrage
+  ///    à froid, lui, est couvert par `_reprendreAppelNatif()`.
+  ///
+  /// `activeCallId` — et non le statut de l'appel — dit que c'est bien NOTRE
+  /// appel sur CET appareil, pour la même raison que dans
+  /// `ouvrirSiAppelEnCours` : un appel peut être en cours entre deux autres
+  /// personnes d'un groupe, et son écran serait alors vide.
+  void _rouvrirEcranAppel() {
+    if (!mounted) return;
+    final cc = context.read<CallController>();
+    if (cc.activeCallId == null) return;
+    if (cc.callScreenVisible) return;
+    PushService.navigatorKey.currentState?.push(MaterialPageRoute(
+      fullscreenDialog: true,
+      builder: (_) => const ActiveCallScreen(),
+    ));
+  }
+
   Future<void> _openCallScreen() async {
     for (var essai = 0; essai < 10; essai++) {
       final nav = PushService.navigatorKey.currentState;

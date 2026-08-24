@@ -13,7 +13,10 @@ class AlanyaTelecom {
   static void Function(String event, Map<String, dynamic> data)? _listener;
   static bool _handlerSet = false;
 
-  /// Événements natifs : 'answer' | 'reject' | 'timeout' | 'telecom_failed'.
+  /// Événements natifs : 'answer' | 'reject' | 'timeout' | 'telecom_failed'
+  /// | 'reopen' (appui sur le chip vert de la barre d'état : REVENIR à un
+  /// appel déjà décroché, sans rien accepter — charge vide, l'appel courant
+  /// est celui que connaît déjà l'application).
   /// data = le map passé à reportIncomingCall (callerName, callerPhone,
   /// roomId, callType, groupAdd, callerAvatar…).
   static void setListener(
