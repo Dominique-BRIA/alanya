@@ -657,6 +657,14 @@ class _ChatScreenState extends State<ChatScreen>
       if (idx < 0) return;
       setState(() {
         _messages[idx] = _withEdited(_messages[idx], content, editedAt);
+        // ⚠️ La liste RENDUE est `_combined`, pas `_messages` : sans cette
+        // reconstruction, elle continue de pointer l'ANCIEN objet et le texte
+        // ne bouge pas d'un pixel. Le gestionnaire de réactions, juste
+        // au-dessus, s'en passe pour une raison qui ne vaut que pour lui : il
+        // MUTE l'objet en place (`m.reactions = ...`), donc la même référence
+        // est déjà dans `_combined`. Ici on REMPLACE l'objet — il faut le
+        // reporter.
+        _rebuildCombined();
       });
     } else if (type == "message_pinned") {
       if (e["convId"] != widget.convId) return;
@@ -1386,8 +1394,14 @@ class _ChatScreenState extends State<ChatScreen>
     }
     setState(() {
       final idx = _messages.indexWhere((x) => x.id == m.id);
-      if (idx >= 0)
+      if (idx >= 0) {
         _messages[idx] = _withEdited(_messages[idx], text, DateTime.now());
+        // Même raison qu'à la réception de `message_edited` : la liste rendue
+        // est `_combined`. Sans ce report, l'auteur de la modification était le
+        // SEUL à ne jamais la voir — son écran gardait l'ancien texte jusqu'à
+        // ce qu'il rouvre la conversation.
+        _rebuildCombined();
+      }
       _editing = null;
     });
     _inputCtrl.clear();
