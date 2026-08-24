@@ -6,6 +6,14 @@
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Chip vert « appel en cours » dans la barre d'état (OngoingCallChip.kt).
+         FOREGROUND_SERVICE_PHONE_CALL est exigé depuis Android 14 pour un
+         service de ce type ; Android l'accorde parce que l'application tient
+         déjà MANAGE_OWN_CALLS et un ConnectionService self-managed avec un
+         appel actif — les deux conditions du système. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
+
     <application>
         <!-- Déclaré au système Telecom : tant qu'une Connection est active
              (sonnerie OU communication), Android LIE le processus de l'app →
@@ -22,6 +30,21 @@
         <!-- Boutons Décrocher/Refuser de la notification d'appel -->
         <receiver
             android:name="com.alanya.telecom.TelecomActionReceiver"
+            android:exported="false" />
+
+        <!-- Service portant le chip vert. Type `phoneCall` OBLIGATOIRE : c'est
+             lui, avec le style CallStyle de la notification, qui fait
+             reconnaître un appel en cours à Android. Distinct de
+             CallForegroundService, qui est de type `microphone` — un service ne
+             peut pas changer de type à l'exécution. -->
+        <service
+            android:name="com.alanya.telecom.OngoingCallService"
+            android:exported="false"
+            android:foregroundServiceType="phoneCall" />
+
+        <!-- Bouton « Raccrocher » du chip -->
+        <receiver
+            android:name="com.alanya.telecom.OngoingCallActionReceiver"
             android:exported="false" />
     </application>
 </manifest>

@@ -104,6 +104,10 @@ class AlanyaConnection(
         Log.d(TAG, "onAnswer")
         cleanupUi()
         setActive()
+        // Chip vert « appel en cours » dans la barre d'état. APRÈS `setActive()`
+        // : Android 14 n'autorise un service de premier plan `phoneCall` que si
+        // un appel est effectivement actif côté Telecom. Voir OngoingCallChip.
+        OngoingCallChip.start(ctx, data)
         AlanyaTelecomPlugin.emit("answer", data)
         // Ramener/lancer l'app au premier plan (écran d'appel côté Dart)
         try {
@@ -149,6 +153,12 @@ class AlanyaConnection(
         timeoutHandler.removeCallbacks(timeoutRunnable)
         IncomingRinger.stop()
         IncomingNotifier.cancel(ctx)
+        // Passage OBLIGÉ de toutes les fins d'appel — refus, raccroché local,
+        // raccroché distant, abandon, expiration des 90 s. Poser le retrait ICI
+        // plutôt que dans chaque `on…()` garantit qu'aucun chemin ne laisse un
+        // chip orphelin dans la barre d'état. Appelé aussi au décroché, juste
+        // avant `start()` : sans effet, `stop()` est idempotent.
+        OngoingCallChip.stop(ctx)
     }
 
     private fun close(cause: Int) {
