@@ -106,9 +106,20 @@ class AuthRepository {
     );
   }
 
-  /// Ajoute une adresse à un compte qui n'en a pas : demande le code.
-  Future<void> demanderAjoutEmail(String accessToken, String email) async {
-    await _api.post("/api/account/email", {"email": email}, bearer: accessToken);
+  /// Pose ou REMPLACE l'adresse du compte : premier temps, demande du code.
+  ///
+  /// 🔴 LE MOT DE PASSE COURANT EST EXIGÉ, pour ajouter comme pour remplacer.
+  /// L'adresse EST un moyen de reprendre le compte : sans lui, quiconque
+  /// emprunte une session ouverte y inscrit la sienne, puis reprend le compte
+  /// plus tard par « mot de passe oublié ».
+  ///
+  /// ⚠️ Le code part sur la NOUVELLE adresse, jamais sur l'ancienne : c'est la
+  /// nouvelle qu'il s'agit de prouver joignable, et l'ancienne est justement
+  /// celle que l'utilisateur ne relève plus.
+  Future<void> demanderAjoutEmail(
+      String accessToken, String email, String motDePasse) async {
+    await _api.post("/api/account/email", {"email": email, "password": motDePasse},
+        bearer: accessToken);
   }
 
   /// Ajoute une adresse : confirme le code et pose l'adresse.
