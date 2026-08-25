@@ -198,23 +198,31 @@ class AuthRepository {
     });
   }
 
-  /// Réinitialise le mot de passe avec l'IDENTIFIANT DE RÉCUPÉRATION.
+  /// Réinitialise le mot de passe avec le CODE DE RÉCUPÉRATION **et** l'Alanya
+  /// ID du compte.
   ///
-  /// Second chemin de la même route : pas de code, l'identifiant EST la preuve.
+  /// 🔴 LES DEUX SONT EXIGÉS. Le code seul suffisait au départ ; c'était un
+  /// secret unique dont la fuite aurait ouvert tous les comptes sans adresse
+  /// d'un coup. L'Alanya ID n'est pas un secret — les contacts le connaissent —
+  /// mais il empêche la reprise EN MASSE : un code volé ne dit plus à quel
+  /// compte il appartient.
   ///
   /// ⚠️ N'ENVOYER NI `email` NI `code` avec. Le serveur refuse explicitement un
   /// mélange des deux chemins plutôt que d'en choisir un — une demande ambiguë
   /// sur une route qui rend un compte doit être rejetée, pas devinée.
   ///
-  /// La saisie n'a pas besoin d'être nettoyée ici : le serveur relève la casse,
-  /// ignore les séparateurs et traduit les I/L/O mal lus. Un nettoyage local
-  /// ferait une deuxième règle à tenir accordée avec la sienne.
+  /// Aucune des deux saisies n'a besoin d'être nettoyée ici : le serveur relève
+  /// la casse, ignore les séparateurs, traduit les I/L/O mal lus et ne retient
+  /// que les chiffres de l'Alanya ID. Un nettoyage local ferait une deuxième
+  /// règle à tenir accordée avec la sienne.
   Future<void> resetPasswordParIdRecuperation({
     required String idRecuperation,
+    required String alanyaId,
     required String newPassword,
   }) async {
     await _api.post("/api/auth/reset-password", {
       "idRecuperation": idRecuperation,
+      "publicNumber": alanyaId,
       "password": newPassword,
     });
   }

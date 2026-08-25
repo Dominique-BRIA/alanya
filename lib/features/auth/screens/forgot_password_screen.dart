@@ -34,6 +34,14 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   final _idRecCtrl = TextEditingController();
   final _idRecPassCtrl = TextEditingController();
 
+  /// L'Alanya ID du compte à reprendre — SECOND FACTEUR du chemin par code.
+  ///
+  /// 🔴 Le code seul ne suffit plus : c'était un secret unique dont la fuite
+  /// aurait ouvert tous les comptes sans adresse d'un coup. L'Alanya ID n'est
+  /// pas un secret, mais il empêche la reprise en masse — un code volé ne dit
+  /// plus à quel compte il appartient.
+  final _idRecNumCtrl = TextEditingController();
+
   bool _loading = false;
   bool _codeSent = false; // Passe à true après l'envoi du code
 
@@ -46,6 +54,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     _codeCtrl.dispose();
     _passCtrl.dispose();
     _idRecCtrl.dispose();
+    _idRecNumCtrl.dispose();
     _idRecPassCtrl.dispose();
     super.dispose();
   }
@@ -57,10 +66,15 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   /// passe tout de suite.
   Future<void> _resetParIdRecuperation() async {
     final id = _idRecCtrl.text.trim();
+    final numero = _idRecNumCtrl.text.trim();
     final motDePasse = _idRecPassCtrl.text;
 
     if (id.isEmpty) {
       showAppSnackBar(tr(context, 'recovery_id_required'));
+      return;
+    }
+    if (numero.isEmpty) {
+      showAppSnackBar(tr(context, 'recovery_alanya_id_required'));
       return;
     }
     if (motDePasse.length < 8) {
@@ -75,6 +89,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
       // ferait une seconde règle à tenir accordée avec la sienne.
       await context.read<AuthRepository>().resetPasswordParIdRecuperation(
             idRecuperation: id,
+            alanyaId: numero,
             newPassword: motDePasse,
           );
       if (!mounted) return;
@@ -233,6 +248,22 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                         labelText: tr(context, 'recovery_id_label'),
                         prefixIcon: const Icon(Icons.key_outlined),
                         counterText: "",
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    // Second facteur. `keyboardType: number` mais SANS filtre
+                    // sur les chiffres : l'Alanya ID est affiché formaté par
+                    // paires dans toute l'application, et c'est sous cette
+                    // forme que l'utilisateur le connaît. Le serveur ne retient
+                    // que les chiffres — refuser les espaces à la saisie
+                    // rejetterait la façon la plus naturelle de le recopier.
+                    TextField(
+                      controller: _idRecNumCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        labelText: tr(context, 'recovery_alanya_id_label'),
+                        helperText: tr(context, 'recovery_alanya_id_hint'),
+                        prefixIcon: const Icon(Icons.badge_outlined),
                       ),
                     ),
                     const SizedBox(height: 16),
