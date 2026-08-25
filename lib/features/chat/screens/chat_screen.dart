@@ -4372,6 +4372,7 @@ class _ChatScreenState extends State<ChatScreen>
               color: _composerBg,
               child: Column(mainAxisSize: MainAxisSize.min, children: [
                 _formatBar(),
+                _compteurLongueur(),
                 Row(children: [
                   // Ordre repris de la maquette : TOUT est dans le champ — smiley contre
                   // le bord gauche, « A » et trombone contre le bord droit. Seul le
@@ -4388,6 +4389,24 @@ class _ChatScreenState extends State<ChatScreen>
                               textInputAction: TextInputAction.send,
                               onChanged: _onInputChanged,
                               onSubmitted: (_) => _send(),
+                              // La colonne `message.content` est un VARCHAR(500) :
+                              // au-delà, le serveur COUPE. Borner la saisie évite
+                              // d'écrire un texte qui arriverait amputé sans
+                              // avertissement.
+                              //
+                              // `inputFormatters` et NON `maxLength` : ce dernier
+                              // impose son propre compteur sous le champ, qui
+                              // pousserait le composeur vers le haut EN
+                              // PERMANENCE. Le compteur ci-dessous ne se montre
+                              // qu'à l'approche de la limite.
+                              //
+                              // Le formateur borne aussi le COLLER, pas seulement
+                              // la frappe — c'est le cas qui compte, personne ne
+                              // tape 500 caractères à la main.
+                              inputFormatters: [
+                                LengthLimitingTextInputFormatter(
+                                    longueurMaxContenu),
+                              ],
                               // Second chemin, celui de WhatsApp : sélectionner du texte, puis
                               // choisir la mise en forme dans le menu contextuel, à la suite de
                               // Couper / Copier / Coller. On repart des entrées natives plutôt que
@@ -4717,6 +4736,46 @@ class _ChatScreenState extends State<ChatScreen>
   ///
   /// `AnimatedSize` plutôt qu'un `if` sec : la barre pousse le champ de saisie
   /// vers le bas, et un saut brutal juste au-dessus du clavier se voit.
+  /// Compteur « reste N caractères », visible seulement à l'approche du plafond.
+  ///
+  /// Il ne s'affiche qu'à partir de 50 caractères de la fin : un compteur
+  /// toujours présent occuperait une ligne du composeur pour une limite que la
+  /// quasi-totalité des messages n'atteint jamais — le message médian fait
+  /// quelques dizaines de caractères.
+  ///
+  /// ⚠️ `ValueListenableBuilder` et NON un `setState` dans `_onInputChanged` :
+  /// cet écran fait plus de 5 000 lignes, et le reconstruire à CHAQUE frappe
+  /// pour rafraîchir un compteur coûterait bien plus que ce qu'il affiche. Ici
+  /// seul le compteur se reconstruit.
+  Widget _compteurLongueur() {
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: _inputCtrl,
+      builder: (context, valeur, _) {
+        final restant = longueurMaxContenu - valeur.text.length;
+        if (restant > 50) return const SizedBox.shrink();
+        // À zéro, la saisie est bloquée par le formateur : le compteur devient
+        // rouge pour expliquer pourquoi le clavier « ne répond plus ».
+        final limiteAtteinte = restant <= 0;
+        return Padding(
+          padding: const EdgeInsets.only(right: 12, bottom: 2),
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: Text(
+              "$restant",
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: limiteAtteinte ? FontWeight.w600 : FontWeight.w400,
+                color: limiteAtteinte
+                    ? Theme.of(context).colorScheme.error
+                    : _iconNeutral,
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _formatBar() {
     return AnimatedSize(
       duration: const Duration(milliseconds: 180),
