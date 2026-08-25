@@ -34,6 +34,7 @@ import 'features/calls/calls_repository.dart';
 import 'features/calls/enregistrements_repository.dart';
 import 'features/calls/plaintes_repository.dart';
 import 'features/chat/chat_repository.dart';
+import 'core/pays_repository.dart';
 import 'features/contacts/contact_lists_repository.dart';
 import 'features/contacts/contacts_repository.dart';
 import 'features/home/home_screen.dart';
@@ -109,6 +110,9 @@ void main() async {
         Provider<AuthedApi>.value(value: authedApi),
         Provider<ContactsRepository>.value(
             value: ContactsRepository(authedApi)),
+        // Table de reference des pays, lue a l inscription.
+        // Route PUBLIQUE : elle doit repondre avant toute session.
+        Provider<PaysRepository>.value(value: PaysRepository(api)),
         Provider<ContactListsRepository>.value(
             value: ContactListsRepository(authedApi)),
         // La sonnerie d'un appelant se lit dans SES listes de contacts, et la
