@@ -11,6 +11,7 @@ import '../auth_controller.dart';
 import '../../../core/pays_repository.dart';
 import '../../../core/telephone.dart';
 import '../auth_repository.dart';
+import 'id_recuperation_screen.dart';
 
 /* 🔴 LA LISTE DE PAYS CODÉE EN DUR A ÉTÉ RETIRÉE LE 25/08/2026.
  *
@@ -32,9 +33,24 @@ import '../auth_repository.dart';
 
 /// Étape 3 : choix du pseudo + mot de passe + pays. Affiche le numéro public attribué.
 class SetupScreen extends StatefulWidget {
-  const SetupScreen({super.key, required this.setupToken, required this.publicNumber});
+  const SetupScreen({
+    super.key,
+    required this.setupToken,
+    required this.publicNumber,
+    this.idRecuperation,
+  });
   final String setupToken;
   final String publicNumber;
+
+  /// Le code de récupération d'une inscription SANS adresse, à présenter une
+  /// fois le compte terminé. `null` pour une inscription par courriel.
+  ///
+  /// 🔴 IL EST MONTRÉ ICI, EN DERNIER (demande du user, 25/08/2026), et plus
+  /// juste après la création du compte. Cet écran est le seul à savoir quand
+  /// l'inscription est réellement finie : le mot de passe posé et la session
+  /// obtenue. Le montrer plus tôt en faisait une étape à traverser, au milieu
+  /// d'un parcours dont l'utilisateur ne voyait pas encore le bout.
+  final String? idRecuperation;
 
   @override
   State<SetupScreen> createState() => _SetupScreenState();
@@ -130,6 +146,39 @@ class _SetupScreenState extends State<SetupScreen> {
             idPays: _selectedPaysId,
           );
       if (!mounted) return;
+
+      /*
+       * DERNIÈRE ÉTAPE DE L'INSCRIPTION SANS ADRESSE : le code de récupération.
+       *
+       * ⚠️ AVANT `completeSetup`, et c'est délibéré. Ouvrir la session d'abord
+       * ferait basculer la racine de l'application sur l'accueil, et cet écran
+       * apparaîtrait par-dessus un écran d'accueil en train de se construire.
+       * Ici, le parcours reste une suite d'écrans, dans l'ordre.
+       *
+       * ⚠️ L'attente ne se termine QUE par le bouton « Continuer » de l'écran :
+       * il neutralise le geste « retour » du système (`PopScope`), sans quoi on
+       * pourrait renvoyer le code d'un balayage.
+       *
+       * Le compte est déjà créé et son mot de passe posé à ce stade : quelqu'un
+       * qui fermerait l'application ici ne perd rien — il se connecte avec son
+       * numéro et retrouve le code dans `Réglages ▸ Sécurité`.
+       */
+      final codeRecuperation = widget.idRecuperation;
+      if (codeRecuperation != null) {
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (ecran) => IdRecuperationScreen(
+              idRecuperation: codeRecuperation,
+              publicNumber: widget.publicNumber,
+              // `ecran` et non le `context` de l'écran de profil : c'est la
+              // route qu'on vient de pousser qu'il faut refermer.
+              onContinuer: () => Navigator.of(ecran).pop(),
+            ),
+          ),
+        );
+        if (!mounted) return;
+      }
+
       await context.read<AuthController>().completeSetup(session);
       if (!mounted) return;
       Navigator.of(context).popUntil((r) => r.isFirst);

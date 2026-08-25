@@ -132,28 +132,22 @@ class _IdRecuperationScreenState extends State<IdRecuperationScreen> {
                 ),
                 const SizedBox(height: 20),
 
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.error.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(Icons.warning_amber_rounded,
-                          size: 20, color: Theme.of(context).colorScheme.error),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          tr(context, 'recovery_id_warning'),
-                          style: const TextStyle(fontSize: 13),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 12),
+                /* 🔴 L'ENCART D'AVERTISSEMENT A ÉTÉ RETIRÉ LE 25/08/2026, à la
+                 * demande du user — il suivait l'Alanya ID et disait que le
+                 * code ne serait plus remontré ici, mais qu'on le retrouverait
+                 * dans les Réglages.
+                 *
+                 * Ne pas le remettre « par prudence » : ce qu'il annonçait est
+                 * déjà porté par ce qui l'entourait — le corps de l'écran dit
+                 * de noter le code et de le garder, et la case à cocher fait
+                 * dire à l'utilisateur qu'il l'a fait. Trois messages pour une
+                 * seule consigne, dont un en rouge, faisaient surtout de
+                 * l'alarme sur un écran qui n'annonce pourtant aucun problème.
+                 *
+                 * La promesse reste tenue par le code : `Réglages ▸ Sécurité`
+                 * redonne le code à qui est connecté
+                 * (`features/settings/screens/recuperation_screen.dart`).
+                 */
 
                 CheckboxListTile(
                   value: _note,

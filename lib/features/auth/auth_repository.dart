@@ -209,6 +209,32 @@ class AuthRepository {
     });
   }
 
+  /// Vérifie que le CODE DE RÉCUPÉRATION et l'Alanya ID désignent le même
+  /// compte, **sans rien changer**.
+  ///
+  /// Sert à ouvrir l'écran du nouveau mot de passe seulement si la paire est
+  /// bonne : sans elle, l'utilisateur saisirait deux fois un mot de passe pour
+  /// apprendre ensuite que son code était faux, et devrait tout recommencer.
+  ///
+  /// 🔴 CE N'EST PAS UNE AUTORISATION, et il n'en revient AUCUN jeton. La
+  /// réinitialisation qui suit renvoie les deux mêmes éléments et refait le
+  /// même contrôle : le pouvoir de reprendre le compte reste attaché à la
+  /// paire, jamais à cette étape.
+  ///
+  /// ⚠️ Elle consomme un essai du plafond de reprise, qu'elle PARTAGE avec
+  /// `resetPasswordParIdRecuperation` (même compteur côté serveur). Ne pas
+  /// l'appeler à chaque frappe : une reprise coûte deux essais sur cinq par
+  /// quart d'heure, il n'y a pas de place pour une vérification continue.
+  Future<void> verifierIdRecuperation({
+    required String idRecuperation,
+    required String alanyaId,
+  }) async {
+    await _api.post("/api/auth/reset-password/verify", {
+      "idRecuperation": idRecuperation,
+      "publicNumber": alanyaId,
+    });
+  }
+
   /// Réinitialise le mot de passe avec le CODE DE RÉCUPÉRATION **et** l'Alanya
   /// ID du compte.
   ///
