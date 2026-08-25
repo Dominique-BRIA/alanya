@@ -19,13 +19,30 @@
 ///                               "accuracy":12.5,"label":"Douala"}}
 ///
 /// La PHOTO d'un contact du répertoire n'est jamais dans la charge : elle est
-/// envoyée comme média du message (`media.first`), `content` étant plafonné à
-/// 8000 caractères par la validation serveur.
+/// envoyée comme média du message (`media.first`).
 library;
 
 import 'dart:convert';
 
 const int versionCharge = 1;
+
+/// Longueur maximale d'un message, en caractères.
+///
+/// 🔴 CE N'EST PAS UN CHOIX D'INTERFACE, c'est la taille de la colonne :
+/// `message.content` est un `VARCHAR(500)` depuis le 25/08/2026. Le serveur
+/// COUPE ce qui dépasse (`tronqueContenu` dans `message-payload.mjs`), donc
+/// sans cette borne à la saisie l'utilisateur écrit un texte, l'envoie, et en
+/// voit arriver une version raccourcie sans que rien ne l'ait prévenu.
+///
+/// ⚠️ Elle compte les MARQUEURS de mise en forme. `*gras*` occupe 6 caractères
+/// en base, pas 4 : c'est le texte brut qui est stocké, et c'est donc lui qu'il
+/// faut mesurer, sinon la borne de l'écran serait plus permissive que la
+/// colonne.
+///
+/// ⚠️ MIROIR de `LONGUEUR_MAX_CONTENU` côté serveur et de la constante du même
+/// nom dans `STAGE-WEB/src/services/message-payload.ts`. La changer ici seul ne
+/// changerait rien : c'est la base qui tranche.
+const int longueurMaxContenu = 500;
 
 /// Un contact partagé dans une discussion.
 class SharedContact {
