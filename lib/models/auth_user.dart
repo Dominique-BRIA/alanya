@@ -1,7 +1,17 @@
 /// Utilisateur authentifié tel que renvoyé par l'API.
 class AuthUser {
   final String id;
-  final String email;
+
+  /// 🔴 NULLABLE DEPUIS LE 25/08/2026 : l'adresse est devenue FACULTATIVE à
+  /// l'inscription. Un compte ouvert sans adresse se reprend par son identifiant
+  /// de récupération, et le serveur renvoie `"email": null` pour lui.
+  ///
+  /// ⚠️ Le cast était `json["email"] as String`, qui LÈVE sur `null` au lieu de
+  /// rendre nul — c'est la même famille de panne que le `as num?` sur une chaîne
+  /// du 17/08/2026. Le premier compte sans adresse aurait fait échouer la
+  /// lecture du profil, donc le démarrage de l'application, sans que
+  /// `flutter analyze` n'en dise rien.
+  final String? email;
   final String publicNumber;
   final String? pseudo;
   final String? avatarUrl;
@@ -79,7 +89,7 @@ class AuthUser {
 
   factory AuthUser.fromJson(Map<String, dynamic> json) => AuthUser(
         id: json["id"] as String,
-        email: json["email"] as String,
+        email: json["email"] as String?,
         publicNumber: json["publicNumber"] as String,
         pseudo: json["pseudo"] as String?,
         avatarUrl: json["avatarUrl"] as String?,
