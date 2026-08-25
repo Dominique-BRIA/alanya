@@ -303,7 +303,9 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 FloatingActionButton.small(
                   heroTag: "fab-ia",
-                  tooltip: "IA",
+                  // Même nom que le titre de l'écran qu'il ouvre : un bouton
+                  // qui s'annonce autrement que l'endroit où il mène.
+                  tooltip: "Assistant Alanya",
                   backgroundColor:
                       Theme.of(context).colorScheme.surfaceContainerHighest,
                   foregroundColor: accentOf(context),
@@ -1845,7 +1847,10 @@ class AiScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: backAppBar(context, "IA"),
+      // « Assistant Alanya » et non « IA » : c'est le nom du produit, celui que
+      // porte déjà l'en-tête d'une conversation partagée. Il ne se traduit pas,
+      // d'où la chaîne en clair plutôt qu'un libellé dans les neuf langues.
+      appBar: backAppBar(context, "Assistant Alanya"),
       body: const _AiTab(),
     );
   }
