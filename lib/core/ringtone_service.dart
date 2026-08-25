@@ -227,6 +227,32 @@ class RingtoneService {
   Future<void> stopIvr() async {
     // Avant le retour anticipé : annule aussi une lecture encore en préparation.
     _generationIvr++;
+    /*
+     * 🐛 ON OUBLIE CE QUI JOUAIT — signalé par le user le 25/08/2026, sous
+     * TROIS symptômes qui n'en font qu'un :
+     *
+     *  1. centre d'appels, agent déjà en ligne : appuyer sur le haut-parleur
+     *     fait repartir LA MUSIQUE D'ATTENTE par-dessus la conversation ;
+     *  2. centre vocal, pendant l'enregistrement d'une plainte : le même appui
+     *     relance LE VOCAL D'ANNONCE dans le micro ;
+     *  3. et dans les deux cas le son reprenait AU DÉBUT.
+     *
+     * `reglerHautParleurIvr` rejoue `_urlIvrEnCours` pour porter le son sur
+     * l'autre sortie. Or cette URL ne s'effaçait qu'à la FIN de l'appel
+     * (`reinitialiserIvr`) : elle survivait donc à l'arrêt de la lecture, et
+     * l'appui ressuscitait un son que plus rien ne jouait — l'agent décroche
+     * (`call_controller.dart:568`), ou l'enregistrement commence
+     * (`plainte_recorder.dart:147`), les deux passent par ici.
+     *
+     * Une lecture arrêtée n'a plus de sortie à choisir. L'oublier ici est donc
+     * la règle, et non une précaution : c'est la seule chose qui distingue
+     * « rien ne joue » de « quelque chose joue à l'écouteur ».
+     *
+     * ⚠️ Sans effet sur le cas normal : `_playIvr` commence par appeler cette
+     * méthode, puis repose immédiatement l'URL du son qu'il lance.
+     */
+    _urlIvrEnCours = null;
+    _onCompleteIvrEnCours = null;
     // Avant tout le reste : un relais laissé vivant relancerait la lecture que
     // l'on est en train d'arrêter.
     _finIvrSub?.cancel();
@@ -342,13 +368,52 @@ class RingtoneService {
     if (_hautParleurIvr == actif) return;
     _hautParleurIvr = actif;
     final url = _urlIvrEnCours;
+    // Rien ne joue : il n'y a aucune sortie à changer. C'est `stopIvr` qui a
+    // effacé l'URL, et c'est ce qui empêche l'appui de ressusciter la musique
+    // d'attente ou le vocal d'annonce par-dessus une conversation.
     if (url == null) return;
-    await _playIvr(url, loop: _loopIvrEnCours);
+
+    /*
+     * 🐛 ON REPREND OÙ ON EN ÉTAIT — signalé par le user le 25/08/2026 : « quand
+     * je clique sur le haut-parleur, le vocal recommence à zéro ».
+     *
+     * Changer de sortie impose de REJOUER : le routage Android est porté par
+     * l'`AudioContext` du lecteur (`_contexteIvr`), et `audioplayers` ne le
+     * change pas sur un lecteur en cours — c'est pour cela que la bascule passe
+     * par un nouveau lecteur. Mais rejouer n'oblige pas à revenir au début : on
+     * relève la position avant de tout défaire, et on y retourne après.
+     *
+     * ⚠️ Relevée AVANT `_playIvr`, qui commence par `stopIvr()` et libère le
+     * lecteur : après, il n'y a plus personne à interroger.
+     *
+     * Une annonce qui reprend au début n'est pas une gêne mineure sur un
+     * standard : elle réénumère les touches, et l'appelant qui vient de choisir
+     * son service se demande si son appui a été perdu.
+     */
+    Duration? position;
+    try {
+      position = await _ivrPlayer?.getCurrentPosition();
+    } catch (_) {}
+
+    await _playIvr(
+      url,
+      loop: _loopIvrEnCours,
+      // ⚠️ LE RELAIS DE FIN DOIT SURVIVRE À LA BASCULE. `playIvrPrompt` et
+      // `_playIvrSequence` s'en servent pour enchaîner ; le perdre laisserait
+      // le standard muet après l'invite, et seulement pour les appelants ayant
+      // touché au haut-parleur — le genre de panne qu'on ne reproduit jamais.
+      onComplete: _onCompleteIvrEnCours,
+      depart: position,
+    );
   }
 
   /// La lecture en cours, pour pouvoir la reprendre sur l'autre sortie.
+  ///
+  /// ⚠️ Effacés par [stopIvr] : une lecture arrêtée n'a plus de sortie à
+  /// choisir, et les garder revenait à rejouer un son que rien ne jouait.
   String? _urlIvrEnCours;
   bool _loopIvrEnCours = true;
+  void Function()? _onCompleteIvrEnCours;
 
   /// Oublie l'état du standard — à appeler à la FIN d'un appel, jamais entre
   /// deux sons du même appel.
@@ -366,6 +431,7 @@ class RingtoneService {
     _hautParleurIvr = true;
     _urlIvrEnCours = null;
     _loopIvrEnCours = true;
+    _onCompleteIvrEnCours = null;
   }
 
   /// Le contexte audio du standard, selon la sortie choisie.
@@ -411,15 +477,22 @@ class RingtoneService {
     );
   }
 
+  /// [depart] : position à laquelle reprendre. Renseignée uniquement par la
+  /// bascule du haut-parleur, qui rejoue le MÊME son sur l'autre sortie et ne
+  /// doit pas le faire recommencer.
   Future<void> _playIvr(String url,
-      {required bool loop, void Function()? onComplete}) async {
+      {required bool loop,
+      void Function()? onComplete,
+      Duration? depart}) async {
     await stopIvr();
     final gen = _generationIvr;
     try {
       // Mémorisé AVANT la lecture : c'est ce qui permet de reprendre le même
       // son sur l'autre sortie quand l'appelant bascule le haut-parleur.
+      // ⚠️ Posé APRÈS `stopIvr()`, qui vient justement de l'effacer.
       _urlIvrEnCours = url;
       _loopIvrEnCours = loop;
+      _onCompleteIvrEnCours = onComplete;
 
       final p = AudioPlayer();
       await p.setAudioContext(_contexteIvr());
@@ -432,6 +505,20 @@ class RingtoneService {
       if (gen != _generationIvr) return _jeter(p);
 
       await p.play(source);
+      // Reprise après une bascule du haut-parleur. Après `play` et non avant :
+      // il n'y a rien où chercher tant que la source n'est pas chargée.
+      //
+      // `Duration.zero` est écarté comme une absence de reprise — y « revenir »
+      // ne ferait qu'ajouter un aller-retour inutile au démarrage normal.
+      if (depart != null && depart > Duration.zero) {
+        try {
+          await p.seek(depart);
+          traceAppel("IVR audio ⏩ reprise à ${depart.inSeconds}s");
+        } catch (_) {
+          // Une source qui refuse le déplacement (flux non « seekable ») joue
+          // depuis le début : c'est le comportement d'avant, pas une panne.
+        }
+      }
       if (loop) await p.setReleaseMode(ReleaseMode.loop);
       if (gen != _generationIvr) {
         traceAppel("IVR audio ANNULÉ pendant le chargement (loop=$loop)");
