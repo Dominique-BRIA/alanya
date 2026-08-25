@@ -8,44 +8,27 @@ import '../../../core/app_snackbar.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../auth_controller.dart';
+import '../../../core/pays_repository.dart';
+import '../../../core/telephone.dart';
 import '../auth_repository.dart';
 
-/// Données pays statiques pour l'inscription (évite un appel API non authentifié).
-class _PaysOption {
-  final int id;
-  final String flag;
-  final String nom;
-  final String prefix;
-  const _PaysOption(this.id, this.flag, this.nom, this.prefix);
-}
-
-const _paysList = [
-  _PaysOption(1, "🇨🇲", "Cameroun", "+237"),
-  _PaysOption(2, "🇫🇷", "France", "+33"),
-  _PaysOption(3, "🇨🇮", "Côte d'Ivoire", "+225"),
-  _PaysOption(4, "🇸🇳", "Sénégal", "+221"),
-  _PaysOption(5, "🇨🇩", "RD Congo", "+243"),
-  _PaysOption(6, "🇬🇦", "Gabon", "+241"),
-  _PaysOption(7, "🇹🇩", "Tchad", "+235"),
-  _PaysOption(8, "🇨🇬", "Congo", "+242"),
-  _PaysOption(9, "🇧🇯", "Bénin", "+229"),
-  _PaysOption(10, "🇹🇬", "Togo", "+228"),
-  _PaysOption(11, "🇲🇱", "Mali", "+223"),
-  _PaysOption(12, "🇧🇫", "Burkina Faso", "+226"),
-  _PaysOption(13, "🇳🇪", "Niger", "+227"),
-  _PaysOption(14, "🇬🇳", "Guinée", "+224"),
-  _PaysOption(15, "🇲🇦", "Maroc", "+212"),
-  _PaysOption(16, "🇩🇿", "Algérie", "+213"),
-  _PaysOption(17, "🇹🇳", "Tunisie", "+216"),
-  _PaysOption(18, "🇳🇬", "Nigeria", "+234"),
-  _PaysOption(19, "🇬🇭", "Ghana", "+233"),
-  _PaysOption(20, "🇨🇦", "Canada", "+1"),
-  _PaysOption(21, "🇧🇪", "Belgique", "+32"),
-  _PaysOption(22, "🇨🇭", "Suisse", "+41"),
-  _PaysOption(23, "🇩🇪", "Allemagne", "+49"),
-  _PaysOption(24, "🇬🇧", "Royaume-Uni", "+44"),
-  _PaysOption(25, "🇺🇸", "États-Unis", "+1"),
-];
+/* 🔴 LA LISTE DE PAYS CODÉE EN DUR A ÉTÉ RETIRÉE LE 25/08/2026.
+ *
+ * Elle portait 25 pays avec des identifiants INVENTÉS — elle disait
+ * « 1 = Cameroun » quand la table `pays` dit « 1 = Afrique du Sud ». Chaque
+ * compte créé depuis cet écran enregistrait donc un pays faux : 4 comptes en
+ * Afrique du Sud en production, tous censés être au Cameroun.
+ *
+ * Le serveur ne pouvait rien détecter — son contrôle demande « cet identifiant
+ * existe-t-il ? », et la réponse était oui ; il désignait simplement un autre
+ * pays.
+ *
+ * Son commentaire d'origine disait qu'elle « évite un appel API non
+ * authentifié » : c'était la vraie raison, et le vrai correctif était donc
+ * d'ouvrir la route. `GET /api/pays` est publique depuis le 25/08/2026 — une
+ * table de référence sans donnée personnelle n'avait rien à protéger. La liste
+ * vient désormais de `core/pays_repository.dart`.
+ */
 
 /// Étape 3 : choix du pseudo + mot de passe + pays. Affiche le numéro public attribué.
 class SetupScreen extends StatefulWidget {
@@ -67,6 +50,64 @@ class _SetupScreenState extends State<SetupScreen> {
   bool _loading = false;
   bool _obscure = true;
   bool _obscureConfirm = true;
+
+  /// La table de référence, chargée depuis le serveur.
+  ///
+  /// 🔴 REMPLACE UNE LISTE CODÉE EN DUR AUX IDENTIFIANTS INVENTÉS. Elle disait
+  /// « 1 = Cameroun » quand la table dit « 1 = Afrique du Sud » : chaque compte
+  /// créé ici enregistrait un pays faux. Voir `core/pays_repository.dart`.
+  List<Pays> _pays = const [];
+  bool _paysErreur = false;
+
+  /// Le pays choisi, ou `null`. Sert à l'indicatif et au format du numéro.
+  Pays? get _paysChoisi {
+    final id = _selectedPaysId;
+    if (id == null) return null;
+    for (final p in _pays) {
+      if (p.idPays == id) return p;
+    }
+    return null;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _chargerPays();
+  }
+
+  Future<void> _chargerPays() async {
+    try {
+      final liste = await context.read<PaysRepository>().liste();
+      if (!mounted) return;
+      setState(() => _pays = liste);
+    } catch (_) {
+      // On ne bloque pas l'inscription : le champ reste vide et son texte
+      // d'aide le dit. Mieux vaut un compte sans pays qu'un parcours interrompu
+      // au dernier écran par une table de référence indisponible.
+      if (mounted) setState(() => _paysErreur = true);
+    }
+  }
+
+  /// Reformate le champ téléphone avec l'indicatif du pays courant.
+  ///
+  /// ⚠️ Le champ affiche la forme LISIBLE (« +237 6 91 23 45 67 ») ; c'est la
+  /// forme canonique qui part au serveur, et c'est le SERVEUR qui normalise en
+  /// dernier ressort. Cette mise en forme n'est qu'un confort de saisie.
+  void _reformaterTelephone() {
+    final p = _paysChoisi;
+    if (p == null) return;
+    final brut = _mobileCtrl.text.trim();
+    if (brut.isEmpty) return;
+    final joli = formaterTelephone(brut, p.prefix, p.iso2);
+    if (joli.isNotEmpty && joli != brut) {
+      _mobileCtrl.value = TextEditingValue(
+        text: joli,
+        // Le curseur va à la FIN : le laisser où il était le placerait au
+        // milieu des espaces qu'on vient d'insérer.
+        selection: TextSelection.collapsed(offset: joli.length),
+      );
+    }
+  }
 
   @override
   void dispose() {
@@ -180,11 +221,28 @@ class _SetupScreenState extends State<SetupScreen> {
                   keyboardType: TextInputType.phone,
                   // Aligné sur la colonne users.mobile, en VARCHAR(20).
                   maxLength: 20,
-                  decoration: const InputDecoration(
+                  /*
+                   * Mise en forme à la SORTIE du champ, pas à chaque frappe.
+                   *
+                   * ⚠️ Reformater pendant la saisie oblige à replacer le curseur
+                   * à chaque caractère, et se bat avec l'utilisateur dès qu'il
+                   * corrige au milieu de son numéro. Attendre qu'il ait fini
+                   * donne le même résultat visible sans aucun de ces défauts.
+                   *
+                   * Ce n'est qu'un confort : c'est le SERVEUR qui normalise ce
+                   * qui va en base (`src/lib/telephone.mjs`).
+                   */
+                  onTapOutside: (_) => _reformaterTelephone(),
+                  onEditingComplete: _reformaterTelephone,
+                  decoration: InputDecoration(
                     labelText: "Téléphone",
-                    hintText: "Ex: 690 00 00 00",
+                    // L'exemple suit le pays choisi : « Ex: 690 00 00 00 » n'a
+                    // aucun sens pour quelqu'un qui vient de choisir la France.
+                    hintText: _paysChoisi == null
+                        ? "Ex: 690 00 00 00"
+                        : "${_paysChoisi!.prefix} …",
                     counterText: "",
-                    prefixIcon: Icon(Icons.phone_outlined),
+                    prefixIcon: const Icon(Icons.phone_outlined),
                   ),
                   validator: (v) {
                     final t = (v ?? "").trim();
@@ -248,17 +306,32 @@ class _SetupScreenState extends State<SetupScreen> {
                 // l'utilisateur arrive au bouton juste après.
                 DropdownButtonFormField<int>(
                   value: _selectedPaysId,
-                  decoration: const InputDecoration(
+                  isExpanded: true, // 67 pays : certains libellés sont longs.
+                  decoration: InputDecoration(
                     labelText: "Pays",
-                    prefixIcon: Icon(Icons.public_outlined),
+                    prefixIcon: const Icon(Icons.public_outlined),
+                    // Tant que la liste arrive, on le dit plutôt que d'afficher
+                    // un menu vide qui ressemble à une panne.
+                    helperText: _paysErreur
+                        ? tr(context, 'server_unreachable')
+                        : (_pays.isEmpty ? tr(context, 'loading') : null),
                   ),
-                  items: _paysList.map((p) {
-                    return DropdownMenuItem(
-                      value: p.id,
-                      child: Text("${p.flag}  ${p.nom}  (${p.prefix})"),
-                    );
-                  }).toList(),
-                  onChanged: (v) => setState(() => _selectedPaysId = v),
+                  items: _pays
+                      .map((p) => DropdownMenuItem(
+                            value: p.idPays,
+                            child: Text(
+                              "${p.drapeau}  ${p.libelle}  (${p.prefix})",
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ))
+                      .toList(),
+                  onChanged: (v) => setState(() {
+                    _selectedPaysId = v;
+                    // Le numéro déjà saisi est reformaté avec le nouvel
+                    // indicatif : changer de pays après avoir tapé son numéro
+                    // laisserait sinon un affichage qui ment sur ce qui partira.
+                    _reformaterTelephone();
+                  }),
                   validator: (v) => v == null ? "Choisis ton pays" : null,
                 ),
                 const SizedBox(height: 24),
