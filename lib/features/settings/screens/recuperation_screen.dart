@@ -103,11 +103,34 @@ class _RecuperationScreenState extends State<RecuperationScreen> {
     showAppSnackBar(tr(context, 'recovery_id_copied'));
   }
 
-  /// Ajout d'une adresse, en deux temps : demande du code, puis confirmation.
+  /// Pose ou REMPLACE l'adresse, en trois temps : mot de passe, nouvelle
+  /// adresse, code de confirmation.
+  ///
+  /// ⚠️ LE MOT DE PASSE EST DEMANDÉ EN PREMIER, avant même la nouvelle adresse.
+  /// Le demander en dernier ferait saisir une adresse pour rien à qui ne s'en
+  /// souvient pas — et surtout, l'ordre dit clairement que c'est le compte qu'on
+  /// s'apprête à toucher, pas un simple réglage.
   Future<void> _ajouterAdresse() async {
+    final aDejaUneAdresse = _aAdresse;
+
+    final motDePasse = await _demanderTexte(
+      titre: aDejaUneAdresse
+          ? tr(context, 'change_email_title')
+          : tr(context, 'add_email_title'),
+      corps: tr(context, 'email_password_prompt'),
+      libelle: tr(context, 'password'),
+      clavier: TextInputType.text,
+      masque: true,
+    );
+    if (motDePasse == null || !mounted) return;
+
     final email = await _demanderTexte(
-      titre: tr(context, 'add_email_title'),
-      corps: tr(context, 'add_email_body'),
+      titre: aDejaUneAdresse
+          ? tr(context, 'change_email_title')
+          : tr(context, 'add_email_title'),
+      corps: aDejaUneAdresse
+          ? tr(context, 'change_email_body')
+          : tr(context, 'add_email_body'),
       libelle: tr(context, 'email'),
       clavier: TextInputType.emailAddress,
     );
@@ -117,7 +140,9 @@ class _RecuperationScreenState extends State<RecuperationScreen> {
     try {
       final token = await context.read<TokenStorage>().accessToken;
       if (token == null || !mounted) return;
-      await context.read<AuthRepository>().demanderAjoutEmail(token, email);
+      await context
+          .read<AuthRepository>()
+          .demanderAjoutEmail(token, email, motDePasse);
       if (!mounted) return;
       setState(() => _chargement = false);
 
@@ -152,6 +177,8 @@ class _RecuperationScreenState extends State<RecuperationScreen> {
     required String libelle,
     required TextInputType clavier,
     int? longueurMax,
+    /// Saisie masquée — pour le mot de passe, qui transite par ce même dialogue.
+    bool masque = false,
   }) async {
     final ctrl = TextEditingController();
     final saisie = await showDialog<String>(
@@ -167,6 +194,7 @@ class _RecuperationScreenState extends State<RecuperationScreen> {
             TextField(
               controller: ctrl,
               keyboardType: clavier,
+              obscureText: masque,
               maxLength: longueurMax,
               autofocus: true,
               decoration: InputDecoration(
@@ -258,15 +286,22 @@ class _RecuperationScreenState extends State<RecuperationScreen> {
             const Divider(),
             const SizedBox(height: 8),
 
-            // Second recours : ajouter une adresse. Proposé UNIQUEMENT si le
-            // compte n'en a pas — le serveur refuse de remplacer une adresse
-            // existante, montrer l'entrée mènerait droit à une erreur.
-            if (_etatCharge && !_aAdresse)
+            // Adresse du compte : l'AJOUTER quand il n'en a pas, la REMPLACER
+            // quand il en a une.
+            //
+            // ⚠️ Proposé dans LES DEUX cas depuis le 25/08/2026. L'entrée était
+            // masquée pour un compte déjà pourvu, parce que le serveur refusait
+            // alors le remplacement ; il l'accepte désormais sous mot de passe,
+            // et le besoin est réel — on perd l'accès à une boîte, on en ouvre
+            // une autre, et le compte doit pouvoir suivre.
+            if (_etatCharge)
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.alternate_email),
-                title: Text(tr(context, 'security_add_email')),
-                subtitle: Text(tr(context, 'security_add_email_sub')),
+                title: Text(tr(
+                    context, _aAdresse ? 'security_change_email' : 'security_add_email')),
+                subtitle: Text(tr(context,
+                    _aAdresse ? 'security_change_email_sub' : 'security_add_email_sub')),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: _chargement ? null : _ajouterAdresse,
               ),
