@@ -20,6 +20,7 @@ import 'ringtones_screen.dart';
 import 'translation_screen.dart';
 import 'privacy_settings_screen.dart';
 import 'login_history_screen.dart';
+import 'recuperation_screen.dart';
 import '../../blocked/screens/blocked_users_screen.dart';
 import '../../chat/screens/starred_messages_screen.dart';
 
@@ -159,6 +160,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
             trailing: _chevron(),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const ChangePasswordScreen()),
+            ),
+          ),
+          // Récupération du compte : revoir son code, ou ajouter une adresse.
+          //
+          // ⚠️ Montré à TOUS les comptes, y compris ceux qui ont une adresse et
+          // donc pas de code : l'écran le dit lui-même. Le masquer aurait
+          // demandé de connaître l'état du compte AVANT d'ouvrir les réglages,
+          // et une entrée qui apparaît ou non selon le compte est plus
+          // déroutante qu'un écran qui explique.
+          _settingsTile(
+            icon: Icons.key_outlined,
+            iconColor: _accent,
+            title: tr(context, 'security_recovery_id'),
+            subtitle: tr(context, 'security_recovery_id_sub'),
+            trailing: _chevron(),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const RecuperationScreen()),
             ),
           ),
           _settingsTile(

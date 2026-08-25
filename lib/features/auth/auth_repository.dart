@@ -3,11 +3,33 @@ import '../../core/api_client.dart';
 import '../../models/auth_user.dart';
 
 /// Résultat de la vérification OTP : token d'étape + numéro public attribué.
+///
+/// ⚠️ Rendu par DEUX chemins : `verify` (inscription avec adresse) et
+/// `registerSansEmail` (inscription sans adresse). Le second porte en plus
+/// [idRecuperation] ; le premier le laisse nul, l'adresse tenant ce rôle.
 class VerifyResult {
   final String setupToken;
   final String publicNumber;
   final bool needsSetup;
-  VerifyResult(this.setupToken, this.publicNumber, this.needsSetup);
+
+  /// 🔴 MONTRÉ UNE SEULE FOIS, ET SEULEMENT ICI.
+  ///
+  /// C'est le seul moyen de reprendre un compte ouvert sans adresse. Le serveur
+  /// ne le redonnera qu'à un utilisateur DÉJÀ connecté
+  /// (`GET /api/account/recovery-id`) : si l'utilisateur quitte l'écran
+  /// d'inscription sans l'avoir noté ET oublie son mot de passe avant de s'être
+  /// reconnecté, son compte est perdu. L'écran DOIT donc le lui faire
+  /// confirmer, pas seulement l'afficher.
+  ///
+  /// Nul pour une inscription avec adresse.
+  final String? idRecuperation;
+
+  VerifyResult(
+    this.setupToken,
+    this.publicNumber,
+    this.needsSetup, {
+    this.idRecuperation,
+  });
 }
 
 /// Résultat d'une authentification réussie (setup ou login).
@@ -48,6 +70,52 @@ class AuthRepository {
   /// Étape 1 : demande l'envoi du code OTP par email.
   Future<void> register(String email) async {
     await _api.post("/api/auth/register", {"email": email});
+  }
+
+  /// Inscription SANS adresse : le compte est créé tout de suite.
+  ///
+  /// Il n'y a rien à confirmer, donc ni code ni écran OTP : le serveur rend
+  /// directement le `setupToken` que rendait `verify`, et le parcours reprend à
+  /// l'étape du mot de passe.
+  ///
+  /// ⚠️ Le champ `email` est ABSENT de la charge, pas vide : le serveur refuse
+  /// `""` (une chaîne vide est une erreur de formulaire, ne rien envoyer est
+  /// une intention).
+  Future<VerifyResult> registerSansEmail() async {
+    final data = await _api.post("/api/auth/register", const {});
+    return VerifyResult(
+      data["setupToken"] as String,
+      data["publicNumber"] as String,
+      (data["needsSetup"] as bool?) ?? true,
+      idRecuperation: data["idRecuperation"] as String?,
+    );
+  }
+
+  /// L'identifiant de récupération du compte connecté, ou `null` s'il n'en a
+  /// pas (compte ouvert avec une adresse).
+  ///
+  /// ⚠️ À N'APPELER QU'APRÈS une confirmation biométrique : la réponse est un
+  /// secret équivalent à un mot de passe.
+  Future<({String? idRecuperation, bool aAdresse})> idRecuperation(
+      String accessToken) async {
+    final data =
+        await _api.get("/api/account/recovery-id", bearer: accessToken);
+    return (
+      idRecuperation: data["idRecuperation"] as String?,
+      aAdresse: (data["aAdresse"] as bool?) ?? false,
+    );
+  }
+
+  /// Ajoute une adresse à un compte qui n'en a pas : demande le code.
+  Future<void> demanderAjoutEmail(String accessToken, String email) async {
+    await _api.post("/api/account/email", {"email": email}, bearer: accessToken);
+  }
+
+  /// Ajoute une adresse : confirme le code et pose l'adresse.
+  Future<void> confirmerAjoutEmail(
+      String accessToken, String email, String code) async {
+    await _api.post("/api/account/email/verify", {"email": email, "code": code},
+        bearer: accessToken);
   }
 
   /// Étape 2 : vérifie le code OTP à 6 chiffres.
@@ -126,6 +194,27 @@ class AuthRepository {
     await _api.post("/api/auth/reset-password", {
       "email": email,
       "code": code,
+      "password": newPassword,
+    });
+  }
+
+  /// Réinitialise le mot de passe avec l'IDENTIFIANT DE RÉCUPÉRATION.
+  ///
+  /// Second chemin de la même route : pas de code, l'identifiant EST la preuve.
+  ///
+  /// ⚠️ N'ENVOYER NI `email` NI `code` avec. Le serveur refuse explicitement un
+  /// mélange des deux chemins plutôt que d'en choisir un — une demande ambiguë
+  /// sur une route qui rend un compte doit être rejetée, pas devinée.
+  ///
+  /// La saisie n'a pas besoin d'être nettoyée ici : le serveur relève la casse,
+  /// ignore les séparateurs et traduit les I/L/O mal lus. Un nettoyage local
+  /// ferait une deuxième règle à tenir accordée avec la sienne.
+  Future<void> resetPasswordParIdRecuperation({
+    required String idRecuperation,
+    required String newPassword,
+  }) async {
+    await _api.post("/api/auth/reset-password", {
+      "idRecuperation": idRecuperation,
       "password": newPassword,
     });
   }
