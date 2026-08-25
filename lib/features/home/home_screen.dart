@@ -13,6 +13,8 @@ import '../geo/screens/geo_disclosure_screen.dart';
 import '../../core/push_service.dart';
 import '../../core/notification_settings.dart';
 import '../../core/realtime_client.dart';
+import '../../widgets/back_app_bar.dart';
+import '../collegues/screens/collegues_tab.dart';
 import '../../core/sonneries_listes.dart';
 import '../../core/call_cache.dart';
 import '../../core/call_status.dart';
@@ -176,12 +178,29 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    /*
+     * 🔴 L'ONGLET COLLÈGUES N'EXISTE QUE POUR LES AGENTS (`type_compte = 2`).
+     *
+     * L'annuaire montre les services d'une ENTREPRISE et les gens qui les
+     * tiennent : il n'a aucun sens pour un particulier, qui n'en a pas. Le
+     * masquer vaut mieux que de l'afficher vide.
+     *
+     * ⚠️ CE N'EST PAS UN CONTRÔLE D'ACCÈS — un onglet caché ne protège rien.
+     * C'est `GET /api/collegues` qui refuse par 403 aux non-agents.
+     *
+     * ⚠️ La liste des onglets et celle de la barre du bas doivent rester de
+     * MÊME LONGUEUR ET DANS LE MÊME ORDRE : `_tab` sert d'index aux deux. Une
+     * entrée ajoutée d'un seul côté décalerait silencieusement toute la
+     * navigation.
+     */
+    final estAgent = context.watch<AuthController>().user?.typeCompte == 2;
+
     final tabs = [
       const _ConversationsTab(),
       const _StatusTab(),
       const CallsScreen(),
       const MeetingsScreen(),
-      const _AiTab(),
+      if (estAgent) const ColleguesTab(),
     ];
 
     return Scaffold(
@@ -261,16 +280,51 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       body: IndexedStack(index: _tab, children: tabs),
+      /*
+       * DEUX BOUTONS EMPILÉS, l'IA au-dessus de l'écriture.
+       *
+       * 🔴 L'IA a quitté la barre du bas (elle a laissé sa place à Collègues) et
+       * devient ce bouton rond, exactement comme Meta AI dans WhatsApp.
+       *
+       * ⚠️ Le bouton IA est VOLONTAIREMENT PLUS PETIT et discret : le geste
+       * principal de cet écran reste d'écrire à quelqu'un. Deux boutons de même
+       * poids feraient hésiter, et l'IA n'est pas ce qu'on vient chercher en
+       * ouvrant ses discussions.
+       *
+       * ⚠️ `mainAxisSize.min` : sans lui, la Column prend toute la hauteur de
+       * l'écran et l'emplacement du bouton flottant part en haut.
+       *
+       * ⚠️ `heroTag` distincts — deux `FloatingActionButton` à l'écran partagent
+       * sinon la même étiquette d'animation, et Flutter lève à la construction.
+       */
       floatingActionButton: _tab == 0
-          ? FloatingActionButton(
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const ContactsScreen()),
-              ),
-              // Nuit : icône sombre sur la terre cuite (contraste du modèle).
-              child: Icon(Icons.edit,
-                  color: Theme.of(context).brightness == Brightness.dark
-                      ? const Color(0xFF160B06)
-                      : Colors.white),
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FloatingActionButton.small(
+                  heroTag: "fab-ia",
+                  tooltip: "IA",
+                  backgroundColor:
+                      Theme.of(context).colorScheme.surfaceContainerHighest,
+                  foregroundColor: accentOf(context),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const AiScreen()),
+                  ),
+                  child: const Icon(Icons.auto_awesome_outlined),
+                ),
+                const SizedBox(height: 12),
+                FloatingActionButton(
+                  heroTag: "fab-ecrire",
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const ContactsScreen()),
+                  ),
+                  // Nuit : icône sombre sur la terre cuite (contraste du modèle).
+                  child: Icon(Icons.edit,
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? const Color(0xFF160B06)
+                          : Colors.white),
+                ),
+              ],
             )
           : null,
       bottomNavigationBar: AlanyaNavBar(
@@ -302,11 +356,15 @@ class _HomeScreenState extends State<HomeScreen> {
             activeIcon: Icons.videocam,
             label: 'Réunions',
           ),
-          const AlanyaNavItem(
-            icon: Icons.auto_awesome_outlined,
-            activeIcon: Icons.auto_awesome,
-            label: 'IA',
-          ),
+          // Collègues remplace l'IA, et disparaît avec elle pour un
+          // non-agent : voir la note sur `tabs`, les deux listes doivent
+          // rester de même longueur.
+          if (estAgent)
+            const AlanyaNavItem(
+              icon: Icons.groups_outlined,
+              activeIcon: Icons.groups,
+              label: 'Collègues',
+            ),
         ],
       ),
     );
@@ -1767,6 +1825,28 @@ class _StatusTabState extends State<_StatusTab> {
           style: const TextStyle(fontWeight: FontWeight.w600)),
       subtitle: Text(g.hasUnviewed ? "Nouveau" : "Vu"),
       onTap: () => _openViewer(groups, index: index, isMine: isMine),
+    );
+  }
+}
+
+/// L'assistant, ouvert EN PLEIN ÉCRAN depuis le bouton flottant.
+///
+/// 🔴 L'IA A QUITTÉ LA BARRE DU BAS le 25/08/2026, pour laisser sa place à
+/// l'onglet Collègues. Elle est désormais un bouton rond posé au-dessus du
+/// bouton d'écriture, comme Meta AI dans WhatsApp.
+///
+/// ⚠️ `_AiTab` ne porte PAS de `Scaffold` — il était conçu pour vivre dans un
+/// `IndexedStack`. C'est cette enveloppe qui lui en donne un, avec sa barre de
+/// retour ; l'ouvrir directement en route afficherait un écran sans aucun moyen
+/// d'en sortir.
+class AiScreen extends StatelessWidget {
+  const AiScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: backAppBar(context, "IA"),
+      body: const _AiTab(),
     );
   }
 }
