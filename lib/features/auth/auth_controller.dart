@@ -253,9 +253,38 @@ class AuthController extends ChangeNotifier {
       access: session.accessToken,
       refresh: session.refreshToken,
     );
-    await _saveUserCache(session.user);
-    user = session.user;
-    _set(AuthStatus.authenticated, session.user);
+
+    /*
+     * 🔴 LE PROFIL EST RELU SUR `/api/me`, ET NON PRIS DANS LA RÉPONSE DE
+     * CONNEXION — qui est INCOMPLÈTE.
+     *
+     * `POST /api/auth/login` ne rend que six champs : id, email, publicNumber,
+     * pseudo, avatarUrl, isOnline. Tout le reste manque, et `AuthUser.fromJson`
+     * le remplace donc par ses valeurs par défaut : `typeCompte` tombe à 0,
+     * `nom`, `idPays`, `mobile`, `statusMsg` à null, `suiviPosition` à faux.
+     *
+     * Constaté le 25/08/2026 : l'onglet Collègues, conditionné à
+     * `typeCompte == 2`, restait invisible pour l'agent `chiwen` — qui EST de
+     * type 2 en base. Il n'apparaissait qu'au redémarrage suivant, quand le
+     * démarrage appelle `/api/me` et corrige le profil. Le même piège attendait
+     * le suivi de position et tout écran qui lirait un de ces champs.
+     *
+     * Relire ici règle la famille entière plutôt qu'un champ : la session juste
+     * ouverte porte le MÊME profil que celui d'un démarrage.
+     *
+     * ⚠️ L'ÉCHEC N'EST PAS BLOQUANT. Sans réseau à cet instant précis, on
+     * retombe sur le profil partiel de la connexion : mieux vaut entrer avec un
+     * profil incomplet — que le prochain démarrage complétera — que de refuser
+     * une connexion pourtant accordée par le serveur.
+     */
+    var profil = session.user;
+    try {
+      profil = await _repo.me(session.accessToken);
+    } catch (_) {}
+
+    await _saveUserCache(profil);
+    user = profil;
+    _set(AuthStatus.authenticated, profil);
     // Ré-enregistre le token FCM : maintenant qu'on est authentifié,
     // le backend peut associer le token à l'utilisateur.
     PushService.instance.registerTokenIfAuthenticated();
