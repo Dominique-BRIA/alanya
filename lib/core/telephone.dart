@@ -50,6 +50,20 @@ String normaliserTelephone(String saisie, String prefixePays) {
   var n = _chiffres(saisie);
   if (n.isEmpty) return "";
 
+  /// 🔴 UN « + » EN TÊTE DIT « CE NUMÉRO EST DÉJÀ COMPLET » — on n'y ajoute
+  /// rien.
+  ///
+  /// Sans cette sortie, l'indicatif du compte se collait devant un numéro
+  /// étranger : « +221 34543678 » sur un compte déclaré en France ressortait
+  /// « +3322134543678 », injoignable — et `users.mobile` est UNIQUE.
+  ///
+  /// Le cas est fréquent et légitime : on vit dans un pays et on garde une
+  /// ligne d'un autre. C'est la raison même pour laquelle changer de pays ne
+  /// touche pas au numéro.
+  ///
+  /// ⚠️ Le test porte sur la SAISIE BRUTE : `_chiffres` a déjà retiré le « + ».
+  if (saisie.trim().startsWith("+")) return "+$n";
+
   final indicatif = _chiffres(prefixePays);
 
   // « 00 » international : la forme longue de « + ».

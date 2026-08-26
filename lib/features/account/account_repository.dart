@@ -25,6 +25,39 @@ class AccountRepository {
     );
   }
 
+  /// Change le PAYS du compte.
+  ///
+  /// 🔴 NE TOUCHE NI À L'ALANYA ID NI AU NUMÉRO. Un numéro appartient à
+  /// l'opérateur qui l'a attribué, pas au pays où l'on vit : déménager en
+  /// gardant sa ligne est le cas normal, et renormaliser sur le nouvel
+  /// indicatif transformerait un numéro juste en numéro faux.
+  Future<void> changerPays(int idPays) async {
+    await _api.patch("/api/account/profile", {"idPays": idPays});
+  }
+
+  /// Change le NUMÉRO DE TÉLÉPHONE, sous mot de passe.
+  ///
+  /// 🔴 `users.mobile` UNIQUEMENT — l'Alanya ID ne bouge jamais. C'est lui que
+  /// les contacts ont enregistré et par lequel on appelle ; le changer
+  /// détruirait le compte.
+  ///
+  /// ⚠️ La saisie part TELLE QUELLE. C'est le serveur qui normalise, avec la
+  /// même règle qu'à l'inscription — et il respecte un « + » initial, donc une
+  /// ligne étrangère garde son propre indicatif.
+  ///
+  /// Rend le numéro TEL QU'ENREGISTRÉ, pour que l'écran affiche ce que la base
+  /// contient et non ce qui a été tapé.
+  Future<String> changerMobile({
+    required String motDePasse,
+    required String mobile,
+  }) async {
+    final data = await _api.post("/api/account/mobile", {
+      "password": motDePasse,
+      "mobile": mobile,
+    });
+    return data["mobile"] as String? ?? "";
+  }
+
   /// Change le mot de passe de l'utilisateur connecté (vérifie l'actuel).
   /// Lève ApiException avec un message lisible en cas d'échec.
   Future<void> changePassword(String currentPassword, String newPassword) async {
