@@ -65,6 +65,20 @@ class AccountRepository {
     return data["mobile"] as String? ?? "";
   }
 
+  /// Le mot de passe fourni est-il bien celui du compte ?
+  ///
+  /// Rend normalement, ou lève une [ApiException] — « Mot de passe incorrect »
+  /// en 403, et un 429 si les essais s'enchaînent.
+  ///
+  /// ⚠️ NE DONNE AUCUN DROIT ET NE MODIFIE RIEN. Sert aux écrans qui se ferment
+  /// derrière une confirmation : demander le mot de passe AVANT d'ouvrir
+  /// l'écran, plutôt que de le découvrir faux à l'enregistrement, une fois le
+  /// formulaire rempli. Le serveur le revérifie de toute façon à l'écriture —
+  /// une porte côté client ne protège rien par elle-même.
+  Future<void> verifierMotDePasse(String motDePasse) async {
+    await _api.post("/api/account/verify-password", {"password": motDePasse});
+  }
+
   /// Change le mot de passe de l'utilisateur connecté (vérifie l'actuel).
   /// Lève ApiException avec un message lisible en cas d'échec.
   Future<void> changePassword(String currentPassword, String newPassword) async {
