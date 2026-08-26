@@ -1,47 +1,34 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../../core/alanya_id_formatter.dart';
 import '../../../core/api_client.dart';
 import '../../../core/app_snackbar.dart';
 import '../../../core/pays_repository.dart';
-import '../../../core/telephone.dart';
 import '../../../core/token_storage.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
+import '../../../widgets/dialogue_mot_de_passe.dart';
 import '../../account/account_repository.dart';
-
 import '../../auth/auth_repository.dart';
+import 'numero_screen.dart';
 
 /// `Réglages ▸ Pays et téléphone`.
 ///
-/// 🔴 CET ÉCRAN NE TOUCHE JAMAIS À L'ALANYA ID. Il est rappelé en tête, en
-/// lecture seule, précisément pour lever le doute : c'est le numéro attribué à
-/// l'inscription, celui que les contacts ont enregistré et par lequel on
-/// appelle. Rien ici ne peut le changer, et le serveur le refuserait de toute
-/// façon — sa route de profil écrit par liste blanche.
-///
-/// Ce que l'écran change, ce sont deux informations distinctes :
+/// 🔴 CET ÉCRAN NE TOUCHE JAMAIS À L'ALANYA ID, et le serveur le refuserait de
+/// toute façon — sa route de profil écrit par liste blanche. Ce qu'il change,
+/// ce sont deux informations distinctes :
 ///   - le PAYS du compte, sans mot de passe : il ne protège rien à lui seul ;
-///   - le NUMÉRO DE LIGNE, sous mot de passe — `users.mobile` est unique et
-///     sert à retrouver quelqu'un.
+///   - le NUMÉRO DE LIGNE, derrière le mot de passe — `users.mobile` est unique
+///     et sert à retrouver quelqu'un.
 ///
-/// 🔴 DEUX PAYS, ET C'EST VOULU : celui du COMPTE, et celui de la LIGNE.
+/// ⚠️ CHANGER DE PAYS NE TOUCHE PAS AU NUMÉRO (demandé deux fois par le user).
+/// Un numéro appartient à l'opérateur qui l'a attribué, pas au pays où l'on
+/// vit : déménager en gardant sa ligne est le cas normal.
 ///
-/// Ils se confondent la plupart du temps — le second est donc initialisé sur le
-/// premier, et personne n'y touche dans le parcours normal. Mais ils peuvent
-/// différer, et c'est même la raison pour laquelle changer de pays ne touche
-/// pas au numéro : on vit dans un pays en gardant une ligne d'un autre.
-///
-/// Le premier jet n'avait qu'un sélecteur, celui du compte, et s'en servait
-/// pour normaliser le numéro. Une ligne camerounaise saisie « 691234567 »
-/// depuis un compte déclaré en France devenait alors « +33691234567 » —
-/// injoignable. Seul un « + » explicite s'en sortait, et l'utilisateur n'a pas
-/// à connaître cette astuce.
-///
-/// ⚠️ Le pays de la ligne n'est JAMAIS écrit sur le compte : il ne voyage que
-/// pour donner le bon indicatif.
+/// La saisie du numéro vit dans [NumeroScreen], pas ici, et c'est le mot de
+/// passe qui y donne accès : demandé À L'ENTRÉE plutôt qu'au moment
+/// d'enregistrer, il évite de faire remplir un écran pour le refuser ensuite.
 class PaysMobileScreen extends StatefulWidget {
   const PaysMobileScreen({super.key});
 
@@ -50,30 +37,12 @@ class PaysMobileScreen extends StatefulWidget {
 }
 
 class _PaysMobileScreenState extends State<PaysMobileScreen> {
-  final _mobileCtrl = TextEditingController();
-  final _mdpCtrl = TextEditingController();
-
   List<Pays> _pays = const [];
 
   /// Le pays du COMPTE — là où vit la personne.
   int? _idPays;
 
-  /// Le pays de la LIGNE, pour le numéro qu'on saisit.
-  ///
-  /// 🔴 DISTINCT DU PAYS DU COMPTE, et jamais écrit sur lui. Les deux se
-  /// confondent souvent, mais pas toujours : on vit dans un pays et on garde
-  /// une ligne d'un autre — c'est la raison même pour laquelle changer de pays
-  /// ne touche pas au numéro.
-  ///
-  /// Sans ce second champ, une ligne camerounaise saisie « 691234567 » depuis
-  /// un compte déclaré en France devenait « +33691234567 », injoignable. Seul
-  /// un « + » explicite s'en sortait, et l'utilisateur n'a pas à le savoir.
-  ///
-  /// Initialisé sur le pays du compte : c'est le cas le plus fréquent, et
-  /// personne n'a à toucher ce champ pour le parcours normal.
-  int? _idPaysNumero;
-
-  /// Remet le sélecteur de pays du compte en accord avec [_idPays].
+  /// Remet le sélecteur de pays en accord avec [_idPays].
   ///
   /// ⚠️ `initialValue` rend le champ NON PILOTÉ : il garde ce que l'utilisateur
   /// a choisi, même si l'enregistrement a échoué. Sans ce forçage, un refus du
@@ -83,33 +52,14 @@ class _PaysMobileScreenState extends State<PaysMobileScreen> {
   int _cleePays = 0;
 
   String? _mobileActuel;
-  String? _alanyaId;
 
   bool _chargement = true;
   bool _envoiPays = false;
-  bool _envoiMobile = false;
-
-  /// Le pays de la LIGNE — celui qui donne l indicatif au numero saisi.
-  Pays? get _paysDuNumero {
-    final id = _idPaysNumero ?? _idPays;
-    if (id == null) return null;
-    for (final p in _pays) {
-      if (p.idPays == id) return p;
-    }
-    return null;
-  }
 
   @override
   void initState() {
     super.initState();
     _charger();
-  }
-
-  @override
-  void dispose() {
-    _mobileCtrl.dispose();
-    _mdpCtrl.dispose();
-    super.dispose();
   }
 
   Future<void> _charger() async {
@@ -126,10 +76,7 @@ class _PaysMobileScreenState extends State<PaysMobileScreen> {
       setState(() {
         _pays = liste;
         _idPays = moi.idPays;
-        _idPaysNumero = moi.idPays;
         _mobileActuel = moi.mobile;
-        _alanyaId = moi.publicNumber;
-        _mobileCtrl.text = moi.mobile ?? "";
         _chargement = false;
       });
     } catch (_) {
@@ -156,51 +103,38 @@ class _PaysMobileScreenState extends State<PaysMobileScreen> {
     }
   }
 
-  Future<void> _enregistrerMobile() async {
-    final numero = _mobileCtrl.text.trim();
-    final mdp = _mdpCtrl.text;
-    if (numero.isEmpty) {
-      showAppSnackBar(tr(context, 'phone_required'));
-      return;
-    }
-    if (mdp.isEmpty) {
-      showAppSnackBar(tr(context, 'password_required'));
-      return;
-    }
+  /// Le mot de passe, puis l'écran de saisie.
+  ///
+  /// ⚠️ Le mot de passe est vérifié AVANT l'ouverture, et transporté jusqu'à
+  /// l'enregistrement parce que le serveur le redemande pour son propre compte.
+  /// Il n'est jamais rangé ailleurs que dans la pile de cet appel.
+  Future<void> _ouvrirNumero() async {
+    final depot = context.read<AccountRepository>();
+    final motDePasse = await demanderMotDePasse(
+      context,
+      message: tr(context, 'phone_change_explain'),
+      verifier: depot.verifierMotDePasse,
+    );
+    if (motDePasse == null || !mounted) return;
 
-    setState(() => _envoiMobile = true);
-    try {
-      final enregistre = await context
-          .read<AccountRepository>()
-          .changerMobile(
-            motDePasse: mdp,
-            mobile: numero,
-            idPaysNumero: _idPaysNumero,
-          );
-      if (!mounted) return;
-      setState(() {
-        _mobileActuel = enregistre;
-        // Le champ reprend la forme RETENUE PAR LA BASE, pas la saisie : sans
-        // ça, l'écran continuerait d'afficher « 06 12 34 56 78 » alors que le
-        // compte porte « +33612345678 ».
-        _mobileCtrl.text = enregistre;
-        // Le mot de passe est effacé dès l'opération finie : le garder en
-        // mémoire de l'écran n'apporte rien et l'expose.
-        _mdpCtrl.clear();
-      });
-      showAppSnackBar(tr(context, 'phone_saved'));
-    } on ApiException catch (e) {
-      showAppSnackBar(e.message);
-    } catch (_) {
-      showAppSnackBar(tr(context, 'server_unreachable'));
-    } finally {
-      if (mounted) setState(() => _envoiMobile = false);
-    }
+    final nouveau = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => NumeroScreen(
+          motDePasse: motDePasse,
+          pays: _pays,
+          idPaysInitial: _idPays,
+          mobileActuel: _mobileActuel,
+        ),
+      ),
+    );
+    if (nouveau == null || !mounted) return;
+    setState(() => _mobileActuel = nouveau);
   }
 
   @override
   Widget build(BuildContext context) {
     final muted = mutedOf(context, Colors.black54);
+    final accent = accentOf(context);
 
     return Scaffold(
       appBar: backAppBar(context, tr(context, 'settings_country_phone')),
@@ -210,46 +144,7 @@ class _PaysMobileScreenState extends State<PaysMobileScreen> {
             : ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
-                  // ── L'Alanya ID, EN LECTURE SEULE ────────────────────────
-                  //
-                  // Rappelé ici pour lever le doute : c'est le numéro de
-                  // l'inscription, et rien sur cet écran ne le change.
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: accentOf(context).withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.badge_outlined, color: accentOf(context)),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(tr(context, 'alanya_number'),
-                                  style: TextStyle(color: muted, fontSize: 12)),
-                              const SizedBox(height: 2),
-                              Text(
-                                _alanyaId == null
-                                    ? "—"
-                                    : formatAlanyaId(_alanyaId!),
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold, fontSize: 16),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(tr(context, 'alanya_number_fixed'),
-                                  style: TextStyle(color: muted, fontSize: 12)),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-
-                  // ── Le pays ──────────────────────────────────────────────
+                  // ── Le pays du compte ────────────────────────────────────
                   Text(tr(context, 'country'),
                       style: const TextStyle(fontWeight: FontWeight.w600)),
                   const SizedBox(height: 8),
@@ -267,7 +162,7 @@ class _PaysMobileScreenState extends State<PaysMobileScreen> {
                     items: _pays
                         .map((p) => DropdownMenuItem(
                               value: p.idPays,
-                              child: Text("${p.drapeau}  ${p.libelle}  (${p.prefix})",
+                              child: Text("${p.libelle}  (${p.prefix})",
                                   overflow: TextOverflow.ellipsis),
                             ))
                         .toList(),
@@ -279,116 +174,61 @@ class _PaysMobileScreenState extends State<PaysMobileScreen> {
                   ),
                   const SizedBox(height: 28),
 
-                  // ── Le numéro ────────────────────────────────────────────
+                  // ── Le numéro : une ligne, pas un formulaire ─────────────
+                  //
+                  // Elle AFFICHE le numéro courant — c'est la première chose
+                  // qu'on vient vérifier ici — et le changement se fait
+                  // derrière, dans un écran dédié.
                   Text(tr(context, 'phone'),
                       style: const TextStyle(fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 4),
-                  Text(tr(context, 'phone_change_explain'),
-                      style: TextStyle(color: muted, fontSize: 13)),
-                  const SizedBox(height: 12),
-
-                  // Le pays DE LA LIGNE — pas celui du compte.
-                  //
-                  // 🔴 Il est ici, DANS la section du numéro, et pas à côté du
-                  // pays du compte : c'est ce qui dit qu'il appartient au
-                  // numéro. Le mettre plus haut ferait croire à deux réglages
-                  // de résidence contradictoires.
-                  //
-                  // ⚠️ IL NE DÉCLENCHE AUCUN ENREGISTREMENT à lui seul — à la
-                  // différence de celui du compte, juste au-dessus. Il ne part
-                  // qu'avec le numéro, sous mot de passe, et n'est jamais écrit
-                  // sur le compte.
-                  DropdownButtonFormField<int>(
-                    initialValue: _idPaysNumero,
-                    isExpanded: true,
-                    decoration: InputDecoration(
-                      prefixIcon: const Icon(Icons.sim_card_outlined),
-                      labelText: tr(context, 'phone_country'),
-                      helperText: tr(context, 'phone_country_explain'),
-                      helperMaxLines: 3,
-                    ),
-                    items: _pays
-                        .map((p) => DropdownMenuItem(
-                              value: p.idPays,
+                  const SizedBox(height: 8),
+                  Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: _ouvrirNumero,
+                      borderRadius: BorderRadius.circular(14),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 14),
+                        decoration: BoxDecoration(
+                          // Le filet du thème : celui des champs juste
+                          // au-dessus, pour que la ligne appartienne à la
+                          // même famille visuelle qu'eux.
+                          border: Border.all(
+                              color: Theme.of(context).dividerColor),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.phone_outlined, color: muted, size: 22),
+                            const SizedBox(width: 14),
+                            Expanded(
                               child: Text(
-                                  "${p.drapeau}  ${p.libelle}  (${p.prefix})",
-                                  overflow: TextOverflow.ellipsis),
-                            ))
-                        .toList(),
-                    onChanged: _envoiMobile
-                        ? null
-                        : (v) {
-                            if (v == null) return;
-                            setState(() => _idPaysNumero = v);
-                            // Le numéro déjà tapé se remet au nouvel indicatif :
-                            // sans ça, l'exemple changerait sous les yeux mais
-                            // la saisie garderait l'ancien préfixe.
-                            _reformater();
-                          },
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _mobileCtrl,
-                    keyboardType: TextInputType.phone,
-                    maxLength: 20,
-                    decoration: InputDecoration(
-                      labelText: tr(context, 'phone'),
-                      prefixIcon: const Icon(Icons.phone_outlined),
-                      counterText: "",
-                      // L'exemple suit le pays choisi : « 690 00 00 00 » n'a
-                      // aucun sens pour quelqu'un qui vient de choisir la France.
-                      hintText: _paysDuNumero == null ? null : "${_paysDuNumero!.prefix} …",
-                    ),
-                    // Mise en forme à la SORTIE du champ, pas à chaque frappe :
-                    // reformater pendant la saisie oblige à replacer le curseur
-                    // à chaque caractère.
-                    onTapOutside: (_) => _reformater(),
-                    onEditingComplete: _reformater,
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _mdpCtrl,
-                    obscureText: true,
-                    decoration: InputDecoration(
-                      labelText: tr(context, 'current_password'),
-                      prefixIcon: const Icon(Icons.lock_outline),
+                                // Rien plutôt qu'un tiret : un compte sans
+                                // numéro doit inviter à en mettre un, pas
+                                // afficher un vide qui ressemble à une panne.
+                                (_mobileActuel == null || _mobileActuel!.isEmpty)
+                                    ? tr(context, 'phone_none')
+                                    : _mobileActuel!,
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  color: (_mobileActuel == null ||
+                                          _mobileActuel!.isEmpty)
+                                      ? muted
+                                      : null,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            Icon(Icons.chevron_right, color: accent),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  FilledButton(
-                    onPressed: _envoiMobile ? null : _enregistrerMobile,
-                    child: Text(tr(context, 'save')),
-                  ),
-
-                  if (_mobileActuel != null && _mobileActuel!.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      tr(context, 'phone_current')
-                          .replaceFirst('{number}', _mobileActuel!),
-                      style: TextStyle(color: muted, fontSize: 12),
-                    ),
-                  ],
                 ],
               ),
       ),
     );
-  }
-
-  /// Met en forme le champ avec l'indicatif du pays courant.
-  ///
-  /// ⚠️ Confort de saisie SEULEMENT — c'est le serveur qui normalise ce qui va
-  /// en base, et lui qui respecte un « + » initial pour une ligne étrangère.
-  void _reformater() {
-    final p = _paysDuNumero;
-    if (p == null) return;
-    final brut = _mobileCtrl.text.trim();
-    if (brut.isEmpty) return;
-    final joli = formaterTelephone(brut, p.prefix, p.iso2);
-    if (joli.isNotEmpty && joli != brut) {
-      _mobileCtrl.value = TextEditingValue(
-        text: joli,
-        selection: TextSelection.collapsed(offset: joli.length),
-      );
-    }
   }
 }
