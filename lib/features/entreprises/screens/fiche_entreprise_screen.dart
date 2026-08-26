@@ -1,18 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../../core/alanya_id_formatter.dart';
-import '../../../core/api_client.dart';
-import '../../../core/app_snackbar.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
-import '../../calls/call_controller.dart';
-import '../../calls/screens/active_call_screen.dart';
-import '../../chat/chat_repository.dart';
 import '../entreprises_repository.dart';
+import 'centres_type_screen.dart';
 
-/// La fiche d'une entreprise : ses standards, et de quoi les appeler.
+/// La fiche d'une entreprise : ce qu'elle est, puis par où la joindre.
+///
+/// 🔴 LES CENTRES SONT RANGÉS DERRIÈRE DEUX ENTRÉES — centres d'appel et centre
+/// vocal — au lieu d'être listés d'un bloc (demande du user, 26/08/2026).
+///
+/// Ce n'est pas qu'un rangement : les deux ne se ressemblent pas. L'un met en
+/// relation avec une personne, l'autre lit un menu enregistré. Les mélanger
+/// obligeait l'appelant à deviner lequel décrocherait, alors que l'écran de
+/// chaque type peut désormais l'expliquer avant qu'il compose.
+///
+/// ⚠️ TOUT EST CHARGÉ EN UNE FOIS ici. Les deux écrans suivants ne refont
+/// aucune requête : ils reçoivent les centres déjà triés. Redemander par type
+/// coûterait un aller-retour pour des données qu'on tient déjà.
 class FicheEntrepriseScreen extends StatefulWidget {
   const FicheEntrepriseScreen({
     super.key,
@@ -33,7 +40,6 @@ class FicheEntrepriseScreen extends StatefulWidget {
 class _FicheEntrepriseScreenState extends State<FicheEntrepriseScreen> {
   FicheEntreprise? _fiche;
   bool _erreur = false;
-  String? _appelEnCours;
 
   @override
   void initState() {
@@ -44,9 +50,8 @@ class _FicheEntrepriseScreenState extends State<FicheEntrepriseScreen> {
   Future<void> _charger() async {
     setState(() => _erreur = false);
     try {
-      final f = await context
-          .read<EntreprisesRepository>()
-          .fiche(widget.idEntreprise);
+      final f =
+          await context.read<EntreprisesRepository>().fiche(widget.idEntreprise);
       if (!mounted) return;
       setState(() => _fiche = f);
     } catch (_) {
@@ -54,36 +59,12 @@ class _FicheEntrepriseScreenState extends State<FicheEntrepriseScreen> {
     }
   }
 
-  /// Appelle un standard.
-  ///
-  /// Même enchaînement que partout ailleurs : la conversation directe est
-  /// obtenue d'abord — c'est elle qui porte l'appel — puis l'écran d'appel est
-  /// ouvert. C'est cet écran qui affiche le pavé à touches, dont l'appelant
-  /// aura besoin dès que le menu se lance.
-  Future<void> _appeler(CentreEntreprise centre) async {
-    if (_appelEnCours != null) return;
-    setState(() => _appelEnCours = centre.alanyaId);
-    try {
-      final convId =
-          await context.read<ChatRepository>().createDirect(centre.alanyaId);
-      if (!mounted) return;
-      await context
-          .read<CallController>()
-          .startOutgoing(convId, "AUDIO", centre.nom);
-      if (!mounted) return;
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          fullscreenDialog: true,
-          builder: (_) => const ActiveCallScreen(),
-        ),
-      );
-    } on ApiException catch (e) {
-      showAppSnackBar(e.message);
-    } catch (_) {
-      showAppSnackBar(tr(context, 'server_unreachable'));
-    } finally {
-      if (mounted) setState(() => _appelEnCours = null);
-    }
+  void _ouvrirType(bool vocal, List<CentreEntreprise> centres) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => CentresTypeScreen(vocal: vocal, centres: centres),
+      ),
+    );
   }
 
   @override
@@ -126,16 +107,19 @@ class _FicheEntrepriseScreenState extends State<FicheEntrepriseScreen> {
     }
 
     final e = fiche.entreprise;
-    // Pays et ville sur une ligne, en n'affichant que ce qui existe : la
-    // moitié des entreprises n'a ni l'un ni l'autre en base.
+    // Ville et pays sur une ligne, en n'affichant que ce qui existe : la moitié
+    // des entreprises n'a ni l'un ni l'autre en base.
     final lieu = [e.ville, e.pays].whereType<String>().join(", ");
+
+    final appels = fiche.centres.where((c) => !c.estVocal).toList();
+    final vocaux = fiche.centres.where((c) => c.estVocal).toList();
 
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 8),
       children: [
         if (e.description != null || lieu.isNotEmpty || e.adresse != null)
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -153,118 +137,88 @@ class _FicheEntrepriseScreenState extends State<FicheEntrepriseScreen> {
             ),
           ),
 
-        if (fiche.centres.isEmpty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(32, 60, 32, 0),
-            child: Text(tr(context, 'company_no_center'),
-                textAlign: TextAlign.center, style: TextStyle(color: muted)),
-          ),
-
-        for (final c in fiche.centres) _carteCentre(c, muted),
+        /*
+         * LES DEUX ENTRÉES, TOUJOURS PRÉSENTES — même à zéro centre.
+         *
+         * L'écran suivant garde alors sa description et dit que ce type n'est
+         * pas encore proposé (demande du user). Masquer l'entrée aurait laissé
+         * croire que l'entreprise n'a QUE des centres d'appel, alors que la
+         * vérité est « elle n'a pas encore de serveur vocal » — et aurait privé
+         * l'utilisateur d'une explication qui vaut par elle-même.
+         */
+        _entree(
+          vocal: false,
+          nombre: appels.length,
+          centres: appels,
+          muted: muted,
+        ),
+        _entree(
+          vocal: true,
+          nombre: vocaux.length,
+          centres: vocaux,
+          muted: muted,
+        ),
       ],
     );
   }
 
-  Widget _carteCentre(CentreEntreprise centre, Color muted) {
-    final occupe = _appelEnCours == centre.alanyaId;
+  Widget _entree({
+    required bool vocal,
+    required int nombre,
+    required List<CentreEntreprise> centres,
+    required Color muted,
+  }) {
+    // Titre au singulier ou au pluriel selon le compte. Zéro prend le
+    // singulier, comme « aucun centre d'appel ».
+    final titre = tr(
+      context,
+      vocal
+          ? (nombre > 1 ? 'company_vocal_centers' : 'company_vocal_center')
+          : (nombre > 1 ? 'company_call_centers' : 'company_call_center'),
+    );
 
     return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: accentOf(context).withValues(alpha: 0.15),
+          child: Icon(
+            vocal ? Icons.graphic_eq : Icons.headset_mic_outlined,
+            color: accentOf(context),
+          ),
+        ),
+        title: Text(titre, style: const TextStyle(fontWeight: FontWeight.w600)),
+        // Une phrase courte, pour choisir sans avoir à ouvrir. L'explication
+        // complète est en tête de l'écran suivant.
+        subtitle: Text(
+          tr(context, vocal ? 'company_vocal_center_short' : 'company_call_center_short'),
+          style: TextStyle(color: muted, fontSize: 13),
+        ),
+        // Le COMPTE avant le chevron : l'appelant sait ce qu'il y a derrière
+        // avant de taper, y compris qu'il n'y a rien.
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Row(
-              children: [
-                // L'icône distingue un standard humain d'un serveur vocal :
-                // on n'attend pas la même chose des deux, et le savoir AVANT
-                // d'appeler évite de patienter pour une machine.
-                Icon(
-                  centre.estVocal ? Icons.graphic_eq : Icons.headset_mic_outlined,
-                  color: accentOf(context),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: accentOf(context).withValues(alpha: nombre == 0 ? 0.06 : 0.14),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                "$nombre",
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: nombre == 0 ? muted : accentOf(context),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(centre.nom,
-                          style: const TextStyle(
-                              fontWeight: FontWeight.w600, fontSize: 15)),
-                      const SizedBox(height: 2),
-                      Text(
-                        "${tr(context, centre.estVocal ? 'company_center_vocal' : 'company_center_call')} · ${formatAlanyaId(centre.alanyaId)}",
-                        style: TextStyle(color: muted, fontSize: 13),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-
-            if (centre.services.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Text(tr(context, 'company_services'),
-                  style: TextStyle(
-                      color: muted, fontSize: 12, fontWeight: FontWeight.w600)),
-              const SizedBox(height: 6),
-              for (final s in centre.services) _ligneService(s, muted),
-            ],
-
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: occupe ? null : () => _appeler(centre),
-                icon: const Icon(Icons.call, size: 18),
-                label: Text(tr(context, 'call')),
               ),
             ),
+            const SizedBox(width: 4),
+            const Icon(Icons.chevron_right),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _ligneService(ServiceTouche s, Color muted) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // La TOUCHE en pastille : c'est le chiffre que l'appelant devra
-          // composer, et il reste lisible même quand le service n'a pas de nom.
-          Container(
-            width: 22,
-            height: 22,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: accentOf(context).withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Text("${s.touche}",
-                style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: accentOf(context))),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              // Le serveur rend `null` quand le service n'est pas nommé : c'est
-              // ICI qu'on le dit, dans la langue de l'utilisateur.
-              s.nom ?? tr(context, 'company_service_unnamed'),
-              style: TextStyle(
-                fontSize: 14,
-                // Le nom manquant est mis en retrait : il ne doit pas se lire
-                // comme un intitulé de service.
-                color: s.nom == null ? muted : null,
-                fontStyle: s.nom == null ? FontStyle.italic : null,
-              ),
-            ),
-          ),
-        ],
+        onTap: () => _ouvrirType(vocal, centres),
       ),
     );
   }
