@@ -17,6 +17,14 @@ class AuthUser {
   final String? avatarUrl;
   final String? statusMsg;
   final String? nom;
+
+  /// Le numéro de LIGNE déclaré, en forme canonique.
+  ///
+  /// ⚠️ À NE PAS CONFONDRE AVEC [publicNumber], l'Alanya ID : celui-là est
+  /// l'identité du compte — ce que les contacts ont enregistré et ce qu'on
+  /// compose — et il ne change jamais. Celui-ci n'est qu'une information de
+  /// contact, modifiable sous mot de passe depuis les réglages.
+  final String? mobile;
   final int? idPays;
   final int typeCompte;
   final int isOnline;
@@ -46,6 +54,7 @@ class AuthUser {
     this.avatarUrl,
     this.statusMsg,
     this.nom,
+    this.mobile,
     this.idPays,
     this.typeCompte = 0,
     this.isOnline = 0,
@@ -74,6 +83,7 @@ class AuthUser {
         avatarUrl: avatarUrl ?? this.avatarUrl,
         statusMsg: statusMsg ?? this.statusMsg,
         nom: nom ?? this.nom,
+        mobile: mobile,
         idPays: idPays ?? this.idPays,
         typeCompte: typeCompte ?? this.typeCompte,
         isOnline: isOnline ?? this.isOnline,
@@ -95,6 +105,7 @@ class AuthUser {
         avatarUrl: json["avatarUrl"] as String?,
         statusMsg: json["statusMsg"] as String?,
         nom: json["nom"] as String?,
+        mobile: json["mobile"] as String?,
         idPays: (json["idPays"] as num?)?.toInt(),
         typeCompte: (json["typeCompte"] as num?)?.toInt() ?? 0,
         isOnline: (json["isOnline"] as num?)?.toInt() ?? 0,

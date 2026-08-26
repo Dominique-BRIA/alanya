@@ -20,6 +20,7 @@ import 'ringtones_screen.dart';
 import 'translation_screen.dart';
 import 'privacy_settings_screen.dart';
 import 'login_history_screen.dart';
+import 'pays_mobile_screen.dart';
 import 'recuperation_screen.dart';
 import '../../blocked/screens/blocked_users_screen.dart';
 import '../../chat/screens/starred_messages_screen.dart';
@@ -160,6 +161,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
             trailing: _chevron(),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const ChangePasswordScreen()),
+            ),
+          ),
+          // Pays et telephone. Place dans SECURITE : le numero se change sous
+          // mot de passe, et le pays conditionne l indicatif applique au numero.
+          _settingsTile(
+            icon: Icons.public_outlined,
+            iconColor: _accent,
+            title: tr(context, 'settings_country_phone'),
+            subtitle: tr(context, 'settings_country_phone_sub'),
+            trailing: _chevron(),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const PaysMobileScreen()),
             ),
           ),
           // Récupération du compte : revoir son code, ou ajouter une adresse.

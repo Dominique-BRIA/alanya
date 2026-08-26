@@ -53,6 +53,21 @@ void main() {
     expect(normaliserTelephone("+237237691234567", "+237"), "+237237691234567");
   });
 
+  group("numéro d'un AUTRE pays que celui du compte", () {
+    // 🔴 Le cas qui a coûté un numéro faux le 26/08/2026 : sans la sortie
+    // anticipée sur le « + », l'indicatif du compte se collait devant un
+    // numéro étranger, qui devenait injoignable.
+    test("numéro sénégalais sur un compte français", () {
+      expect(normaliserTelephone("+221 34543678", "+33"), "+22134543678");
+    });
+    test("ligne camerounaise sur un compte français", () {
+      expect(normaliserTelephone("+237 6 91 23 45 67", "+33"), "+237691234567");
+    });
+    test("sans « + », le numéro reste national", () {
+      expect(normaliserTelephone("612345678", "+33"), "+33612345678");
+    });
+  });
+
   group("formaterTelephone — le groupement local", () {
     test("Cameroun : paires depuis la fin", () {
       expect(formaterTelephone("691234567", "+237", "CM"), "+237 6 91 23 45 67");
