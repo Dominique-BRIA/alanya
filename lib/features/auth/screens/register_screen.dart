@@ -7,7 +7,6 @@ import '../../../core/app_snackbar.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../auth_repository.dart';
-import 'id_recuperation_screen.dart';
 import 'otp_screen.dart';
 import 'setup_screen.dart';
 
@@ -55,10 +54,21 @@ class _RegisterScreenState extends State<RegisterScreen> {
   /// valider refuserait de continuer à cause d'une adresse à moitié tapée que
   /// l'utilisateur vient justement de renoncer à donner.
   ///
-  /// Le compte est créé immédiatement — il n'y a pas de code à confirmer — puis
-  /// l'identifiant de récupération est présenté AVANT le mot de passe. Cet
-  /// ordre compte : le présenter après aurait laissé l'utilisateur croire
-  /// l'inscription finie et le faire passer sur l'écran d'un geste.
+  /// Le compte est créé immédiatement — il n'y a pas de code à confirmer — et
+  /// l'on enchaîne sur le profil.
+  ///
+  /// 🔴 L'IDENTIFIANT DE RÉCUPÉRATION EST PRÉSENTÉ À LA FIN, après le profil et
+  /// le mot de passe (demande du user, 25/08/2026). Il l'était auparavant juste
+  /// ici, avant le mot de passe. Le raisonnement d'alors — « le montrer après
+  /// laisserait croire l'inscription finie » — se retournait en fait contre
+  /// lui : intercalé au milieu, le code arrivait avant que le compte soit
+  /// utilisable, et l'écran était traversé comme une étape de plus. Il est
+  /// désormais la dernière chose que voit l'utilisateur, une fois qu'il n'a
+  /// plus rien à faire.
+  ///
+  /// ⚠️ C'est `SetupScreen` qui le montre, et c'est voulu : il est le seul à
+  /// savoir quand l'inscription est réellement terminée — le mot de passe posé
+  /// et la session obtenue.
   Future<void> _sansEmail() async {
     final confirme = await _confirmerSansEmail();
     if (!confirme || !mounted) return;
@@ -77,19 +87,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
       }
       await Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => IdRecuperationScreen(
-            idRecuperation: id,
+          builder: (_) => SetupScreen(
+            setupToken: res.setupToken,
             publicNumber: res.publicNumber,
-            // `pushReplacement` : une fois l'identifiant noté, revenir sur cet
-            // écran n'a plus de sens et le remontrerait sans raison.
-            onContinuer: () => Navigator.of(context).pushReplacement(
-              MaterialPageRoute(
-                builder: (_) => SetupScreen(
-                  setupToken: res.setupToken,
-                  publicNumber: res.publicNumber,
-                ),
-              ),
-            ),
+            // Transporté jusqu'au bout du parcours : c'est `SetupScreen` qui
+            // le présentera, une fois le compte réellement utilisable.
+            idRecuperation: id,
           ),
         ),
       );
