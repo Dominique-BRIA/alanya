@@ -1327,6 +1327,12 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
             final ctrl = context.read<MeetingController>();
             // Liste des participants présents (et non des seuls noms résolus).
             final peerIds = ctrl.peerIds;
+            // Et ceux qui sont ATTENDUS : invités, pas encore entrés. C'est la
+            // seule partie de cette fiche qui bouge quand l'organisateur ajoute
+            // quelqu'un en cours de séance — un ajouté n'est pas dans la salle
+            // tant qu'il n'a pas franchi la porte, et le compteur du haut, qui
+            // dit qui est là, n'a donc aucune raison de bouger avec lui.
+            final attendus = ctrl.invitesAbsents;
             return SafeArea(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -1428,6 +1434,52 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                             ),
                           );
                         }),
+                        // --- Invités qui ne sont pas encore là ---
+                        //
+                        // Séparés des présents, et jamais mêlés à eux : on ne
+                        // peut ni couper leur micro, ni leur donner la parole,
+                        // ni les voir. Les fondre dans la même liste ferait
+                        // croire à des gens muets plutôt qu'à des gens absents.
+                        if (attendus.isNotEmpty) ...[
+                          const Divider(color: Colors.white12, height: 1),
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                            child: Text(
+                              "Attendus (${attendus.length})",
+                              style: const TextStyle(
+                                color: Colors.white54,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ),
+                          ...attendus.map((invite) {
+                            return ListTile(
+                              leading: Opacity(
+                                // L'absence se voit d'abord : une pastille
+                                // seule se confondrait avec les autres états
+                                // déjà posés sur les avatars présents.
+                                opacity: 0.45,
+                                child: AvatarCircle(
+                                  name: invite.nom,
+                                  avatarUrl: invite.avatarUrl,
+                                  radius: 18,
+                                  backgroundColor: AlanyaColors.forest,
+                                ),
+                              ),
+                              title: Text(
+                                invite.nom,
+                                style: const TextStyle(color: Colors.white54),
+                              ),
+                              subtitle: const Text(
+                                "Invité · pas encore arrivé",
+                                style: TextStyle(
+                                    color: Colors.white38, fontSize: 12),
+                              ),
+                            );
+                          }),
+                        ],
                       ],
                     ),
                   ),

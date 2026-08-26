@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -30,6 +32,9 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
   /// Demandes EN ATTENTE, chargées pour le seul organisateur.
   List<MeetingInviteRequest> _demandes = const [];
 
+  /// Écoute des changements de composition annoncés par le serveur.
+  StreamSubscription<MeetingComposition>? _compositionSub;
+
   @override
   void initState() {
     super.initState();
@@ -45,7 +50,41 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
       // première frame passée, d'où le chargement des demandes ici et non plus
       // haut dans initState.
       _chargeDemandes();
+      _ecouteLaComposition();
     });
+  }
+
+  /// CETTE FICHE EST LA SURFACE QUE LE DÉFAUT VISAIT.
+  ///
+  /// « Participants (N) » et la liste dessous viennent d'une COPIE prise au
+  /// chargement. Quand l'organisateur ajoutait quelqu'un depuis un autre
+  /// appareil, la route REST écrivait en base sans pouvoir prévenir personne :
+  /// il fallait sortir de la fiche et y revenir pour voir la ligne apparaître.
+  ///
+  /// Le serveur annonce désormais le changement dans la salle, et le contrôleur
+  /// le relaie ici. On RELIT alors notre propre copie plutôt que de la
+  /// rapiécer : c'est la même source pour tout le monde, et un ajout suivi
+  /// d'un retrait ne laisse aucun reste.
+  ///
+  /// ⚠️ CE N'EST PAS UN REMPLACEMENT DU « TIRER POUR RAFRAÎCHIR ». L'annonce
+  /// passe par la SALLE : elle n'atteint que ceux dont la socket y est inscrite.
+  /// Ouvrir cette fiche sans être entré dans la réunion ne fait entrer dans
+  /// aucune salle — le geste manuel reste donc le seul recours dans ce cas.
+  void _ecouteLaComposition() {
+    _compositionSub =
+        context.read<MeetingController>().compositions.listen((c) {
+      if (!mounted || c.meetingId != _meeting.idMeeting) return;
+      _refresh();
+      // Une demande acceptée ajoute un participant ET retire la demande : la
+      // liste d'à côté devient fausse au même instant.
+      _chargeDemandes();
+    });
+  }
+
+  @override
+  void dispose() {
+    _compositionSub?.cancel();
+    super.dispose();
   }
 
   bool get _isOrganiser {
