@@ -98,6 +98,25 @@ void main() {
     });
   });
 
+  group("numéro portant DÉJÀ un autre indicatif que celui demandé", () {
+    // 🔴 Ces trois-là échouaient avant le correctif du 26/08/2026 : le
+    // découpage réattribuait les chiffres et rendait un AUTRE numéro.
+    // Découvert en ajoutant le choix du pays de la ligne dans les réglages —
+    // changer ce sélecteur réécrivait le numéro déjà saisi.
+    test("ligne française présentée avec l'indicatif camerounais", () {
+      expect(formaterTelephone("+33612345678", "+237", "CM"), "+33612345678");
+    });
+    test("ligne sénégalaise présentée avec l'indicatif français", () {
+      expect(formaterTelephone("+221 34 543 678", "+33", "FR"), "+22134543678");
+    });
+    test("aucun chiffre perdu : le formatage reste réversible", () {
+      expect(
+        normaliserTelephone(formaterTelephone("+33612345678", "+237", "CM"), "+237"),
+        "+33612345678",
+      );
+    });
+  });
+
   test("formater n'altère jamais ce qu'on envoie", () {
     const canonique = "+237691234567";
     expect(

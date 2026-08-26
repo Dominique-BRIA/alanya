@@ -27,9 +27,21 @@ import '../../auth/auth_repository.dart';
 ///   - le NUMÉRO DE LIGNE, sous mot de passe — `users.mobile` est unique et
 ///     sert à retrouver quelqu'un.
 ///
-/// ⚠️ LE PAYS EST PLACÉ AU-DESSUS DU NUMÉRO, et ce n'est pas cosmétique : c'est
-/// l'indicatif du pays du compte qui sert à normaliser un numéro saisi sans
-/// « + ». Changer le pays d'abord donne le bon indicatif au numéro qui suit.
+/// 🔴 DEUX PAYS, ET C'EST VOULU : celui du COMPTE, et celui de la LIGNE.
+///
+/// Ils se confondent la plupart du temps — le second est donc initialisé sur le
+/// premier, et personne n'y touche dans le parcours normal. Mais ils peuvent
+/// différer, et c'est même la raison pour laquelle changer de pays ne touche
+/// pas au numéro : on vit dans un pays en gardant une ligne d'un autre.
+///
+/// Le premier jet n'avait qu'un sélecteur, celui du compte, et s'en servait
+/// pour normaliser le numéro. Une ligne camerounaise saisie « 691234567 »
+/// depuis un compte déclaré en France devenait alors « +33691234567 » —
+/// injoignable. Seul un « + » explicite s'en sortait, et l'utilisateur n'a pas
+/// à connaître cette astuce.
+///
+/// ⚠️ Le pays de la ligne n'est JAMAIS écrit sur le compte : il ne voyage que
+/// pour donner le bon indicatif.
 class PaysMobileScreen extends StatefulWidget {
   const PaysMobileScreen({super.key});
 
@@ -42,7 +54,34 @@ class _PaysMobileScreenState extends State<PaysMobileScreen> {
   final _mdpCtrl = TextEditingController();
 
   List<Pays> _pays = const [];
+
+  /// Le pays du COMPTE — là où vit la personne.
   int? _idPays;
+
+  /// Le pays de la LIGNE, pour le numéro qu'on saisit.
+  ///
+  /// 🔴 DISTINCT DU PAYS DU COMPTE, et jamais écrit sur lui. Les deux se
+  /// confondent souvent, mais pas toujours : on vit dans un pays et on garde
+  /// une ligne d'un autre — c'est la raison même pour laquelle changer de pays
+  /// ne touche pas au numéro.
+  ///
+  /// Sans ce second champ, une ligne camerounaise saisie « 691234567 » depuis
+  /// un compte déclaré en France devenait « +33691234567 », injoignable. Seul
+  /// un « + » explicite s'en sortait, et l'utilisateur n'a pas à le savoir.
+  ///
+  /// Initialisé sur le pays du compte : c'est le cas le plus fréquent, et
+  /// personne n'a à toucher ce champ pour le parcours normal.
+  int? _idPaysNumero;
+
+  /// Remet le sélecteur de pays du compte en accord avec [_idPays].
+  ///
+  /// ⚠️ `initialValue` rend le champ NON PILOTÉ : il garde ce que l'utilisateur
+  /// a choisi, même si l'enregistrement a échoué. Sans ce forçage, un refus du
+  /// serveur laissait affiché un pays qui n'est PAS celui du compte — et
+  /// l'écran mentait sur l'état réel. Changer la clé recrée le champ, qui
+  /// repart alors de l'état.
+  int _cleePays = 0;
+
   String? _mobileActuel;
   String? _alanyaId;
 
@@ -50,8 +89,9 @@ class _PaysMobileScreenState extends State<PaysMobileScreen> {
   bool _envoiPays = false;
   bool _envoiMobile = false;
 
-  Pays? get _paysChoisi {
-    final id = _idPays;
+  /// Le pays de la LIGNE — celui qui donne l indicatif au numero saisi.
+  Pays? get _paysDuNumero {
+    final id = _idPaysNumero ?? _idPays;
     if (id == null) return null;
     for (final p in _pays) {
       if (p.idPays == id) return p;
@@ -86,6 +126,7 @@ class _PaysMobileScreenState extends State<PaysMobileScreen> {
       setState(() {
         _pays = liste;
         _idPays = moi.idPays;
+        _idPaysNumero = moi.idPays;
         _mobileActuel = moi.mobile;
         _alanyaId = moi.publicNumber;
         _mobileCtrl.text = moi.mobile ?? "";
@@ -104,8 +145,11 @@ class _PaysMobileScreenState extends State<PaysMobileScreen> {
       setState(() => _idPays = id);
       showAppSnackBar(tr(context, 'country_saved'));
     } on ApiException catch (e) {
+      // Le pays n'a pas changé en base : le sélecteur doit revenir dessus.
+      if (mounted) setState(() => _cleePays++);
       showAppSnackBar(e.message);
     } catch (_) {
+      if (mounted) setState(() => _cleePays++);
       showAppSnackBar(tr(context, 'server_unreachable'));
     } finally {
       if (mounted) setState(() => _envoiPays = false);
@@ -128,7 +172,11 @@ class _PaysMobileScreenState extends State<PaysMobileScreen> {
     try {
       final enregistre = await context
           .read<AccountRepository>()
-          .changerMobile(motDePasse: mdp, mobile: numero);
+          .changerMobile(
+            motDePasse: mdp,
+            mobile: numero,
+            idPaysNumero: _idPaysNumero,
+          );
       if (!mounted) return;
       setState(() {
         _mobileActuel = enregistre;
@@ -206,7 +254,10 @@ class _PaysMobileScreenState extends State<PaysMobileScreen> {
                       style: const TextStyle(fontWeight: FontWeight.w600)),
                   const SizedBox(height: 8),
                   DropdownButtonFormField<int>(
-                    value: _idPays,
+                    // La clé porte l'état : elle change quand un enregistrement
+                    // échoue, pour que le champ reparte du pays réel du compte.
+                    key: ValueKey("pays-compte-$_cleePays-$_idPays"),
+                    initialValue: _idPays,
                     isExpanded: true,
                     decoration: InputDecoration(
                       prefixIcon: const Icon(Icons.public_outlined),
@@ -234,7 +285,48 @@ class _PaysMobileScreenState extends State<PaysMobileScreen> {
                   const SizedBox(height: 4),
                   Text(tr(context, 'phone_change_explain'),
                       style: TextStyle(color: muted, fontSize: 13)),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 12),
+
+                  // Le pays DE LA LIGNE — pas celui du compte.
+                  //
+                  // 🔴 Il est ici, DANS la section du numéro, et pas à côté du
+                  // pays du compte : c'est ce qui dit qu'il appartient au
+                  // numéro. Le mettre plus haut ferait croire à deux réglages
+                  // de résidence contradictoires.
+                  //
+                  // ⚠️ IL NE DÉCLENCHE AUCUN ENREGISTREMENT à lui seul — à la
+                  // différence de celui du compte, juste au-dessus. Il ne part
+                  // qu'avec le numéro, sous mot de passe, et n'est jamais écrit
+                  // sur le compte.
+                  DropdownButtonFormField<int>(
+                    initialValue: _idPaysNumero,
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      prefixIcon: const Icon(Icons.sim_card_outlined),
+                      labelText: tr(context, 'phone_country'),
+                      helperText: tr(context, 'phone_country_explain'),
+                      helperMaxLines: 3,
+                    ),
+                    items: _pays
+                        .map((p) => DropdownMenuItem(
+                              value: p.idPays,
+                              child: Text(
+                                  "${p.drapeau}  ${p.libelle}  (${p.prefix})",
+                                  overflow: TextOverflow.ellipsis),
+                            ))
+                        .toList(),
+                    onChanged: _envoiMobile
+                        ? null
+                        : (v) {
+                            if (v == null) return;
+                            setState(() => _idPaysNumero = v);
+                            // Le numéro déjà tapé se remet au nouvel indicatif :
+                            // sans ça, l'exemple changerait sous les yeux mais
+                            // la saisie garderait l'ancien préfixe.
+                            _reformater();
+                          },
+                  ),
+                  const SizedBox(height: 12),
                   TextField(
                     controller: _mobileCtrl,
                     keyboardType: TextInputType.phone,
@@ -245,7 +337,7 @@ class _PaysMobileScreenState extends State<PaysMobileScreen> {
                       counterText: "",
                       // L'exemple suit le pays choisi : « 690 00 00 00 » n'a
                       // aucun sens pour quelqu'un qui vient de choisir la France.
-                      hintText: _paysChoisi == null ? null : "${_paysChoisi!.prefix} …",
+                      hintText: _paysDuNumero == null ? null : "${_paysDuNumero!.prefix} …",
                     ),
                     // Mise en forme à la SORTIE du champ, pas à chaque frappe :
                     // reformater pendant la saisie oblige à replacer le curseur
@@ -287,7 +379,7 @@ class _PaysMobileScreenState extends State<PaysMobileScreen> {
   /// ⚠️ Confort de saisie SEULEMENT — c'est le serveur qui normalise ce qui va
   /// en base, et lui qui respecte un « + » initial pour une ligne étrangère.
   void _reformater() {
-    final p = _paysChoisi;
+    final p = _paysDuNumero;
     if (p == null) return;
     final brut = _mobileCtrl.text.trim();
     if (brut.isEmpty) return;
