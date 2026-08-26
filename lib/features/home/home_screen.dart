@@ -15,6 +15,7 @@ import '../../core/notification_settings.dart';
 import '../../core/realtime_client.dart';
 import '../../widgets/back_app_bar.dart';
 import '../collegues/screens/collegues_tab.dart';
+import '../entreprises/screens/entreprises_tab.dart';
 import '../../core/sonneries_listes.dart';
 import '../../core/call_cache.dart';
 import '../../core/call_status.dart';
@@ -193,7 +194,36 @@ class _HomeScreenState extends State<HomeScreen> {
      * entrée ajoutée d'un seul côté décalerait silencieusement toute la
      * navigation.
      */
-    final estAgent = context.watch<AuthController>().user?.typeCompte == 2;
+    /*
+     * 🔴 LA CINQUIÈME PLACE DÉPEND DU TYPE DE COMPTE.
+     *
+     *   - PARTICULIER (type 0) → Entreprises : l'annuaire des standards qu'il
+     *     peut appeler ;
+     *   - AGENT (type 2)       → Collègues : l'annuaire interne de son
+     *     employeur ;
+     *   - standards (3 et 4)   → ni l'un ni l'autre. Ce sont des comptes de
+     *     service, pas des personnes qui consultent un annuaire.
+     *
+     * Les deux ne cohabitent jamais : un agent n'a pas besoin de chercher un
+     * service client depuis l'application avec laquelle il EST le service
+     * client, et un particulier n'a pas de collègues.
+     *
+     * ⚠️ CE N'EST PAS UN CONTRÔLE D'ACCÈS. `GET /api/collegues` refuse par 403
+     * aux non-agents parce qu'elle expose l'annuaire interne d'un employeur.
+     * `GET /api/entreprises`, elle, NE refuse personne : c'est un annuaire
+     * public, et masquer l'onglet n'est qu'un choix de produit.
+     *
+     * ⚠️ `typeCompte` VIENT DE `/api/me`, relu à chaque connexion depuis le
+     * 25/08/2026. Il valait 0 pour tout le monde juste après un login — la
+     * réponse de `/api/auth/login` ne le porte pas — et l'onglet n'apparaissait
+     * qu'au redémarrage suivant. Ne pas revenir à la valeur mise en cache.
+     *
+     * ⚠️ La liste des onglets et celle de la barre du bas doivent rester de
+     * MÊME LONGUEUR ET DANS LE MÊME ORDRE : `_tab` sert d'index aux deux.
+     */
+    final typeCompte = context.watch<AuthController>().user?.typeCompte ?? 0;
+    final estAgent = typeCompte == 2;
+    final estParticulier = typeCompte == 0;
 
     final tabs = [
       const _ConversationsTab(),
@@ -201,6 +231,7 @@ class _HomeScreenState extends State<HomeScreen> {
       const CallsScreen(),
       const MeetingsScreen(),
       if (estAgent) const ColleguesTab(),
+      if (estParticulier) const EntreprisesTab(),
     ];
 
     return Scaffold(
@@ -303,7 +334,9 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 FloatingActionButton.small(
                   heroTag: "fab-ia",
-                  tooltip: "IA",
+                  // Même nom que le titre de l'écran qu'il ouvre : un bouton
+                  // qui s'annonce autrement que l'endroit où il mène.
+                  tooltip: "Assistant Alanya",
                   backgroundColor:
                       Theme.of(context).colorScheme.surfaceContainerHighest,
                   foregroundColor: accentOf(context),
@@ -364,6 +397,14 @@ class _HomeScreenState extends State<HomeScreen> {
               icon: Icons.groups_outlined,
               activeIcon: Icons.groups,
               label: 'Collègues',
+            ),
+          // Entreprises prend la MÊME place pour un particulier — voir la note
+          // sur `tabs` : les deux listes doivent rester de même longueur.
+          if (estParticulier)
+            const AlanyaNavItem(
+              icon: Icons.domain_outlined,
+              activeIcon: Icons.domain,
+              label: 'Entreprises',
             ),
         ],
       ),
@@ -1845,7 +1886,10 @@ class AiScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: backAppBar(context, "IA"),
+      // « Assistant Alanya » et non « IA » : c'est le nom du produit, celui que
+      // porte déjà l'en-tête d'une conversation partagée. Il ne se traduit pas,
+      // d'où la chaîne en clair plutôt qu'un libellé dans les neuf langues.
+      appBar: backAppBar(context, "Assistant Alanya"),
       body: const _AiTab(),
     );
   }
