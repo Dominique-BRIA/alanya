@@ -47,13 +47,20 @@ class AccountRepository {
   ///
   /// Rend le numéro TEL QU'ENREGISTRÉ, pour que l'écran affiche ce que la base
   /// contient et non ce qui a été tapé.
+  /// [idPaysNumero] : le pays DE LA LIGNE, quand il diffère de celui du compte.
+  ///
+  /// 🔴 IL N'EST JAMAIS ÉCRIT SUR LE COMPTE. Il ne sert qu'à donner le bon
+  /// indicatif au numéro : normaliser une ligne camerounaise avec l'indicatif
+  /// français d'un compte expatrié produisait « +33691234567 », injoignable.
   Future<String> changerMobile({
     required String motDePasse,
     required String mobile,
+    int? idPaysNumero,
   }) async {
     final data = await _api.post("/api/account/mobile", {
       "password": motDePasse,
       "mobile": mobile,
+      if (idPaysNumero != null) "idPaysNumero": idPaysNumero,
     });
     return data["mobile"] as String? ?? "";
   }

@@ -85,6 +85,20 @@ String formaterTelephone(String saisie, String prefixePays, [String? iso2]) {
   if (canonique.isEmpty) return "";
 
   final indicatif = _chiffres(prefixePays);
+
+  // 🔴 LE NUMÉRO NE PORTE PAS L'INDICATIF DEMANDÉ : on le rend tel quel.
+  //
+  // Le découpage suppose que `canonique` commence par `indicatif` pour savoir
+  // où finit l'indicatif. Sinon la soustraction de longueurs mange des chiffres
+  // et en réattribue d'autres : « +33612345678 » présenté avec « +237 »
+  // ressortait « +237 12 34 56 78 » — un AUTRE numéro, pas une mise en forme.
+  //
+  // Constaté le 26/08/2026 en ajoutant le choix du pays de la ligne dans les
+  // réglages : changer ce sélecteur réécrivait le numéro déjà saisi.
+  if (indicatif.isNotEmpty && !canonique.startsWith("+$indicatif")) {
+    return canonique;
+  }
+
   final national = canonique.substring(1 + indicatif.length);
   if (national.isEmpty) return "+$indicatif";
 
