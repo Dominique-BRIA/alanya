@@ -96,6 +96,24 @@ class MeetingController extends ChangeNotifier {
   final StreamController<MeetingRefus> _refus =
       StreamController<MeetingRefus>.broadcast();
 
+  /// La COMPOSITION de la réunion vient de changer : quelqu'un a été ajouté,
+  /// exclu, ou son rôle a changé — depuis une route REST, et non depuis la
+  /// salle.
+  ///
+  /// Un flux et non un état, pour la même raison que [alertes] et [coupures] :
+  /// c'est un ÉVÉNEMENT ponctuel. Ce qu'il laisse derrière lui — le répertoire
+  /// et la liste des invités à jour — est posé par la relecture, et se lit dans
+  /// [invitesAbsents] comme dans [participantNames].
+  ///
+  /// À QUOI IL SERT AUX ÉCRANS : la fiche de la réunion tient sa PROPRE copie du
+  /// [Meeting], que le contrôleur ne peut pas mettre à jour à sa place. Elle
+  /// écoute donc ce flux pour relire à son tour, au lieu de brancher un second
+  /// chemin sur la socket — il n'y a qu'une porte pour les événements de salle,
+  /// et c'est ce contrôleur.
+  Stream<MeetingComposition> get compositions => _compositions.stream;
+  final StreamController<MeetingComposition> _compositions =
+      StreamController<MeetingComposition>.broadcast();
+
   /// Une inscription est partie vers le serveur et attend sa réponse.
   ///
   /// ⚠️ C'EST LE SEUL MOYEN DE LIRE JUSTE UNE TRAME `error`. Le serveur en émet
@@ -131,6 +149,15 @@ class MeetingController extends ChangeNotifier {
   final Map<String, String?> _participantAvatars = {}; // userId -> avatarUrl
   final Set<String> _connectedPeerIds =
       {}; // participants annoncés par le serveur
+
+  /// Les personnes INVITÉES à la réunion, telles que `GET /api/meetings/:id`
+  /// les donne — moi excepté, et sans celles qui ont décliné.
+  ///
+  /// ⚠️ CE N'EST PAS [_connectedPeerIds], ET IL NE FAUT SURTOUT PAS LES
+  /// CONFONDRE. Cette liste vient de la BASE et dit qui est attendu ; l'autre
+  /// vient de la SOCKET et dit qui est là. Un invité ajouté en cours de séance
+  /// entre ici tout de suite et dans l'autre seulement s'il franchit la porte.
+  final List<MeetingInvite> _invites = [];
 
   /// État muet des pairs, tel qu'annoncé par eux-mêmes via la signalisation
   /// applicative (`meeting_signal` de type `state`).
@@ -224,6 +251,23 @@ class MeetingController extends ChangeNotifier {
   /// [connectedPeerCount] + 1, qui ne compte que les pairs dont le flux média
   /// est déjà établi (un nouveau venu y manquait pendant quelques secondes).
   int get participantCount => _connectedPeerIds.length + 1;
+
+  /// Les invités qui ne sont PAS (encore) dans la salle.
+  ///
+  /// DÉRIVÉ À LA LECTURE, jamais stocké. La liste des invités vient de la base,
+  /// la présence vient de la socket, et les deux bougent chacune de leur côté :
+  /// un troisième champ tenu à la main finirait fatalement par contredire l'un
+  /// des deux — il suffirait d'oublier de le mettre à jour dans un seul des
+  /// quatre endroits qui retirent un pair.
+  ///
+  /// ⚠️ NE PAS L'AJOUTER À [participantCount]. Ce compteur-là dit combien de
+  /// personnes sont DANS la salle, et l'en-tête l'affiche à côté du minuteur :
+  /// y mêler des absents lui ferait annoncer du monde que personne ne voit ni
+  /// n'entend.
+  List<MeetingInvite> get invitesAbsents => [
+        for (final invite in _invites)
+          if (!_connectedPeerIds.contains(invite.userId)) invite,
+      ];
 
   /// Le pair [peerId] a-t-il son micro coupé ? Faux si on ne sait pas encore.
   bool isPeerMuted(String peerId) => _peerMuted[peerId] ?? false;
@@ -548,16 +592,51 @@ class MeetingController extends ChangeNotifier {
     await _mesh?.switchCamera();
   }
 
-  /// Renseigne les noms/avatars des participants déjà présents à notre arrivée.
+  /// Numéro de la dernière relecture demandée.
   ///
-  /// L'événement `meeting_joined` ne contient que des IDs, sans les noms. On
-  /// complète avec le détail de la réunion, qui liste tous les participants.
-  /// Les participants annoncés par `meeting_user_joined` (avec leur nom) ne
-  /// sont pas écrasés. Échec silencieux : on se contentera du repli
-  /// « Participant » le temps du rafraîchissement suivant.
-  Future<void> _hydrateParticipants(int meetingId) async {
+  /// Deux changements rapprochés lancent deux lectures, et RIEN NE GARANTIT
+  /// QUE LA PREMIÈRE RÉPONDE EN PREMIER. Sans ce numéro, une réponse ancienne
+  /// arrivée en dernier écraserait durablement la liste par un état périmé —
+  /// exactement le défaut qu'on évitait en ne transportant pas la liste dans
+  /// l'événement.
+  int _relectureNo = 0;
+
+  /// RELIT la réunion au serveur, et met à jour ce qui vient de la BASE.
+  ///
+  /// UNE SEULE SOURCE, `GET /api/meetings/:id` — la même pour le mobile, le web
+  /// et la fiche de la réunion. Rien n'est déduit de l'événement qui a déclenché
+  /// cette lecture : le serveur DIT que la composition a changé, il ne la
+  /// transporte pas.
+  ///
+  /// 🔴 CE QUI EST TOUCHÉ, ET RIEN D'AUTRE : le répertoire des noms, celui des
+  /// avatars, et la liste des invités. [_connectedPeerIds], le maillage WebRTC,
+  /// les états muets, les mains levées et les présentateurs ne sont PAS
+  /// reconstruits ici. Ils décrivent la SALLE, que seule la socket connaît ;
+  /// cette lecture ne connaît que la liste des invités.
+  ///
+  /// ET C'EST CE QUI PROTÈGE L'IMAGE. La grille vidéo se construit sur
+  /// `peerIds` et `remoteStreams` ; ses tuiles sont appariées PAR POSITION par
+  /// Flutter, et un `RTCVideoRenderer` n'est détruit que si sa tuile disparaît
+  /// de la liste. Écrire dans [_connectedPeerIds] à chaque relecture — même
+  /// pour y remettre exactement les mêmes identifiants dans un autre ordre —
+  /// ferait donc réinitialiser des renderers, et l'image de toute la salle
+  /// clignoterait à chaque arrivée. Ici, la liste des présents ne bouge pas :
+  /// seuls le nom et l'avatar affichés changent.
+  ///
+  /// Les noms déjà connus ne sont pas écrasés : `meeting_user_joined` porte le
+  /// nom de celui qui entre, et il est au moins aussi frais que celui-ci.
+  ///
+  /// Échec silencieux : on se contentera du repli « Participant » jusqu'à la
+  /// relecture suivante. Une réunion ne doit pas s'arrêter parce qu'une requête
+  /// HTTP a échoué.
+  Future<void> _relitLaComposition(int meetingId) async {
+    final no = ++_relectureNo;
     try {
       final meeting = await _meetings.fetchMeeting(meetingId);
+      // Une lecture plus récente est partie depuis, ou la salle a changé
+      // pendant celle-ci : on ne pose rien.
+      if (no != _relectureNo || meetingId != activeMeetingId) return;
+
       var changed = false;
       for (final p in meeting.participants) {
         if (p.userId == myUserId) continue;
@@ -571,10 +650,48 @@ class MeetingController extends ChangeNotifier {
           changed = true;
         }
       }
+
+      // Ceux qui ont DÉCLINÉ sont écartés : les annoncer comme attendus ferait
+      // guetter quelqu'un qui a déjà dit non.
+      final invites = <MeetingInvite>[
+        for (final p in meeting.participants)
+          if (p.userId != myUserId && p.status != MeetingInvite.statutDecline)
+            MeetingInvite(
+              userId: p.userId,
+              nom: p.displayName,
+              avatarUrl: p.avatarUrl,
+            ),
+      ];
+      if (!_memeListeInvites(invites)) {
+        _invites
+          ..clear()
+          ..addAll(invites);
+        changed = true;
+      }
+
       if (changed) notifyListeners();
     } catch (e) {
-      debugPrint('[MeetingController] hydratation participants échouée: $e');
+      debugPrint('[MeetingController] relecture de la composition échouée: $e');
     }
+  }
+
+  /// La liste relue est-elle la même que celle qu'on affiche déjà ?
+  ///
+  /// Une relecture qui ne change rien ne doit RIEN notifier : le ticker
+  /// redessine déjà la salle chaque seconde, y ajouter des reconstructions
+  /// inutiles ferait travailler la grille vidéo pour rien.
+  bool _memeListeInvites(List<MeetingInvite> autres) {
+    if (_invites.length != autres.length) return false;
+    for (var i = 0; i < _invites.length; i++) {
+      final a = _invites[i];
+      final b = autres[i];
+      if (a.userId != b.userId ||
+          a.nom != b.nom ||
+          a.avatarUrl != b.avatarUrl) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /// Renseigne l'avatar d'un participant (venu du détail de la réunion), pour
@@ -689,6 +806,15 @@ class MeetingController extends ChangeNotifier {
         break;
       case "meeting_mute":
         _handleMeetingMute(e);
+        break;
+      // Le nom du verbe est celui que porte `VERBE_COMPOSITION` dans le backend
+      // (`src/lib/salle-temps-reel.ts`) ; c'est la seule source à suivre s'il
+      // change. Ce `switch` FILTRE, exactement comme la liste des types côté
+      // web : un verbe absent d'ici n'atteint jamais son gestionnaire, et sans
+      // la moindre erreur — c'est l'oubli qui a déjà coûté deux défauts sur
+      // `meeting_screen` et `meeting_mute`.
+      case "meeting_participants_changed":
+        _handleCompositionChangee(e);
         break;
       case "meeting_extended":
         // L'organisateur a repoussé le terme. La nouvelle durée vient du
@@ -824,8 +950,10 @@ class MeetingController extends ChangeNotifier {
     }
     // L'événement ne contient que les IDs : on résout noms et avatars depuis le
     // détail de la réunion, sinon les participants déjà présents restent
-    // invisibles dans la grille et la fiche participants.
-    _hydrateParticipants(meetingId);
+    // invisibles dans la grille et la fiche participants. La même lecture pose
+    // la liste des invités, pour que la fiche sache dès l'entrée qui est encore
+    // attendu.
+    _relitLaComposition(meetingId);
     // Annonce mon état muet courant à ceux déjà présents.
     _broadcastState();
     // ET MA MAIN, si elle était levée. Le serveur ne conserve rien : la salle
@@ -1090,6 +1218,51 @@ class MeetingController extends ChangeNotifier {
     _rt.meetingMute(id, userId, media);
   }
 
+  /// LA COMPOSITION DE LA RÉUNION A CHANGÉ (`meeting_participants_changed`).
+  ///
+  /// POURQUOI CE VERBE EXISTE. L'API et le serveur temps réel sont DEUX
+  /// PROCESSUS. Une route REST qui ajoute quelqu'un écrit en base et n'a aucun
+  /// accès aux sockets : elle ne pouvait prévenir que des APPAREILS, par
+  /// notification poussée — donc les nouveaux invités, et eux seuls. Ceux qui
+  /// étaient déjà dans la salle ne voyaient bouger ni le nombre de participants
+  /// ni la liste des invités, et devaient sortir et revenir. Le serveur ouvre
+  /// désormais un pont interne : la route prévient le serveur temps réel, qui
+  /// diffuse ce verbe à toute la salle.
+  ///
+  /// IL NE PORTE PAS LA NOUVELLE LISTE, et c'est voulu. Il DIT qu'elle a
+  /// changé, on la RELIT :
+  ///
+  ///  - une liste transportée ici aurait sa propre forme, à tenir d'accord pour
+  ///    toujours avec celle de `GET /api/meetings/:id` — deux vérités pour une
+  ///    seule réunion, et une fusion à écrire de ce côté comme du côté web ;
+  ///  - un « ça a changé » est IDEMPOTENT : quel que soit l'ordre d'arrivée de
+  ///    deux annonces rapprochées, la dernière relecture dit le vrai, alors que
+  ///    la dernière liste arrivée n'est pas forcément la plus récente.
+  ///
+  /// UN SEUL VERBE POUR TOUS LES CAS, le motif étant DANS la trame. Un motif
+  /// qu'on ne connaît pas encore — l'exclusion, le changement de rôle — relance
+  /// quand même la relecture, là où un type inconnu serait tombé sans bruit
+  /// dans le `switch`. Il n'y aura donc rien à ajouter ici le jour où le serveur
+  /// en émettra un nouveau.
+  ///
+  /// L'ÉVÉNEMENT EST ÉMIS SANS ATTENDRE LA LECTURE, et c'est délibéré : les
+  /// écrans qui tiennent leur propre copie de la réunion relisent la leur en
+  /// parallèle, et n'ont aucune raison d'attendre la nôtre.
+  void _handleCompositionChangee(Map<String, dynamic> e) {
+    final meetingId = (e["meetingId"] as num?)?.toInt();
+    if (meetingId == null || meetingId != activeMeetingId) return;
+
+    _relitLaComposition(meetingId);
+
+    if (_compositions.isClosed) return;
+    _compositions.add(MeetingComposition(
+      meetingId: meetingId,
+      motif: e["motif"] as String?,
+      parUserId: e["parUserId"] as String?,
+      nombre: (e["nombre"] as num?)?.toInt(),
+    ));
+  }
+
   /// Qui présente son écran (`meeting_screen`).
   ///
   /// POURQUOI CE VERBE COMPTE. La piste vidéo d'un écran emprunte exactement le
@@ -1141,6 +1314,9 @@ class MeetingController extends ChangeNotifier {
     _participantNames.clear();
     _participantAvatars.clear();
     _connectedPeerIds.clear();
+    // Sans cela, la fiche de la réunion SUIVANTE annoncerait comme attendus les
+    // invités de la précédente, avant même la première relecture.
+    _invites.clear();
     _peerMuted.clear();
     _raisedHands.clear();
     // Un reste de la réunion précédente mettrait un absent en grand dès
@@ -1160,6 +1336,7 @@ class MeetingController extends ChangeNotifier {
     _alertes.close();
     _coupures.close();
     _refus.close();
+    _compositions.close();
     _stopMesh();
     super.dispose();
   }
@@ -1284,6 +1461,68 @@ class MeetingRefus {
     return "Réunion quittée : elle est limitée à $plafond participants, "
         "et toutes les places sont prises.";
   }
+}
+
+/// La composition d'une réunion vient de changer, depuis une route REST.
+///
+/// ⚠️ NE PORTE PAS LA NOUVELLE LISTE — voir
+/// [MeetingController._handleCompositionChangee] pour le pourquoi. Ce qu'il
+/// porte ne sert qu'à FORMULER ce qui s'est passé ; ce qui sert à AFFICHER se
+/// relit au serveur.
+class MeetingComposition {
+  const MeetingComposition({
+    required this.meetingId,
+    this.motif,
+    this.parUserId,
+    this.nombre,
+  });
+
+  /// Les motifs que le serveur émet aujourd'hui — voir `MotifSalle` dans
+  /// `src/lib/salle-temps-reel.ts`, la seule source à suivre.
+  static const motifAjout = "PARTICIPANTS_ADDED";
+  static const motifRetrait = "PARTICIPANT_REMOVED";
+  static const motifRole = "ROLE_CHANGED";
+
+  final int meetingId;
+
+  /// CE QUI a changé, en CODE et jamais en phrase : le serveur ne rend aucun
+  /// texte affichable.
+  ///
+  /// ⚠️ VOLONTAIREMENT UNE CHAÎNE LIBRE, et non une énumération. Un motif
+  /// inconnu de cette version de l'application ne doit RIEN empêcher : la
+  /// relecture reste juste quoi qu'il arrive, et c'est elle qui compte. Une
+  /// énumération obligerait à un repli « inconnu » que personne ne penserait à
+  /// traiter.
+  final String? motif;
+
+  /// Qui a provoqué le changement. Déjà connu de toute la salle.
+  final String? parUserId;
+
+  /// Combien de lignes bougent. Un nombre, pas une liste : de quoi annoncer
+  /// quelque chose tout de suite, rien à fusionner.
+  final int? nombre;
+
+  bool get estUnAjout => motif == motifAjout;
+}
+
+/// Quelqu'un d'INVITÉ à la réunion — déjà dans la salle ou pas encore.
+///
+/// Vient de `GET /api/meetings/:id`, donc de la base : à ne pas confondre avec
+/// un pair de [MeetingController.peerIds], qui vient de la socket et qui est,
+/// lui, réellement là.
+class MeetingInvite {
+  const MeetingInvite({
+    required this.userId,
+    required this.nom,
+    this.avatarUrl,
+  });
+
+  /// Le statut d'un invité qui a DÉCLINÉ, tel que le serveur le pose.
+  static const statutDecline = 2;
+
+  final String userId;
+  final String nom;
+  final String? avatarUrl;
 }
 
 /// Message de chat échangé pendant une réunion. Éphémère, non persisté.
