@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/pays_repository.dart';
-import '../../../l10n/app_localizations.dart';
-import '../../../theme/alanya_theme.dart';
-import '../../../widgets/back_app_bar.dart';
+import '../core/pays_repository.dart';
+import '../l10n/app_localizations.dart';
+import '../theme/alanya_theme.dart';
+import 'back_app_bar.dart';
 
 /// Choisir un pays dans une liste cherchable.
 ///

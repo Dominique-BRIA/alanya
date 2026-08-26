@@ -1,16 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/api_client.dart';
 import '../../../core/app_snackbar.dart';
 import '../../../core/pays_repository.dart';
-import '../../../core/telephone.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../../account/account_repository.dart';
-import 'choix_pays_screen.dart';
+import '../../../widgets/saisie_pays_numero.dart';
 
 /// Saisir son numéro de téléphone : le pays d'abord, le numéro ensuite.
 ///
@@ -57,19 +55,11 @@ class NumeroScreen extends StatefulWidget {
 
 class _NumeroScreenState extends State<NumeroScreen> {
   final _numeroCtrl = TextEditingController();
-  final _numeroFocus = FocusNode();
 
   int? _idPays;
   bool _envoi = false;
 
-  Pays? get _paysChoisi {
-    final id = _idPays;
-    if (id == null) return null;
-    for (final p in widget.pays) {
-      if (p.idPays == id) return p;
-    }
-    return null;
-  }
+  Pays? get _paysChoisi => paysParId(widget.pays, _idPays);
 
   @override
   void initState() {
@@ -81,7 +71,6 @@ class _NumeroScreenState extends State<NumeroScreen> {
   @override
   void dispose() {
     _numeroCtrl.dispose();
-    _numeroFocus.dispose();
     super.dispose();
   }
 
@@ -108,19 +97,6 @@ class _NumeroScreenState extends State<NumeroScreen> {
     _numeroCtrl.text = chiffres;
   }
 
-  Future<void> _choisirPays() async {
-    final choisi = await Navigator.of(context).push<Pays>(
-      MaterialPageRoute(
-        builder: (_) => ChoixPaysScreen(
-          pays: widget.pays,
-          idSelectionne: _idPays,
-        ),
-      ),
-    );
-    if (choisi == null || !mounted) return;
-    setState(() => _idPays = choisi.idPays);
-  }
-
   Future<void> _enregistrer() async {
     final pays = _paysChoisi;
     if (pays == null) {
@@ -135,7 +111,8 @@ class _NumeroScreenState extends State<NumeroScreen> {
 
     // L'indicatif est recollé ICI, parce qu'il n'est pas dans le champ : le
     // serveur normalise ensuite, avec la même règle qu'à l'inscription.
-    final complet = normaliserTelephone(saisi, pays.prefix);
+    final complet =
+        SaisiePaysNumero.numeroComplet(widget.pays, pays.idPays, saisi);
 
     setState(() => _envoi = true);
     try {
@@ -158,27 +135,7 @@ class _NumeroScreenState extends State<NumeroScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final accent = accentOf(context);
     final muted = mutedOf(context, Colors.black54);
-    final pays = _paysChoisi;
-
-    // Soulignement seul, sans remplissage : c'est ce qui donne à l'écran son
-    // allure de saisie de numéro plutôt que de formulaire de réglages. Le
-    // thème global remplit et arrondit les champs — il est écarté ici, et
-    // seulement ici.
-    InputDecoration souligne({String? hint}) => InputDecoration(
-          hintText: hint,
-          filled: false,
-          isDense: true,
-          contentPadding: const EdgeInsets.symmetric(vertical: 10),
-          enabledBorder: UnderlineInputBorder(
-            borderSide: BorderSide(color: accent.withValues(alpha: 0.45)),
-          ),
-          focusedBorder: UnderlineInputBorder(
-            borderSide: BorderSide(color: accent, width: 2),
-          ),
-          border: const UnderlineInputBorder(),
-        );
 
     return Scaffold(
       appBar: backAppBar(context, tr(context, 'phone_number_title')),
@@ -193,68 +150,16 @@ class _NumeroScreenState extends State<NumeroScreen> {
             ),
             const SizedBox(height: 32),
 
-            // ── Le pays, sur sa propre ligne ──────────────────────────────
-            InkWell(
-              onTap: _envoi ? null : _choisirPays,
-              child: InputDecorator(
-                decoration: souligne(),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        pays?.libelle ?? tr(context, 'choose_country'),
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: pays == null ? muted : null,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    Icon(Icons.arrow_drop_down, color: accent),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 18),
-
-            // ── L'indicatif, puis le numéro ───────────────────────────────
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                // L'indicatif est AFFICHÉ, pas saisi : il suit le pays choisi
-                // au-dessus. Le rendre modifiable ouvrirait la porte à un
-                // indicatif qui contredit le pays, et il faudrait alors
-                // décider lequel des deux fait foi.
-                SizedBox(
-                  width: 76,
-                  child: InputDecorator(
-                    decoration: souligne(),
-                    child: Text(
-                      pays == null || pays.prefix.isEmpty ? "+" : pays.prefix,
-                      style: const TextStyle(fontSize: 16),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: TextField(
-                    controller: _numeroCtrl,
-                    focusNode: _numeroFocus,
-                    keyboardType: TextInputType.phone,
-                    autofocus: true,
-                    maxLength: 20,
-                    style: const TextStyle(fontSize: 16),
-                    // Le champ ne prend QUE des chiffres : l'indicatif est
-                    // dans la case de gauche, et un « + » tapé ici produirait
-                    // un numéro à deux indicatifs.
-                    inputFormatters: [
-                      FilteringTextInputFormatter.digitsOnly,
-                    ],
-                    decoration: souligne(hint: tr(context, 'phone_hint'))
-                        .copyWith(counterText: ""),
-                  ),
-                ),
-              ],
+            // 🔴 LE MÊME COMPOSANT QU'À L'INSCRIPTION. Les deux écrans avaient
+            // chacun leur formulaire, et c'est ainsi qu'un numéro finit stocké
+            // sous deux formes dans une colonne UNIQUE.
+            SaisiePaysNumero(
+              pays: widget.pays,
+              idPays: _idPays,
+              controller: _numeroCtrl,
+              onPays: (id) => setState(() => _idPays = id),
+              actif: !_envoi,
+              autofocus: true,
             ),
             const SizedBox(height: 40),
 
