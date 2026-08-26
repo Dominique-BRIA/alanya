@@ -36,6 +36,7 @@ import 'features/calls/plaintes_repository.dart';
 import 'features/chat/chat_repository.dart';
 import 'core/pays_repository.dart';
 import 'features/collegues/collegues_repository.dart';
+import 'features/entreprises/entreprises_repository.dart';
 import 'features/contacts/contact_lists_repository.dart';
 import 'features/contacts/contacts_repository.dart';
 import 'features/home/home_screen.dart';
@@ -116,6 +117,8 @@ void main() async {
         Provider<PaysRepository>.value(value: PaysRepository(api)),
         // Annuaire des collegues — reserve aux agents, le serveur le controle.
         Provider<ColleguesRepository>.value(value: ColleguesRepository(authedApi)),
+        // Annuaire public des entreprises — la route ne refuse personne.
+        Provider<EntreprisesRepository>.value(value: EntreprisesRepository(authedApi)),
         Provider<ContactListsRepository>.value(
             value: ContactListsRepository(authedApi)),
         // La sonnerie d'un appelant se lit dans SES listes de contacts, et la
