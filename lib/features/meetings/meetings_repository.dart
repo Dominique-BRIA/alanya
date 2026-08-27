@@ -107,11 +107,22 @@ class MeetingsRepository {
   ///
   /// ⚠️ La personne proposée n'est prévenue de RIEN à ce stade. Elle ne le sera
   /// que si l'organisateur accepte, et par une invitation ordinaire.
-  Future<void> requestInvite(int idMeeting, String publicNumber) async {
-    await _api.post(
+  /// Rend VRAI si la personne est entree DIRECTEMENT, sans demande.
+  ///
+  /// 🔴 LE CAS EXISTE ENCORE, et l ecran doit le dire. Quand l organisateur a
+  /// active l invitation automatique, il n y a pas de demande du tout :
+  /// quelqu un entre. Annoncer « la personne n est prevenue que si
+  /// l organisateur accepte » serait alors un mensonge — elle est deja dedans.
+  ///
+  /// ⚠️ Ce n est PAS le contournement « organisateur absent », retire du
+  /// serveur le 27/08/2026 : celui-la sautait l approbation sans que personne
+  /// l ait demande. Ici c est l organisateur qui a choisi ce mode.
+  Future<bool> requestInvite(int idMeeting, String publicNumber) async {
+    final data = await _api.post(
       "/api/meetings/$idMeeting/invite-requests",
       {"publicNumber": publicNumber},
     );
+    return data["ajouteDirectement"] == true;
   }
 
   /// Demandes d'ajout en attente d'une réunion.

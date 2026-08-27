@@ -342,12 +342,17 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     if (numeros == null || numeros.isEmpty || !mounted) return;
 
     try {
-      await context
+      final entreeDirecte = await context
           .read<MeetingsRepository>()
           .requestInvite(widget.meetingId, numeros.first);
       if (mounted) {
-        showAppSnackBar(
-            "Demande envoyée. La personne n'est prévenue que si l'organisateur accepte.");
+        // Le message suit ce qui s'est RÉELLEMENT passé. Il annonçait une
+        // demande dans tous les cas, y compris quand la personne venait
+        // d'entrer — et celui qui proposait attendait alors une décision qui
+        // n'aurait jamais lieu.
+        showAppSnackBar(entreeDirecte
+            ? "Cette réunion accepte les invitations sans approbation : la personne a été ajoutée."
+            : "Demande envoyée. La personne n'est prévenue que si l'organisateur accepte.");
       }
     } on ApiException catch (e) {
       if (mounted) showAppSnackBar(e.message);
