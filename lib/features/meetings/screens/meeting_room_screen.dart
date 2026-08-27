@@ -54,39 +54,38 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   StreamSubscription<MeetingCoupure>? _coupuresSub;
   StreamSubscription<MeetingRefus>? _refusSub;
 
-  /// Ce que CET écran a ajouté au compteur `_roomScreensOpen` du contrôleur :
-  /// 0 ou 1, jamais plus.
+  /// Le contrôleur, retenu dès que les dépendances sont prêtes.
   ///
-  /// 🔴 SANS CE DRAPEAU, LE BANDEAU GLOBAL DES RÉUNIONS DISPARAISSAIT
-  /// DÉFINITIVEMENT. `didChangeDependencies` est rejoué à CHAQUE
-  /// `notifyListeners()` du contrôleur — cet écran en dépend par
-  /// `context.watch<MeetingController>()` — et il y programmait un post-frame
-  /// de plus, donc un `setRoomVisible(true)` de plus. Une réunion un peu
-  /// animée montait le compteur à plusieurs dizaines ; en sortant, les deux
-  /// `setRoomVisible(false)` (celui du retour, celui de `dispose`) n'en
-  /// retiraient que deux. Le compteur restait au-dessus de zéro, `roomVisible`
-  /// restait vrai, et le bandeau ne revenait plus — pour toute la durée de vie
-  /// de l'application.
-  ///
-  /// L'écran d'APPEL n'a jamais eu le défaut : son `didChangeDependencies`
-  /// sort par un `if (_calls == cc) return;` dès la deuxième invocation. Ici,
-  /// les trois abonnements voisins se protègent bien par `??=` — seul le
-  /// compteur avait été oublié.
+  /// ⚠️ RETENU PLUTÔT QUE RELU DANS `dispose`. Un `context.read` au démontage
+  /// dépend d'un élément qu'on est justement en train de retirer de l'arbre :
+  /// c'est le dernier endroit où l'on veut apprendre que le contexte n'est plus
+  /// utilisable, puisque c'est là qu'on rend sa place au bandeau global. L'écran
+  /// d'appel retient déjà le sien de la même façon (`_calls`).
+  MeetingController? _mc;
+
+  /// Ce que CET écran pèse dans le compteur `_roomScreensOpen` : 0 ou 1.
   bool _compteDansLeCompteur = false;
 
-  /// Fait que cet écran pèse exactement [visible] dans le compteur, quel que
-  /// soit le nombre d'appels. Idempotent dans les deux sens : le retour système
-  /// et `dispose` peuvent donc tous deux demander le retrait sans se marcher
-  /// dessus.
+  /// Fait que cet écran pèse exactement [visible] dans le compteur. Idempotent
+  /// dans les deux sens : le retour système et `dispose` peuvent tous deux
+  /// demander le retrait sans se marcher dessus.
   void _signaleSalleVisible(bool visible) {
     if (visible == _compteDansLeCompteur) return;
+    final mc = _mc;
+    if (mc == null) return;
     _compteDansLeCompteur = visible;
-    context.read<MeetingController>().setRoomVisible(visible);
+    mc.setRoomVisible(visible);
   }
 
   @override
   void initState() {
     super.initState();
+    // La salle est affichée → le bandeau global s'efface. UNE SEULE FOIS, à
+    // l'entrée : le post-frame attend que `didChangeDependencies` ait retenu le
+    // contrôleur, et rien d'autre ne rearmera ce compteur.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _signaleSalleVisible(true);
+    });
     _join();
   }
 
@@ -150,11 +149,36 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // La salle est affichée → masque le bandeau global. Posé en post-frame car
-    // il peut être appelé plusieurs fois au fil des dépendances.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _signaleSalleVisible(true);
-    });
+    _mc ??= context.read<MeetingController>();
+
+    /* 🔴 LE COMPTEUR NE SE TOUCHE PLUS ICI, ET C'EST TOUT LE CORRECTIF.
+     *
+     * Ce corps-ci programmait un post-frame qui appelait
+     * `_signaleSalleVisible(true)`. Or `didChangeDependencies` est rejoué à
+     * CHAQUE `notifyListeners()` du contrôleur, et l'écran en dépend — mais
+     * SEULEMENT EN VIDÉO : `_localVideo`, `_remoteVideoSingle` et
+     * `_remoteVideoTile` appellent `context.watch<MeetingController>()` sur le
+     * contexte de l'écran, là où la grille audio reçoit `ctrl` en paramètre et
+     * passe par un `ListenableBuilder` qui n'inscrit rien.
+     *
+     * D'où un bandeau vert qui ne revenait QUE pour les réunions audio :
+     *   1. on réduit → `onPopInvokedWithResult` désarme le drapeau, compteur 0 ;
+     *   2. la salle vit encore le temps de l'animation de sortie, et en vidéo
+     *      `_onMeshUpdated` notifie sans arrêt → `didChangeDependencies` →
+     *      post-frame → `_signaleSalleVisible(true)` → compteur 1 ;
+     *   3. le bandeau, qui s'affiche sur `isActive && !roomVisible`, se
+     *      referme aussitôt.
+     * En audio, rien ne notifie pendant ces quelques centaines de millisecondes,
+     * la marche 2 n'existe pas, et le bandeau reste.
+     *
+     * ⚠️ NE PAS « RÉPARER » ÇA EN AJOUTANT UNE GARDE DE PLUS. Le drapeau
+     * `_compteDansLeCompteur` en était déjà une, et elle ne suffit pas : le
+     * retour la remet à faux, ce qui rouvre la porte au post-frame suivant. La
+     * seule forme correcte est celle-ci — on arme UNE fois à l'entrée, on
+     * désarme à la sortie, et la mise à jour des dépendances n'a pas voix au
+     * chapitre.
+     */
+
     // Une seule souscription, même si les dépendances changent plusieurs fois.
     _alertesSub ??= context.read<MeetingController>().alertes.listen(_onAlerte);
     _coupuresSub ??=
@@ -334,8 +358,9 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   }
 
   Future<void> _leave() async {
-    final ctrl = context.read<MeetingController>();
-    await ctrl.leave();
+    // Le contrôleur retenu, et non `context.read` : on part vers un `await`
+    // puis vers un démontage, et le contexte n'a pas à survivre à ça.
+    await _mc?.leave();
     if (mounted) Navigator.of(context).maybePop();
   }
 
