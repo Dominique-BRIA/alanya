@@ -30,12 +30,22 @@ class Collegue {
   final String? avatarUrl;
   final bool enLigne;
 
+  /// L agence de rattachement, ou null.
+  ///
+  /// NUL, ET JAMAIS UNE CHAINE VIDE : un agent sans fonction rattachee n a pas
+  /// d agence, et le cas est REEL en production. Le distinguer permet de ne
+  /// RIEN afficher, la ou un libelle vide dessinerait une ligne creuse sous le
+  /// numero — qui se lit comme une donnee perdue plutot que comme une
+  /// information qui n existe pas.
+  final String? agence;
+
   const Collegue({
     required this.id,
     required this.publicNumber,
     required this.nom,
     required this.avatarUrl,
     required this.enLigne,
+    this.agence,
   });
 
   factory Collegue.fromJson(Map<String, dynamic> j) => Collegue(
@@ -44,6 +54,11 @@ class Collegue {
         nom: j["nom"] as String? ?? "",
         avatarUrl: j["avatarUrl"] as String?,
         enLigne: ((j["isOnline"] as num?)?.toInt() ?? 0) == 1,
+        // Un libelle vide vaut absence : le serveur rend null, mais une base
+        // qui porterait une chaine vide ne doit pas produire une ligne creuse.
+        agence: (j["agence"] as String?)?.trim().isNotEmpty == true
+            ? (j["agence"] as String).trim()
+            : null,
       );
 }
 
