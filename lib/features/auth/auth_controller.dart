@@ -20,6 +20,32 @@ import 'auth_repository.dart';
 enum AuthStatus { unknown, unauthenticated, authenticated }
 
 /// État global d'authentification (exposé via Provider).
+/// Ce rafraîchissement raté doit-il DÉTRUIRE la session ?
+///
+/// 🔴 LA RÈGLE QUI A REGRESSÉ, ET LA RAISON DE CETTE FONCTION. Elle vivait
+/// dispersée dans les `catch` de [AuthController.bootstrap], qui ne peut pas se
+/// tester — ses dépendances sont des classes concrètes adossées aux canaux de
+/// plateforme. Isolée ici, elle se prouve (`test/session_expiration_test.dart`).
+///
+/// SEUL UN 4xx DIT QUELQUE CHOSE DU JETON : expiré, révoqué, session évincée.
+/// C'est le serveur qui l'a jugé, et effacer est alors la bonne conduite.
+///
+/// TOUT LE RESTE PARLE DU SERVEUR OU DU RÉSEAU, et le jeton n'y est pour rien :
+///   - 5xx : le serveur redémarre, Nginx répond 502 ;
+///   - `SocketException`, `ClientException`, délai dépassé : aucune réponse.
+///
+/// Les confondre détruisait la session sur une simple coupure — c'est la cause
+/// des « déconnexions intempestives » signalées par le user le 26/08/2026, et
+/// le pendant exact existait côté web (`src/lib/api-client.ts`).
+///
+/// ⚠️ EN CAS DE DOUTE, ON GARDE. Une session gardée à tort se corrige au
+/// rafraîchissement suivant ; une session détruite à tort oblige à retaper son
+/// mot de passe, et fait perdre le cache hors ligne.
+bool sessionMorteApresEchec(Object erreur) {
+  if (erreur is! ApiException) return false;
+  return erreur.statusCode >= 400 && erreur.statusCode < 500;
+}
+
 class AuthController extends ChangeNotifier {
   AuthController(this._repo, this._storage, {RealtimeClient? realtime})
       : _realtime = realtime;
@@ -151,12 +177,36 @@ class AuthController extends ChangeNotifier {
             messageDeconnexion =
                 "Votre compte a été ouvert sur un autre appareil.";
           }
-        } catch (_) {
-          // refresh échoué → on nettoie
+
+          // Le serveur en panne n'est pas un refus — voir
+          // [sessionMorteApresEchec], qui porte la règle et ses raisons.
+          if (!sessionMorteApresEchec(e)) {
+            if (user != null) {
+              _set(AuthStatus.authenticated, user);
+              return;
+            }
+            rethrow;
+          }
+        } catch (e) {
+          /*
+           * ⚠️ RÉSEAU COUPÉ, DÉLAI DÉPASSÉ, DNS : aucune réponse du serveur.
+           *
+           * Ces pannes-là arrivent en `SocketException` ou `ClientException`,
+           * PAS en `ApiException` — elles ne passent donc pas par la branche
+           * ci-dessus. Elles tombaient dans « Échec total », et démarrer
+           * l'application hors réseau déconnectait.
+           *
+           * On garde la session : le profil en cache suffit à travailler, et le
+           * rafraîchissement réussira au prochain réseau.
+           */
+          if (!sessionMorteApresEchec(e) && user != null) {
+            _set(AuthStatus.authenticated, user);
+            return;
+          }
         }
       }
 
-      // 4. Échec total
+      // 4. Échec total — le serveur a REFUSÉ, ou il n'y avait rien à restaurer.
       await _storage.clear();
       _set(AuthStatus.unauthenticated, null);
     } catch (_) {

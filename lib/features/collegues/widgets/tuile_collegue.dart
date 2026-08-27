@@ -126,6 +126,35 @@ class _TuileCollegueState extends State<TuileCollegue> {
                         formatAlanyaId(c.publicNumber),
                         style: TextStyle(fontSize: 13, color: muted),
                       ),
+                      // L'AGENCE, juste sous le numéro (demande du user,
+                      // 26/08/2026).
+                      //
+                      // ⚠️ RIEN DU TOUT quand elle manque, et pas un tiret :
+                      // un agent sans fonction rattachée n'a pas d'agence, et
+                      // le cas est réel en production. Une ligne creuse sous le
+                      // numéro se lirait comme une donnée perdue, alors qu'il
+                      // n'y a simplement rien à dire.
+                      //
+                      // Plus petite et plus pâle que le numéro : elle situe la
+                      // personne, elle ne sert pas à la joindre — c'est le
+                      // numéro qu'on vient chercher ici.
+                      if (c.agence != null) ...[
+                        const SizedBox(height: 2),
+                        Row(
+                          children: [
+                            Icon(Icons.business_outlined,
+                                size: 12, color: muted),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                c.agence!,
+                                style: TextStyle(fontSize: 12, color: muted),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ],
                   ),
                 ),
