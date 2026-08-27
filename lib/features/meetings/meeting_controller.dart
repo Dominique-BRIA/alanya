@@ -264,6 +264,37 @@ class MeetingController extends ChangeNotifier {
   /// personnes sont DANS la salle, et l'en-tête l'affiche à côté du minuteur :
   /// y mêler des absents lui ferait annoncer du monde que personne ne voit ni
   /// n'entend.
+  /// Les demandes d'invitation EN ATTENTE, telles que le serveur les rend à
+  /// CETTE personne.
+  ///
+  /// 🔴 CE QUE CETTE LISTE CONTIENT DÉPEND DE QUI JE SUIS, et ce n'est pas
+  /// décidé ici : l'organisateur reçoit toutes les demandes en attente, chacun
+  /// des autres ne reçoit que celles qu'il a faites. Le filtre est dans la
+  /// requête du serveur — refiltrer ici laisserait croire qu'on peut se fier à
+  /// la liste pour savoir ce qui existe vraiment.
+  ///
+  /// ⚠️ NE PAS LA MÊLER À [invitesAbsents] NI À [participantCount]. Ces gens-là
+  /// ne sont pas invités : ils sont PROPOSÉS, et l'organisateur n'a pas encore
+  /// tranché. Les compter comme attendus ferait guetter quelqu'un qui pourrait
+  /// bien ne jamais venir.
+  List<MeetingInviteRequest> _demandes = const [];
+  List<MeetingInviteRequest> get demandesEnAttente => _demandes;
+
+  /// Relit les demandes en attente de la réunion active.
+  ///
+  /// Silencieux en cas d'échec : la salle reste utilisable sans cette liste, et
+  /// une erreur de plus à l'écran pendant une réunion n'aide personne.
+  Future<void> _relitLesDemandes(int meetingId) async {
+    try {
+      final d = await _meetings.fetchInviteRequests(meetingId);
+      if (meetingId != activeMeetingId) return;
+      _demandes = d.where((x) => x.estEnAttente).toList();
+      notifyListeners();
+    } catch (_) {
+      // Sans droit ou sans réseau : on garde ce qu'on avait.
+    }
+  }
+
   List<MeetingInvite> get invitesAbsents => [
         for (final invite in _invites)
           if (!_connectedPeerIds.contains(invite.userId)) invite,
@@ -954,6 +985,9 @@ class MeetingController extends ChangeNotifier {
     // la liste des invités, pour que la fiche sache dès l'entrée qui est encore
     // attendu.
     _relitLaComposition(meetingId);
+    // Les demandes en attente au moment ou j entre : sans cette lecture, la
+    // liste des membres n en montrerait aucune tant que rien ne bouge.
+    _relitLesDemandes(meetingId);
     // Annonce mon état muet courant à ceux déjà présents.
     _broadcastState();
     // ET MA MAIN, si elle était levée. Le serveur ne conserve rien : la salle
@@ -1250,10 +1284,34 @@ class MeetingController extends ChangeNotifier {
   /// parallèle, et n'ont aucune raison d'attendre la nôtre.
   void _handleCompositionChangee(Map<String, dynamic> e) {
     final meetingId = (e["meetingId"] as num?)?.toInt();
-    if (meetingId == null || meetingId != activeMeetingId) return;
+    if (meetingId == null) return;
 
-    _relitLaComposition(meetingId);
+    /*
+     * 🔴 L'ANNONCE PASSE MÊME QUAND ON N'EST PAS DANS LA RÉUNION (26/08/2026).
+     *
+     * Ce filtre disait `meetingId != activeMeetingId`, et `activeMeetingId`
+     * n'est posé qu'en ENTRANT dans une salle. L'organisateur qui consulte la
+     * fiche de sa réunion sans y être entré n'a donc pas de réunion active :
+     * l'annonce arrivait bien jusqu'ici — le serveur la lui adresse
+     * personnellement depuis le 26/08 — et elle était jetée une ligne plus
+     * loin. Il fallait toujours tirer pour rafraîchir, ce que le user a
+     * signalé.
+     *
+     * LA RELECTURE INTERNE, ELLE, RESTE RÉSERVÉE À LA RÉUNION ACTIVE : elle
+     * remplit `_participantNames`, `_connectedPeerIds` et compagnie, qui
+     * décrivent LA SALLE OÙ L'ON EST. Les remplir avec une autre réunion
+     * mettrait dans la grille des gens qu'on n'entend pas.
+     */
+    if (meetingId == activeMeetingId) {
+      _relitLaComposition(meetingId);
+      // Les motifs INVITE_* ne changent pas la composition mais la liste des
+      // demandes. Relire les deux sur le meme verbe evite d en oublier un le
+      // jour ou le serveur en ajoutera un troisieme.
+      _relitLesDemandes(meetingId);
+    }
 
+    // Le flux, lui, part toujours : chaque écran tient sa propre copie et sait
+    // seul si l'annonce le concerne — ils comparent déjà l'identifiant.
     if (_compositions.isClosed) return;
     _compositions.add(MeetingComposition(
       meetingId: meetingId,
@@ -1317,6 +1375,9 @@ class MeetingController extends ChangeNotifier {
     // Sans cela, la fiche de la réunion SUIVANTE annoncerait comme attendus les
     // invités de la précédente, avant même la première relecture.
     _invites.clear();
+    // Sans ca, les demandes de la reunion precedente s afficheraient dans la
+    // suivante, ou l organisateur n est peut-etre meme pas le meme.
+    _demandes = const [];
     _peerMuted.clear();
     _raisedHands.clear();
     // Un reste de la réunion précédente mettrait un absent en grand dès

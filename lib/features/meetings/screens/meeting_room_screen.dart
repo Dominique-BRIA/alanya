@@ -13,6 +13,9 @@ import '../../../widgets/contact_picker_sheet.dart';
 import '../../auth/auth_controller.dart';
 import '../meeting_controller.dart';
 import '../meetings_repository.dart';
+import '../widgets/tuile_demande.dart';
+import '../../../models/meeting.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Écran de réunion active — style Google Meet.
 ///
@@ -348,6 +351,66 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       }
     } on ApiException catch (e) {
       if (mounted) showAppSnackBar(e.message);
+    }
+  }
+
+  /// Vrai pendant qu'une décision part au serveur.
+  ///
+  /// ⚠️ IL BARRE LES BOUTONS DE TOUTES LES DEMANDES, pas seulement celle qu'on
+  /// vient de toucher. C'est voulu : trancher en accepte une et peut faire
+  /// franchir le plafond, ce qui rendrait la suivante irrecevable. Mieux vaut
+  /// attendre la réponse que laisser enchaîner des gestes dont le serveur
+  /// refusera la moitié.
+  bool _trancheEnCours = false;
+
+  /// L'organisateur tranche une demande SANS QUITTER LA SALLE (demande du user,
+  /// 26/08/2026). Il devait auparavant sortir jusqu'à la fiche de la réunion.
+  ///
+  /// La liste n'est pas rapiécée ici : le serveur annonce le changement, le
+  /// contrôleur relit, et la feuille se redessine d'elle-même. Retirer la ligne
+  /// à la main en plus ferait deux vérités.
+  Future<void> _trancheDepuisLaSalle(
+      MeetingInviteRequest d, bool accepter) async {
+    if (_trancheEnCours) return;
+    setState(() => _trancheEnCours = true);
+    try {
+      await context.read<MeetingsRepository>().decideInviteRequest(
+            widget.meetingId,
+            d.id,
+            accepter: accepter,
+          );
+      if (!mounted) return;
+      showAppSnackBar(accepter
+          ? "${d.invite.displayName} a été ajouté et prévenu"
+          // La portée du refus est rappelée : il vaut pour tout le monde et
+          // pour toujours, ce n'est pas un « pas maintenant ».
+          : "Demande refusée. ${d.invite.displayName} n'en saura rien.");
+    } on ApiException catch (e) {
+      showAppSnackBar(e.message);
+    } catch (_) {
+      showAppSnackBar(tr(context, 'server_unreachable'));
+    } finally {
+      if (mounted) setState(() => _trancheEnCours = false);
+    }
+  }
+
+  /// Le proposant retire sa demande depuis la salle.
+  ///
+  /// ⚠️ L'ÉCHEC EST NORMAL et doit se lire : si l'organisateur a tranché entre
+  /// les deux, le serveur refuse et le dit. C'est lui qui arbitre la course.
+  Future<void> _retireDepuisLaSalle(MeetingInviteRequest d) async {
+    if (_trancheEnCours) return;
+    setState(() => _trancheEnCours = true);
+    try {
+      await context
+          .read<MeetingsRepository>()
+          .cancelInviteRequest(widget.meetingId, d.id);
+    } on ApiException catch (e) {
+      showAppSnackBar(e.message);
+    } catch (_) {
+      showAppSnackBar(tr(context, 'server_unreachable'));
+    } finally {
+      if (mounted) setState(() => _trancheEnCours = false);
     }
   }
 
@@ -1358,6 +1421,10 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
             // tant qu'il n'a pas franchi la porte, et le compteur du haut, qui
             // dit qui est là, n'a donc aucune raison de bouger avec lui.
             final attendus = ctrl.invitesAbsents;
+            // Et ceux qui ne sont même pas encore invités : PROPOSÉS, en
+            // attente que l'organisateur tranche. Le serveur ne rend cette
+            // liste qu'à qui elle regarde — elle est donc vide pour les autres.
+            final demandes = ctrl.demandesEnAttente;
             return SafeArea(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -1504,6 +1571,51 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                               ),
                             );
                           }),
+                        ],
+
+                        // --- Demandes en attente d'approbation ---
+                        //
+                        // 🔴 EN DERNIER, ET SÉPARÉES DES ATTENDUS. Un attendu
+                        // est ACQUIS : il viendra ou pas, mais sa place est
+                        // faite. Celui-ci n'est que PROPOSÉ — l'organisateur
+                        // n'a pas tranché, et il pourrait ne jamais entrer.
+                        // Les fondre ensemble ferait compter comme venant
+                        // quelqu'un qui n'a même pas été accepté.
+                        //
+                        // ⚠️ QUI VOIT CETTE SECTION : l'organisateur, qui
+                        // tranche, et le proposant, pour sa propre demande.
+                        // Personne d'autre — et ce n'est pas cet écran qui le
+                        // décide, c'est le serveur qui ne rend à chacun que ce
+                        // qui le regarde. La personne proposée, elle, n'est au
+                        // courant de rien : un refus doit lui rester invisible.
+                        if (demandes.isNotEmpty) ...[
+                          const Divider(color: Colors.white12, height: 1),
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                            child: Text(
+                              ctrl.jeSuisOrganisateur
+                                  ? "À approuver (${demandes.length})"
+                                  : "Tes demandes (${demandes.length})",
+                              style: const TextStyle(
+                                color: Colors.white54,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ),
+                          ...demandes.map(
+                            (d) => TuileDemandeInvitation(
+                              demande: d,
+                              jeSuisOrganisateur: ctrl.jeSuisOrganisateur,
+                              jeSuisLeProposant: d.demandeur.id == me?.id,
+                              actif: !_trancheEnCours,
+                              surFondSombre: true,
+                              onAccepter: () => _trancheDepuisLaSalle(d, true),
+                              onRefuser: () => _trancheDepuisLaSalle(d, false),
+                              onRetirer: () => _retireDepuisLaSalle(d),
+                            ),
+                          ),
                         ],
                       ],
                     ),

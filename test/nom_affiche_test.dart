@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:alanya/models/contact.dart';
 import 'package:alanya/models/conversation.dart';
 import 'package:alanya/models/blocked_user.dart';
+import 'package:alanya/models/auth_user.dart';
 
 /// Spécification exécutable d'UNE règle : **quand on montre un numéro à la
 /// place d'un nom, il est formaté.**
@@ -80,6 +81,45 @@ void main() {
     test("un identifiant à 8 chiffres, le format généré par le serveur", () {
       final m = ConvMember(id: "u1", pseudo: null, publicNumber: "67641599");
       expect(m.displayName, "67 64 15 99");
+    });
+  });
+
+  group("AuthUser.nomAffiche — le nom qu'on envoie AUX AUTRES", () {
+    // 🔴 CE GETTER PART SUR LE RÉSEAU (`bindUser`), et c'est ce qui le rend
+    // différent des autres : il ne décide pas ce que JE lis, il décide ce que
+    // les autres voient s'afficher chez eux, en appel comme en réunion.
+    //
+    // Le défaut du 26/08/2026 : il valait `pseudo ?? publicNumber`, et le nom
+    // n'était donc jamais consulté. En réunion, chacun voyait le pseudo des
+    // autres. La règle du serveur (`src/lib/display-name.mjs`) dit pourtant
+    // « nom, puis pseudo, puis numéro » — les deux doivent la dire pareil,
+    // sinon une même personne s'appelle autrement selon la porte par laquelle
+    // son nom est arrivé.
+    AuthUser faire({String? nom, String? pseudo}) => AuthUser(
+          id: "u1",
+          email: null,
+          publicNumber: brut,
+          nom: nom,
+          pseudo: pseudo,
+        );
+
+    test("le nom passe avant le pseudo", () {
+      expect(faire(nom: "BRIA Dominique", pseudo: "Domi").nomAffiche,
+          "BRIA Dominique");
+    });
+
+    test("sans nom, le pseudo prend le relais", () {
+      expect(faire(pseudo: "Domi").nomAffiche, "Domi");
+    });
+
+    test("un nom vide ne compte pas pour un nom", () {
+      // La colonne accepte la chaîne vide, et un `??` seul l'aurait retenue :
+      // on se serait présenté sous un nom invisible.
+      expect(faire(nom: "   ", pseudo: "Domi").nomAffiche, "Domi");
+    });
+
+    test("sans rien, le numéro — et il est FORMATÉ", () {
+      expect(faire().nomAffiche, formate);
     });
   });
 
