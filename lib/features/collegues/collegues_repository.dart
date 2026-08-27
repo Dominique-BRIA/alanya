@@ -62,6 +62,26 @@ class Collegue {
       );
 }
 
+/// Les services, ET la raison d'une liste vide.
+///
+/// 🔴 LES DEUX ENSEMBLE, parce qu'une liste vide seule ne dit pas POURQUOI.
+/// L'écran affichait « Aucun service n'est configuré pour ton entreprise » dans
+/// tous les cas ; depuis que l'entreprise peut resserrer le répertoire au propre
+/// service de l'agent, ce texte peut être faux — des services existent, on n'a
+/// simplement pas le droit de les voir. Envoyer quelqu'un signaler une panne de
+/// configuration qui n'existe pas coûte plus cher qu'un booléen.
+class ListeServices {
+  const ListeServices({required this.services, required this.porteeRestreinte});
+
+  final List<ServiceCollegues> services;
+
+  /// L'entreprise limite le répertoire au service de chacun (`company.collegue`
+  /// à 0). Faux par défaut : c'est le comportement d'avant ce réglage, et un
+  /// serveur qui ne renvoie pas le champ ne doit pas faire croire à une
+  /// restriction.
+  final bool porteeRestreinte;
+}
+
 /// L'annuaire des collègues.
 ///
 /// ⚠️ Le contrat vit côté serveur (`src/lib/collegues.ts`). Ce dépôt ne fait que
@@ -72,13 +92,16 @@ class ColleguesRepository {
   final AuthedApi _api;
 
   /// Les services de mon entreprise.
-  Future<List<ServiceCollegues>> services() async {
+  Future<ListeServices> services() async {
     final data = await _api.get("/api/collegues");
     final brut = data["services"] as List?;
-    return (brut ?? const [])
-        .whereType<Map<String, dynamic>>()
-        .map(ServiceCollegues.fromJson)
-        .toList();
+    return ListeServices(
+      services: (brut ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(ServiceCollegues.fromJson)
+          .toList(),
+      porteeRestreinte: data["porteeRestreinte"] as bool? ?? false,
+    );
   }
 
   /// Les collègues d'un service.
