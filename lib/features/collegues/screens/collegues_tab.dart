@@ -34,6 +34,10 @@ class _ColleguesTabState extends State<ColleguesTab> {
   Timer? _debounce;
 
   List<ServiceCollegues>? _services;
+
+  /// L entreprise limite-t-elle le repertoire au service de chacun ?
+  /// Sert UNIQUEMENT a dire vrai quand la liste est vide.
+  bool _porteeRestreinte = false;
   bool _erreur = false;
 
   /// Résultats de la recherche serveur. `null` = on n'est pas en recherche.
@@ -58,7 +62,10 @@ class _ColleguesTabState extends State<ColleguesTab> {
     try {
       final liste = await context.read<ColleguesRepository>().services();
       if (!mounted) return;
-      setState(() => _services = liste);
+      setState(() {
+        _services = liste.services;
+        _porteeRestreinte = liste.porteeRestreinte;
+      });
     } catch (_) {
       if (mounted) setState(() => _erreur = true);
     }
@@ -154,7 +161,14 @@ class _ColleguesTabState extends State<ColleguesTab> {
       return const Center(child: CircularProgressIndicator());
     }
     if (services.isEmpty) {
-      return _message(tr(context, 'colleagues_no_service'), muted);
+      // Le message dit POURQUOI la liste est vide. « Aucun service n est
+      // configure » serait faux quand c est l entreprise qui restreint : des
+      // services existent, on n a pas le droit de les voir.
+      return _message(
+        tr(context,
+            _porteeRestreinte ? 'colleagues_own_service_only' : 'colleagues_no_service'),
+        muted,
+      );
     }
 
     return ListView.builder(
