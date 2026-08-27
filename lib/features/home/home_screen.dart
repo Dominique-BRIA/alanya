@@ -14,7 +14,7 @@ import '../../core/push_service.dart';
 import '../../core/notification_settings.dart';
 import '../../core/realtime_client.dart';
 import '../../widgets/back_app_bar.dart';
-import '../collegues/screens/collegues_tab.dart';
+import '../annuaire/annuaire_tab.dart';
 import '../entreprises/screens/entreprises_tab.dart';
 import '../../core/sonneries_listes.dart';
 import '../../core/call_cache.dart';
@@ -233,7 +233,10 @@ class _HomeScreenState extends State<HomeScreen> {
       const _StatusTab(),
       const CallsScreen(),
       const MeetingsScreen(),
-      if (estAgent) const ColleguesTab(),
+      // L agent recoit l ANNUAIRE — ses collegues ET les entreprises, en deux
+      // volets. Le particulier garde Entreprises seul : il n a pas de collegues,
+      // et un selecteur a un seul volet ne serait qu un obstacle.
+      if (estAgent) const AnnuaireTab(),
       if (estParticulier) const EntreprisesTab(),
     ];
 
@@ -392,14 +395,18 @@ class _HomeScreenState extends State<HomeScreen> {
             activeIcon: Icons.videocam,
             label: 'Réunions',
           ),
-          // Collègues remplace l'IA, et disparaît avec elle pour un
-          // non-agent : voir la note sur `tabs`, les deux listes doivent
+          // L Annuaire prend la place qu occupait l IA, et disparaît avec elle
+          // pour un non-agent : voir la note sur `tabs`, les deux listes doivent
           // rester de même longueur.
+          //
+          // « Annuaire » et non « Collègues » : l onglet porte désormais deux
+          // volets. Le libellé est aussi le plus court des deux, ce qui compte
+          // à 60 dp de large.
           if (estAgent)
             const AlanyaNavItem(
-              icon: Icons.groups_outlined,
-              activeIcon: Icons.groups,
-              label: 'Collègues',
+              icon: Icons.menu_book_outlined,
+              activeIcon: Icons.menu_book,
+              label: 'Annuaire',
             ),
           // Entreprises prend la MÊME place pour un particulier — voir la note
           // sur `tabs` : les deux listes doivent rester de même longueur.
