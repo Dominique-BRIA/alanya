@@ -223,17 +223,23 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
     try {
       // Une seule personne : chaque proposition se tranche séparément, un lot
       // obligerait l'organisateur à tout accepter ou tout refuser.
-      await context
+      final entreeDirecte = await context
           .read<MeetingsRepository>()
           .requestInvite(_meeting.idMeeting, numeros.first);
       if (!mounted) return;
+      // Le message suit ce qui s'est RÉELLEMENT passé — voir la même correction
+      // dans la salle. Annoncer une demande quand la personne vient d'entrer
+      // faisait attendre une décision qui n'aurait jamais lieu.
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-              "Demande envoyée à l'organisateur. La personne n'est pas prévenue tant qu'il n'a pas accepté."),
-          duration: Duration(seconds: 6),
+        SnackBar(
+          content: Text(entreeDirecte
+              ? "Cette réunion accepte les invitations sans approbation : la personne a été ajoutée."
+              : "Demande envoyée à l'organisateur. La personne n'est pas prévenue tant qu'il n'a pas accepté."),
+          duration: const Duration(seconds: 6),
         ),
       );
+      // Elle est entrée : la liste des participants vient de changer.
+      if (entreeDirecte) await _refresh();
     } on ApiException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
