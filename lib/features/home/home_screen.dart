@@ -91,14 +91,17 @@ class _HomeScreenState extends State<HomeScreen> {
       context.read<RealtimeClient>().connect();
       final user = context.read<AuthController>().user;
       if (user != null) {
-        context.read<CallController>().bindUser(
-              user.id,
-              user.pseudo ?? user.publicNumber,
-            );
-        context.read<MeetingController>().bindUser(
-              user.id,
-              user.pseudo ?? user.publicNumber,
-            );
+        // 🔴 LE NOM D'ABORD, comme partout ailleurs.
+        //
+        // C'est le nom sous lequel on se présente aux autres en appel comme en
+        // réunion. Ces deux lignes disaient `pseudo ?? publicNumber`, alors que
+        // la règle du projet — `nom ?? pseudo ?? numéro` — est écrite côté
+        // serveur dans `display-name.mjs` et appliquée par toutes les routes.
+        // Signalé par le user le 26/08/2026 : en réunion, chacun voyait le
+        // pseudo des autres au lieu de leur nom.
+        final nomAffiche = user.nomAffiche;
+        context.read<CallController>().bindUser(user.id, nomAffiche);
+        context.read<MeetingController>().bindUser(user.id, nomAffiche);
       }
       MissedCalls.instance
         ..bind(context.read<CallsRepository>())

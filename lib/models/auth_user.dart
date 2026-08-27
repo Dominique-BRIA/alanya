@@ -1,3 +1,5 @@
+import '../core/alanya_id_formatter.dart';
+
 /// Utilisateur authentifié tel que renvoyé par l'API.
 class AuthUser {
   final String id;
@@ -63,6 +65,31 @@ class AuthUser {
     this.suiviPosition = false,
     this.suiviPositionIntervalleMin = 5,
   });
+
+  /// Le nom sous lequel on se présente aux autres : en appel, en réunion, dans
+  /// les listes.
+  ///
+  /// 🔴 LE NOM D'ABORD, PUIS LE PSEUDO, PUIS LE NUMÉRO. C'est exactement la
+  /// règle du serveur (`src/lib/display-name.mjs`), et c'est volontaire : deux
+  /// ordres différents feraient qu'une même personne s'appellerait autrement
+  /// selon que le nom vienne d'une route REST ou de l'appareil.
+  ///
+  /// ⚠️ LE NUMÉRO DE REPLI EST FORMATÉ, conformément à la règle que
+  /// `test/nom_affiche_test.dart` fixe pour tous les modèles : quand on montre
+  /// un numéro à la place d'un nom, il est formaté. Un « 12345678 » collé au
+  /// milieu d'une liste de noms se lit mal, et c'est ce défaut-là qui avait
+  /// été signalé au transfert d'appel.
+  ///
+  /// ⚠️ CE GETTER PART SUR LE RÉSEAU (`bindUser`, `home_screen.dart`) : c'est
+  /// le nom que les autres voient s'afficher chez eux. Le changer change ce
+  /// qu'ils lisent.
+  String get nomAffiche {
+    final n = nom?.trim();
+    if (n != null && n.isNotEmpty) return n;
+    final p = pseudo?.trim();
+    if (p != null && p.isNotEmpty) return p;
+    return formatAlanyaId(publicNumber);
+  }
 
   AuthUser copyWith({
     String? pseudo,

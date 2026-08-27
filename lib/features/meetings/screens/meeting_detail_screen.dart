@@ -13,6 +13,7 @@ import '../../../models/meeting.dart';
 import '../../auth/auth_controller.dart';
 import '../meeting_controller.dart';
 import '../meetings_repository.dart';
+import '../widgets/tuile_demande.dart';
 import 'meeting_room_screen.dart';
 
 /// Écran de détail d'une réunion — affiche les participants, permet
@@ -29,7 +30,8 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
   late Meeting _meeting;
   bool _loading = false;
 
-  /// Demandes EN ATTENTE, chargées pour le seul organisateur.
+  /// Demandes EN ATTENTE, telles que le serveur les rend à CETTE personne :
+  /// toutes pour l'organisateur, seulement les siennes pour les autres.
   List<MeetingInviteRequest> _demandes = const [];
 
   /// Écoute des changements de composition annoncés par le serveur.
@@ -66,10 +68,16 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
   /// rapiécer : c'est la même source pour tout le monde, et un ajout suivi
   /// d'un retrait ne laisse aucun reste.
   ///
-  /// ⚠️ CE N'EST PAS UN REMPLACEMENT DU « TIRER POUR RAFRAÎCHIR ». L'annonce
-  /// passe par la SALLE : elle n'atteint que ceux dont la socket y est inscrite.
-  /// Ouvrir cette fiche sans être entré dans la réunion ne fait entrer dans
-  /// aucune salle — le geste manuel reste donc le seul recours dans ce cas.
+  /// ⚠️ CETTE RÉSERVE EST LEVÉE DEPUIS LE 26/08/2026. L'annonce ne passait que
+  /// par la SALLE, donc n'atteignait que les sockets qui y sont inscrites :
+  /// ouvrir cette fiche sans être entré dans la réunion n'inscrit dans aucune
+  /// salle, et le geste manuel restait le seul recours — ce que le user a
+  /// signalé pour les demandes d'invitation.
+  ///
+  /// Le pont interne sait désormais viser des PERSONNES en plus des salles
+  /// (`src/lib/salle-temps-reel.ts`), et le serveur adresse l'annonce à
+  /// l'organisateur comme au proposant, où qu'ils soient dans l'application.
+  /// Le « tirer pour rafraîchir » reste un filet, plus une nécessité.
   void _ecouteLaComposition() {
     _compositionSub =
         context.read<MeetingController>().compositions.listen((c) {
@@ -236,9 +244,17 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
     }
   }
 
-  /// Charge les demandes en attente — organisateur seulement.
+  /// Charge les demandes en attente.
+  ///
+  /// ⚠️ PLUS RÉSERVÉ À L'ORGANISATEUR depuis le 26/08/2026. La route rend
+  /// désormais à chacun LES SIENNES — celui qui a proposé quelqu'un suit sa
+  /// demande — et c'est le serveur qui filtre, pas cet écran. Le garde-fou
+  /// `if (!_isOrganiser) return;` qui était ici empêchait le proposant de voir
+  /// quoi que ce soit, quelle que soit la réponse du serveur.
+  ///
+  /// Sans demande à soi, la liste revient vide : rien ne s'affiche, et personne
+  /// n'apprend rien sur les demandes des autres.
   Future<void> _chargeDemandes() async {
-    if (!_isOrganiser) return;
     try {
       final d = await context
           .read<MeetingsRepository>()
@@ -488,10 +504,15 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
               ],
               const SizedBox(height: 24),
 
-              // --- Demandes en attente (organisateur seulement) ---
+              // --- Demandes en attente ---
+              //
+              // L organisateur les voit toutes ; chacun des autres ne voit que
+              // les siennes, et c est le SERVEUR qui filtre.
               if (_demandes.isNotEmpty) ...[
                 Text(
-                  "Demandes en attente (${_demandes.length})",
+                  _isOrganiser
+                      ? "Demandes en attente (${_demandes.length})"
+                      : "Tes demandes (${_demandes.length})",
                   style: const TextStyle(
                       fontWeight: FontWeight.bold, fontSize: 16),
                 ),
@@ -539,37 +560,59 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
   /// Le sous-titre nomme le DEMANDEUR : c'est ce qui permet à l'organisateur de
   /// juger — la même personne proposée par deux collègues différents n'appelle
   /// pas la même décision.
+  /// La tuile vient du composant partage avec la salle : les deux surfaces
+  /// doivent proposer les memes gestes aux memes personnes.
   Widget _demandeTile(MeetingInviteRequest d) {
+    final moi = context.read<AuthController>().user?.id;
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
-      child: ListTile(
-        leading: AvatarCircle(
-          name: d.invite.displayName,
-          avatarUrl: d.invite.avatarUrl,
-          radius: 20,
-          backgroundColor: AlanyaColors.forest,
-        ),
-        title: Text(d.invite.displayName,
-            style: const TextStyle(fontWeight: FontWeight.w600)),
-        subtitle: Text("Proposé par ${d.demandeur.displayName}",
-            style: const TextStyle(fontSize: 12)),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              tooltip: "Refuser",
-              icon: Icon(Icons.close, color: dangerOf(context)),
-              onPressed: _loading ? null : () => _confirmeRefus(d),
-            ),
-            IconButton(
-              tooltip: "Accepter",
-              icon: Icon(Icons.check, color: positiveOf(context)),
-              onPressed: _loading ? null : () => _trancheDemande(d, true),
-            ),
-          ],
-        ),
+      child: TuileDemandeInvitation(
+        demande: d,
+        jeSuisOrganisateur: _isOrganiser,
+        jeSuisLeProposant: d.demandeur.id == moi,
+        actif: !_loading,
+        onAccepter: () => _trancheDemande(d, true),
+        onRefuser: () => _confirmeRefus(d),
+        onRetirer: () => _retireDemande(d),
       ),
     );
+  }
+
+  /// Le proposant retire sa demande.
+  ///
+  /// ⚠️ SANS CONFIRMATION, contrairement au refus. Retirer sa propre demande ne
+  /// détruit rien : la personne pourra être proposée de nouveau, par n'importe
+  /// qui. Le refus, lui, est définitif — d'où le dialogue qui le précède.
+  ///
+  /// ⚠️ L'ÉCHEC EST NORMAL ICI et doit se lire : si l'organisateur a tranché
+  /// entre-temps, le serveur refuse et le dit. On relit alors la liste plutôt
+  /// que de laisser à l'écran une demande qui n'existe plus.
+  Future<void> _retireDemande(MeetingInviteRequest d) async {
+    setState(() => _loading = true);
+    try {
+      await context
+          .read<MeetingsRepository>()
+          .cancelInviteRequest(_meeting.idMeeting, d.id);
+    } on ApiException catch (e) {
+      // Le message du serveur tel quel : c'est lui qui sait si l'organisateur
+      // a tranché entre-temps, et c'est ce qu'il faut lire.
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Serveur injoignable")),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+      // Relue dans TOUS LES CAS, y compris après un échec : si le refus vient
+      // de ce que l'organisateur a tranché, la demande n'existe plus et doit
+      // disparaître de l'écran.
+      await _chargeDemandes();
+    }
   }
 
   /// Le refus est confirmé, l'acceptation non.

@@ -114,7 +114,15 @@ class MeetingsRepository {
     );
   }
 
-  /// Demandes d'ajout d'une réunion — organisateur uniquement.
+  /// Demandes d'ajout en attente d'une réunion.
+  ///
+  /// ⚠️ CE QUE LA RÉPONSE CONTIENT DÉPEND DE QUI DEMANDE : l'organisateur reçoit
+  /// TOUTES les demandes en attente, chacun des autres reçoit seulement CELLES
+  /// QU'IL A FAITES. C'est le serveur qui filtre, dans sa requête — ne pas
+  /// refiltrer ici, et surtout ne pas supposer que la liste est complète.
+  ///
+  /// Sans demande à soi, la liste revient vide : rien à afficher, et rien
+  /// d'appris sur les demandes des autres.
   Future<List<MeetingInviteRequest>> fetchInviteRequests(int idMeeting) async {
     final res = await _api.get("/api/meetings/$idMeeting/invite-requests");
     final list = (res["demandes"] as List?) ?? const [];
@@ -122,6 +130,17 @@ class MeetingsRepository {
         .map((e) =>
             MeetingInviteRequest.fromJson(Map<String, dynamic>.from(e as Map)))
         .toList();
+  }
+
+  /// Le proposant RETIRE sa demande, tant que l'organisateur n'a pas tranché.
+  ///
+  /// ⚠️ PEUT ÉCHOUER LÉGITIMEMENT, et l'appelant doit le montrer : si
+  /// l'organisateur a tranché entre-temps, le serveur rend 409 avec « il a déjà
+  /// tranché ». C'est lui qui arbitre la course, sur l'état en base — retirer
+  /// une demande déjà acceptée effacerait la trace d'un participant pourtant
+  /// bien entré.
+  Future<void> cancelInviteRequest(int idMeeting, int requestId) async {
+    await _api.delete("/api/meetings/$idMeeting/invite-requests/$requestId");
   }
 
   /// L'organisateur tranche une demande.
