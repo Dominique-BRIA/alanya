@@ -842,6 +842,26 @@ class MeetingController extends ChangeNotifier {
           _clear();
         }
         break;
+      case "meeting_kicked":
+        // L'organisateur m'a retiré de la réunion. Comme pour `meeting_ended`,
+        // rien ne se coupe tout seul : le maillage WebRTC vit entre les
+        // appareils et ne consulte pas la base. Sans cette branche, un exclu
+        // sous mobile continuait de parler et de filmer parmi des gens qui le
+        // croyaient parti.
+        //
+        // ⚠️ LE VERBE EST DIFFUSÉ À TOUTE LA SALLE — chacun doit relire la
+        // composition — mais UN SEUL est concerné. Sans le test du
+        // destinataire, la réunion se viderait à chaque exclusion.
+        final kickMeeting = e["meetingId"];
+        final kickCible = (e["toUserId"] ?? "").toString();
+        if (kickMeeting == activeMeetingId && kickCible == myUserId) {
+          _stopMesh();
+          CallForegroundService.arreter();
+          _clear();
+        } else if (kickMeeting == activeMeetingId && activeMeetingId != null) {
+          _relitLaComposition(activeMeetingId!);
+        }
+        break;
       case "ws_connected":
         // Reconnexion de la socket après une coupure. On se réinscrit dans la
         // salle, sinon la nouvelle socket n'est pas dans meetingRooms côté
