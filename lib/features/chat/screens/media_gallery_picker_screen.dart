@@ -41,8 +41,13 @@ class MediaGalleryPickerScreen extends StatefulWidget {
       _MediaGalleryPickerScreenState();
 }
 
+/// Les deux vues de l'en-tête. « Collections » = les albums du téléphone.
+enum _Onglet { photos, collections }
+
 class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
   static const int _taillePage = 90;
+
+  _Onglet _onglet = _Onglet.photos;
 
   List<AssetPathEntity> _albums = [];
   AssetPathEntity? _album;
@@ -249,26 +254,21 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
       appBar: AppBar(
         backgroundColor: const Color(0xFF111B21),
         foregroundColor: Colors.white,
-        title: _albums.length > 1
-            ? DropdownButtonHideUnderline(
-                child: DropdownButton<AssetPathEntity>(
-                  value: _album,
-                  dropdownColor: const Color(0xFF1F2C34),
-                  iconEnabledColor: Colors.white,
-                  style: const TextStyle(color: Colors.white, fontSize: 16),
-                  items: _albums
-                      .map((a) => DropdownMenuItem(
-                            value: a,
-                            child:
-                                Text(a.name, overflow: TextOverflow.ellipsis),
-                          ))
-                      .toList(),
-                  onChanged: (a) {
-                    if (a != null) _changeAlbum(a);
-                  },
-                ),
-              )
-            : const Text("Galerie"),
+        /*
+         * 🔴 DEUX ONGLETS, PLUS UN NOM D'ALBUM EN GUISE DE TITRE (demande du
+         * user, 31/08/2026).
+         *
+         * L'en-tête affichait le nom de l'album courant — « Recent » — dans un
+         * `DropdownButton`. Ça se lisait comme un TITRE : « personne ne peut
+         * s'imaginer que c'est cliquable », et la moitié de la galerie
+         * (les albums) restait donc introuvable.
+         *
+         * Deux pastilles côte à côte, l'active pleine : on voit qu'il y a deux
+         * endroits, et lequel on regarde. C'est la disposition de la capture
+         * fournie.
+         */
+        title: _onglets(),
+        centerTitle: true,
         actions: [
           if (_choisis.isNotEmpty)
             Padding(
@@ -285,20 +285,140 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
       ),
       body: Column(children: [
         if (_partiel && !_permissionRefusee) _bandeauPartiel(),
+        // Le nom de l'album regardé, quand ce n'est pas la vue d'ensemble :
+        // sans lui, plus rien ne dirait d'où viennent ces photos une fois
+        // l'album choisi.
+        if (_onglet == _Onglet.photos && _album != null && _album != _albums.firstOrNull)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
+            child: Row(children: [
+              const Icon(Icons.folder_outlined, size: 15, color: Colors.white54),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(_album!.name,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white70, fontSize: 13)),
+              ),
+            ]),
+          ),
         Expanded(
-          child: _chargement
-              ? const Center(
-                  child: CircularProgressIndicator(color: Colors.white54))
-              : _permissionRefusee
-                  ? _refus()
-                  : _assets.isEmpty
+          child: _permissionRefusee
+              ? _refus()
+              : _onglet == _Onglet.collections
+                  ? _listeAlbums()
+                  : _chargement
                       ? const Center(
-                          child: Text("Aucun média",
-                              style: TextStyle(color: Colors.white54)))
-                      : _grille(),
+                          child: CircularProgressIndicator(color: Colors.white54))
+                      : _assets.isEmpty
+                          ? const Center(
+                              child: Text("Aucun média",
+                                  style: TextStyle(color: Colors.white54)))
+                          : _grille(),
         ),
       ]),
       bottomNavigationBar: _choisis.isEmpty ? null : _barreBasse(),
+    );
+  }
+
+  /// Les deux pastilles de l'en-tête : **Photos** et **Collections**.
+  ///
+  /// Volontairement des boutons pleins/vides plutôt qu'un `TabBar` : il n'y a
+  /// pas de balayage entre les deux vues, et un soulignement de `TabBar` se lit
+  /// moins bien qu'une pastille pleine sur ce fond sombre.
+  Widget _onglets() {
+    Widget pastille(String libelle, _Onglet valeur) {
+      final actif = _onglet == valeur;
+      return GestureDetector(
+        onTap: () => setState(() => _onglet = valeur),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+          decoration: BoxDecoration(
+            color: actif ? AlanyaColors.terracotta : const Color(0xFF1F2C34),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Text(
+            libelle,
+            style: TextStyle(
+              color: actif ? Colors.white : Colors.white70,
+              fontSize: 14,
+              fontWeight: actif ? FontWeight.w600 : FontWeight.w500,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      pastille("Photos", _Onglet.photos),
+      const SizedBox(width: 8),
+      pastille("Collections", _Onglet.collections),
+    ]);
+  }
+
+  /// L'onglet **Collections** : les albums du téléphone.
+  ///
+  /// Une vignette de couverture, le nom, et le nombre d'éléments. Choisir un
+  /// album bascule sur l'onglet Photos, filtré dessus — la sélection en cours
+  /// est CONSERVÉE, choisir dans deux albums est un usage courant.
+  Widget _listeAlbums() {
+    if (_albums.isEmpty) {
+      return const Center(
+        child: Text("Aucun album", style: TextStyle(color: Colors.white54)),
+      );
+    }
+    return ListView.builder(
+      itemCount: _albums.length,
+      itemBuilder: (_, i) {
+        final album = _albums[i];
+        return ListTile(
+          leading: SizedBox(
+            width: 52,
+            height: 52,
+            child: FutureBuilder<List<AssetEntity>>(
+              // Une seule vignette par album : la couverture. En demander plus
+              // ferait autant d'allers-retours natifs que d'albums.
+              future: album.getAssetListPaged(page: 0, size: 1),
+              builder: (_, lot) {
+                final premier = lot.data?.firstOrNull;
+                if (premier == null) {
+                  return Container(color: const Color(0xFF1F2C34));
+                }
+                return FutureBuilder(
+                  future: premier
+                      .thumbnailDataWithSize(const ThumbnailSize.square(160)),
+                  builder: (_, vignette) {
+                    final octets = vignette.data;
+                    if (octets == null) {
+                      return Container(color: const Color(0xFF1F2C34));
+                    }
+                    return ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: Image.memory(octets,
+                          fit: BoxFit.cover, width: 52, height: 52),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+          title: Text(album.name,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white, fontSize: 15)),
+          subtitle: FutureBuilder<int>(
+            future: album.assetCountAsync,
+            builder: (_, compte) => Text(
+              compte.data == null ? "" : "${compte.data} élément(s)",
+              style: const TextStyle(color: Colors.white54, fontSize: 12),
+            ),
+          ),
+          trailing:
+              const Icon(Icons.chevron_right, color: Colors.white38, size: 20),
+          onTap: () {
+            setState(() => _onglet = _Onglet.photos);
+            _changeAlbum(album);
+          },
+        );
+      },
     );
   }
 
@@ -437,41 +557,55 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
             icon: const Icon(Icons.close, color: Colors.white),
             onPressed: _preparation ? null : () => setState(_choisis.clear),
           ),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  "${_choisis.length}",
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600),
+          Text(
+            "${_choisis.length}",
+            style: const TextStyle(
+                color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+          ),
+          if (tropNombreux)
+            const Flexible(
+              child: Padding(
+                padding: EdgeInsets.only(left: 8),
+                child: Text(
+                  // On ne bloque pas : on annonce le découpage, pour que le
+                  // résultat dans le fil ne surprenne pas.
+                  "10 par message",
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: Colors.white54, fontSize: 11),
                 ),
-                if (tropNombreux)
-                  const Text(
-                    // On ne bloque pas : on annonce le découpage, pour que le
-                    // résultat dans le fil ne surprenne pas.
-                    "Envoi en plusieurs messages (10 par message)",
-                    style: TextStyle(color: Colors.white54, fontSize: 11),
-                  ),
-              ],
+              ),
+            ),
+          const Spacer(),
+          /*
+           * ⚠️ « Prévisualiser » EST FLEXIBLE ET S'ÉLIDE, « OK » NON.
+           *
+           * Le user a signalé le 31/08/2026 que le bouton OK n'apparaissait
+           * pas. Un `Row` dont un enfant demande plus que la largeur
+           * disponible ne prévient pas en release : il CLIPPE, et c'est le
+           * dernier enfant — OK — qui disparaît. Rendre le libellé long
+           * élidable met la contrainte là où elle est supportable ; le bouton
+           * de sortie, lui, ne peut jamais être la variable d'ajustement.
+           */
+          Flexible(
+            child: TextButton(
+              onPressed: _preparation ? null : _previsualise,
+              style: TextButton.styleFrom(foregroundColor: Colors.white),
+              child: const Text("Prévisualiser",
+                  overflow: TextOverflow.ellipsis, maxLines: 1),
             ),
           ),
-          TextButton(
-            onPressed: _preparation ? null : _previsualise,
-            style: TextButton.styleFrom(foregroundColor: Colors.white),
-            child: const Text("Prévisualiser"),
-          ),
-          const SizedBox(width: 4),
+          const SizedBox(width: 6),
           ElevatedButton(
             onPressed: _preparation ? null : _valide,
             style: ElevatedButton.styleFrom(
               backgroundColor: AlanyaColors.terracotta,
               foregroundColor: Colors.white,
+              // Une taille plancher : même vide de texte, le bouton reste un
+              // bouton visible.
+              minimumSize: const Size(72, 42),
+              padding: const EdgeInsets.symmetric(horizontal: 20),
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20)),
+                  borderRadius: BorderRadius.circular(21)),
             ),
             child: _preparation
                 ? const SizedBox(
@@ -479,7 +613,8 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
                     height: 16,
                     child: CircularProgressIndicator(
                         strokeWidth: 2, color: Colors.white))
-                : const Text("OK"),
+                : const Text("OK",
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
           ),
         ]),
       ),
