@@ -5,6 +5,7 @@ import 'package:photo_manager/photo_manager.dart';
 
 import '../../../core/galerie.dart';
 import '../../../theme/alanya_theme.dart';
+import 'apercu_selection_screen.dart';
 import '../../../widgets/media/media_picker_sheet.dart';
 
 /// Sélecteur de médias plein écran, façon WhatsApp.
@@ -19,31 +20,18 @@ import '../../../widgets/media/media_picker_sheet.dart';
 ///
 /// Le plafond de 10 est celui du serveur (`mediaIds.max(10)`) : au-delà, l'envoi
 /// est découpé en plusieurs messages. On laisse donc dépasser 10, mais on le DIT.
-/// Ce que le sélecteur rend : les médias, et le chemin choisi pour la suite.
-///
-/// 🔴 LES DEUX BOUTONS DU BAS NE FONT PAS LA MÊME CHOSE (demande du user,
+/// 🔴 LES DEUX BOUTONS DU BAS NE MÈNENT PAS AU MÊME ENDROIT (demande du user,
 /// 30/08/2026, captures à l'appui) :
-///   - **OK** envoie tout de suite, sans légende. C'est le geste courant, et il
-///     ne doit coûter qu'un appui ;
-///   - **Prévisualiser** ouvre l'aperçu, où l'on ajoute une légende, retire un
-///     média ou balaie entre eux.
-///
-/// Un booléen plutôt que deux méthodes de sortie : l'écran appelant décide, et
-/// la sélection est lue une seule fois.
-class SelectionMedias {
-  const SelectionMedias({required this.fichiers, required this.apercu});
-
-  final List<MediaPickResult> fichiers;
-
-  /// Vrai si l'utilisateur a demandé l'aperçu avant l'envoi.
-  final bool apercu;
-}
-
+///   - **OK** ferme le sélecteur et ouvre l'écran d'envoi — les médias en
+///     grand, la barre de légende en bas, le bouton d'envoi. C'est la sortie ;
+///   - **Prévisualiser** ne sort PAS du sélecteur : il montre les photos
+///     cochées en grand, sans légende ni envoi, et le retour ramène ici avec la
+///     sélection intacte. C'est un coup d'œil, pas une étape.
 class MediaGalleryPickerScreen extends StatefulWidget {
   const MediaGalleryPickerScreen({super.key});
 
-  static Future<SelectionMedias?> open(BuildContext context) {
-    return Navigator.of(context).push<SelectionMedias>(
+  static Future<List<MediaPickResult>?> open(BuildContext context) {
+    return Navigator.of(context).push<List<MediaPickResult>>(
       MaterialPageRoute(builder: (_) => const MediaGalleryPickerScreen()),
     );
   }
@@ -190,11 +178,9 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
     });
   }
 
-  /// Lit les octets des assets retenus, dans l'ordre de sélection.
-  ///
-  /// [apercu] dit ce qui suit : l'écran d'aperçu (légende, retrait, balayage)
-  /// ou l'envoi direct. Les deux boutons du bas ne diffèrent que par là.
-  Future<void> _valide({required bool apercu}) async {
+  /// « OK » : lit les octets des assets retenus, dans l'ordre de sélection, et
+  /// rend la main à la discussion — qui enchaîne sur l'écran de légende.
+  Future<void> _valide() async {
     if (_choisis.isEmpty || _preparation) return;
     setState(() => _preparation = true);
     final resultats = <MediaPickResult>[];
@@ -225,7 +211,17 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
       );
       return;
     }
-    Navigator.of(context).pop(SelectionMedias(fichiers: resultats, apercu: apercu));
+    Navigator.of(context).pop(resultats);
+  }
+
+  /// « Prévisualiser » : les photos cochées, en grand, sans rien d'autre.
+  ///
+  /// ⚠️ NE FERME PAS LE SÉLECTEUR et ne lit AUCUN octet : l'écran d'aperçu
+  /// travaille sur les vignettes des assets. Prévisualiser dix photos ne doit
+  /// pas coûter ce que coûte leur envoi.
+  Future<void> _previsualise() async {
+    if (_choisis.isEmpty || _preparation) return;
+    await ApercuSelectionScreen.ouvrir(context, List.of(_choisis));
   }
 
   String _mime(AssetEntity asset) {
@@ -422,10 +418,10 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
   /// 30/08/2026 : la croix qui vide la sélection, le compte, « Prévisualiser »
   /// et « OK ».
   ///
-  /// ⚠️ « OK » ENVOIE, « Prévisualiser » MONTRE D'ABORD. L'ancien bouton unique
-  /// « Suivant » imposait l'écran d'aperçu à tout le monde : envoyer une photo
-  /// demandait deux appuis et un écran de plus, ce que le user a signalé comme
-  /// le défaut principal du parcours.
+  /// ⚠️ « OK » MÈNE À L'ÉCRAN D'ENVOI (légende + bouton d'envoi),
+  /// « Prévisualiser » montre les photos et ramène ici. Ne pas les intervertir :
+  /// c'est la correction demandée par le user après un premier essai qui les
+  /// avait inversés.
   Widget _barreBasse() {
     final tropNombreux = _choisis.length > 10;
     return SafeArea(
@@ -464,13 +460,13 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
             ),
           ),
           TextButton(
-            onPressed: _preparation ? null : () => _valide(apercu: true),
+            onPressed: _preparation ? null : _previsualise,
             style: TextButton.styleFrom(foregroundColor: Colors.white),
             child: const Text("Prévisualiser"),
           ),
           const SizedBox(width: 4),
           ElevatedButton(
-            onPressed: _preparation ? null : () => _valide(apercu: false),
+            onPressed: _preparation ? null : _valide,
             style: ElevatedButton.styleFrom(
               backgroundColor: AlanyaColors.terracotta,
               foregroundColor: Colors.white,

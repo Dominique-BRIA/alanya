@@ -1853,29 +1853,14 @@ class _ChatScreenState extends State<ChatScreen>
     /*
      * Médias sélectionnés.
      *
-     * 🔴 L'APERÇU N'EST PLUS IMPOSÉ (demande du user, 30/08/2026). Le sélecteur
-     * plein écran offre deux sorties : « OK » envoie tout de suite, et
-     * « Prévisualiser » passe par l'écran de légende. Les autres sources —
-     * caméra, bande des récents, sélecteur système — n'ont pas ce choix et
-     * gardent l'aperçu : il est leur seul moyen de retirer un média avant
-     * l'envoi.
+     * ⚠️ TOUTES LES SOURCES PASSENT PAR L'ÉCRAN DE LÉGENDE, y compris le « OK »
+     * du sélecteur plein écran : c'est LUI l'écran que le user a demandé —
+     * les médias en grand, la barre de légende en bas, le bouton d'envoi. Le
+     * « Prévisualiser » du sélecteur, lui, ne sort jamais du sélecteur et
+     * n'arrive donc pas ici.
      */
-    final bool passerParApercu;
-    final List<MediaPickResult> files;
-    if (result is SelectionMedias) {
-      files = result.fichiers;
-      passerParApercu = result.apercu;
-    } else {
-      files = result as List<MediaPickResult>;
-      passerParApercu = true;
-    }
+    final files = result as List<MediaPickResult>;
     if (files.isEmpty) return;
-
-    if (!passerParApercu) {
-      // Envoi direct : pas de légende, l'ordre est celui de la sélection.
-      await _lanceEnvoiMedias(files, null);
-      return;
-    }
 
     // Aperçu : balayage entre les médias, retrait de l'un d'eux, légende.
     // ⚠️ On envoie la liste RENDUE par l'aperçu, pas celle de la sélection : un
