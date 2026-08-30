@@ -247,13 +247,45 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
     return '$m:${s.toString().padLeft(2, '0')}';
   }
 
+  /*
+   * ═══ COULEURS DE L'ÉCRAN ═══
+   *
+   * 🔴 L'ÉCRAN ÉTAIT SOMBRE EN DUR (façon WhatsApp) ; il porte désormais NOTRE
+   * palette (demande du user, 31/08/2026) : le blanc cassé Alanya au lieu du
+   * blanc, et le vert de la marque au lieu du bleu de la capture de référence.
+   *
+   * ⚠️ THEME-AWARE, et pas simplement « repeint en clair ». Le mode Nuit garde
+   * un écran sombre : un sélecteur crème s'y allumerait comme une lampe au
+   * milieu d'une application noire. La règle du projet est de n'ajouter QUE la
+   * branche Nuit sans toucher au clair — ici les deux branches naissent
+   * ensemble, l'écran n'ayant jamais été theme-aware.
+   *
+   * ⚠️ Le VERT ne suit PAS le thème : il appartient à la marque
+   * ([AlanyaColors.logoVert], relevé sur le « W » de l'icône), au même titre que
+   * le logotype. Le faire dériver d'un thème à l'autre le rendrait décoratif.
+   */
+  Color get _fond =>
+      themed(context, light: AlanyaColors.cream, dark: AlanyaColors.nuit);
+  Color get _fondBarre =>
+      themed(context, light: AlanyaColors.warmWhite, dark: AlanyaColors.nuit2);
+  Color get _surface =>
+      themed(context, light: AlanyaColors.sand, dark: AlanyaColors.nuit3);
+  Color get _texte =>
+      themed(context, light: AlanyaColors.ink, dark: AlanyaColors.craie);
+  Color get _texteDoux =>
+      themed(context, light: AlanyaColors.grey600, dark: AlanyaColors.craie2);
+
+  /// Le vert de la marque — celui du « W » de l'icône. Il remplace le bleu de
+  /// la capture de référence, et sert d'accent unique de cet écran.
+  Color get _accent => AlanyaColors.logoVert;
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0B141A),
+      backgroundColor: _fond,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF111B21),
-        foregroundColor: Colors.white,
+        backgroundColor: _fondBarre,
+        foregroundColor: _texte,
         /*
          * 🔴 DEUX ONGLETS, PLUS UN NOM D'ALBUM EN GUISE DE TITRE (demande du
          * user, 31/08/2026).
@@ -275,10 +307,10 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
               padding: const EdgeInsets.only(right: 8),
               child: Center(
                 child: Text("${_choisis.length}",
-                    style: const TextStyle(
-                        color: Colors.white,
+                    style: TextStyle(
+                        color: _accent,
                         fontSize: 15,
-                        fontWeight: FontWeight.w600)),
+                        fontWeight: FontWeight.w700)),
               ),
             ),
         ],
@@ -292,12 +324,12 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
             child: Row(children: [
-              const Icon(Icons.folder_outlined, size: 15, color: Colors.white54),
+              Icon(Icons.folder_outlined, size: 15, color: _texteDoux),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(_album!.name,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                    style: TextStyle(color: _texteDoux, fontSize: 13)),
               ),
             ]),
           ),
@@ -307,12 +339,12 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
               : _onglet == _Onglet.collections
                   ? _listeAlbums()
                   : _chargement
-                      ? const Center(
-                          child: CircularProgressIndicator(color: Colors.white54))
+                      ? Center(
+                          child: CircularProgressIndicator(color: _accent))
                       : _assets.isEmpty
-                          ? const Center(
+                          ? Center(
                               child: Text("Aucun média",
-                                  style: TextStyle(color: Colors.white54)))
+                                  style: TextStyle(color: _texteDoux)))
                           : _grille(),
         ),
       ]),
@@ -333,15 +365,18 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
           decoration: BoxDecoration(
-            color: actif ? AlanyaColors.terracotta : const Color(0xFF1F2C34),
+            // Pastille pleine pour l'onglet actif, sourde pour l'autre : c'est
+            // la forme de la capture de référence, son bleu remplacé par notre
+            // vert.
+            color: actif ? _accent : _surface,
             borderRadius: BorderRadius.circular(20),
           ),
           child: Text(
             libelle,
             style: TextStyle(
-              color: actif ? Colors.white : Colors.white70,
+              color: actif ? Colors.white : _texteDoux,
               fontSize: 14,
-              fontWeight: actif ? FontWeight.w600 : FontWeight.w500,
+              fontWeight: actif ? FontWeight.w700 : FontWeight.w500,
             ),
           ),
         ),
@@ -362,8 +397,8 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
   /// est CONSERVÉE, choisir dans deux albums est un usage courant.
   Widget _listeAlbums() {
     if (_albums.isEmpty) {
-      return const Center(
-        child: Text("Aucun album", style: TextStyle(color: Colors.white54)),
+      return Center(
+        child: Text("Aucun album", style: TextStyle(color: _texteDoux)),
       );
     }
     return ListView.builder(
@@ -381,7 +416,7 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
               builder: (_, lot) {
                 final premier = lot.data?.firstOrNull;
                 if (premier == null) {
-                  return Container(color: const Color(0xFF1F2C34));
+                  return Container(color: _surface);
                 }
                 return FutureBuilder(
                   future: premier
@@ -389,7 +424,7 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
                   builder: (_, vignette) {
                     final octets = vignette.data;
                     if (octets == null) {
-                      return Container(color: const Color(0xFF1F2C34));
+                      return Container(color: _surface);
                     }
                     return ClipRRect(
                       borderRadius: BorderRadius.circular(6),
@@ -403,16 +438,15 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
           ),
           title: Text(album.name,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Colors.white, fontSize: 15)),
+              style: TextStyle(color: _texte, fontSize: 15)),
           subtitle: FutureBuilder<int>(
             future: album.assetCountAsync,
             builder: (_, compte) => Text(
               compte.data == null ? "" : "${compte.data} élément(s)",
-              style: const TextStyle(color: Colors.white54, fontSize: 12),
+              style: TextStyle(color: _texteDoux, fontSize: 12),
             ),
           ),
-          trailing:
-              const Icon(Icons.chevron_right, color: Colors.white38, size: 20),
+          trailing: Icon(Icons.chevron_right, color: _texteDoux, size: 20),
           onTap: () {
             setState(() => _onglet = _Onglet.photos);
             _changeAlbum(album);
@@ -427,12 +461,11 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 32),
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          const Icon(Icons.photo_library_outlined,
-              size: 52, color: Colors.white38),
+          Icon(Icons.photo_library_outlined, size: 52, color: _texteDoux),
           const SizedBox(height: 12),
-          const Text("Accès à la galerie refusé",
+          Text("Accès à la galerie refusé",
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white70)),
+              style: TextStyle(color: _texte)),
           const SizedBox(height: 8),
           TextButton(
             onPressed: () => PhotoManager.openSetting(),
@@ -456,13 +489,13 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
       itemBuilder: (_, i) {
         if (i >= _assets.length) {
           return Container(
-            color: const Color(0xFF1F2C34),
-            child: const Center(
+            color: _surface,
+            child: Center(
               child: SizedBox(
                 width: 16,
                 height: 16,
                 child: CircularProgressIndicator(
-                    strokeWidth: 2, color: Colors.white24),
+                    strokeWidth: 2, color: _texteDoux),
               ),
             ),
           );
@@ -478,7 +511,7 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
                   asset.thumbnailDataWithSize(const ThumbnailSize(300, 300)),
               builder: (_, snap) {
                 if (snap.data == null) {
-                  return Container(color: const Color(0xFF1F2C34));
+                  return Container(color: _surface);
                 }
                 return Image.memory(snap.data!, fit: BoxFit.cover);
               },
@@ -492,9 +525,9 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
                 height: 22,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: choisi
-                      ? AlanyaColors.terracotta
-                      : Colors.black.withValues(alpha: 0.35),
+                  // Le vert de la marque marque la sélection, comme la pastille
+                  // d'onglet : un seul accent sur tout l'écran.
+                  color: choisi ? _accent : Colors.black.withValues(alpha: 0.35),
                   shape: BoxShape.circle,
                   border: Border.all(color: Colors.white, width: 1.5),
                 ),
@@ -546,7 +579,12 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
     final tropNombreux = _choisis.length > 10;
     return SafeArea(
       child: Container(
-        color: const Color(0xFF111B21),
+        decoration: BoxDecoration(
+          color: _fondBarre,
+          // Un filet plutôt qu'une ombre : sur un fond crème, l'ombre se voit
+          // à peine et le trait sépare franchement la barre de la grille.
+          border: Border(top: BorderSide(color: _surface)),
+        ),
         padding: const EdgeInsets.fromLTRB(8, 8, 12, 8),
         child: Row(children: [
           // La croix VIDE la sélection, elle ne ferme pas l'écran : fermer
@@ -554,24 +592,24 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
           // « je recommence ma sélection ».
           IconButton(
             tooltip: "Vider la sélection",
-            icon: const Icon(Icons.close, color: Colors.white),
+            icon: Icon(Icons.close, color: _texte),
             onPressed: _preparation ? null : () => setState(_choisis.clear),
           ),
           Text(
             "${_choisis.length}",
-            style: const TextStyle(
-                color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+            style: TextStyle(
+                color: _texte, fontSize: 16, fontWeight: FontWeight.w700),
           ),
           if (tropNombreux)
-            const Flexible(
+            Flexible(
               child: Padding(
-                padding: EdgeInsets.only(left: 8),
+                padding: const EdgeInsets.only(left: 8),
                 child: Text(
                   // On ne bloque pas : on annonce le découpage, pour que le
                   // résultat dans le fil ne surprenne pas.
                   "10 par message",
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: Colors.white54, fontSize: 11),
+                  style: TextStyle(color: _texteDoux, fontSize: 11),
                 ),
               ),
             ),
@@ -589,7 +627,7 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
           Flexible(
             child: TextButton(
               onPressed: _preparation ? null : _previsualise,
-              style: TextButton.styleFrom(foregroundColor: Colors.white),
+              style: TextButton.styleFrom(foregroundColor: _texte),
               child: const Text("Prévisualiser",
                   overflow: TextOverflow.ellipsis, maxLines: 1),
             ),
@@ -598,14 +636,18 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
           ElevatedButton(
             onPressed: _preparation ? null : _valide,
             style: ElevatedButton.styleFrom(
-              backgroundColor: AlanyaColors.terracotta,
+              // Le vert de la marque, à la place du bleu de la capture.
+              backgroundColor: _accent,
               foregroundColor: Colors.white,
               // Une taille plancher : même vide de texte, le bouton reste un
               // bouton visible.
               minimumSize: const Size(72, 42),
               padding: const EdgeInsets.symmetric(horizontal: 20),
+              // Même forme que le bouton de la capture : un rectangle aux coins
+              // arrondis, pas une pastille — les onglets, eux, sont des
+              // pastilles. Deux formes, deux rôles.
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(21)),
+                  borderRadius: BorderRadius.circular(12)),
             ),
             child: _preparation
                 ? const SizedBox(
@@ -628,17 +670,18 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
   /// rouvre la sélection du système.
   Widget _bandeauPartiel() {
     return Material(
-      color: const Color(0xFF1F2C34),
+      color: _surface,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
         child: Row(children: [
-          const Expanded(
+          Expanded(
             child: Text(
               "Seules les photos que tu as autorisées sont visibles.",
-              style: TextStyle(color: Colors.white70, fontSize: 12),
+              style: TextStyle(color: _texte, fontSize: 12),
             ),
           ),
           TextButton(
+            style: TextButton.styleFrom(foregroundColor: _accent),
             onPressed: () async {
               await PhotoManager.presentLimited(type: RequestType.common);
               if (!mounted) return;
