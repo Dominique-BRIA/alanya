@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 
 import '../../../core/message_cache.dart';
+import '../../../core/messages_systeme.dart';
 import '../../../core/whatsapp_text.dart';
 import '../../../core/whatsapp_format_input.dart';
 import '../../../core/whatsapp_editing_controller.dart';
@@ -161,6 +162,68 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
+  /// Noms des membres du GROUPE, lus sur le serveur à l'ouverture.
+  ///
+  /// 🔴 « MEMBRE » S'AFFICHAIT À LA PLACE DES NOMS (signalé sur device le
+  /// 30/08/2026). Le nom d'un expéditeur ne vient PAS du message — le serveur
+  /// n'envoie que `senderId` — mais d'une carte `id → nom` que l'écran reçoit à
+  /// sa construction, `widget.memberNames`. Elle a deux trous :
+  ///   1. **elle est figée** : quelqu'un ajouté au groupe après l'ouverture de
+  ///      l'écran n'y est jamais, et reste « Membre » tant qu'on ne ressort pas ;
+  ///   2. **elle est parfois vide** : l'écran s'ouvre aussi depuis l'écran
+  ///      d'appel, qui ne la passe pas — là, TOUT LE MONDE est « Membre ».
+  ///
+  /// On lit donc les membres à l'ouverture, et cette carte-ci prime. Elle ne
+  /// remplace pas `widget.memberNames` : celle-ci sert pendant le temps de
+  /// l'aller-retour réseau, et de repli si l'appel échoue.
+  Map<String, String> _membresCharges = const {};
+
+  /// Vrai pendant une relecture des membres, pour ne pas en lancer dix.
+  bool _relitLesMembres = false;
+
+  /// Relit les membres du groupe.
+  ///
+  /// Silencieux en cas d'échec : un nom manquant se replie sur « Membre », ce
+  /// qui reste lisible — alors qu'une erreur à l'ouverture d'une conversation
+  /// ne servirait à rien à personne.
+  Future<void> _chargeMembres() async {
+    if (_relitLesMembres) return;
+    _relitLesMembres = true;
+    try {
+      final membres =
+          await context.read<ChatRepository>().getGroupMembers(widget.convId);
+      if (!mounted) return;
+      setState(() {
+        _membresCharges = {
+          for (final m in membres)
+            if (m["id"] is String)
+              m["id"] as String:
+                  (m["pseudo"] as String?) ?? (m["publicNumber"] as String? ?? ""),
+        };
+      });
+    } catch (_) {
+      // Repli sur `widget.memberNames` : rien à dire à l'utilisateur.
+    } finally {
+      _relitLesMembres = false;
+    }
+  }
+
+  /// Nom à afficher pour un expéditeur, dans un groupe.
+  ///
+  /// ⚠️ Une seule relecture est déclenchée par identifiant inconnu, et jamais
+  /// depuis `build` — un appel réseau dans une méthode de construction
+  /// repartirait à chaque image. D'où le report par `addPostFrameCallback`.
+  String _nomExpediteur(String? senderId) {
+    if (senderId == null) return "Membre";
+    final connu = _membresCharges[senderId] ?? widget.memberNames[senderId];
+    if (connu != null && connu.isNotEmpty) return connu;
+    // Inconnu : c'est probablement quelqu'un qui vient d'être ajouté au groupe.
+    if (!_relitLesMembres) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _chargeMembres());
+    }
+    return "Membre";
+  }
+
   // Couleurs theme-aware (mode Nuit).
   bool get _dark => Theme.of(context).brightness == Brightness.dark;
 
@@ -304,6 +367,7 @@ class _ChatScreenState extends State<ChatScreen>
       duration: const Duration(milliseconds: 900),
     )..repeat(reverse: true);
     ChatScreen.activeConvId = widget.convId;
+    if (widget.isGroup) _chargeMembres();
     _load();
     _loadPinned();
     _loadDisappearing();
@@ -1786,9 +1850,32 @@ class _ChatScreenState extends State<ChatScreen>
       return;
     }
 
-    // Médias sélectionnés
-    final files = result as List<MediaPickResult>;
+    /*
+     * Médias sélectionnés.
+     *
+     * 🔴 L'APERÇU N'EST PLUS IMPOSÉ (demande du user, 30/08/2026). Le sélecteur
+     * plein écran offre deux sorties : « OK » envoie tout de suite, et
+     * « Prévisualiser » passe par l'écran de légende. Les autres sources —
+     * caméra, bande des récents, sélecteur système — n'ont pas ce choix et
+     * gardent l'aperçu : il est leur seul moyen de retirer un média avant
+     * l'envoi.
+     */
+    final bool passerParApercu;
+    final List<MediaPickResult> files;
+    if (result is SelectionMedias) {
+      files = result.fichiers;
+      passerParApercu = result.apercu;
+    } else {
+      files = result as List<MediaPickResult>;
+      passerParApercu = true;
+    }
     if (files.isEmpty) return;
+
+    if (!passerParApercu) {
+      // Envoi direct : pas de légende, l'ordre est celui de la sélection.
+      await _lanceEnvoiMedias(files, null);
+      return;
+    }
 
     // Aperçu : balayage entre les médias, retrait de l'un d'eux, légende.
     // ⚠️ On envoie la liste RENDUE par l'aperçu, pas celle de la sélection : un
@@ -3407,6 +3494,18 @@ class _ChatScreenState extends State<ChatScreen>
   Widget _bubble(Message m, bool mine) {
     // Message système (ex. « Messages éphémères activés ») : pastille centrée.
     if (m.type == "SYSTEM") {
+      /*
+       * 🔴 LA CHARGE EST DU JSON, ET ELLE S'AFFICHAIT TELLE QUELLE (signalé sur
+       * device le 30/08/2026). Le serveur enregistre `{"code":…}` parce que la
+       * phrase dépend de la LANGUE du lecteur, et parfois de son identité — un
+       * avis de blocage ne dit pas la même chose des deux côtés. C'est donc au
+       * client de composer, ce que le web faisait déjà et le mobile non.
+       */
+      final texteSysteme =
+          composerMessageSysteme(context, m.content, _myId);
+      // Code inconnu (client plus ancien que le serveur) : la pastille dispa-
+      // raît plutôt que d'afficher une accolade. Voir `core/messages_systeme.dart`.
+      if (texteSysteme.isEmpty) return const SizedBox.shrink();
       return Center(
         child: Container(
           margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 36),
@@ -3421,7 +3520,7 @@ class _ChatScreenState extends State<ChatScreen>
             Icon(Icons.timer_outlined, size: 15, color: _iconNeutral),
             const SizedBox(width: 6),
             Flexible(
-              child: Text(m.content ?? '',
+              child: Text(texteSysteme,
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 12.5, color: _iconNeutral)),
             ),
@@ -3460,9 +3559,7 @@ class _ChatScreenState extends State<ChatScreen>
     // une carte vide au milieu de l'océan.
     final positionPartagee =
         effectif == "LOCATION" ? positionDepuisContenu(m.content) : null;
-    final senderLabel = widget.isGroup && !mine
-        ? (widget.memberNames[m.senderId] ?? "Membre")
-        : null;
+    final senderLabel = widget.isGroup && !mine ? _nomExpediteur(m.senderId) : null;
     final isHighlighted =
         _highlightedMessageId == m.id || _selectedMessageId == m.id;
     final isGrid = isMultiMedia; // 2+ médias → grille
@@ -3794,9 +3891,8 @@ class _ChatScreenState extends State<ChatScreen>
   /// « répondre » ou « supprimer » n'a de sens que pour un message.
   Widget _groupBubble(GroupeMedias groupe, bool mine) {
     final medias = groupe.medias;
-    final senderLabel = widget.isGroup && !mine
-        ? (widget.memberNames[groupe.senderId] ?? "Membre")
-        : null;
+    final senderLabel =
+        widget.isGroup && !mine ? _nomExpediteur(groupe.senderId) : null;
     // Une grille regroupe PLUSIEURS messages : elle s'illumine dès que l'un
     // d'eux est la cible. Sans cela, sauter vers une photo citée amenait au bon
     // endroit sans que rien ne s'allume — la grille ignorait la surbrillance,

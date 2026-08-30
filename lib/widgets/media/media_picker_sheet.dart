@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:file_picker/file_picker.dart';
+import '../../core/galerie.dart';
 import '../../theme/alanya_theme.dart';
 
 /// Résultat de la sélection de médias.
@@ -90,7 +91,11 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
 
   Future<void> _loadRecentMedia() async {
     final permission = await PhotoManager.requestPermissionExtend();
-    if (!permission.isAuth) {
+    // 🔴 `hasAccess` et NON `isAuth` : l'accès PARTIEL d'Android 14+ est un oui.
+    // Avec `isAuth`, choisir « Sélectionner des photos » faisait déclarer la
+    // permission refusée, la bande des récents restait vide et le bouton
+    // « Galerie » ouvrait le sélecteur du système. Voir `core/galerie.dart`.
+    if (!accesUtilisable(permission)) {
       if (mounted) setState(() { _loadingGallery = false; _permissionDenied = true; });
       return;
     }
@@ -98,6 +103,8 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
       final albums = await PhotoManager.getAssetPathList(
         type: RequestType.common,
         hasAll: true,
+        // Sans cet ordre, « récents » montrait les plus VIEILLES photos.
+        filterOption: ordreRecentDAbord,
       );
       if (albums.isEmpty) {
         if (mounted) setState(() => _loadingGallery = false);

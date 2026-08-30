@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
 
+import '../../../core/galerie.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/media/media_picker_sheet.dart';
 
@@ -18,11 +19,31 @@ import '../../../widgets/media/media_picker_sheet.dart';
 ///
 /// Le plafond de 10 est celui du serveur (`mediaIds.max(10)`) : au-delà, l'envoi
 /// est découpé en plusieurs messages. On laisse donc dépasser 10, mais on le DIT.
+/// Ce que le sélecteur rend : les médias, et le chemin choisi pour la suite.
+///
+/// 🔴 LES DEUX BOUTONS DU BAS NE FONT PAS LA MÊME CHOSE (demande du user,
+/// 30/08/2026, captures à l'appui) :
+///   - **OK** envoie tout de suite, sans légende. C'est le geste courant, et il
+///     ne doit coûter qu'un appui ;
+///   - **Prévisualiser** ouvre l'aperçu, où l'on ajoute une légende, retire un
+///     média ou balaie entre eux.
+///
+/// Un booléen plutôt que deux méthodes de sortie : l'écran appelant décide, et
+/// la sélection est lue une seule fois.
+class SelectionMedias {
+  const SelectionMedias({required this.fichiers, required this.apercu});
+
+  final List<MediaPickResult> fichiers;
+
+  /// Vrai si l'utilisateur a demandé l'aperçu avant l'envoi.
+  final bool apercu;
+}
+
 class MediaGalleryPickerScreen extends StatefulWidget {
   const MediaGalleryPickerScreen({super.key});
 
-  static Future<List<MediaPickResult>?> open(BuildContext context) {
-    return Navigator.of(context).push<List<MediaPickResult>>(
+  static Future<SelectionMedias?> open(BuildContext context) {
+    return Navigator.of(context).push<SelectionMedias>(
       MaterialPageRoute(builder: (_) => const MediaGalleryPickerScreen()),
     );
   }
@@ -48,6 +69,13 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
   bool _chargementPage = false;
   bool _permissionRefusee = false;
   bool _preparation = false;
+
+  /// L'accès est PARTIEL (Android 14+, « Sélectionner des photos »).
+  ///
+  /// L'utilisateur ne voit alors qu'une partie de sa galerie. Le taire le
+  /// laisserait chercher une photo que l'application n'a pas le droit de lui
+  /// montrer — d'où le bandeau et son bouton « Gérer ».
+  bool _partiel = false;
 
   final _defilement = ScrollController();
 
@@ -77,17 +105,24 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
   Future<void> _initialise() async {
     final permission = await PhotoManager.requestPermissionExtend();
     if (!mounted) return;
-    if (!permission.isAuth) {
+    // 🔴 `hasAccess` et NON `isAuth` : l'accès PARTIEL d'Android 14+ est un oui.
+    // Voir `core/galerie.dart` — c'est ce test qui renvoyait tout le monde vers
+    // le sélecteur du système.
+    if (!accesUtilisable(permission)) {
       setState(() {
         _chargement = false;
         _permissionRefusee = true;
       });
       return;
     }
+    _partiel = accesPartiel(permission);
     try {
       final albums = await PhotoManager.getAssetPathList(
         type: RequestType.common,
         hasAll: true,
+        // Sans cet ordre, la galerie remonte de la plus VIEILLE photo du
+        // téléphone : Android rend `MediaStore` par identifiant croissant.
+        filterOption: ordreRecentDAbord,
       );
       if (!mounted) return;
       if (albums.isEmpty) {
@@ -156,7 +191,10 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
   }
 
   /// Lit les octets des assets retenus, dans l'ordre de sélection.
-  Future<void> _valide() async {
+  ///
+  /// [apercu] dit ce qui suit : l'écran d'aperçu (légende, retrait, balayage)
+  /// ou l'envoi direct. Les deux boutons du bas ne diffèrent que par là.
+  Future<void> _valide({required bool apercu}) async {
     if (_choisis.isEmpty || _preparation) return;
     setState(() => _preparation = true);
     final resultats = <MediaPickResult>[];
@@ -187,7 +225,7 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
       );
       return;
     }
-    Navigator.of(context).pop(resultats);
+    Navigator.of(context).pop(SelectionMedias(fichiers: resultats, apercu: apercu));
   }
 
   String _mime(AssetEntity asset) {
@@ -249,16 +287,21 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
             ),
         ],
       ),
-      body: _chargement
-          ? const Center(
-              child: CircularProgressIndicator(color: Colors.white54))
-          : _permissionRefusee
-              ? _refus()
-              : _assets.isEmpty
-                  ? const Center(
-                      child: Text("Aucun média",
-                          style: TextStyle(color: Colors.white54)))
-                  : _grille(),
+      body: Column(children: [
+        if (_partiel && !_permissionRefusee) _bandeauPartiel(),
+        Expanded(
+          child: _chargement
+              ? const Center(
+                  child: CircularProgressIndicator(color: Colors.white54))
+              : _permissionRefusee
+                  ? _refus()
+                  : _assets.isEmpty
+                      ? const Center(
+                          child: Text("Aucun média",
+                              style: TextStyle(color: Colors.white54)))
+                      : _grille(),
+        ),
+      ]),
       bottomNavigationBar: _choisis.isEmpty ? null : _barreBasse(),
     );
   }
@@ -375,22 +418,40 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
     );
   }
 
+  /// La barre du bas, calquée sur les captures fournies par le user le
+  /// 30/08/2026 : la croix qui vide la sélection, le compte, « Prévisualiser »
+  /// et « OK ».
+  ///
+  /// ⚠️ « OK » ENVOIE, « Prévisualiser » MONTRE D'ABORD. L'ancien bouton unique
+  /// « Suivant » imposait l'écran d'aperçu à tout le monde : envoyer une photo
+  /// demandait deux appuis et un écran de plus, ce que le user a signalé comme
+  /// le défaut principal du parcours.
   Widget _barreBasse() {
     final tropNombreux = _choisis.length > 10;
     return SafeArea(
       child: Container(
         color: const Color(0xFF111B21),
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+        padding: const EdgeInsets.fromLTRB(8, 8, 12, 8),
         child: Row(children: [
+          // La croix VIDE la sélection, elle ne ferme pas l'écran : fermer
+          // renverrait à la discussion alors que le geste attendu ici est
+          // « je recommence ma sélection ».
+          IconButton(
+            tooltip: "Vider la sélection",
+            icon: const Icon(Icons.close, color: Colors.white),
+            onPressed: _preparation ? null : () => setState(_choisis.clear),
+          ),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  "${_choisis.length} sélectionné${_choisis.length > 1 ? "s" : ""}",
+                  "${_choisis.length}",
                   style: const TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.w600),
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600),
                 ),
                 if (tropNombreux)
                   const Text(
@@ -402,23 +463,66 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
               ],
             ),
           ),
-          const SizedBox(width: 12),
-          ElevatedButton.icon(
-            onPressed: _preparation ? null : _valide,
-            icon: _preparation
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: Colors.white))
-                : const Icon(Icons.arrow_forward, size: 18),
-            label: const Text("Suivant"),
+          TextButton(
+            onPressed: _preparation ? null : () => _valide(apercu: true),
+            style: TextButton.styleFrom(foregroundColor: Colors.white),
+            child: const Text("Prévisualiser"),
+          ),
+          const SizedBox(width: 4),
+          ElevatedButton(
+            onPressed: _preparation ? null : () => _valide(apercu: false),
             style: ElevatedButton.styleFrom(
               backgroundColor: AlanyaColors.terracotta,
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(20)),
             ),
+            child: _preparation
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white))
+                : const Text("OK"),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  /// Bandeau d'ACCÈS PARTIEL — Android 14+, « Sélectionner des photos ».
+  ///
+  /// Sans lui, l'utilisateur cherche dans notre grille une photo que le système
+  /// ne nous laisse pas voir, et conclut que l'application est cassée. Le bouton
+  /// rouvre la sélection du système.
+  Widget _bandeauPartiel() {
+    return Material(
+      color: const Color(0xFF1F2C34),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+        child: Row(children: [
+          const Expanded(
+            child: Text(
+              "Seules les photos que tu as autorisées sont visibles.",
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+          ),
+          TextButton(
+            onPressed: () async {
+              await PhotoManager.presentLimited(type: RequestType.common);
+              if (!mounted) return;
+              // La galerie est relue : l'utilisateur vient d'ajouter des photos,
+              // et ne pas les montrer donnerait l'impression que son geste n'a
+              // rien fait.
+              setState(() {
+                _assets.clear();
+                _page = 0;
+                _finPagination = false;
+                _chargement = true;
+              });
+              await _chargePageSuivante(premiere: true);
+            },
+            child: const Text("Gérer"),
           ),
         ]),
       ),

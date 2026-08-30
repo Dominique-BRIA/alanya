@@ -8,6 +8,7 @@ import '../../core/whatsapp_text.dart';
 
 import '../../core/connectivity_service.dart';
 import '../../core/conversation_cache.dart';
+import '../../core/messages_systeme.dart';
 import '../../core/geo_service.dart';
 import '../geo/screens/geo_disclosure_screen.dart';
 import '../../core/push_service.dart';
@@ -1292,6 +1293,23 @@ class _ConversationsTabState extends State<_ConversationsTab>
     // L'ajouter demanderait de le faire remonter par l'API des conversations.
     String typeLabel() {
       if (last == null) return "—";
+      /*
+       * 🔴 UN MESSAGE SYSTÈME PORTE DU JSON, et la liste l'affichait tel quel :
+       * le serveur recopie la charge `{"code":"member_added",…}` dans
+       * `conversation.lastMessage`, parce que la phrase dépend de la langue du
+       * lecteur et ne peut donc pas être figée en base.
+       *
+       * Le fil de discussion compose déjà cette phrase ; la liste doit passer
+       * par le MÊME composeur, sans quoi le défaut reste visible à l'endroit le
+       * plus regardé de l'application.
+       */
+      if (last.type == "SYSTEM") {
+        return composerMessageSysteme(
+          context,
+          last.content,
+          context.read<AuthController>().user?.id,
+        );
+      }
       return apercuMessage(last.type, last.content);
     }
 
