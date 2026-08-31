@@ -74,6 +74,7 @@ import '../chat_media_integration.dart';
 import '../../../widgets/media/gps_preview.dart';
 import 'media_gallery_viewer.dart';
 import '../../../widgets/media/media_picker_sheet.dart';
+import '../../../core/limites_media.dart';
 
 class ChatScreen extends StatefulWidget {
   static String? activeConvId;
@@ -1943,8 +1944,23 @@ class _ChatScreenState extends State<ChatScreen>
   /// pendant son affichage.
   Future<List<MediaPickResult>?> _prendrePhoto() async {
     try {
-      final photo = await ImagePicker()
-          .pickImage(source: ImageSource.camera, imageQuality: 85);
+      /*
+       * ⚠️ `imageQuality` SEUL NE REDIMENSIONNE PAS.
+       *
+       * Il ne fait que RÉ-ENCODER : une photo de 12 mégapixels restait en
+       * 4000 × 3000, simplement un peu moins nette — pour 1,5 à 2 Mo, affichés
+       * dans une bulle de quelques centaines de pixels. Le gain vient de la
+       * RÉSOLUTION, et `image_picker` ne réduit que si on lui donne des bornes.
+       *
+       * Mêmes valeurs que le web et que la galerie : une photo doit peser
+       * pareil quel que soit le chemin par lequel elle est partie.
+       */
+      final photo = await ImagePicker().pickImage(
+        source: ImageSource.camera,
+        imageQuality: LimitesMedia.imageQualite,
+        maxWidth: LimitesMedia.imageBordMax.toDouble(),
+        maxHeight: LimitesMedia.imageBordMax.toDouble(),
+      );
       if (photo == null) return null;
       final octets = await photo.readAsBytes();
       return [

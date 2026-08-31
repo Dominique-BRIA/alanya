@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:file_picker/file_picker.dart';
 import '../../theme/alanya_theme.dart';
+import '../../core/limites_media.dart';
+import '../../core/preparation_media.dart';
 
 /// Résultat de la sélection de médias.
 class MediaPickResult {
@@ -124,14 +126,39 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
   Future<void> _confirmSelection() async {
     if (_selectedIds.isEmpty) return;
     final results = <MediaPickResult>[];
+    final tropGrosGalerie = <String>[];
     for (final asset in _recentMedia) {
       if (!_selectedIds.contains(asset.id)) continue;
       final bytes = await asset.originBytes;
       if (bytes == null) continue;
-      final name = asset.title ?? 'media_${asset.id}';
-      final mime = _mimeFromAsset(asset);
+      var name = asset.title ?? 'media_${asset.id}';
+      var mime = _mimeFromAsset(asset);
+
+      // COMPRESSION D'ABORD, PLAFOND ENSUITE : une photo de 8 Mo tombe sous la
+      // barre une fois réduite. Contrôler avant refuserait des images qui
+      // passent très bien.
+      var octets = bytes;
+      final reduit = await PreparationMedia.compresserDepuisGalerie(
+        asset,
+        bytes,
+        nomFichier: name,
+        mimeType: mime,
+      );
+      if (reduit != null) {
+        octets = reduit;
+        name = PreparationMedia.nomEnJpeg(name);
+        mime = 'image/jpeg';
+      }
+
+      // ⚠️ Ce chemin n'avait AUCUN plafond : l'utilisateur payait le
+      // téléversement complet pour recevoir un 413 à l'arrivée.
+      if (octets.length > _maxOctets) {
+        tropGrosGalerie.add(name);
+        continue;
+      }
+
       results.add(MediaPickResult(
-        bytes: bytes,
+        bytes: octets,
         fileName: name,
         mimeType: mime,
         durationMs: asset.type == AssetType.video ? (asset.duration * 1000).toInt() : null,
@@ -140,7 +167,17 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
         path: (await asset.file)?.path,
       ));
     }
-    if (mounted && results.isNotEmpty) Navigator.pop(context, results);
+    if (!mounted) return;
+    // On NOMME ce qui n'a pas pu partir : une sélection qui se réduit en
+    // silence laisse croire à un envoi complet.
+    if (tropGrosGalerie.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(tropGrosGalerie.length == 1
+            ? "« ${tropGrosGalerie.first} » dépasse ${LimitesMedia.tailleMaxMo} Mo et n'a pas été joint"
+            : "${tropGrosGalerie.length} fichiers dépassent ${LimitesMedia.tailleMaxMo} Mo et n'ont pas été joints"),
+      ));
+    }
+    if (results.isNotEmpty) Navigator.pop(context, results);
   }
 
   // ══ CAMÉRA ══
@@ -177,13 +214,26 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
       );
       if (result == null || result.files.isEmpty || !mounted) return;
       final results = <MediaPickResult>[];
+      final tropGrosSysteme = <String>[];
       for (final file in result.files) {
         if (file.bytes == null) continue;
+        // Même plafond que partout ailleurs. Il manquait ici aussi.
+        if (file.bytes!.length > _maxOctets) {
+          tropGrosSysteme.add(file.name);
+          continue;
+        }
         results.add(MediaPickResult(
           bytes: file.bytes!,
           fileName: file.name,
           mimeType: _guessMime(file.name),
           path: file.path,
+        ));
+      }
+      if (mounted && tropGrosSysteme.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(tropGrosSysteme.length == 1
+              ? "« ${tropGrosSysteme.first} » dépasse ${LimitesMedia.tailleMaxMo} Mo et n'a pas été joint"
+              : "${tropGrosSysteme.length} fichiers dépassent ${LimitesMedia.tailleMaxMo} Mo et n'ont pas été joints"),
         ));
       }
       if (mounted && results.isNotEmpty) navigator.pop(results);
@@ -234,7 +284,11 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
   }
 
   /// Taille maximale acceptée par le serveur, en octets.
-  static const int _maxOctets = 50 * 1024 * 1024;
+  ///
+  /// Reprise de `LimitesMedia` : elle était écrite en dur ICI, et n'était
+  /// appliquée qu'au chemin des documents. Trois autres chemins laissaient
+  /// partir n'importe quelle taille.
+  static int get _maxOctets => LimitesMedia.tailleMaxOctets;
 
   // ══ CONTACT — fiche de contact partagée (type de message CONTACT) ══
   //
