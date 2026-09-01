@@ -408,7 +408,31 @@ class _ChatScreenState extends State<ChatScreen>
   String? _highlightedMessageId;
   final Map<String, GlobalKey> _messageKeys = {};
   final Map<String, ReplyPreview> _replySnapshots = {};
+  /// Les traductions AFFICHÉES, par identifiant de message.
+  ///
+  /// 🔴 ELLES SURVIVENT À L'ÉCRAN depuis le 31/08/2026 : la carte est semée
+  /// depuis `MessageCache` à l'ouverture et écrite à chaque traduction. Avant,
+  /// elle ne vivait que le temps de la conversation ouverte — sortir et revenir
+  /// effaçait tout, et il fallait retraduire chaque message un par un.
   final Map<String, String> _translations = {};
+
+  /// Charge les traductions déjà faites pour cette conversation.
+  ///
+  /// ⚠️ FILTRÉ SUR LA LANGUE DE LECTURE COURANTE : une traduction faite vers
+  /// une autre langue n'est pas affichée. Elle reste en base — revenir à sa
+  /// langue précédente y retrouve son fil déjà traduit.
+  Future<void> _chargeTraductions() async {
+    if (!mounted) return;
+    final cible = context.read<LocaleController>().languageCode;
+    try {
+      final connues = await MessageCache.traductionsDe(widget.convId, cible);
+      if (!mounted || connues.isEmpty) return;
+      setState(() => _translations.addAll(connues));
+    } catch (_) {
+      // Cache illisible : on repart sans traduction, elles se referont à la
+      // demande. Rien à dire à l'utilisateur.
+    }
+  }
   final Set<String> _translating = {};
 
   // Lot D — scroll infini (chargement des messages plus anciens).
@@ -425,6 +449,10 @@ class _ChatScreenState extends State<ChatScreen>
     )..repeat(reverse: true);
     ChatScreen.activeConvId = widget.convId;
     if (widget.isGroup) _chargeMembres();
+    // Avant `_load()` : les traductions n'attendent pas le réseau, et une bulle
+    // qui s'affiche traduite dès la première image vaut mieux qu'une bulle qui
+    // se traduit sous les yeux une seconde plus tard.
+    _chargeTraductions();
     _load();
     _loadPinned();
     _loadDisappearing();
@@ -4329,6 +4357,9 @@ class _ChatScreenState extends State<ChatScreen>
     final cible = context.read<LocaleController>().languageCode;
     if (_translations.containsKey(m.id)) {
       setState(() => _translations.remove(m.id));
+      // Oubliée aussi en base : sans cela, elle reviendrait à la réouverture et
+      // le geste de retrait passerait pour ignoré.
+      await MessageCache.supprimeTraduction(m.id);
       return;
     }
     if (_translating.contains(m.id)) return;
@@ -4370,6 +4401,16 @@ class _ChatScreenState extends State<ChatScreen>
         // propre langue, c'est ce texte — on le montre, plutôt que d'opposer un
         // message d'erreur à quelqu'un qui a simplement appuyé sur « Traduire ».
         setState(() => _translations[m.id] = text);
+        // Retenue comme les autres : « rien à traduire » est une réponse, et la
+        // recalculer à chaque ouverture ferait retourner le détecteur sur un
+        // message dont on sait déjà qu'il n'y a rien à en tirer.
+        await MessageCache.putTraduction(
+          messageId: m.id,
+          convId: widget.convId,
+          texte: text,
+          langueSource: null,
+          langueCible: cible,
+        );
         return;
       }
       final etat = await etatCouple(source, cible);
@@ -4410,6 +4451,13 @@ class _ChatScreenState extends State<ChatScreen>
       final traduit = await traduireUnTexte(source, cible, text);
       if (!mounted) return;
       setState(() => _translations[m.id] = traduit);
+      await MessageCache.putTraduction(
+        messageId: m.id,
+        convId: widget.convId,
+        texte: traduit,
+        langueSource: source,
+        langueCible: cible,
+      );
     } catch (_) {
       _messageTraduction('translation_failed');
     } finally {
