@@ -182,6 +182,44 @@ class _ChatScreenState extends State<ChatScreen>
   /// Vrai pendant une relecture des membres, pour ne pas en lancer dix.
   bool _relitLesMembres = false;
 
+  /// JUSQU'OÙ CHAQUE MEMBRE A LU, en millisecondes.
+  ///
+  /// 🔴 UN COMPTEUR, ET NON DES COCHES BLEUES, et ce n'est pas cosmétique : la
+  /// règle « tous ont lu » se laisse BLOQUER PAR UN SEUL membre qui a coupé ses
+  /// accusés de lecture. Son horodatage n'avance jamais, et les coches du
+  /// groupe entier ne passeraient plus — sans que personne comprenne pourquoi.
+  /// Un compteur, lui, ne se bloque pas : le discret n'est simplement pas
+  /// compté.
+  ///
+  /// Semée par les membres à l'ouverture, avancée par les trames `read`.
+  /// Même règle que le web (`260ccd2`), à qui elle est reprise.
+  final Map<String, int> _lecturesParMembre = {};
+
+  /// Note qu'un membre a lu jusqu'à [quandMs], sans jamais reculer.
+  ///
+  /// ⚠️ LE `max` COMPTE : les trames arrivent dans le désordre, et une trame
+  /// ancienne rejouée ferait reculer un membre, donc baisser le compteur sous
+  /// les yeux de l'expéditeur.
+  void _avanceLecture(String userId, int quandMs) {
+    final connu = _lecturesParMembre[userId] ?? 0;
+    if (quandMs > connu) _lecturesParMembre[userId] = quandMs;
+  }
+
+  /// Combien de membres ont lu ce message — hors moi.
+  ///
+  /// Rend `0` hors groupe : la bulle n'affiche alors rien, les deux coches
+  /// suffisent à deux.
+  int _nbLectures(Message m) {
+    if (!widget.isGroup || m.senderId != _myId) return 0;
+    final envoye = m.createdAt.millisecondsSinceEpoch;
+    var n = 0;
+    for (final entree in _lecturesParMembre.entries) {
+      if (entree.key == _myId) continue;
+      if (entree.value >= envoye) n++;
+    }
+    return n;
+  }
+
   /// Relit les membres du groupe.
   ///
   /// Silencieux en cas d'échec : un nom manquant se replie sur « Membre », ce
@@ -194,6 +232,7 @@ class _ChatScreenState extends State<ChatScreen>
       final membres =
           await context.read<ChatRepository>().getGroupMembers(widget.convId);
       if (!mounted) return;
+      if (!mounted) return;
       setState(() {
         _membresCharges = {
           for (final m in membres)
@@ -201,6 +240,22 @@ class _ChatScreenState extends State<ChatScreen>
               m["id"] as String:
                   (m["pseudo"] as String?) ?? (m["publicNumber"] as String? ?? ""),
         };
+        /*
+         * SEMENCE DU COMPTEUR DE LECTURES : ce que les membres avaient déjà lu
+         * AVANT qu'on ouvre. Les trames `read` ne racontent que la suite.
+         *
+         * Sans elle, le compteur repartirait de zéro à chaque ouverture du
+         * groupe, et tout ce qui a été lu pendant qu'on regardait ailleurs
+         * serait invisible.
+         */
+        for (final m in membres) {
+          final id = m["id"];
+          final brut = m["lastReadAt"];
+          if (id is! String || brut is! String) continue;
+          final quand = DateTime.tryParse(brut);
+          if (quand == null) continue;
+          _avanceLecture(id, quand.millisecondsSinceEpoch);
+        }
       });
     } catch (_) {
       // Repli sur `widget.memberNames` : rien à dire à l'utilisateur.
@@ -611,6 +666,30 @@ class _ChatScreenState extends State<ChatScreen>
     } else if (type == "read") {
       if (e["convId"] != widget.convId) return;
       setState(() {
+        /*
+         * Jusqu'où CE membre a lu — c'est ce qui alimente le compteur en
+         * groupe.
+         *
+         * ⚠️ LE CHAMP S'APPELLE `userId`, PAS `readBy`. La trame du serveur est
+         * `{type:"read", convId, userId, at}` (`ws-server.mjs`) ; le web le
+         * renomme dans sa couche WebSocket, ce qui rend son code trompeur si
+         * on le recopie. `readBy` est accepté en second, au cas où le serveur
+         * s'aligne un jour sur ce nom.
+         *
+         * `at` est une chaîne ISO (`new Date()` sérialisé). Un serveur plus
+         * ancien ne l'envoie pas : le compteur s'en tient alors à sa semence,
+         * sans jamais afficher de chiffre faux.
+         */
+        final lecteur = e["userId"] ?? e["readBy"];
+        final quand = e["at"];
+        if (lecteur is String) {
+          final ms = quand is num
+              ? quand.toInt()
+              : (quand is String
+                  ? DateTime.tryParse(quand)?.millisecondsSinceEpoch
+                  : null);
+          if (ms != null) _avanceLecture(lecteur, ms);
+        }
         _messages = _messages
             .map((m) => m.senderId == _myId && m.status != "READ"
                 ? Message(
@@ -1513,6 +1592,27 @@ class _ChatScreenState extends State<ChatScreen>
         const SizedBox(width: 4),
       ],
       Text(_time(m.createdAt), style: TextStyle(fontSize: 10, color: color)),
+      /*
+       * LE COMPTEUR DE LECTURES, EN GROUPE SEULEMENT.
+       *
+       * Deux coches ne disent rien d'utile à douze : « lu » par qui ? Le nombre
+       * répond, et il ne se laisse pas bloquer par un membre qui a coupé ses
+       * accusés — celui-là n'est simplement pas compté.
+       *
+       * ⚠️ MASQUÉ À ZÉRO : « 0 lu » sous chaque message fraîchement envoyé
+       * serait un reproche permanent.
+       */
+      if (mine && widget.isGroup) ...[
+        Builder(builder: (_) {
+          final n = _nbLectures(m);
+          if (n <= 0) return const SizedBox.shrink();
+          return Padding(
+            padding: const EdgeInsets.only(left: 4),
+            child: Text("$n lu",
+                style: TextStyle(fontSize: 10, color: color)),
+          );
+        }),
+      ],
       if (mine) ...[const SizedBox(width: 4), _statusTicks(m.status, color)],
     ]);
   }
