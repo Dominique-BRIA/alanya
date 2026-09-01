@@ -87,6 +87,17 @@ class Message {
   // Favori (étoile) pour MOI — mutable : basculé en place au tap.
   bool starred;
 
+  /// LES MENTIONS `@` DU MESSAGE — groupes seulement.
+  ///
+  /// 🔴 LE TEXTE PORTE « @Dominique » EN CLAIR ; cette liste dit QUEL compte
+  /// est visé. Sans elle, mettre en évidence reviendrait à chercher un pseudo
+  /// dans une phrase, et notifier reviendrait à le deviner — ce qui échoue dès
+  /// que deux membres portent le même nom.
+  ///
+  /// Vide quand le serveur ne connaît pas encore les mentions : le message
+  /// s'affiche alors comme une phrase ordinaire, sans rien perdre.
+  final List<MentionMessage> mentions;
+
   Message({
     required this.id,
     required this.convId,
@@ -103,6 +114,7 @@ class Message {
     this.replyTo,
     this.reactions = const [],
     this.starred = false,
+    this.mentions = const [],
   });
 
   /// Vrai si le message a été supprimé pour tout le monde.
@@ -136,5 +148,30 @@ class Message {
             .map((r) => MessageReaction.fromJson(r as Map<String, dynamic>))
             .toList(),
         starred: (j["starred"] as bool?) ?? false,
+        mentions: ((j["mentions"] as List?) ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .map(MentionMessage.fromJson)
+            .toList(),
       );
+}
+
+/// UNE MENTION `@` : le compte visé, et le texte écrit dans le message.
+///
+/// ⚠️ [libelle] N'EST PAS LE PSEUDO COURANT, c'est ce qui a été inséré à
+/// l'envoi, figé par le serveur. Deux raisons : c'est ce texte qu'il faut
+/// retrouver dans le message pour le mettre en évidence — un pseudo changé
+/// depuis ne s'y trouverait plus — et cela garde lisible la mention d'une
+/// personne qui a quitté le groupe.
+class MentionMessage {
+  const MentionMessage({required this.userId, required this.libelle});
+
+  final String userId;
+  final String libelle;
+
+  factory MentionMessage.fromJson(Map<String, dynamic> j) => MentionMessage(
+        userId: (j["userId"] as String?) ?? "",
+        libelle: (j["libelle"] as String?) ?? "",
+      );
+
+  Map<String, dynamic> toJson() => {"userId": userId, "libelle": libelle};
 }

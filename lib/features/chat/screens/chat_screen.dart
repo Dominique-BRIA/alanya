@@ -496,9 +496,164 @@ class _ChatScreenState extends State<ChatScreen>
   /// pas à chaque caractère : le listener se déclenche aussi à chaque
   /// déplacement du curseur.
   void _onInputTextChanged() {
+    _majRequeteMention();
     final rempli = _inputCtrl.text.trim().isNotEmpty;
     if (rempli == _hasText) return;
     setState(() => _hasText = rempli);
+  }
+
+  // ══════════════════════════════════════════════
+  // MENTIONS @ — GROUPES SEULEMENT
+  // ══════════════════════════════════════════════
+
+  /// Les comptes désignés par un `@` dans le texte en cours de rédaction.
+  ///
+  /// 🔴 UNE MENTION DÉSIGNE UNE PERSONNE, PAS UNE CHAÎNE. Le texte porte
+  /// « @Dominique » en clair — lisible partout, y compris par un client qui
+  /// ignore les mentions — et cette liste retient QUI a été choisi. Sans elle,
+  /// notifier reviendrait à deviner un pseudo, ce qui échoue dès que deux
+  /// membres portent le même nom.
+  final List<MentionMessage> _mentionsEnCours = [];
+
+  /// Ce qui suit le `@` en cours de frappe, ou `null` si l'on n'est pas dans
+  /// une mention. Chaîne VIDE = « @ » seul, la liste s'affiche entière.
+  String? _requeteMention;
+
+  /// Position du `@` qui a ouvert la liste, pour savoir quoi remplacer.
+  int _debutMention = -1;
+
+  /// Détecte si le curseur est dans un `@…` et met la liste à jour.
+  ///
+  /// ⚠️ ON REMONTE DEPUIS LE CURSEUR, jamais depuis le début du texte : un
+  /// message peut contenir plusieurs mentions déjà posées, et repartir du début
+  /// rouvrirait la liste sur la première d'entre elles pendant qu'on écrit à la
+  /// fin.
+  ///
+  /// La mention s'arrête à la première ESPACE : « @Jean Dupont » n'est donc pas
+  /// cherché en entier. C'est le comportement de WhatsApp, et il évite qu'une
+  /// phrase entière soit prise pour une requête après un `@` isolé.
+  void _majRequeteMention() {
+    if (!widget.isGroup) return;
+    final sel = _inputCtrl.selection;
+    final texte = _inputCtrl.text;
+    if (!sel.isValid || !sel.isCollapsed || sel.start > texte.length) {
+      if (_requeteMention != null) setState(() => _requeteMention = null);
+      return;
+    }
+    final avant = texte.substring(0, sel.start);
+    final at = avant.lastIndexOf('@');
+    if (at < 0) {
+      if (_requeteMention != null) setState(() => _requeteMention = null);
+      return;
+    }
+    // Le `@` doit ouvrir un mot : « alanya@exemple.com » n'est pas une mention.
+    if (at > 0 && !RegExp(r'\s').hasMatch(avant[at - 1])) {
+      if (_requeteMention != null) setState(() => _requeteMention = null);
+      return;
+    }
+    final requete = avant.substring(at + 1);
+    if (requete.contains(RegExp(r'\s'))) {
+      if (_requeteMention != null) setState(() => _requeteMention = null);
+      return;
+    }
+    if (_requeteMention == requete && _debutMention == at) return;
+    setState(() {
+      _requeteMention = requete;
+      _debutMention = at;
+    });
+  }
+
+  /// Les membres proposés, filtrés par ce qui suit le `@`.
+  ///
+  /// Se mentionner soi-même est écarté : on ne se notifie pas.
+  List<MapEntry<String, String>> _membresProposes() {
+    final requete = (_requeteMention ?? "").toLowerCase();
+    final source = <String, String>{
+      ...widget.memberNames,
+      // Les noms relus priment : ils sont plus frais que ceux passés à l'écran.
+      ..._membresCharges,
+    };
+    final entrees = source.entries
+        .where((e) => e.key != _myId && e.value.trim().isNotEmpty)
+        .where((e) => requete.isEmpty || e.value.toLowerCase().contains(requete))
+        .toList()
+      ..sort((a, b) => a.value.toLowerCase().compareTo(b.value.toLowerCase()));
+    return entrees;
+  }
+
+  /// Remplace le `@requête` en cours par `@Nom `, et retient le compte visé.
+  void _insereMention(String userId, String nom) {
+    final texte = _inputCtrl.text;
+    final sel = _inputCtrl.selection;
+    final fin = sel.isValid ? sel.start : texte.length;
+    if (_debutMention < 0 || _debutMention > fin) return;
+
+    // L'espace final n'est pas cosmétique : sans lui, le curseur reste DANS la
+    // mention et la liste se rouvre aussitôt sur le nom qu'on vient de choisir.
+    final remplacement = "@$nom ";
+    final nouveau = texte.replaceRange(_debutMention, fin, remplacement);
+    _inputCtrl.value = TextEditingValue(
+      text: nouveau,
+      selection:
+          TextSelection.collapsed(offset: _debutMention + remplacement.length),
+    );
+    setState(() {
+      _requeteMention = null;
+      _debutMention = -1;
+      // Une même personne ne figure qu'une fois : la mentionner deux fois dans
+      // un message ne doit pas la notifier deux fois.
+      _mentionsEnCours.removeWhere((m) => m.userId == userId);
+      _mentionsEnCours.add(MentionMessage(userId: userId, libelle: nom));
+    });
+  }
+
+  /// Les mentions à ENVOYER, réduites à celles encore présentes dans le texte.
+  ///
+  /// 🔴 SANS CE FILTRE, EFFACER « @Dominique » DU TEXTE LE NOTIFIERAIT QUAND
+  /// MÊME : la liste retient ce qui a été choisi, pas ce qui reste écrit.
+  /// Quelqu'un qui se ravise et supprime la mention ne doit déranger personne.
+  List<Map<String, String>> _mentionsAEnvoyer(String texte) {
+    final vues = <String>{};
+    final sortie = <Map<String, String>>[];
+    for (final m in _mentionsEnCours) {
+      if (vues.contains(m.userId)) continue;
+      if (!texte.contains("@${m.libelle}")) continue;
+      vues.add(m.userId);
+      sortie.add({"userId": m.userId, "libelle": m.libelle});
+    }
+    return sortie;
+  }
+
+  /// La liste des membres, au-dessus du champ de saisie.
+  Widget _panneauMentions() {
+    if (!widget.isGroup || _requeteMention == null) {
+      return const SizedBox.shrink();
+    }
+    final membres = _membresProposes();
+    // Aucun membre ne correspond : on referme plutôt que d'afficher un panneau
+    // vide au-dessus du clavier.
+    if (membres.isEmpty) return const SizedBox.shrink();
+    return Container(
+      constraints: const BoxConstraints(maxHeight: 200),
+      decoration: BoxDecoration(
+        color: _composerBg,
+        border: Border(top: BorderSide(color: _muted45.withValues(alpha: 0.3))),
+      ),
+      child: ListView.builder(
+        shrinkWrap: true,
+        padding: EdgeInsets.zero,
+        itemCount: membres.length,
+        itemBuilder: (_, i) {
+          final e = membres[i];
+          return ListTile(
+            dense: true,
+            leading: AvatarCircle(name: e.value, avatarUrl: null, radius: 16),
+            title: Text(e.value, style: TextStyle(color: _iconNeutral)),
+            onTap: () => _insereMention(e.key, e.value),
+          );
+        },
+      ),
+    );
   }
 
   /// Insère un emoji à la position du curseur, ou à la fin si le champ n'a
@@ -1439,6 +1594,9 @@ class _ChatScreenState extends State<ChatScreen>
   Future<void> _send() async {
     final text = _inputCtrl.text.trim();
     if (text.isEmpty || _sending) return;
+    // Les mentions encore présentes dans le texte — voir `_mentionsAEnvoyer`,
+    // qui écarte celles que l'utilisateur a effacées après les avoir choisies.
+    final mentions = _mentionsAEnvoyer(text);
     // Mode édition : on modifie le message au lieu d'en envoyer un nouveau.
     if (_editing != null) {
       _submitEdit(text);
@@ -1476,7 +1634,9 @@ class _ChatScreenState extends State<ChatScreen>
         _replyTo = null;
       });
       _inputCtrl.clear();
-      rt.sendMessage(widget.convId, text, tempId, replyToId: replyId);
+      rt.sendMessage(widget.convId, text, tempId,
+          replyToId: replyId, mentions: mentions);
+      _mentionsEnCours.clear();
       _scrollToBottom();
       return;
     }
@@ -1486,7 +1646,9 @@ class _ChatScreenState extends State<ChatScreen>
     try {
       final msg = await context
           .read<ChatRepository>()
-          .sendText(widget.convId, text, replyToId: replyId);
+          .sendText(widget.convId, text,
+              replyToId: replyId, mentions: mentions);
+      _mentionsEnCours.clear();
       _cacheMsg(msg);
       _inputCtrl.clear();
       setState(() {
@@ -3629,6 +3791,9 @@ class _ChatScreenState extends State<ChatScreen>
           if (!widget.isGroup)
             ActivityIndicatorBar(
                 typing: _peerTyping, recording: _peerRecording),
+          // Juste au-dessus du champ : la liste sort du `@` qu'on vient de
+          // taper, et doit rester sous les yeux, au-dessus du clavier.
+          _panneauMentions(),
           _composer(),
         ]),
       ),
@@ -4208,6 +4373,58 @@ class _ChatScreenState extends State<ChatScreen>
     return m.type == 'TEXT' ? 'FILE' : m.type;
   }
 
+  /// Le texte d'un message, avec ses `@mentions` mises en évidence.
+  ///
+  /// 🔴 ON DÉCOUPE SUR LES LIBELLÉS PORTÉS PAR LE MESSAGE, jamais sur une
+  /// expression régulière du genre `@\w+`. Deux raisons :
+  ///   - un `@` écrit à la main, qui ne désigne personne, ne doit pas se
+  ///     colorer comme une vraie mention ;
+  ///   - un libellé peut contenir une espace (« @Jean Dupont ») : aucune
+  ///     expression sur les mots ne le retrouverait en entier.
+  ///
+  /// ⚠️ LA MISE EN FORME WHATSAPP EST CONSERVÉE HORS MENTIONS : les segments
+  /// entre deux mentions repassent par `spansWhatsApp`, sans quoi le gras et
+  /// l'italique disparaîtraient de tout message contenant un `@`.
+  ///
+  /// ⚠️ Les mentions les plus LONGUES sont cherchées d'abord : avec « @Jean »
+  /// et « @Jean Dupont » dans le même groupe, commencer par la courte couperait
+  /// la longue en deux.
+  List<InlineSpan> _spansAvecMentions(String texte, Message m, Color couleur) {
+    final libelles = m.mentions.map((x) => x.libelle).toSet().toList()
+      ..sort((a, b) => b.length.compareTo(a.length));
+    final spans = <InlineSpan>[];
+    var reste = texte;
+
+    while (reste.isNotEmpty) {
+      var meilleurIndex = -1;
+      var meilleurLibelle = "";
+      for (final l in libelles) {
+        if (l.isEmpty) continue;
+        final i = reste.indexOf("@$l");
+        if (i < 0) continue;
+        // Le plus TÔT dans le texte ; à égalité, le plus long — la liste étant
+        // déjà triée par longueur, le premier trouvé à cet index l'emporte.
+        if (meilleurIndex < 0 || i < meilleurIndex) {
+          meilleurIndex = i;
+          meilleurLibelle = l;
+        }
+      }
+      if (meilleurIndex < 0) {
+        spans.addAll(spansWhatsApp(reste));
+        break;
+      }
+      if (meilleurIndex > 0) {
+        spans.addAll(spansWhatsApp(reste.substring(0, meilleurIndex)));
+      }
+      spans.add(TextSpan(
+        text: "@$meilleurLibelle",
+        style: TextStyle(color: couleur, fontWeight: FontWeight.w700),
+      ));
+      reste = reste.substring(meilleurIndex + meilleurLibelle.length + 1);
+    }
+    return spans;
+  }
+
   Widget _textBubble(Message m, bool mine) {
     final translated = _translations[m.id];
     final isTranslating = _translating.contains(m.id);
@@ -4263,11 +4480,12 @@ class _ChatScreenState extends State<ChatScreen>
            * caché, il passe au second plan. C'est ce que fait la maquette.
            */
           final aTraduction = translated != null;
+          final texteAffiche = aTraduction ? translated : displayText;
           return Text.rich(
             TextSpan(
-              children: aTraduction
-                  ? spansWhatsApp(translated)
-                  : spansWhatsApp(displayText),
+              children: m.mentions.isEmpty
+                  ? spansWhatsApp(texteAffiche)
+                  : _spansAvecMentions(texteAffiche, m, onTextColor),
             ),
             style: TextStyle(color: onTextColor),
           );

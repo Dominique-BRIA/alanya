@@ -276,8 +276,13 @@ class RealtimeClient extends ChangeNotifier {
     }
   }
 
+  /// [mentions] : les comptes visés par un `@`, chacun `{userId, libelle}`.
+  ///
+  /// ⚠️ LE SERVEUR LES REFILTRE sur les participants réels du groupe : ce que
+  /// le client annonce ici est une intention, pas une autorisation. Envoyer
+  /// l'identifiant de quelqu'un hors du groupe ne le notifie pas.
   void sendMessage(String convId, String content, String tempId,
-          {String? replyToId}) =>
+          {String? replyToId, List<Map<String, String>>? mentions}) =>
       _send({
         "type": "send",
         "convId": convId,
@@ -285,6 +290,7 @@ class RealtimeClient extends ChangeNotifier {
         "msgType": "TEXT",
         "tempId": tempId,
         if (replyToId != null) "replyToId": replyToId,
+        if (mentions != null && mentions.isNotEmpty) "mentions": mentions,
       });
 
   void sendMedia(String convId, String mediaId, String msgType, String tempId,

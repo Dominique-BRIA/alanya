@@ -47,9 +47,22 @@ class MessageCache {
        * Toute évolution future de ce cache passe désormais par `onUpgrade`, en
        * incrémentant `version`.
        */
-      version: 2,
+      version: 3,
       onUpgrade: (db, ancienne, nouvelle) async {
         if (ancienne < 2) await _creeTableTraductions(db);
+        /*
+         * v3 — LES MENTIONS `@`.
+         *
+         * Une colonne JSON sur `messages`, et non une table à part : une
+         * mention ne se lit JAMAIS seule, toujours avec son message, et
+         * `putConv` — qui efface puis réinsère la conversation — emporterait
+         * de toute façon une table liée. C'est exactement l'inverse des
+         * traductions, qui doivent survivre à ce cycle : d'où leur table
+         * indépendante. Le cycle de vie de la donnée décide de sa forme.
+         */
+        if (ancienne < 3) {
+          await db.execute('ALTER TABLE messages ADD COLUMN mentions_json TEXT');
+        }
       },
       onCreate: (db, _) async {
         await db.execute('''
@@ -64,7 +77,8 @@ class MessageCache {
             reply_to_snapshot TEXT,
             deleted_at TEXT,
             created_at TEXT NOT NULL,
-            media_json TEXT
+            media_json TEXT,
+            mentions_json TEXT
           )
         ''');
         await db.execute(
@@ -199,6 +213,9 @@ class MessageCache {
           'deleted_at': m.deletedAt?.toIso8601String(),
           'created_at': m.createdAt.toIso8601String(),
           'media_json': m.media.isNotEmpty ? jsonEncode(_mediaListToJson(m.media)) : null,
+          'mentions_json': m.mentions.isNotEmpty
+              ? jsonEncode(m.mentions.map((x) => x.toJson()).toList())
+              : null,
         },
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
@@ -225,6 +242,9 @@ class MessageCache {
         'deleted_at': m.deletedAt?.toIso8601String(),
         'created_at': m.createdAt.toIso8601String(),
         'media_json': m.media.isNotEmpty ? jsonEncode(_mediaListToJson(m.media)) : null,
+          'mentions_json': m.mentions.isNotEmpty
+              ? jsonEncode(m.mentions.map((x) => x.toJson()).toList())
+              : null,
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
@@ -301,6 +321,18 @@ class MessageCache {
       media = list.map((m) => MessageMedia.fromJson(m as Map<String, dynamic>)).toList();
     }
 
+    // ⚠️ La colonne n'existe pas dans une base restée en v2 le temps d'une
+    // migration : `row['mentions_json']` vaut alors `null`, et le message
+    // s'affiche sans mise en évidence plutôt que de faire échouer la lecture.
+    List<MentionMessage> mentions = const [];
+    if (row['mentions_json'] != null) {
+      final list = jsonDecode(row['mentions_json'] as String) as List;
+      mentions = list
+          .whereType<Map<String, dynamic>>()
+          .map(MentionMessage.fromJson)
+          .toList();
+    }
+
     return Message(
       id: row['id'] as String,
       convId: row['conv_id'] as String,
@@ -315,6 +347,7 @@ class MessageCache {
           : null,
       media: media,
       createdAt: DateTime.parse(row['created_at'] as String),
+      mentions: mentions,
     );
   }
 }

@@ -36,11 +36,18 @@ class ChatRepository {
         .toList();
   }
 
-  Future<Message> sendText(String convId, String content, {String? replyToId}) async {
+  /// [mentions] : les comptes visés par un `@`, chacun `{userId, libelle}`.
+  ///
+  /// ⚠️ CE CHEMIN EST LE REPLI du WebSocket, et il doit se comporter comme lui :
+  /// une mention retenue en temps réel et perdue ici ferait dépendre la
+  /// notification de l'état du réseau au moment de l'envoi.
+  Future<Message> sendText(String convId, String content,
+      {String? replyToId, List<Map<String, String>>? mentions}) async {
     final data = await _api.post("/api/conversations/$convId/messages", {
       "content": content,
       "type": "TEXT",
       if (replyToId != null) "replyToId": replyToId,
+      if (mentions != null && mentions.isNotEmpty) "mentions": mentions,
     });
     return Message.fromJson(data);
   }
