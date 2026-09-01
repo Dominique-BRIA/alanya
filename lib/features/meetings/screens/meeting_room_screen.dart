@@ -56,6 +56,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   StreamSubscription<MeetingAlerte>? _alertesSub;
   StreamSubscription<MeetingCoupure>? _coupuresSub;
   StreamSubscription<MeetingRefus>? _refusSub;
+  StreamSubscription<void>? _exclusionSub;
 
   /// Le contrôleur, retenu dès que les dépendances sont prêtes.
   ///
@@ -187,6 +188,22 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     _coupuresSub ??=
         context.read<MeetingController>().coupures.listen(_onCoupure);
     _refusSub ??= context.read<MeetingController>().refus.listen(_onRefus);
+    _exclusionSub ??=
+        context.read<MeetingController>().exclusions.listen((_) => _onExclu());
+  }
+
+  /// L'organisateur m'a exclu : la salle se referme, et on dit pourquoi.
+  ///
+  /// ⚠️ LE MESSAGE PART APRÈS LA FERMETURE, pas avant. Affiché d'abord, il
+  /// disparaîtrait avec l'écran qu'on quitte dans la même image ; posé après, il
+  /// s'affiche sur la liste des réunions, où l'exclu se retrouve.
+  ///
+  /// Le contrôleur a déjà démonté la maille et arrêté le service de premier
+  /// plan — il n'y a plus rien à couper ici.
+  void _onExclu() {
+    if (!mounted) return;
+    Navigator.of(context).maybePop();
+    showAppSnackBar("Vous avez été retiré de la réunion.");
   }
 
   /// Le serveur a refusé l'entrée — salle pleine, le plus souvent.
@@ -437,6 +454,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     _alertesSub?.cancel();
     _coupuresSub?.cancel();
     _refusSub?.cancel();
+    _exclusionSub?.cancel();
     // L'écran disparaît : le bandeau global reprend si la réunion continue.
     // On ne quitte PAS la réunion ici — c'est le rôle du bouton rouge.
     _signaleSalleVisible(false);
@@ -1352,9 +1370,13 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       icon: const Icon(Icons.more_vert, color: Colors.white54, size: 20),
       tooltip: "Actions",
       color: const Color(0xFF2A2A2A),
-      onSelected: (media) {
-        ctrl.couperParticipant(peerId, media);
-        showAppSnackBar(media == "audio"
+      onSelected: (action) {
+        if (action == "exclure") {
+          _confirmeExclusion(peerId, nom);
+          return;
+        }
+        ctrl.couperParticipant(peerId, action);
+        showAppSnackBar(action == "audio"
             ? "Micro de $nom coupé."
             : "Caméra de $nom coupée.");
       },
@@ -1385,8 +1407,64 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                   style: TextStyle(color: Colors.white)),
             ),
           ),
+        const PopupMenuDivider(),
+        // Séparé des deux coupures, et en rouge : couper se répare d'un geste,
+        // exclure efface la place de quelqu'un. Deux gestes de nature
+        // différente ne se ressemblent pas dans un menu.
+        const PopupMenuItem(
+          value: "exclure",
+          child: ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.person_remove, color: Colors.redAccent),
+            title: Text("Exclure de la réunion",
+                style: TextStyle(color: Colors.redAccent)),
+          ),
+        ),
       ],
     );
+  }
+
+  /// Exclure demande confirmation — couper, non.
+  ///
+  /// 🔴 LA DIFFÉRENCE EST DANS CE QUI SE RÉPARE. Un micro coupé se rallume ;
+  /// une exclusion efface la ligne du participant, et l'exclu ne peut plus
+  /// rentrer par la porte du `join`. Un geste sans retour se confirme.
+  Future<void> _confirmeExclusion(String peerId, String nom) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Exclure de la réunion ?"),
+        content: Text(
+            "$nom sera retiré de la salle et ne pourra pas y revenir seul."),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text("Annuler"),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text("Exclure",
+                style: TextStyle(color: dangerOf(context))),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await context
+          .read<MeetingsRepository>()
+          .exclureParticipant(widget.meetingId, peerId);
+      if (!mounted) return;
+      // Rien n'est retiré de la grille ici : c'est le serveur qui annonce le
+      // départ à toute la salle (`meeting_user_left`), et le contrôleur suit.
+      // Le faire aussi localement ferait disparaître la vignette deux fois.
+      showAppSnackBar("$nom a été exclu de la réunion.");
+    } on ApiException catch (e) {
+      showAppSnackBar(e.message);
+    } catch (_) {
+      showAppSnackBar(tr(context, 'server_unreachable'));
+    }
   }
 
   void _showChat() {

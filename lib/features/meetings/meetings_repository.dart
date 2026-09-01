@@ -75,6 +75,25 @@ class MeetingsRepository {
     await _api.post("/api/meetings/$idMeeting/decline", {});
   }
 
+  /// EXCLUT un participant — organisateur uniquement.
+  ///
+  /// 🔴 CE N'EST PAS UNE COUPURE DE MICRO. Couper se répare d'un geste ;
+  /// exclure efface la ligne du participant, et l'exclu ne peut plus rentrer
+  /// par la porte du `join`. C'est pour cela que l'écran demande confirmation
+  /// avant, alors que couper agit sans rien demander.
+  ///
+  /// Le serveur refuse d'exclure l'organisateur lui-même : la réunion se
+  /// retrouverait sans personne pour la fermer.
+  ///
+  /// ⚠️ Le corps voyage dans un DELETE, ce que `ApiClient.delete` accepte
+  /// depuis la suppression de compte. Le serveur lit `participantId`.
+  Future<void> exclureParticipant(int idMeeting, String participantId) async {
+    await _api.delete(
+      "/api/meetings/$idMeeting/participants",
+      body: {"participantId": participantId},
+    );
+  }
+
   /// Terminer une réunion (organisateur uniquement).
   Future<void> endMeeting(int idMeeting) async {
     await _api.post("/api/meetings/$idMeeting/end", {});

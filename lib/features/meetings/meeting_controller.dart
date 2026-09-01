@@ -93,6 +93,15 @@ class MeetingController extends ChangeNotifier {
   /// afficher mais une salle DÉMONTÉE — le contrôleur a déjà tout refermé quand
   /// l'événement arrive.
   Stream<MeetingRefus> get refus => _refus.stream;
+
+  /// J'AI ÉTÉ EXCLU de la réunion par l'organisateur.
+  ///
+  /// Un flux plutôt qu'un drapeau : la salle est démontée dans la foulée, et un
+  /// drapeau posé sur un contrôleur qu'on vient de remettre à zéro se lit mal —
+  /// il faudrait décider de quand l'effacer. L'événement, lui, se consomme une
+  /// fois et ne laisse rien derrière.
+  Stream<void> get exclusions => _exclusions.stream;
+  final StreamController<void> _exclusions = StreamController<void>.broadcast();
   final StreamController<MeetingRefus> _refus =
       StreamController<MeetingRefus>.broadcast();
 
@@ -873,6 +882,31 @@ class MeetingController extends ChangeNotifier {
           _clear();
         }
         break;
+      case "meeting_kicked":
+        /*
+         * 🔴 J'AI ÉTÉ EXCLU DE LA RÉUNION — et c'est à moi de raccrocher.
+         *
+         * ⚠️ LA TRAME EST DIFFUSÉE À TOUTE LA SALLE, pas au seul exclu : le
+         * pont côté serveur relaie `{...donnees, type, meetingId}` à la salle
+         * entière. Sans le test sur `toUserId`, TOUT LE MONDE quitterait la
+         * réunion dès qu'une personne en est exclue.
+         *
+         * Le serveur retire aussi l'exclu de la salle de son côté, et annonce
+         * son départ aux autres : cette branche-ci ne sert donc qu'à MON propre
+         * écran. Sans elle, je resterais devant une grille de vignettes gelées,
+         * micro ouvert, en croyant participer.
+         */
+        if (e["meetingId"] == activeMeetingId &&
+            e["toUserId"] is String &&
+            e["toUserId"] == myUserId) {
+          _stopMesh();
+          CallForegroundService.arreter();
+          // Annoncé AVANT le démontage : `_clear()` notifie ses auditeurs, et
+          // l'écran peut se refermer sur le champ avant d'avoir su pourquoi.
+          if (!_exclusions.isClosed) _exclusions.add(null);
+          _clear();
+        }
+        break;
       case "ws_connected":
         // Reconnexion de la socket après une coupure. On se réinscrit dans la
         // salle, sinon la nouvelle socket n'est pas dans meetingRooms côté
@@ -1397,6 +1431,7 @@ class MeetingController extends ChangeNotifier {
     _alertes.close();
     _coupures.close();
     _refus.close();
+    _exclusions.close();
     _compositions.close();
     _stopMesh();
     super.dispose();
