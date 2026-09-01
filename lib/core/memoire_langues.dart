@@ -25,6 +25,21 @@ class MemoireLangues {
 
   static const _cle = "langues_correspondants";
 
+  /// Les langues FIXÉES à la main, par correspondant.
+  ///
+  /// 🔴 ELLES PRIMENT SUR TOUT — sur la détection comme sur ce qui a été
+  /// appris (demande du user, 31/08/2026). Quelqu'un qui sait dans quelle
+  /// langue son interlocuteur écrit en sait toujours plus que ML Kit sur trois
+  /// mots ; lui demander de le dire une fois vaut mieux que le deviner cent
+  /// fois.
+  ///
+  /// Absence d'entrée = « auto », c'est-à-dire le mécanisme de détection.
+  /// C'est le défaut, et il ne se stocke pas : ne rien écrire est déjà dire
+  /// « devine ».
+  static const _cleFixees = "langues_fixees";
+
+  static Map<String, String>? _cacheFixees;
+
   /// Plafond d'entrées retenues.
   ///
   /// Sans lui, la carte grandirait indéfiniment dans les préférences — et
@@ -56,9 +71,63 @@ class MemoireLangues {
     }
   }
 
+  static Future<Map<String, String>> _chargeFixees() async {
+    final connu = _cacheFixees;
+    if (connu != null) return connu;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final brut = prefs.getString(_cleFixees);
+      if (brut == null || brut.isEmpty) return _cacheFixees = {};
+      final decode = jsonDecode(brut);
+      if (decode is! Map) return _cacheFixees = {};
+      return _cacheFixees = {
+        for (final e in decode.entries)
+          if (e.key is String && e.value is String)
+            e.key as String: e.value as String,
+      };
+    } catch (_) {
+      return _cacheFixees = {};
+    }
+  }
+
+  /// La langue FIXÉE pour [userId], ou `null` si elle est en « auto ».
+  static Future<String?> langueFixee(String userId) async {
+    if (userId.isEmpty) return null;
+    final carte = await _chargeFixees();
+    return carte[userId];
+  }
+
+  /// Fixe la langue de [userId], ou revient à « auto » avec `null`.
+  ///
+  /// ⚠️ REVENIR À « AUTO » N'EFFACE PAS CE QUI A ÉTÉ APPRIS : les deux mémoires
+  /// sont distinctes. C'est voulu — celui qui relâche la consigne retrouve la
+  /// meilleure observation disponible, pas une page blanche.
+  static Future<void> fixe(String userId, String? langue) async {
+    if (userId.isEmpty) return;
+    final carte = await _chargeFixees();
+    if (langue == null || langue.isEmpty) {
+      if (!carte.containsKey(userId)) return;
+      carte.remove(userId);
+    } else {
+      if (carte[userId] == langue) return;
+      carte[userId] = langue;
+    }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_cleFixees, jsonEncode(carte));
+    } catch (_) {}
+  }
+
   /// La langue connue de [userId], ou `null`.
+  ///
+  /// ⚠️ LA LANGUE FIXÉE PRIME sur celle qui a été apprise. Un appelant qui
+  /// n'interrogerait que la mémoire d'observation ignorerait la consigne
+  /// explicite de l'utilisateur — c'est ici, et pas chez l'appelant, que
+  /// l'ordre des deux se décide.
   static Future<String?> langueDe(String userId) async {
     if (userId.isEmpty) return null;
+    final fixee = await langueFixee(userId);
+    if (fixee != null && fixee.isNotEmpty) return fixee;
     final carte = await _charge();
     return carte[userId];
   }
@@ -73,6 +142,10 @@ class MemoireLangues {
   /// SÛRES.
   static Future<void> retiens(String userId, String langue) async {
     if (userId.isEmpty || langue.isEmpty) return;
+    // Une langue fixée à la main n'a pas à être « corrigée » par une
+    // observation : l'utilisateur a tranché, et une détection sûre sur un
+    // message isolé ne le contredit pas.
+    if (await langueFixee(userId) != null) return;
     final carte = await _charge();
     if (carte[userId] == langue) return;
     if (carte.length >= _plafond && !carte.containsKey(userId)) carte.clear();
@@ -91,9 +164,13 @@ class MemoireLangues {
   /// compte suivant sur le même téléphone.
   static Future<void> clear() async {
     _cache = {};
+    _cacheFixees = {};
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_cle);
+      // Les langues fixées partent aussi : elles désignent des correspondants
+      // du compte qu'on quitte.
+      await prefs.remove(_cleFixees);
     } catch (_) {}
   }
 }

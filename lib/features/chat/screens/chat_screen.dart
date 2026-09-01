@@ -417,6 +417,12 @@ class _ChatScreenState extends State<ChatScreen>
   /// effaçait tout, et il fallait retraduire chaque message un par un.
   final Map<String, String> _translations = {};
 
+  /// La langue D'ORIGINE de chaque message traduit, pour l'afficher.
+  ///
+  /// Absente quand il n'y avait rien à traduire : la bulle n'annonce alors
+  /// aucune traduction, puisqu'il n'y en a pas eu.
+  final Map<String, String> _sourceTraduction = {};
+
   /// Charge les traductions déjà faites pour cette conversation.
   ///
   /// ⚠️ FILTRÉ SUR LA LANGUE DE LECTURE COURANTE : une traduction faite vers
@@ -428,7 +434,13 @@ class _ChatScreenState extends State<ChatScreen>
     try {
       final connues = await MessageCache.traductionsDe(widget.convId, cible);
       if (!mounted || connues.isEmpty) return;
-      setState(() => _translations.addAll(connues));
+      setState(() {
+        for (final e in connues.entries) {
+          _translations[e.key] = e.value.texte;
+          final src = e.value.source;
+          if (src != null) _sourceTraduction[e.key] = src;
+        }
+      });
     } catch (_) {
       // Cache illisible : on repart sans traduction, elles se referont à la
       // demande. Rien à dire à l'utilisateur.
@@ -3563,6 +3575,7 @@ class _ChatScreenState extends State<ChatScreen>
         overlayOpacity: 0.85,
         child: Column(children: [
           _pinnedBanner(),
+          _bandeauLangueManquante(),
           Expanded(
               child: _loading
                   ? Center(child: CircularProgressIndicator(color: _accent))
@@ -4236,13 +4249,53 @@ class _ChatScreenState extends State<ChatScreen>
             displayText =
                 displayText.replaceAll(RegExp(r'\[([^\]]+)\]'), '').trim();
           }
-          return displayText.isNotEmpty
-              ? Text.rich(
-                  TextSpan(children: spansWhatsApp(displayText)),
-                  style: TextStyle(color: onTextColor),
-                )
-              : const SizedBox.shrink();
+          if (displayText.isEmpty) return const SizedBox.shrink();
+          /*
+           * 🔴 QUAND IL Y A UNE TRADUCTION, C'EST ELLE LE TEXTE PRINCIPAL
+           * (demande du user, 31/08/2026, capture de référence à l'appui).
+           *
+           * L'ordre était inverse : l'original en grand, la traduction dans un
+           * encadré en dessous. Or on traduit précisément parce qu'on ne lit
+           * PAS la langue d'origine — mettre en avant ce qu'on ne comprend pas
+           * et reléguer ce qu'on comprend prenait le lecteur à contre-emploi.
+           *
+           * L'original reste juste en dessous, en plus petit : il n'est pas
+           * caché, il passe au second plan. C'est ce que fait la maquette.
+           */
+          final aTraduction = translated != null;
+          return Text.rich(
+            TextSpan(
+              children: aTraduction
+                  ? spansWhatsApp(translated)
+                  : spansWhatsApp(displayText),
+            ),
+            style: TextStyle(color: onTextColor),
+          );
         })(),
+        // L'ORIGINAL, sous la traduction — et la langue dont il vient.
+        if (translated != null && (m.content ?? '').trim().isNotEmpty) ...[
+          const SizedBox(height: 3),
+          Text(
+            (m.content ?? '').trim(),
+            style: TextStyle(fontSize: 12.5, color: onSubColor),
+          ),
+          const SizedBox(height: 2),
+          Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.translate, size: 11, color: onSubColor),
+            const SizedBox(width: 4),
+            Text(
+              // « traduit de l'anglais » quand la langue est connue ; le
+              // libellé nu sinon — une traduction dont on ignore la source
+              // reste une traduction, et le taire vaut mieux que d'inventer.
+              _sourceTraduction[m.id] != null
+                  ? tr(context, 'translated_from').replaceFirst(
+                      '{langue}', nomAutonyme(_sourceTraduction[m.id]!))
+                  : tr(context, 'translated'),
+              style: TextStyle(
+                  fontSize: 10, fontStyle: FontStyle.italic, color: onSubColor),
+            ),
+          ]),
+        ],
         if ((m.content ?? '').isNotEmpty) ...[
           buildLinkPreview(m.content!, mine),
           (() {
@@ -4296,34 +4349,9 @@ class _ChatScreenState extends State<ChatScreen>
             );
           })(),
         ],
-        if (translated != null) ...[
-          const SizedBox(height: 6),
-          Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                  color:
-                      mine ? Colors.white.withOpacity(0.15) : _quoteBgRecv(0.7),
-                  borderRadius: BorderRadius.circular(8)),
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(Icons.translate, size: 12, color: onSubColor),
-                      const SizedBox(width: 4),
-                      Text(tr(context, 'translated'),
-                          style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
-                              color: onSubColor))
-                    ]),
-                    const SizedBox(height: 2),
-                    Text(translated,
-                        style: TextStyle(
-                            fontSize: 13,
-                            color: onTextColor,
-                            fontStyle: FontStyle.italic)),
-                  ])),
-        ],
+        // L'ancien encadré « Traduction » sous le message a disparu : la
+        // traduction est passée EN HAUT, à la place du texte principal, et
+        // l'original juste sous elle. Voir le bloc de texte ci-dessus.
         if (isTranslating) ...[
           const SizedBox(height: 4),
           Row(mainAxisSize: MainAxisSize.min, children: [
@@ -4353,6 +4381,75 @@ class _ChatScreenState extends State<ChatScreen>
 
   /// Vrai pendant une passe de traduction automatique — une seule à la fois.
   bool _autoEnCours = false;
+
+  /// La langue qu'il faudrait installer pour que l'automatique fasse son
+  /// travail dans cette conversation.
+  ///
+  /// 🔴 SANS CE BANDEAU, LA FONCTION EST SILENCIEUSEMENT INERTE — c'est le
+  /// défaut signalé par le user le 31/08/2026 : « j'ai activé la traduction
+  /// automatique, il faut encore appuyer sur Traduire ». La passe automatique
+  /// s'arrête sur chaque message dont le modèle de langue n'est pas installé,
+  /// et elle ne télécharge jamais rien d'elle-même — à raison, mais rien ne le
+  /// disait. L'utilisateur voyait donc un interrupteur allumé qui ne faisait
+  /// rien.
+  String? _langueManquante;
+
+  /// Le bandeau qui propose d'installer la langue manquante.
+  ///
+  /// Un geste, pas une notification : le téléchargement reste déclenché par
+  /// l'utilisateur, avec la confirmation habituelle qui annonce le poids.
+  Widget _bandeauLangueManquante() {
+    final langue = _langueManquante;
+    if (langue == null || !TraductionAuto.instance.activee) {
+      return const SizedBox.shrink();
+    }
+    return Material(
+      color: AlanyaColors.gold.withValues(alpha: 0.18),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
+        child: Row(children: [
+          Icon(Icons.translate, size: 16, color: _iconNeutral),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              "Traduction automatique : installer ${nomAutonyme(langue)}",
+              style: TextStyle(fontSize: 12.5, color: _iconNeutral),
+            ),
+          ),
+          TextButton(
+            onPressed: () => _installeLangueManquante(langue),
+            child: const Text("Installer"),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Future<void> _installeLangueManquante(String source) async {
+    final cible = context.read<LocaleController>().languageCode;
+    final manquantes = await nomsLanguesManquantes(source, cible);
+    if (!mounted) return;
+    final libelle =
+        manquantes.isEmpty ? nomAutonyme(source) : manquantes.join(" + ");
+    if (!await confirmerInstallationLangues(context, libelle)) return;
+    if (!mounted) return;
+    var installe = await telechargerCouple(source, cible);
+    if (!installe &&
+        wifiExige &&
+        mounted &&
+        await proposerDonneesMobiles(context)) {
+      installe = await telechargerCouple(source, cible, wifiSeulement: false);
+    }
+    if (!mounted) return;
+    if (!installe) {
+      _messageTraduction('translation_download_failed');
+      return;
+    }
+    setState(() => _langueManquante = null);
+    // La passe reprend aussitôt : les messages qui l'attendaient sont
+    // maintenant traduisibles, et l'utilisateur vient de le demander.
+    _traduitAutomatiquement();
+  }
 
   /// Combien de messages récents la passe automatique examine.
   ///
@@ -4435,14 +4532,24 @@ class _ChatScreenState extends State<ChatScreen>
         }
         // Le modèle manque : on s'arrête là pour ce message, sans rien
         // télécharger et sans rien retenir — il redeviendra candidat le jour où
-        // la langue sera installée.
-        if (await etatCouple(source, cible) != EtatCouple.pret) continue;
+        // la langue sera installée. Le bandeau le DIT, sans quoi l'interrupteur
+        // resterait allumé sans effet visible.
+        if (await etatCouple(source, cible) != EtatCouple.pret) {
+          if (!mounted) return;
+          if (_langueManquante != source) {
+            setState(() => _langueManquante = source);
+          }
+          continue;
+        }
         if (!mounted) return;
 
         try {
           final traduit = await traduireUnTexte(source, cible, texte);
           if (!mounted) return;
-          setState(() => _translations[m.id] = traduit);
+          setState(() {
+            _translations[m.id] = traduit;
+            _sourceTraduction[m.id] = source;
+          });
           await MessageCache.putTraduction(
             messageId: m.id,
             convId: widget.convId,
@@ -4470,7 +4577,10 @@ class _ChatScreenState extends State<ChatScreen>
     if (text.isEmpty) return;
     final cible = context.read<LocaleController>().languageCode;
     if (_translations.containsKey(m.id)) {
-      setState(() => _translations.remove(m.id));
+      setState(() {
+        _translations.remove(m.id);
+        _sourceTraduction.remove(m.id);
+      });
       // Oubliée aussi en base : sans cela, elle reviendrait à la réouverture et
       // le geste de retrait passerait pour ignoré.
       await MessageCache.supprimeTraduction(m.id);
@@ -4564,7 +4674,10 @@ class _ChatScreenState extends State<ChatScreen>
       }
       final traduit = await traduireUnTexte(source, cible, text);
       if (!mounted) return;
-      setState(() => _translations[m.id] = traduit);
+      setState(() {
+        _translations[m.id] = traduit;
+        _sourceTraduction[m.id] = source;
+      });
       await MessageCache.putTraduction(
         messageId: m.id,
         convId: widget.convId,

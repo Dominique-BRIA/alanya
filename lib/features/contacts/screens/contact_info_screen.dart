@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_mlkit_translation/google_mlkit_translation.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/api_client.dart';
 import '../../../core/alanya_id_formatter.dart';
 import '../../../core/app_snackbar.dart';
+import '../../../core/memoire_langues.dart';
+import '../../../core/traduction_appareil.dart';
 import '../../../core/token_storage.dart';
 import '../../../models/message.dart';
 import '../../../theme/alanya_theme.dart';
@@ -80,13 +83,22 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
 
   bool _muted = false;
 
+  /// La langue FIXÉE pour ce correspondant, ou `null` pour « auto ».
+  String? _langueFixee;
+
   String get _muteKey => "mute_${widget.convId ?? widget.userId}";
 
   @override
   void initState() {
     super.initState();
     _loadMuted();
+    _loadLangue();
     _loadSharedMedia();
+  }
+
+  Future<void> _loadLangue() async {
+    final fixee = await MemoireLangues.langueFixee(widget.userId);
+    if (mounted) setState(() => _langueFixee = fixee);
   }
 
   Future<void> _loadMuted() async {
@@ -643,6 +655,93 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
   // ---------------------------------------------------------------------------
   // PARAMÈTRES
   // ---------------------------------------------------------------------------
+  /// LA LANGUE DU CORRESPONDANT — « auto » par défaut.
+  ///
+  /// 🔴 POURQUOI CE RÉGLAGE EXISTE (demande du user, 31/08/2026). La détection
+  /// automatique se trompe souvent : « merci » est français, portugais et
+  /// proche de l'italien, et un message de trois mots n'a pas de quoi trancher.
+  /// L'utilisateur, lui, SAIT dans quelle langue son interlocuteur écrit. Le
+  /// lui demander une fois vaut mieux que le deviner cent fois.
+  ///
+  /// ⚠️ « AUTO » N'EST PAS UNE LANGUE : c'est l'absence de consigne, et donc le
+  /// mécanisme actuel — détection, puis mémoire de ce qu'on a observé chez
+  /// cette personne. Le défaut ne s'écrit nulle part : ne rien stocker dit
+  /// déjà « devine ».
+  ///
+  /// Une langue fixée PRIME sur tout, et l'observation cesse de la corriger
+  /// (voir `core/memoire_langues.dart`).
+  Widget _ligneLangue(ColorScheme cs) {
+    return Material(
+      type: MaterialType.transparency,
+      child: ListTile(
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+        leading: Icon(Icons.translate_rounded, color: accentOf(context)),
+        title: Text(
+          "Langue de ${widget.name}",
+          style: TextStyle(
+              fontSize: 15, fontWeight: FontWeight.w500, color: cs.onSurface),
+        ),
+        subtitle: Text(
+          _langueFixee == null
+              ? "Auto — détectée à la lecture"
+              : nomAutonyme(_langueFixee!),
+          style: TextStyle(fontSize: 12.5, color: cs.onSurfaceVariant),
+        ),
+        trailing: const Icon(Icons.chevron_right_rounded, size: 20),
+        onTap: _choisirLangue,
+      ),
+    );
+  }
+
+  Future<void> _choisirLangue() async {
+    final choix = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) {
+        final langues = languesTraduisibles();
+        return SafeArea(
+          child: ListView.builder(
+            shrinkWrap: true,
+            // +1 : la première ligne est « Auto », qui n'est pas une langue.
+            itemCount: langues.length + 1,
+            itemBuilder: (_, i) {
+              if (i == 0) {
+                return ListTile(
+                  leading: Icon(Icons.auto_awesome_outlined,
+                      color: accentOf(context)),
+                  title: const Text("Auto — détectée à la lecture"),
+                  trailing: _langueFixee == null
+                      ? Icon(Icons.check, color: accentOf(context))
+                      : null,
+                  onTap: () => Navigator.pop(ctx, ""),
+                );
+              }
+              final code = langues[i - 1].bcpCode;
+              return ListTile(
+                title: Text(nomAutonyme(code)),
+                trailing: _langueFixee == code
+                    ? Icon(Icons.check, color: accentOf(context))
+                    : null,
+                onTap: () => Navigator.pop(ctx, code),
+              );
+            },
+          ),
+        );
+      },
+    );
+    if (choix == null || !mounted) return;
+    // La chaîne vide porte « auto » : `null` voudrait dire « annulé », et les
+    // deux ne se distingueraient plus au retour de la feuille.
+    final langue = choix.isEmpty ? null : choix;
+    await MemoireLangues.fixe(widget.userId, langue);
+    if (!mounted) return;
+    setState(() => _langueFixee = langue);
+    showAppSnackBar(langue == null
+        ? "Langue détectée automatiquement"
+        : "Messages de ${widget.name} lus comme du ${nomAutonyme(langue)}");
+  }
+
   Widget _settingsCard() {
     final cs = Theme.of(context).colorScheme;
     return GlassCard(
@@ -674,6 +773,8 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
             activeColor: positiveOf(context),
             onChanged: (on) => _toggleMuted(!on),
           ),
+          _divider(),
+          _ligneLangue(cs),
           _divider(),
           Material(
             type: MaterialType.transparency,

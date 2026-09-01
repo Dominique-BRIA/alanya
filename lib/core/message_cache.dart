@@ -10,6 +10,21 @@ import '../models/message.dart';
 /// Stocke les messages dans une base SQLite locale. Au chargement d'une
 /// conversation, on affiche d'abord le cache (instantané), puis on synchronise
 /// avec le serveur en arrière-plan pour récupérer les nouveaux messages.
+/// Une traduction retenue : le texte, et la langue d'où il vient.
+///
+/// La LANGUE SOURCE accompagne le texte parce que la bulle l'affiche —
+/// « traduit de l'anglais ». Sans elle, le fil dirait qu'un message a été
+/// traduit sans dire de quoi, ce qui est précisément l'information utile quand
+/// on relit une conversation à plusieurs langues.
+///
+/// `source` est nulle quand il n'y avait RIEN à traduire : le texte est alors
+/// celui d'origine, et aucune mention ne doit s'afficher.
+class TraductionLocale {
+  const TraductionLocale({required this.texte, required this.source});
+  final String texte;
+  final String? source;
+}
+
 class MessageCache {
   MessageCache._();
   static Database? _db;
@@ -125,19 +140,23 @@ class MessageCache {
   /// Filtré sur la langue : ce qui a été traduit vers une autre langue n'est
   /// pas rendu, mais reste en base — l'utilisateur peut revenir à sa langue
   /// précédente, et retrouver son fil déjà traduit.
-  static Future<Map<String, String>> traductionsDe(
+  static Future<Map<String, TraductionLocale>> traductionsDe(
     String convId,
     String langueCible,
   ) async {
     final db = await _database();
     final rows = await db.query(
       'traductions',
-      columns: ['message_id', 'texte'],
+      columns: ['message_id', 'texte', 'langue_source'],
       where: 'conv_id = ? AND langue_cible = ?',
       whereArgs: [convId, langueCible],
     );
     return {
-      for (final r in rows) r['message_id'] as String: r['texte'] as String,
+      for (final r in rows)
+        r['message_id'] as String: TraductionLocale(
+          texte: r['texte'] as String,
+          source: r['langue_source'] as String?,
+        ),
     };
   }
 
