@@ -4459,12 +4459,31 @@ class _ChatScreenState extends State<ChatScreen>
   /// mesure. Les traductions étant conservées, le travail ne se refait pas.
   static const int _fenetreAuto = 30;
 
-  /// Sous cette longueur, on ne traduit pas tout seul.
+  /// Sous cette longueur, il n'y a rien à traduire du tout.
   ///
-  /// « ok », « merci », « à demain » : la détection y devine plus qu'elle ne
-  /// reconnaît, et le lecteur les comprenait de toute façon. Le bouton
-  /// « Traduire » reste disponible pour qui veut insister.
-  static const int _minCaracteresAuto = 15;
+  /// 🔴 ABAISSÉ DE 15 À 1 LE 31/08/2026, et c'était LA cause du défaut signalé
+  /// par le user : « j'envoie plein de hello, ils ne sont pas traduits
+  /// automatiquement, et pourtant quand je clique sur traduire ça passe ».
+  /// « hello » fait cinq caractères — la passe automatique le sautait, message
+  /// après message, pendant que le bouton, lui, n'a jamais eu de plancher.
+  ///
+  /// Le plancher de 15 venait de la crainte des mauvaises détections sur un
+  /// texte court. Cette crainte est fondée, mais elle ne justifiait pas de
+  /// rendre la fonction inerte sur les messages les plus fréquents d'une
+  /// conversation : **l'automatique doit faire ce que fait le bouton**, sans
+  /// quoi il ne mérite pas son nom.
+  ///
+  /// ⚠️ CE QUE ÇA COÛTE, ASSUMÉ : sur un « hello » d'un correspondant inconnu,
+  /// la langue devinée peut être fausse, et la traduction affichée sera fausse
+  /// aussi — exactement ce que le bouton produisait déjà dans ce cas. Trois
+  /// garde-fous limitent la casse : une langue FIXÉE court-circuite la
+  /// devinette, la langue APPRISE du correspondant passe avant elle, et
+  /// l'original reste affiché sous la traduction — une bêtise se voit.
+  ///
+  /// ⚠️ MIS À 1 SUR DEMANDE EXPLICITE DU USER (« arrête cette limite de
+  /// caractère, mets-le à 1 »). Le plancher ne sert donc plus qu'à écarter la
+  /// chaîne VIDE : tout message qui porte au moins un caractère est candidat.
+  static const int _minCaracteresAuto = 1;
 
   /// Types dont le `content` est de la PROSE.
   ///
@@ -4512,18 +4531,9 @@ class _ChatScreenState extends State<ChatScreen>
         // la détection au lieu de lui servir de repli.
         final fixee = await MemoireLangues.langueFixee(m.senderId);
         if (!mounted) return;
-        /*
-         * 🔴 LE PLANCHER DE LONGUEUR NE S'APPLIQUE PAS QUAND LA LANGUE EST
-         * FIXÉE, et c'est la seconde moitié du défaut signalé le 31/08/2026 :
-         * « la traduction automatique n'est pas encore réelle ».
-         *
-         * Ce plancher existe parce que la DÉTECTION devine sur un texte court —
-         * « Hello guy », neuf caractères, était détecté comme du vietnamien.
-         * Quand l'utilisateur a désigné la langue lui-même, il n'y a plus rien
-         * à deviner : refuser de traduire un message court reviendrait à se
-         * priver de la seule information sûre dont on dispose.
-         */
-        if (fixee == null && texte.length < _minCaracteresAuto) continue;
+        // Un caractère : le plancher n'écarte plus que le message vide. Voir
+        // `_minCaracteresAuto`, qui porte l'histoire de cette limite.
+        if (texte.length < _minCaracteresAuto) continue;
 
         final connue = await MemoireLangues.langueDe(m.senderId);
         if (!mounted) return;
