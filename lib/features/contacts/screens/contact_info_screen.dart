@@ -7,12 +7,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/api_client.dart';
 import '../../../core/alanya_id_formatter.dart';
 import '../../../core/app_snackbar.dart';
+import '../../../core/locale_controller.dart';
 import '../../../core/memoire_langues.dart';
 import '../../../core/traduction_appareil.dart';
 import '../../../core/token_storage.dart';
 import '../../../models/message.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
+import '../../../widgets/dialogues_traduction.dart';
 import '../../../widgets/glass_card.dart';
 import '../../../widgets/media/cached_media.dart';
 import '../../account/screens/avatar_viewer_screen.dart';
@@ -740,6 +742,52 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
     showAppSnackBar(langue == null
         ? "Langue détectée automatiquement"
         : "Messages de ${widget.name} lus comme du ${nomAutonyme(langue)}");
+    if (langue != null) await _installeCoupleSiNecessaire(langue);
+  }
+
+  /// Installe le couple de langues DANS LA FOULÉE, une seule fois.
+  ///
+  /// 🔴 DEMANDE DU USER (31/08/2026), et c'est le bon moment : fixer la langue
+  /// de quelqu'un, c'est annoncer qu'on va lire ses messages traduits. Attendre
+  /// le premier message pour découvrir qu'il manque un modèle repousse le
+  /// téléchargement au pire instant — celui où l'on veut lire, souvent sans
+  /// Wi-Fi.
+  ///
+  /// ⚠️ « UNE FOIS » AU SENS STRICT : si le couple est déjà prêt, rien ne se
+  /// passe et rien ne s'affiche. La question n'est reposée que si l'état change
+  /// — modèle évincé par le système, ou langue de lecture changée.
+  ///
+  /// ⚠️ LE TÉLÉCHARGEMENT RESTE UN GESTE : la confirmation habituelle annonce
+  /// le poids, et le repli données mobiles n'est proposé que si le Wi-Fi était
+  /// bien la contrainte. On ne tire pas des dizaines de mégaoctets parce que
+  /// quelqu'un a touché un menu.
+  Future<void> _installeCoupleSiNecessaire(String source) async {
+    final cible = context.read<LocaleController>().languageCode;
+    final etat = await etatCouple(source, cible);
+    if (!mounted) return;
+    // `pret` : déjà là. `indisponible` : même langue que la mienne, ou langue
+    // non traduisible — dans les deux cas il n'y a rien à télécharger, et
+    // proposer une installation impossible serait trompeur.
+    if (etat != EtatCouple.aTelecharger) return;
+
+    final manquantes = await nomsLanguesManquantes(source, cible);
+    if (!mounted) return;
+    final libelle =
+        manquantes.isEmpty ? nomAutonyme(source) : manquantes.join(" + ");
+    if (!await confirmerInstallationLangues(context, libelle)) return;
+    if (!mounted) return;
+
+    var installe = await telechargerCouple(source, cible);
+    if (!installe &&
+        wifiExige &&
+        mounted &&
+        await proposerDonneesMobiles(context)) {
+      installe = await telechargerCouple(source, cible, wifiSeulement: false);
+    }
+    if (!mounted) return;
+    showAppSnackBar(installe
+        ? "${nomAutonyme(source)} installé — les messages seront traduits"
+        : "Installation impossible");
   }
 
   Widget _settingsCard() {
