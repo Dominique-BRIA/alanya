@@ -26,12 +26,12 @@ import 'fiche_entreprise_screen.dart';
 /// filtrage »). Elle ignorait le pays jusque-là, à la demande du user
 /// également : **ne pas revenir en arrière sans lui**.
 ///
-/// ⚠️ CE QUE CE CHOIX COÛTE, et pourquoi il tient quand même : la recherche
-/// était le seul chemin vers une entreprise dont le pays n'est pas renseigné.
-/// Le serveur INCLUT désormais ces entreprises-là dans tous les pays — une
-/// entreprise sans pays n'est pas « d'un autre pays », elle est non classée.
-/// Sans cette règle, la moitié de l'annuaire de production (1 entreprise sur 2,
-/// mesuré le 31/08) serait devenue introuvable.
+/// 🔴 UNE ENTREPRISE SANS PAYS NE S'AFFICHE NULLE PART — tranché par le user,
+/// en connaissance de cause : la recherche était son dernier chemin d'accès, et
+/// la production compte 1 entreprise sans pays sur 2 (mesuré le 31/08/2026).
+/// Elle n'est pas perdue, elle est invisible tant que son pays n'est pas
+/// renseigné. Ne pas « réparer » ça en la réintroduisant : le remède est de
+/// renseigner le pays de l'entreprise.
 ///
 /// Le menu ne propose QUE des pays qui ont au moins une entreprise : c'est le
 /// serveur qui le dit, lui seul le sait.

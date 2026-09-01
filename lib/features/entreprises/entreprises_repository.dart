@@ -185,9 +185,8 @@ class EntreprisesRepository {
   ///
   /// 🔴 ELLE SUIT LE FILTRE depuis le 31/08/2026 (demande du user). Elle
   /// ignorait le pays auparavant, à sa demande également — ne pas revenir en
-  /// arrière sans lui. Une entreprise SANS pays reste trouvable dans tous les
-  /// pays : le serveur l'inclut toujours, faute de quoi elle deviendrait
-  /// introuvable partout.
+  /// arrière sans lui. Une entreprise SANS pays n'est donc plus trouvable du
+  /// tout : le user l'a tranché le même jour.
   Future<List<Entreprise>> chercher(String requete, {int? idPays}) async {
     final data = await _api.get(
       "/api/entreprises?q=${Uri.encodeQueryComponent(requete)}"
