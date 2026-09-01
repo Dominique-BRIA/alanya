@@ -652,6 +652,17 @@ class _ConversationsTabState extends State<_ConversationsTab>
         break;
       }
     }
+    /*
+     * 🔴 LA SOURDINE VAUT AUSSI POUR CETTE NOTIFICATION-CI.
+     *
+     * Le serveur écarte le destinataire de la POUSSÉE, mais celle-ci est
+     * fabriquée par l'application elle-même, à la réception d'une trame temps
+     * réel : elle passe donc à côté du filtre du serveur. Sans cette garde,
+     * mettre une conversation en sourdine n'aurait aucun effet tant que
+     * l'application reste ouverte — c'est-à-dire précisément quand on la
+     * regarde.
+     */
+    if (conv?.sourdine == true) return;
     final title = conv?.title ?? "Nouveau message";
 
     // Aperçu du message selon le type — on retire les marqueurs pour les
@@ -1434,6 +1445,16 @@ class _ConversationsTabState extends State<_ConversationsTab>
                   size: 14,
                   color: isDark ? AlanyaColors.craie2 : AlanyaColors.grey400),
             ),
+          // Cloche barrée : sans elle, une conversation en sourdine ne se
+          // distingue en rien d'une conversation où personne n'écrit. C'est le
+          // seul endroit où l'on peut s'en apercevoir sans ouvrir le menu.
+          if (c.sourdine)
+            Padding(
+              padding: const EdgeInsets.only(left: 4),
+              child: Icon(Icons.notifications_off,
+                  size: 14,
+                  color: isDark ? AlanyaColors.craie2 : AlanyaColors.grey400),
+            ),
         ],
       ),
       subtitle: buildPreview(style: subtitleStyle),
@@ -1512,6 +1533,58 @@ class _ConversationsTabState extends State<_ConversationsTab>
                     .read<ChatRepository>()
                     .pinConversation(c.id, !c.isPinned);
                 _load();
+              },
+            ),
+            /*
+             * SOURDINE — rattrapage du web (31/08/2026).
+             *
+             * ⚠️ ÊTRE EN SOURDINE, C'EST NE PAS ÊTRE DÉRANGÉ, pas cesser de
+             * recevoir : le serveur écarte le destinataire de la POUSSÉE, mais
+             * les messages arrivent, le compteur monte et le temps réel
+             * continue. Le libellé le dit — « notifications », pas
+             * « conversation ».
+             *
+             * L'état affiché est CELUI QUE REND LE SERVEUR, jamais celui qu'on
+             * espérait : c'est le défaut exact que le web venait de corriger,
+             * un interrupteur qui basculait localement et n'envoyait rien.
+             */
+            ListTile(
+              leading: Icon(
+                c.sourdine
+                    ? Icons.notifications_active_outlined
+                    : Icons.notifications_off_outlined,
+                color: AlanyaColors.terracotta,
+              ),
+              title: Text(c.sourdine
+                  ? "Réactiver les notifications"
+                  : "Couper les notifications"),
+              onTap: () async {
+                Navigator.pop(ctx);
+                try {
+                  final etat = await context
+                      .read<ChatRepository>()
+                      .definirSourdine(c.id, !c.sourdine);
+                  if (!mounted) return;
+                  // Mise à jour en place : recharger toute la liste pour un
+                  // booléen ferait clignoter l'écran, et le serveur vient de
+                  // nous dire l'état retenu.
+                  setState(() {
+                    final liste = _convs;
+                    if (liste == null) return;
+                    final i = liste.indexWhere((x) => x.id == c.id);
+                    if (i >= 0) liste[i] = liste[i].copieAvecSourdine(etat);
+                  });
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(etat
+                        ? "Notifications coupées pour cette conversation"
+                        : "Notifications rétablies"),
+                  ));
+                } catch (_) {
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text("Impossible de contacter le serveur."),
+                  ));
+                }
               },
             ),
             ListTile(

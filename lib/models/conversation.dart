@@ -94,6 +94,21 @@ class Conversation {
   final bool isPinned;
   final bool isArchived;
 
+  /// Notifications coupées pour MOI dans cette conversation.
+  ///
+  /// 🔴 PAR PARTICIPANT, pas par conversation : c'est un choix personnel, et
+  /// mettre en sourdine ne doit rien changer pour les autres membres. La
+  /// colonne vit sur `participant`, côté serveur.
+  ///
+  /// ⚠️ ÊTRE EN SOURDINE, C'EST NE PAS ÊTRE DÉRANGÉ — pas cesser de recevoir.
+  /// Le serveur écarte le destinataire de la POUSSÉE ; la conversation continue
+  /// de se mettre à jour en direct chez qui la regarde, et le compteur de non
+  /// lus fait son travail.
+  ///
+  /// Facultatif dans la charge : un serveur antérieur ne l'envoie pas, et
+  /// l'interrupteur part alors de « non ».
+  final bool sourdine;
+
   Conversation({
     required this.id,
     required this.isGroup,
@@ -107,7 +122,29 @@ class Conversation {
     this.lastCallFourni = false,
     this.isPinned = false,
     this.isArchived = false,
+    this.sourdine = false,
   });
+
+  /// Copie avec la sourdine changée — le reste est intact.
+  ///
+  /// La liste des conversations est reconstruite à partir de ces objets : sans
+  /// copie, basculer l'interrupteur n'aurait aucun effet visible avant le
+  /// prochain rafraîchissement complet.
+  Conversation copieAvecSourdine(bool valeur) => Conversation(
+        id: id,
+        isGroup: isGroup,
+        title: title,
+        avatarUrl: avatarUrl,
+        members: members,
+        lastMessage: lastMessage,
+        unread: unread,
+        updatedAt: updatedAt,
+        lastCall: lastCall,
+        lastCallFourni: lastCallFourni,
+        isPinned: isPinned,
+        isArchived: isArchived,
+        sourdine: valeur,
+      );
 
   Map<String, String> get memberNames => {
         for (final m in members) m.id: m.displayName,
@@ -134,5 +171,6 @@ class Conversation {
         updatedAt: DateTime.parse(j["updatedAt"] as String),
         isPinned: (j["isPinned"] as bool?) ?? false,
         isArchived: (j["isArchived"] as bool?) ?? false,
+        sourdine: (j["sourdine"] as bool?) ?? false,
       );
 }

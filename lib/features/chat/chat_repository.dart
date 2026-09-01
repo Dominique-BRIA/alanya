@@ -69,6 +69,23 @@ class ChatRepository {
     await _api.patch("/api/conversations/$convId/pin", {"pinned": pinned});
   }
 
+  /// Coupe ou rétablit les notifications de cette conversation, POUR MOI.
+  ///
+  /// ⚠️ ÊTRE EN SOURDINE, C'EST NE PAS ÊTRE DÉRANGÉ — pas cesser de recevoir.
+  /// Le serveur écarte le destinataire de la poussée ; les messages arrivent,
+  /// le compteur de non lus monte, le temps réel continue.
+  ///
+  /// Rend l'état RETENU PAR LE SERVEUR, et non celui qu'on espérait : c'est lui
+  /// que l'écran doit afficher. Même règle que le web, dont la fiche de
+  /// conversation basculait un état local sans rien envoyer nulle part.
+  Future<bool> definirSourdine(String convId, bool sourdine) async {
+    final data = await _api.post(
+      "/api/conversations/$convId/sourdine",
+      {"sourdine": sourdine},
+    );
+    return (data["sourdine"] as bool?) ?? sourdine;
+  }
+
   /// F9 : Archiver/désarchiver une conversation.
   Future<void> archiveConversation(String convId, bool archived) async {
     await _api.patch("/api/conversations/$convId/archive", {"archived": archived});
