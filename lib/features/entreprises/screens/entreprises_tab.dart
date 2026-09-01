@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../../../l10n/app_localizations.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../auth/auth_controller.dart';
 import '../entreprises_repository.dart';
 import 'fiche_entreprise_screen.dart';
 
@@ -12,14 +13,28 @@ import 'fiche_entreprise_screen.dart';
 ///
 /// Deux niveaux, plus un raccourci :
 ///   1. les types d'entreprise ;
-///   2. les entreprises de ce type, DANS MON PAYS ;
-///   +  une RECHERCHE qui ignore le pays.
+///   2. les entreprises de ce type ;
+///   +  une RECHERCHE.
 ///
-/// 🔴 LA RECHERCHE IGNORE LE FILTRE PAR PAYS, et c'est voulu. Naviguer, c'est
-/// découvrir ce qu'on peut joindre autour de soi ; chercher, c'est déjà savoir
-/// ce qu'on veut. C'est aussi le SEUL chemin vers une entreprise dont le pays
-/// n'est pas renseigné — cas réel en production, où « Open solution » n'a pas
-/// de pays et n'apparaît donc dans aucune liste filtrée.
+/// 🔴 UN FILTRE PAR PAYS COMMANDE TOUT L'ÉCRAN depuis le 31/08/2026 (demande du
+/// user). L'annuaire ne montrait auparavant que le pays du compte, sans moyen
+/// d'en changer. Le filtre part sur ce même pays — le comportement d'avant
+/// devient donc son cas par défaut — et l'on peut désormais regarder ailleurs.
+///
+/// 🔴 LA RECHERCHE SUIT LE FILTRE, elle aussi (même demande, formulée juste
+/// après : « je pense que c'est mieux si la recherche est alignée sur le
+/// filtrage »). Elle ignorait le pays jusque-là, à la demande du user
+/// également : **ne pas revenir en arrière sans lui**.
+///
+/// ⚠️ CE QUE CE CHOIX COÛTE, et pourquoi il tient quand même : la recherche
+/// était le seul chemin vers une entreprise dont le pays n'est pas renseigné.
+/// Le serveur INCLUT désormais ces entreprises-là dans tous les pays — une
+/// entreprise sans pays n'est pas « d'un autre pays », elle est non classée.
+/// Sans cette règle, la moitié de l'annuaire de production (1 entreprise sur 2,
+/// mesuré le 31/08) serait devenue introuvable.
+///
+/// Le menu ne propose QUE des pays qui ont au moins une entreprise : c'est le
+/// serveur qui le dit, lui seul le sait.
 ///
 /// ⚠️ Aucun emoji ni sticker — règle du projet.
 class EntreprisesTab extends StatefulWidget {
@@ -44,10 +59,66 @@ class _EntreprisesTabState extends State<EntreprisesTab> {
   List<Entreprise>? _resultats;
   bool _recherche = false;
 
+  /// Les pays proposés par le filtre — ceux qui ont au moins une entreprise.
+  List<PaysEntreprise> _pays = const [];
+
+  /// Le pays sélectionné, ou `null` tant qu'on n'a rien choisi.
+  ///
+  /// 🔴 `null` NE VEUT PAS DIRE « TOUS LES PAYS » : il veut dire « le serveur
+  /// décide », et le serveur retombe alors sur le pays du compte. C'est ce qui
+  /// donne au filtre sa valeur par défaut sans que le client ait à connaître le
+  /// pays de l'utilisateur ni à l'annoncer.
+  int? _paysChoisi;
+
   @override
   void initState() {
     super.initState();
     _charger();
+    _chargerPays();
+  }
+
+  /// Charge la liste du filtre, et y repère le pays de l'utilisateur.
+  ///
+  /// ⚠️ ÉCHEC SILENCIEUX : sans la liste, le filtre ne s'affiche pas et
+  /// l'annuaire se comporte comme avant. Une erreur en travers de l'écran pour
+  /// un menu qui n'est pas la fonction principale serait disproportionnée.
+  Future<void> _chargerPays() async {
+    try {
+      final liste = await context.read<EntreprisesRepository>().paysDisponibles();
+      if (!mounted) return;
+      final mien = context.read<AuthController>().user?.idPays;
+      setState(() {
+        _pays = liste;
+        // Le pays du compte devient la sélection affichée — mais seulement
+        // s'il est dans la liste : le montrer alors qu'il n'a aucune entreprise
+        // afficherait un menu pointant sur une liste vide.
+        if (_paysChoisi == null &&
+            mien != null &&
+            liste.any((p) => p.idPays == mien)) {
+          _paysChoisi = mien;
+        }
+      });
+    } catch (_) {
+      // Filtre indisponible : l'annuaire reste utilisable tel quel.
+    }
+  }
+
+  /// Rejoue ce qui est à l'écran avec le pays courant.
+  ///
+  /// Les trois vues en dépendent : les types, les entreprises d'un type ouvert,
+  /// et la recherche en cours. N'en rafraîchir qu'une laisserait les autres
+  /// afficher le pays précédent sans que rien ne le dise.
+  Future<void> _appliquePays(int? idPays) async {
+    setState(() {
+      _paysChoisi = idPays;
+      _types = null;
+      _entreprises = null;
+    });
+    await _charger();
+    final ouvert = _typeOuvert;
+    if (ouvert != null) await _ouvrirType(ouvert);
+    final q = _rechercheCtrl.text.trim();
+    if (q.isNotEmpty) await _chercher(q);
   }
 
   @override
@@ -60,7 +131,7 @@ class _EntreprisesTabState extends State<EntreprisesTab> {
   Future<void> _charger() async {
     setState(() => _erreur = false);
     try {
-      final liste = await context.read<EntreprisesRepository>().types();
+      final liste = await context.read<EntreprisesRepository>().types(idPays: _paysChoisi);
       if (!mounted) return;
       setState(() => _types = liste);
     } catch (_) {
@@ -74,7 +145,7 @@ class _EntreprisesTabState extends State<EntreprisesTab> {
       _entreprises = null;
     });
     try {
-      final liste = await context.read<EntreprisesRepository>().duType(t.id);
+      final liste = await context.read<EntreprisesRepository>().duType(t.id, idPays: _paysChoisi);
       if (!mounted) return;
       setState(() => _entreprises = liste);
     } catch (_) {
@@ -103,7 +174,7 @@ class _EntreprisesTabState extends State<EntreprisesTab> {
 
   Future<void> _chercher(String q) async {
     try {
-      final trouves = await context.read<EntreprisesRepository>().chercher(q);
+      final trouves = await context.read<EntreprisesRepository>().chercher(q, idPays: _paysChoisi);
       if (!mounted) return;
       // La saisie a pu changer pendant l'aller-retour : on ne pose le résultat
       // que s'il correspond ENCORE à ce qui est écrit.
@@ -115,6 +186,67 @@ class _EntreprisesTabState extends State<EntreprisesTab> {
     } catch (_) {
       if (mounted) setState(() => _recherche = false);
     }
+  }
+
+  /// LE FILTRE PAR PAYS, à droite de la barre de recherche.
+  ///
+  /// Un bouton et non un menu déroulant étalé : la liste peut compter des
+  /// dizaines de pays, et un `DropdownButton` de cette taille écraserait la
+  /// barre de recherche à côté de laquelle il vit.
+  ///
+  /// ⚠️ RIEN NE S'AFFICHE TANT QUE LA LISTE EST VIDE — serveur plus ancien qui
+  /// ne connaît pas la route, ou aucune entreprise nulle part. Un filtre qui
+  /// n'offre aucun choix n'est pas un filtre, c'est une impasse.
+  Widget _filtrePays() {
+    if (_pays.isEmpty) return const SizedBox.shrink();
+    final choisi = _pays.where((p) => p.idPays == _paysChoisi).firstOrNull;
+    return Padding(
+      padding: const EdgeInsets.only(left: 8),
+      child: PopupMenuButton<int>(
+        tooltip: "Filtrer par pays",
+        onSelected: _appliquePays,
+        itemBuilder: (_) => [
+          for (final p in _pays)
+            PopupMenuItem<int>(
+              value: p.idPays,
+              child: Row(children: [
+                Icon(
+                  p.idPays == _paysChoisi
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
+                  size: 18,
+                  color: accentOf(context),
+                ),
+                const SizedBox(width: 10),
+                Flexible(child: Text(p.libelle, overflow: TextOverflow.ellipsis)),
+              ]),
+            ),
+        ],
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+          decoration: BoxDecoration(
+            border: Border.all(color: mutedOf(context, Colors.black26)),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.public, size: 18, color: accentOf(context)),
+            const SizedBox(width: 6),
+            // Le nom du pays, borné : « République démocratique du Congo » ne
+            // doit pas repousser la barre de recherche hors de l'écran.
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 90),
+              child: Text(
+                choisi?.libelle ?? "Pays",
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+                style: const TextStyle(fontSize: 13),
+              ),
+            ),
+            const Icon(Icons.arrow_drop_down, size: 18),
+          ]),
+        ),
+      ),
+    );
   }
 
   void _ouvrirFiche(Entreprise e) {
@@ -136,25 +268,30 @@ class _EntreprisesTabState extends State<EntreprisesTab> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-            child: TextField(
-              controller: _rechercheCtrl,
-              onChanged: _surSaisie,
-              textInputAction: TextInputAction.search,
-              decoration: InputDecoration(
-                hintText: tr(context, 'company_search_hint'),
-                prefixIcon: const Icon(Icons.search),
-                isDense: true,
-                suffixIcon: _rechercheCtrl.text.isEmpty
-                    ? null
-                    : IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: () {
-                          _rechercheCtrl.clear();
-                          _surSaisie("");
-                        },
-                      ),
+            child: Row(children: [
+              Expanded(
+                child: TextField(
+                  controller: _rechercheCtrl,
+                  onChanged: _surSaisie,
+                  textInputAction: TextInputAction.search,
+                  decoration: InputDecoration(
+                    hintText: tr(context, 'company_search_hint'),
+                    prefixIcon: const Icon(Icons.search),
+                    isDense: true,
+                    suffixIcon: _rechercheCtrl.text.isEmpty
+                        ? null
+                        : IconButton(
+                            icon: const Icon(Icons.close),
+                            onPressed: () {
+                              _rechercheCtrl.clear();
+                              _surSaisie("");
+                            },
+                          ),
+                  ),
+                ),
               ),
-            ),
+              _filtrePays(),
+            ]),
           ),
 
           // Fil d'Ariane du second niveau. Masqué en recherche : celle-ci

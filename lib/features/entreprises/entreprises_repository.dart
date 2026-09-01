@@ -1,6 +1,22 @@
 import '../../core/authed_api.dart';
 
 /// Un type d'entreprise, avec le nombre d'entreprises visibles derrière.
+/// Un pays proposé par le filtre de l'annuaire.
+///
+/// Seuls les pays qui ont au moins une entreprise arrivent ici — c'est le
+/// serveur qui le décide, lui seul le sait.
+class PaysEntreprise {
+  final int idPays;
+  final String libelle;
+
+  const PaysEntreprise({required this.idPays, required this.libelle});
+
+  factory PaysEntreprise.fromJson(Map<String, dynamic> j) => PaysEntreprise(
+        idPays: (j["idPays"] as num?)?.toInt() ?? 0,
+        libelle: j["libelle"] as String? ?? "",
+      );
+}
+
 class TypeEntreprise {
   final int id;
   final String libelle;
@@ -136,29 +152,55 @@ class EntreprisesRepository {
   EntreprisesRepository(this._api);
   final AuthedApi _api;
 
-  /// Les types d'entreprise.
-  Future<List<TypeEntreprise>> types() async {
-    final data = await _api.get("/api/entreprises");
+  /// Les pays qui ont AU MOINS UNE entreprise — ce que propose le filtre.
+  ///
+  /// 🔴 DEMANDÉ AU SERVEUR, jamais construit depuis la table des pays : sur 67
+  /// pays, deux seulement mènent quelque part aujourd'hui. Un menu qui
+  /// proposerait les 67 rendrait 65 listes vides.
+  Future<List<PaysEntreprise>> paysDisponibles() async {
+    final data = await _api.get("/api/entreprises?pays-disponibles=1");
+    return ((data["pays"] as List?) ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .map(PaysEntreprise.fromJson)
+        .toList();
+  }
+
+  /// Les types d'entreprise, dans [idPays] — ou dans mon pays si `null`.
+  Future<List<TypeEntreprise>> types({int? idPays}) async {
+    final data = await _api.get("/api/entreprises${_pays(idPays)}");
     return ((data["types"] as List?) ?? const [])
         .whereType<Map<String, dynamic>>()
         .map(TypeEntreprise.fromJson)
         .toList();
   }
 
-  /// Les entreprises d'un type, DANS MON PAYS.
-  Future<List<Entreprise>> duType(int idType) async {
-    final data = await _api.get("/api/entreprises?type=$idType");
+  /// Les entreprises d'un type, dans [idPays] — ou dans mon pays si `null`.
+  Future<List<Entreprise>> duType(int idType, {int? idPays}) async {
+    final data =
+        await _api.get("/api/entreprises?type=$idType${_pays(idPays, suite: true)}");
     return _entreprises(data);
   }
 
-  /// Recherche — TOUS PAYS confondus.
+  /// Recherche, DANS LE PAYS SÉLECTIONNÉ.
   ///
-  /// 🔴 Seul chemin vers une entreprise dont le pays n'est pas renseigné : la
-  /// navigation par type ne peut pas l'atteindre.
-  Future<List<Entreprise>> chercher(String requete) async {
-    final data =
-        await _api.get("/api/entreprises?q=${Uri.encodeQueryComponent(requete)}");
+  /// 🔴 ELLE SUIT LE FILTRE depuis le 31/08/2026 (demande du user). Elle
+  /// ignorait le pays auparavant, à sa demande également — ne pas revenir en
+  /// arrière sans lui. Une entreprise SANS pays reste trouvable dans tous les
+  /// pays : le serveur l'inclut toujours, faute de quoi elle deviendrait
+  /// introuvable partout.
+  Future<List<Entreprise>> chercher(String requete, {int? idPays}) async {
+    final data = await _api.get(
+      "/api/entreprises?q=${Uri.encodeQueryComponent(requete)}"
+      "${_pays(idPays, suite: true)}",
+    );
     return _entreprises(data);
+  }
+
+  /// Le fragment `pays=…`, ou rien. Sans lui, le serveur retombe sur le pays du
+  /// compte — c'est ce qui rend l'ancien comportement inchangé.
+  String _pays(int? idPays, {bool suite = false}) {
+    if (idPays == null) return "";
+    return suite ? "&pays=$idPays" : "?pays=$idPays";
   }
 
   /// La fiche d'une entreprise : ses centres et leurs services.
