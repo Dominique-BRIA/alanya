@@ -49,6 +49,20 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
 
   _Onglet _onglet = _Onglet.photos;
 
+  /// L'album ouvert DEPUIS L'ONGLET COLLECTIONS, ou `null` si l'on regarde la
+  /// liste des albums.
+  ///
+  /// 🔴 C'EST UN TROISIÈME NIVEAU, pas un troisième onglet (correction du user,
+  /// 31/08/2026). Ouvrir un album basculait l'onglet actif sur « Photos » : on
+  /// tapait dans Collections et on se retrouvait ailleurs, sans jamais pouvoir
+  /// revenir à la liste — et le retour du système sortait carrément de la
+  /// galerie. Les deux défauts n'en font qu'un : l'album n'existait pas comme
+  /// endroit où l'on se trouve.
+  ///
+  /// Collections a donc deux états : la LISTE (`null`) et un ALBUM OUVERT. Le
+  /// retour va de l'un à l'autre avant de quitter l'écran.
+  AssetPathEntity? _albumOuvert;
+
   List<AssetPathEntity> _albums = [];
   AssetPathEntity? _album;
   final List<AssetEntity> _assets = [];
@@ -172,6 +186,37 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
     await _chargePageSuivante(premiere: true);
   }
 
+  /// Ouvre un album depuis Collections — SANS quitter l'onglet.
+  ///
+  /// L'onglet actif reste « Collections » : on est entré dans un de ses
+  /// dossiers, on n'a pas changé d'endroit. C'est la barre du haut qui dit où
+  /// l'on se trouve, en prenant le nom de l'album et une flèche de retour.
+  Future<void> _ouvreAlbum(AssetPathEntity album) async {
+    setState(() => _albumOuvert = album);
+    await _changeAlbum(album);
+  }
+
+  /// Referme l'album ouvert et revient à la LISTE des albums.
+  ///
+  /// ⚠️ Recharge la vue d'ensemble dans la foulée : l'onglet Photos partage la
+  /// même grille, et le laisser sur les assets de l'album le ferait mentir au
+  /// prochain appui.
+  Future<void> _fermeAlbum() async {
+    final tous = _albums.firstOrNull;
+    setState(() => _albumOuvert = null);
+    if (tous != null && _album != tous) await _changeAlbum(tous);
+  }
+
+  /// Bascule d'onglet.
+  ///
+  /// Revenir sur « Collections » montre toujours la LISTE, jamais le dernier
+  /// album ouvert : un onglet doit mener au même endroit à chaque appui.
+  Future<void> _changeOnglet(_Onglet cible) async {
+    if (cible == _onglet && _albumOuvert == null) return;
+    setState(() => _onglet = cible);
+    await _fermeAlbum();
+  }
+
   void _bascule(AssetEntity asset) {
     setState(() {
       final index = _choisis.indexWhere((a) => a.id == asset.id);
@@ -281,11 +326,39 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final dansUnAlbum = _albumOuvert != null;
+    /*
+     * 🔴 LE RETOUR SYSTÈME REFERME D'ABORD L'ALBUM (correction du user,
+     * 31/08/2026). Il sortait de la galerie entière depuis l'intérieur d'un
+     * album : on perdait sa sélection pour avoir voulu revenir à la liste des
+     * dossiers. Un niveau de navigation qui s'ouvre doit se refermer par le
+     * même geste que partout ailleurs dans Android.
+     */
+    return PopScope(
+      canPop: !dansUnAlbum,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        _fermeAlbum();
+      },
+      child: _echafaudage(dansUnAlbum),
+    );
+  }
+
+  Widget _echafaudage(bool dansUnAlbum) {
     return Scaffold(
       backgroundColor: _fond,
       appBar: AppBar(
         backgroundColor: _fondBarre,
         foregroundColor: _texte,
+        // Dans un album, la flèche revient à la LISTE des albums ; ailleurs,
+        // c'est la flèche ordinaire qui referme le sélecteur.
+        leading: dansUnAlbum
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back),
+                tooltip: "Retour aux albums",
+                onPressed: _fermeAlbum,
+              )
+            : null,
         /*
          * 🔴 DEUX ONGLETS, PLUS UN NOM D'ALBUM EN GUISE DE TITRE (demande du
          * user, 31/08/2026).
@@ -298,8 +371,17 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
          * Deux pastilles côte à côte, l'active pleine : on voit qu'il y a deux
          * endroits, et lequel on regarde. C'est la disposition de la capture
          * fournie.
+         *
+         * ⚠️ DANS UN ALBUM, LES PASTILLES CÈDENT LA PLACE À SON NOM. Les
+         * laisser afficherait « Collections » en actif alors qu'on regarde des
+         * photos, et rien ne dirait lesquelles.
          */
-        title: _onglets(),
+        title: dansUnAlbum
+            ? Text(_albumOuvert!.name,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    color: _texte, fontSize: 17, fontWeight: FontWeight.w600))
+            : _onglets(),
         centerTitle: true,
         actions: [
           if (_choisis.isNotEmpty)
@@ -317,26 +399,16 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
       ),
       body: Column(children: [
         if (_partiel && !_permissionRefusee) _bandeauPartiel(),
-        // Le nom de l'album regardé, quand ce n'est pas la vue d'ensemble :
-        // sans lui, plus rien ne dirait d'où viennent ces photos une fois
-        // l'album choisi.
-        if (_onglet == _Onglet.photos && _album != null && _album != _albums.firstOrNull)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
-            child: Row(children: [
-              Icon(Icons.folder_outlined, size: 15, color: _texteDoux),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(_album!.name,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: _texteDoux, fontSize: 13)),
-              ),
-            ]),
-          ),
+        // Le bandeau « nom de l'album » a disparu : le nom est désormais DANS
+        // la barre du haut, avec la flèche qui en sort. Le garder ici le dirait
+        // deux fois.
         Expanded(
           child: _permissionRefusee
               ? _refus()
-              : _onglet == _Onglet.collections
+              // La grille sert les DEUX onglets : la vue d'ensemble sous
+              // « Photos », et l'album ouvert sous « Collections ». Seule la
+              // liste des albums est un affichage à part.
+              : (_onglet == _Onglet.collections && _albumOuvert == null)
                   ? _listeAlbums()
                   : _chargement
                       ? Center(
@@ -361,7 +433,7 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
     Widget pastille(String libelle, _Onglet valeur) {
       final actif = _onglet == valeur;
       return GestureDetector(
-        onTap: () => setState(() => _onglet = valeur),
+        onTap: () => _changeOnglet(valeur),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
           decoration: BoxDecoration(
@@ -393,8 +465,9 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
   /// L'onglet **Collections** : les albums du téléphone.
   ///
   /// Une vignette de couverture, le nom, et le nombre d'éléments. Choisir un
-  /// album bascule sur l'onglet Photos, filtré dessus — la sélection en cours
-  /// est CONSERVÉE, choisir dans deux albums est un usage courant.
+  /// album l'OUVRE sans quitter l'onglet ; la flèche du haut, comme le retour
+  /// du système, ramène à cette liste. La sélection en cours est CONSERVÉE d'un
+  /// album à l'autre : choisir dans deux dossiers est un usage courant.
   Widget _listeAlbums() {
     if (_albums.isEmpty) {
       return Center(
@@ -447,10 +520,10 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
             ),
           ),
           trailing: Icon(Icons.chevron_right, color: _texteDoux, size: 20),
-          onTap: () {
-            setState(() => _onglet = _Onglet.photos);
-            _changeAlbum(album);
-          },
+          // 🔴 ON RESTE DANS COLLECTIONS. Basculer sur « Photos » ici était le
+          // défaut signalé : l'onglet changeait sous le doigt, et la liste des
+          // albums devenait inatteignable.
+          onTap: () => _ouvreAlbum(album),
         );
       },
     );
