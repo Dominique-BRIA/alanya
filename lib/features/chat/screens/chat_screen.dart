@@ -4506,13 +4506,29 @@ class _ChatScreenState extends State<ChatScreen>
         if (m.senderId == _myId) continue; // les messages REÇUS
         if (m.deletedAt != null) continue;
         if (!_typesTraduisibles.contains(m.type)) continue;
-        if (texte.length < _minCaracteresAuto) continue;
         if (_translations.containsKey(m.id)) continue;
+
+        // La langue FIXÉE prime sur tout : passée à part, elle court-circuite
+        // la détection au lieu de lui servir de repli.
+        final fixee = await MemoireLangues.langueFixee(m.senderId);
+        if (!mounted) return;
+        /*
+         * 🔴 LE PLANCHER DE LONGUEUR NE S'APPLIQUE PAS QUAND LA LANGUE EST
+         * FIXÉE, et c'est la seconde moitié du défaut signalé le 31/08/2026 :
+         * « la traduction automatique n'est pas encore réelle ».
+         *
+         * Ce plancher existe parce que la DÉTECTION devine sur un texte court —
+         * « Hello guy », neuf caractères, était détecté comme du vietnamien.
+         * Quand l'utilisateur a désigné la langue lui-même, il n'y a plus rien
+         * à deviner : refuser de traduire un message court reviendrait à se
+         * priver de la seule information sûre dont on dispose.
+         */
+        if (fixee == null && texte.length < _minCaracteresAuto) continue;
 
         final connue = await MemoireLangues.langueDe(m.senderId);
         if (!mounted) return;
-        final detection =
-            await detecterSource(texte, cible, langueConnue: connue);
+        final detection = await detecterSource(texte, cible,
+            langueConnue: connue, langueImposee: fixee);
         if (!mounted) return;
         final source = detection.source;
         if (source != null && detection.fiable) {
@@ -4607,10 +4623,12 @@ class _ChatScreenState extends State<ChatScreen>
        * observé chez lui, et `detecterSource` ne s'en sert que si sa propre
        * détection n'ose pas se prononcer.
        */
+      // Meme regle que la passe automatique : une langue fixee ne se discute pas.
+      final fixee = await MemoireLangues.langueFixee(m.senderId);
       final connue = await MemoireLangues.langueDe(m.senderId);
       if (!mounted) return;
-      final detection =
-          await detecterSource(text, cible, langueConnue: connue);
+      final detection = await detecterSource(text, cible,
+          langueConnue: connue, langueImposee: fixee);
       if (!mounted) return;
       final source = detection.source;
       // On n'apprend QUE des détections sûres : retenir une erreur la ferait

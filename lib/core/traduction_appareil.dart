@@ -574,16 +574,50 @@ const int _longueurFiable = 20;
 ///
 /// [langueConnue] vient de `core/memoire_langues.dart`. C'est le vrai levier :
 /// un message de trois mots est indécidable, son auteur ne l'est pas.
+///
+/// [langueImposee] est la langue FIXÉE À LA MAIN pour ce correspondant. Elle ne
+/// se discute pas : voir le bloc en tête de fonction.
 Future<Detection> detecterSource(
   String texte,
   String cible, {
   String? langueConnue,
+  String? langueImposee,
 }) async {
   const rien = (source: null, fiable: false);
   if (!moteurAppareilPresent) return rien;
   final propre = texte.trim();
   if (propre.isEmpty) return rien;
   final cibleNormalisee = normaliserLangue(cible);
+
+  /*
+   * 🔴 UNE LANGUE FIXÉE PAR L'UTILISATEUR EST CRUE À 100 % (règle du user,
+   * 31/08/2026, mot pour mot : « donc de l'autre est fixé fait lui confiance
+   * 100% »). AUCUNE détection n'est même tentée.
+   *
+   * Ce n'était qu'un repli jusqu'ici — utilisé seulement quand ML Kit n'osait
+   * pas se prononcer — et le défaut s'est vu sur device : « Hello guy », écrit
+   * par un contact dont la langue était fixée à l'anglais, a été détecté comme
+   * du VIETNAMIEN avec assez d'assurance pour l'emporter, et l'application a
+   * proposé d'installer Tiếng Việt.
+   *
+   * Sur un texte court, ML Kit est confiant ET faux ; l'utilisateur qui a pris
+   * la peine de désigner la langue de son correspondant en sait plus que lui.
+   * Un seuil ne réglait pas ce cas : seule la priorité absolue le règle.
+   */
+  if (langueImposee != null && langueImposee.isNotEmpty) {
+    final code = normaliserLangue(langueImposee);
+    // Fixée sur MA langue : il n'y a rien à traduire, et c'est une réponse
+    // juste — pas un refus.
+    if (code == cibleNormalisee) return rien;
+    if (code.isNotEmpty && langueSupportee(code) != null) {
+      // `fiable: false` : rien n'a été observé, donc rien à apprendre. La
+      // consigne de l'utilisateur n'a pas besoin d'être confirmée par une
+      // mémoire qui, de toute façon, ne la contredira plus.
+      return (source: code, fiable: false);
+    }
+    // Langue fixée mais non traduisible : on ne la force pas, on redescend sur
+    // la détection ordinaire plutôt que de ne rien rendre du tout.
+  }
 
   try {
     final detecteur = _detecteurs.putIfAbsent(
