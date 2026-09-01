@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../../core/app_snackbar.dart';
 import '../../../core/locale_controller.dart';
 import '../../../core/traduction_appareil.dart';
+import '../../../core/traduction_auto.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../../../widgets/dialogues_traduction.dart';
@@ -126,6 +127,7 @@ class _TranslationScreenState extends State<TranslationScreen> {
         overlayOpacity: 0.92,
         child: Column(
           children: [
+            _interrupteurAuto(),
             _entete(),
             _champRecherche(),
             Expanded(
@@ -133,6 +135,42 @@ class _TranslationScreenState extends State<TranslationScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// L'interrupteur « Traduction automatique », en TÊTE de l'écran.
+  ///
+  /// 🔴 ICI ET NON DANS LA LISTE DES RÉGLAGES : il ne se comprend qu'à côté des
+  /// langues installées, dont il dépend entièrement. Un message ne sera traduit
+  /// tout seul que si son couple de langues est déjà là — l'écran qui l'annonce
+  /// doit être celui qui permet de l'installer.
+  ///
+  /// ⚠️ MASQUÉ SI LE MOTEUR N'EXISTE PAS (web) : proposer d'automatiser ce que
+  /// la plateforme ne sait pas faire serait une promesse vide.
+  Widget _interrupteurAuto() {
+    if (!moteurAppareilPresent) return const SizedBox.shrink();
+    final muted = themed(
+      context,
+      light: Colors.black54,
+      dark: AlanyaColors.craie2,
+    );
+    return ValueListenableBuilder<bool>(
+      valueListenable: TraductionAuto.instance.active,
+      builder: (_, actif, __) => SwitchListTile(
+        value: actif,
+        onChanged: (v) => TraductionAuto.instance.definir(v),
+        title: const Text("Traduction automatique"),
+        subtitle: Text(
+          actif
+              // Ce que la fonction NE FAIT PAS est aussi important : sans cette
+              // phrase, un message resté dans sa langue passerait pour une
+              // panne, alors que son modèle n'est simplement pas installé.
+              ? "Les messages reçus sont traduits dès leur arrivée, quand leur langue est installée."
+              : "Les messages restent dans leur langue ; « Traduire » reste disponible sur chacun.",
+          style: TextStyle(color: muted, fontSize: 12),
+        ),
+        secondary: Icon(Icons.translate, color: accentOf(context)),
       ),
     );
   }

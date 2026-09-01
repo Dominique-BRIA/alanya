@@ -11,6 +11,7 @@ import 'core/connectivity_service.dart';
 import 'core/data_saver_service.dart';
 import 'core/debug_overlay.dart';
 import 'core/geo_service.dart';
+import 'core/traduction_auto.dart';
 import 'core/notification_settings.dart';
 import 'core/locale_controller.dart';
 import 'core/outbox.dart';
@@ -100,6 +101,7 @@ void main() async {
   GeoService.instance.init(authedApi);
   await DataSaverService.instance.load();
   await NotificationSettings.instance.load();
+  await TraductionAuto.instance.load();
 
   runApp(
     MultiProvider(

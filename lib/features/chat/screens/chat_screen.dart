@@ -34,6 +34,7 @@ import '../../../core/token_storage.dart';
 import '../../../core/voice_recorder.dart';
 import '../../../core/locale_controller.dart';
 import '../../../core/traduction_appareil.dart';
+import '../../../core/traduction_auto.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../models/message.dart';
 import '../../../models/message_payload.dart';
@@ -692,6 +693,9 @@ class _ChatScreenState extends State<ChatScreen>
         }
       }
       _scrollToBottom();
+      // Le message vient d'arriver : on le traduit sans attendre la prochaine
+      // ouverture du fil. La passe ne reprend que ce qui n'est pas déjà traduit.
+      _traduitAutomatiquement();
     } else if (type == "read") {
       if (e["convId"] != widget.convId) return;
       setState(() {
@@ -947,6 +951,7 @@ class _ChatScreenState extends State<ChatScreen>
       }
       _markReadRemote();
       _scrollToBottom(immediat: true);
+      _traduitAutomatiquement();
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
@@ -4344,6 +4349,115 @@ class _ChatScreenState extends State<ChatScreen>
         _timestampRow(m, mine, onSubColor),
       ]),
     );
+  }
+
+  /// Vrai pendant une passe de traduction automatique — une seule à la fois.
+  bool _autoEnCours = false;
+
+  /// Combien de messages récents la passe automatique examine.
+  ///
+  /// ⚠️ PAS TOUT L'HISTORIQUE. Ouvrir une conversation de deux mille messages
+  /// ne doit pas lancer deux mille détections de langue : on traduit ce qui est
+  /// sous les yeux, et la remontée du fil s'occupera du reste au fur et à
+  /// mesure. Les traductions étant conservées, le travail ne se refait pas.
+  static const int _fenetreAuto = 30;
+
+  /// Sous cette longueur, on ne traduit pas tout seul.
+  ///
+  /// « ok », « merci », « à demain » : la détection y devine plus qu'elle ne
+  /// reconnaît, et le lecteur les comprenait de toute façon. Le bouton
+  /// « Traduire » reste disponible pour qui veut insister.
+  static const int _minCaracteresAuto = 15;
+
+  /// Types dont le `content` est de la PROSE.
+  ///
+  /// 🔴 LISTE BLANCHE, ET C'EST LE GARDE-FOU DU LOT. `CONTACT` et `LOCATION`
+  /// stockent du JSON dans `content` : le passer à un traducteur détruirait le
+  /// rendu de la bulle. Une liste noire laisserait un futur type filer au
+  /// traducteur par défaut ; ici, il reste exclu tant que personne ne l'a
+  /// explicitement autorisé.
+  static const Set<String> _typesTraduisibles = {
+    "TEXT",
+    // Médias : seule leur légende est concernée, et elle vit dans `content`.
+    "IMAGE",
+    "VIDEO",
+    "FILE",
+  };
+
+  /// TRADUIT AUTOMATIQUEMENT les messages reçus.
+  ///
+  /// 🔴 NE TÉLÉCHARGE JAMAIS RIEN. Si le couple de langues n'est pas installé,
+  /// le message reste dans sa langue et le bouton « Traduire » fera la demande.
+  /// Quelques dizaines de mégaoctets ne partent que d'un geste — la règle vaut
+  /// d'autant plus ici que personne n'a rien demandé pour ce message-là.
+  ///
+  /// Les échecs sont silencieux : une passe automatique qui afficherait des
+  /// erreurs harcèlerait l'utilisateur pour un service qu'il n'a pas sollicité
+  /// message par message.
+  Future<void> _traduitAutomatiquement() async {
+    if (!TraductionAuto.instance.activee || !moteurAppareilPresent) return;
+    if (_autoEnCours || !mounted) return;
+    _autoEnCours = true;
+    try {
+      final cible = context.read<LocaleController>().languageCode;
+      // Les plus récents d'abord : ce sont ceux qu'on regarde.
+      final candidats = _messages.reversed.take(_fenetreAuto).toList();
+      for (final m in candidats) {
+        if (!mounted) return;
+        if (!TraductionAuto.instance.activee) return;
+        final texte = (m.content ?? '').trim();
+        if (m.senderId == _myId) continue; // les messages REÇUS
+        if (m.deletedAt != null) continue;
+        if (!_typesTraduisibles.contains(m.type)) continue;
+        if (texte.length < _minCaracteresAuto) continue;
+        if (_translations.containsKey(m.id)) continue;
+
+        final connue = await MemoireLangues.langueDe(m.senderId);
+        if (!mounted) return;
+        final detection =
+            await detecterSource(texte, cible, langueConnue: connue);
+        if (!mounted) return;
+        final source = detection.source;
+        if (source != null && detection.fiable) {
+          await MemoireLangues.retiens(m.senderId, source);
+        }
+        if (source == null) {
+          // Rien à traduire : on le RETIENT quand même, sinon le détecteur
+          // repasserait sur ce message à chaque ouverture du fil.
+          await MessageCache.putTraduction(
+            messageId: m.id,
+            convId: widget.convId,
+            texte: texte,
+            langueSource: null,
+            langueCible: cible,
+          );
+          continue;
+        }
+        // Le modèle manque : on s'arrête là pour ce message, sans rien
+        // télécharger et sans rien retenir — il redeviendra candidat le jour où
+        // la langue sera installée.
+        if (await etatCouple(source, cible) != EtatCouple.pret) continue;
+        if (!mounted) return;
+
+        try {
+          final traduit = await traduireUnTexte(source, cible, texte);
+          if (!mounted) return;
+          setState(() => _translations[m.id] = traduit);
+          await MessageCache.putTraduction(
+            messageId: m.id,
+            convId: widget.convId,
+            texte: traduit,
+            langueSource: source,
+            langueCible: cible,
+          );
+        } catch (_) {
+          // Un échec ponctuel n'arrête pas la passe : les autres messages
+          // n'ont pas à en souffrir.
+        }
+      }
+    } finally {
+      _autoEnCours = false;
+    }
   }
 
   /// Traduit un message SUR L'APPAREIL, ou retire la traduction affichée.
