@@ -22,13 +22,46 @@ class MediaPickResult {
   /// l'icône, ce qui reste correct.
   final String? path;
 
+  /// L'image a été RÉDUITE avant l'envoi, et [path] mène encore à l'original.
+  ///
+  /// Sert à deux choses, toutes deux à l'écran d'envoi : annoncer le gain, et
+  /// rendre l'original accessible en un appui. Faux pour une vidéo, un GIF, un
+  /// PNG et pour toute image déjà assez petite — voir
+  /// `core/compression_image.dart`.
+  final bool compresse;
+
+  /// Poids de l'original, quand il a été réduit. `null` sinon.
+  ///
+  /// ⚠️ ON NE GARDE PAS LES OCTETS D'ORIGINE EN MÉMOIRE. Dix photos de 8 Mo
+  /// tenues en double sont 160 Mo dans un téléphone : l'original se relit
+  /// depuis [path] au moment où on le demande, et pas avant.
+  final int? tailleOriginale;
+
   const MediaPickResult({
     required this.bytes,
     required this.fileName,
     required this.mimeType,
     this.durationMs,
     this.path,
+    this.compresse = false,
+    this.tailleOriginale,
   });
+
+  MediaPickResult copieAvec({
+    Uint8List? bytes,
+    String? fileName,
+    String? mimeType,
+    bool? compresse,
+  }) =>
+      MediaPickResult(
+        bytes: bytes ?? this.bytes,
+        fileName: fileName ?? this.fileName,
+        mimeType: mimeType ?? this.mimeType,
+        durationMs: durationMs,
+        path: path,
+        compresse: compresse ?? this.compresse,
+        tailleOriginale: tailleOriginale,
+      );
 
   bool get estImage => mimeType.startsWith('image/');
   bool get estVideo => mimeType.startsWith('video/');

@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../../core/compression_image.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/media/media_picker_sheet.dart';
 
@@ -170,6 +171,7 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
               ),
             ),
             if (_fichiers.length > 1) _bandeau(),
+            ?_ligneCompression(),
             _composeur(),
           ],
         ),
@@ -272,6 +274,88 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
         },
       ),
     );
+  }
+
+  /// « Compressée · 4,2 Mo → 320 Ko · **Envoyer l'original** ».
+  ///
+  /// 🔴 DIRE CE QU'ON A FAIT, ET LAISSER LE REFUSER (rattrapage du web,
+  /// 31/08/2026). Réduire une photo sans le dire est une décision prise à la
+  /// place de quelqu'un : celui qui envoie une ordonnance, un reçu ou un plan
+  /// veut ses pixels, et il n'a aucun moyen de deviner qu'on les lui a retirés.
+  ///
+  /// ⚠️ L'ORIGINAL SE RELIT DEPUIS LE DISQUE, il n'est pas gardé en mémoire :
+  /// dix photos de 8 Mo tenues en double feraient tomber l'application. Le
+  /// chemin vient du sélecteur ; sans lui (envoi web, sélecteur système qui ne
+  /// rend que des octets) la ligne ne s'affiche pas, faute de pouvoir tenir sa
+  /// promesse.
+  Widget? _ligneCompression() {
+    final courant = _fichiers[_index];
+    if (!courant.compresse || courant.path == null) return null;
+    final avant = courant.tailleOriginale;
+    if (avant == null) return null;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+      child: Row(children: [
+        const Icon(Icons.compress, size: 14, color: Colors.white54),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(
+            "${poidsLisible(avant)} → ${poidsLisible(courant.bytes.length)}",
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Colors.white54, fontSize: 12),
+          ),
+        ),
+        const SizedBox(width: 10),
+        GestureDetector(
+          onTap: _restaureOriginal,
+          child: const Text(
+            "Envoyer l'original",
+            style: TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                decoration: TextDecoration.underline),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  /// Remplace les octets réduits par ceux du fichier d'origine.
+  ///
+  /// Sans retour en arrière : reprendre la version réduite demanderait de la
+  /// garder en mémoire à côté de l'original, pour une hésitation. Celui qui
+  /// change d'avis ressort et resélectionne — c'est deux appuis, et ça ne coûte
+  /// la mémoire de personne.
+  Future<void> _restaureOriginal() async {
+    final courant = _fichiers[_index];
+    final chemin = courant.path;
+    if (chemin == null) return;
+    try {
+      final octets = await File(chemin).readAsBytes();
+      if (!mounted) return;
+      setState(() {
+        _fichiers[_index] = courant.copieAvec(
+          bytes: octets,
+          // Le nom et le type redeviennent ceux de l'original : le serveur
+          // choisit l'extension de stockage d'après le NOM, et des octets
+          // d'origine sous un nom `.jpg` seraient servis avec le mauvais
+          // en-tête. Même règle qu'à la compression, dans l'autre sens.
+          fileName: chemin.split(Platform.pathSeparator).last,
+          compresse: false,
+        );
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("L'original sera envoyé")),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Original introuvable — envoi réduit")),
+      );
+    }
   }
 
   Widget _composeur() {

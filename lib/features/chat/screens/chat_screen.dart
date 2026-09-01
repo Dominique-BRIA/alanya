@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 
+import '../../../core/compression_image.dart';
 import '../../../core/message_cache.dart';
 import '../../../core/messages_systeme.dart';
 import '../../../core/whatsapp_text.dart';
@@ -2015,8 +2016,22 @@ class _ChatScreenState extends State<ChatScreen>
   /// pendant son affichage.
   Future<List<MediaPickResult>?> _prendrePhoto() async {
     try {
-      final photo = await ImagePicker()
-          .pickImage(source: ImageSource.camera, imageQuality: 85);
+      /*
+       * ⚠️ MÊMES BORNES QUE LA GALERIE (`core/compression_image.dart`) : bord
+       * long à 1600 px, qualité 82. La prise de vue ne bornait que la qualité,
+       * et sortait donc des images en pleine définition du capteur — 12 Mpx sur
+       * un téléphone courant, soit plusieurs mégaoctets pour une bulle de
+       * 280 px de large.
+       *
+       * `image_picker` sait le faire lui-même à la capture : c'est plus sobre
+       * que de recompresser après coup, et le fichier n'existe jamais en grand.
+       */
+      final photo = await ImagePicker().pickImage(
+        source: ImageSource.camera,
+        maxWidth: imageBordMax.toDouble(),
+        maxHeight: imageBordMax.toDouble(),
+        imageQuality: imageQualite,
+      );
       if (photo == null) return null;
       final octets = await photo.readAsBytes();
       return [

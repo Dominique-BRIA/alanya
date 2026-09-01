@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
 
+import '../../../core/compression_image.dart';
 import '../../../core/galerie.dart';
 import '../../../theme/alanya_theme.dart';
 import 'apercu_selection_screen.dart';
@@ -239,14 +240,38 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
         final octets = await asset.originBytes;
         if (octets == null) continue;
         final fichier = await asset.file;
-        resultats.add(MediaPickResult(
-          bytes: octets,
-          fileName: asset.title ?? 'media_${asset.id}',
+        /*
+         * 🔴 COMPRESSION AVANT ENVOI (rattrapage du web, 31/08/2026).
+         *
+         * Le mobile envoyait les octets d'origine — 3 à 8 Mo par photo — quand
+         * le web les réduit de dix à quinze fois depuis la veille. C'est le
+         * mobile qui paie la donnée, des deux côtés de la conversation.
+         *
+         * La règle vit dans `core/compression_image.dart`, miroir du module du
+         * web : mêmes bornes, mêmes refus. Elle rend les octets d'origine à la
+         * moindre incertitude.
+         */
+        final compresse = await compresserAsset(
+          asset,
+          octets,
+          nomFichier: asset.title ?? 'media_${asset.id}',
           mimeType: _mime(asset),
+        );
+        resultats.add(MediaPickResult(
+          bytes: compresse.octets,
+          fileName: compresse.nomFichier,
+          mimeType: compresse.mimeType,
           durationMs: asset.type == AssetType.video
               ? (asset.duration * 1000).toInt()
               : null,
+          // ⚠️ LE CHEMIN RESTE CELUI DE L'ORIGINAL. Il sert à l'aperçu d'une
+          // vidéo, et désormais à RELIRE l'original si l'utilisateur refuse la
+          // compression — d'où l'intérêt de ne pas garder ses octets en
+          // mémoire.
           path: fichier?.path,
+          compresse: compresse.compresse,
+          tailleOriginale:
+              compresse.compresse ? compresse.tailleAvant : null,
         ));
       } catch (_) {
         // Un média illisible (fichier iCloud non téléchargé, corrompu) est
