@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 
 import '../../../core/compression_image.dart';
+import '../../../core/memoire_langues.dart';
 import '../../../core/message_cache.dart';
 import '../../../core/messages_systeme.dart';
 import '../../../core/whatsapp_text.dart';
@@ -4337,11 +4338,32 @@ class _ChatScreenState extends State<ChatScreen>
     }
     setState(() => _translating.add(m.id));
     try {
-      // ⚠️ PLUS AUCUN REFUS ICI (demande du user). `sourceProbable` prend le
-      // meilleur candidat quelle que soit sa confiance, et écarte la langue
-      // cible pour ne jamais buter sur « déjà dans ta langue ».
-      final source = await sourceProbable(text, cible);
+      // ⚠️ AUCUN REFUS ICI NON PLUS (règle du user) : `detecterSource` finit
+      // toujours par proposer une source, et son `null` ne veut pas dire « je
+      // ne sais pas » mais « rien à traduire » — traité juste en dessous en
+      // affichant le texte tel quel.
+      /*
+       * 🔴 LA LANGUE DU CORRESPONDANT SERT D'INDICE (31/08/2026).
+       *
+       * Le user constatait que la détection « pointe très souvent sur la
+       * mauvaise langue ». Un message de trois mots est indécidable — « merci »
+       * est français, portugais et proche de l'italien — mais son AUTEUR écrit
+       * presque toujours dans la même langue. On lui passe donc ce qu'on a
+       * observé chez lui, et `detecterSource` ne s'en sert que si sa propre
+       * détection n'ose pas se prononcer.
+       */
+      final connue = await MemoireLangues.langueDe(m.senderId);
       if (!mounted) return;
+      final detection =
+          await detecterSource(text, cible, langueConnue: connue);
+      if (!mounted) return;
+      final source = detection.source;
+      // On n'apprend QUE des détections sûres : retenir une erreur la ferait
+      // resservir à tous les messages suivants de cette personne.
+      if (source != null && detection.fiable) {
+        await MemoireLangues.retiens(m.senderId, source);
+        if (!mounted) return;
+      }
       if (source == null) {
         // Rien à traduire : le message est DÉJÀ dans la langue des réglages, ou
         // ne porte aucune langue (chiffres, émojis). Traduire un texte vers sa

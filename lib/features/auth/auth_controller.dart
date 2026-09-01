@@ -7,6 +7,7 @@ import '../../core/api_client.dart';
 import '../../core/call_cache.dart';
 import '../../core/call_ui_native.dart';
 import '../../core/contact_cache.dart';
+import '../../core/memoire_langues.dart';
 import '../../core/conversation_cache.dart';
 import '../../core/message_cache.dart';
 import '../../core/device_registry.dart';
@@ -295,6 +296,9 @@ class AuthController extends ChangeNotifier {
     await ConversationCache.clear();
     await CallCache.clear();
     await ContactCache.clear();
+    // Les langues observées chez les correspondants d'un compte ne doivent pas
+    // servir d'indice au compte suivant sur le même téléphone.
+    await MemoireLangues.clear();
     _set(AuthStatus.unauthenticated, null);
   }
 

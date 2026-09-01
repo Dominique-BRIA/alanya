@@ -521,11 +521,70 @@ const double _seuilOuvert = 0.01;
 /// identifiable (chiffres, émojis). ⚠️ L'appelant doit alors afficher le texte
 /// TEL QUEL en guise de traduction — c'est littéralement ce que « traduire vers
 /// sa propre langue » produit — et surtout pas un message d'erreur.
-Future<String?> sourceProbable(String texte, String cible) async {
-  if (!moteurAppareilPresent) return null;
+/// Raccourci sans indice ni apprentissage — voir [detecterSource], qui porte
+/// la règle. Conservé pour un appelant qui n'aurait pas d'expéditeur à citer.
+Future<String?> sourceProbable(String texte, String cible) async =>
+    (await detecterSource(texte, cible)).source;
+
+/// Ce qu'une détection a donné, et si l'on peut s'y fier.
+///
+/// [fiable] ne décrit PAS la qualité de la traduction à venir : il dit
+/// seulement si cette détection mérite d'être RETENUE comme la langue du
+/// correspondant. Une détection douteuse traduit quand même — elle n'enseigne
+/// simplement rien.
+typedef Detection = ({String? source, bool fiable});
+
+/// Seuil au-dessus duquel une détection se décide toute seule.
+///
+/// En dessous, ML Kit devine plus qu'il ne reconnaît : sur « ok » ou « merci »,
+/// ses trois premiers candidats sont à quelques points les uns des autres.
+const double _seuilSur = 0.5;
+
+/// Longueur minimale pour APPRENDRE d'une détection.
+///
+/// Plus exigeante que pour traduire : se tromper en traduisant coûte une bulle,
+/// se tromper en apprenant contamine tous les messages suivants du même
+/// correspondant.
+const int _longueurFiable = 20;
+
+/// La langue SOURCE à utiliser pour traduire [texte] vers [cible], ou `null`.
+///
+/// 🔴 **NE REFUSE TOUJOURS RIEN** (règle du user, 19/08/2026). `null` ne veut
+/// pas dire « je ne sais pas » mais « il n'y a rien à traduire » : le texte est
+/// déjà dans la langue voulue, ou ne porte aucune langue. L'appelant affiche
+/// alors le texte TEL QUEL, jamais une erreur.
+///
+/// 🔴 CE QUI A CHANGÉ LE 31/08/2026, et pourquoi le détecteur se trompait si
+/// souvent (constaté par le user) :
+///
+///  1. **La langue cible n'est plus écartée des candidats.** Elle l'était pour
+///     ne jamais buter sur « déjà dans ta langue » — mais quand le message EST
+///     dans la langue du lecteur, ce qui est courant dans un groupe, la bonne
+///     réponse était retirée d'office et la fonction était FORCÉE de descendre
+///     au candidat suivant, c'est-à-dire à du bruit. Elle ne se trompait pas :
+///     on lui interdisait d'avoir raison. Le prix de cette erreur n'était pas
+///     seulement une traduction fausse, mais le téléchargement de plusieurs
+///     dizaines de mégaoctets pour une langue dont personne n'avait besoin.
+///
+///  2. **Un plancher de confiance, qui ne refuse pas pour autant.** Sous
+///     [_seuilSur], on ne dit pas « je ne sais pas » : on retombe sur
+///     [langueConnue], la langue observée chez ce correspondant, et seulement à
+///     défaut sur le meilleur candidat — l'ancien comportement, conservé comme
+///     dernier recours.
+///
+/// [langueConnue] vient de `core/memoire_langues.dart`. C'est le vrai levier :
+/// un message de trois mots est indécidable, son auteur ne l'est pas.
+Future<Detection> detecterSource(
+  String texte,
+  String cible, {
+  String? langueConnue,
+}) async {
+  const rien = (source: null, fiable: false);
+  if (!moteurAppareilPresent) return rien;
   final propre = texte.trim();
-  if (propre.isEmpty) return null;
+  if (propre.isEmpty) return rien;
   final cibleNormalisee = normaliserLangue(cible);
+
   try {
     final detecteur = _detecteurs.putIfAbsent(
       _seuilOuvert,
@@ -534,15 +593,52 @@ Future<String?> sourceProbable(String texte, String cible) async {
     final candidats = await _enfiler(
       () => detecteur.identifyPossibleLanguages(propre),
     );
-    // La liste vient triée par confiance décroissante : le premier candidat
-    // exploitable est le meilleur, aussi faible soit son score.
+    if (candidats.isEmpty) return _repli(langueConnue, cibleNormalisee);
+
+    // La liste vient triée par confiance décroissante.
+    final meilleur = candidats.first;
+    final code = normaliserLangue(meilleur.languageTag);
+    final sur = meilleur.confidence >= _seuilSur && code.isNotEmpty;
+
+    if (sur) {
+      // Le message est dans la langue du lecteur : il n'y a rien à traduire, et
+      // le dire est la réponse JUSTE. C'est ce refus-là qui manquait.
+      if (code == cibleNormalisee) return rien;
+      if (langueSupportee(code) != null) {
+        return (
+          source: code,
+          // On n'apprend que d'un texte assez long : une détection sûre sur
+          // cinq caractères reste une coïncidence.
+          fiable: propre.length >= _longueurFiable,
+        );
+      }
+    }
+
+    // Détection incertaine : la langue connue du correspondant vaut mieux que
+    // le meilleur candidat d'un texte que ML Kit n'a pas su lire.
+    final connue = _repli(langueConnue, cibleNormalisee);
+    if (connue.source != null) return connue;
+
+    // Dernier recours — l'ancien comportement : le premier candidat exploitable,
+    // aussi faible soit son score. On ne refuse rien.
     for (final candidat in candidats) {
-      final code = normaliserLangue(candidat.languageTag);
-      if (code.isEmpty || code == cibleNormalisee) continue;
-      if (langueSupportee(code) != null) return code;
+      final c = normaliserLangue(candidat.languageTag);
+      if (c.isEmpty || c == cibleNormalisee) continue;
+      if (langueSupportee(c) != null) return (source: c, fiable: false);
     }
   } catch (_) {
-    // Détecteur indisponible : on rend `null`, l'appelant montrera le texte.
+    // Détecteur indisponible : la langue connue, sinon rien.
+    return _repli(langueConnue, cibleNormalisee);
   }
-  return null;
+  return rien;
+}
+
+Detection _repli(String? langueConnue, String cibleNormalisee) {
+  if (langueConnue == null) return (source: null, fiable: false);
+  final code = normaliserLangue(langueConnue);
+  if (code.isEmpty || code == cibleNormalisee) {
+    return (source: null, fiable: false);
+  }
+  if (langueSupportee(code) == null) return (source: null, fiable: false);
+  return (source: code, fiable: false);
 }
