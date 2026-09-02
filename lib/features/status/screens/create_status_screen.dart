@@ -1,13 +1,13 @@
-import 'dart:typed_data';
-
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/api_client.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../../widgets/media/media_picker_sheet.dart' show MediaPickResult;
+import '../../chat/screens/media_gallery_picker_screen.dart';
 import '../../media/media_repository.dart';
 import '../status_repository.dart';
+import 'status_viewer_screen.dart' show dureeVideoStatutMax;
 
 /// Convertit un hex (#RRGGBB) en Color opaque.
 Color colorFromHex(String hex) {
@@ -66,51 +66,64 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
     }
   }
 
-  /// Sélectionne une image ou vidéo depuis la galerie, l'upload, puis publie
-  /// le statut média.
+  /// Sélectionne des médias, les téléverse, puis publie un statut par média.
+  ///
+  /// 🔴 PASSE PAR LE SÉLECTEUR DE LA DISCUSSION, ET C'EST TOUT L'INTÉRÊT.
+  ///
+  /// L'ancien chemin ouvrait `FilePicker` et envoyait les octets D'ORIGINE :
+  /// 3 à 8 Mo pour une photo de téléphone, affichée dans un écran qui n'en
+  /// montre qu'un dixième. `MediaGalleryPickerScreen` applique déjà la règle
+  /// de `core/compression_image.dart` — miroir du web, bord long 1600 px,
+  /// qualité 82, et retour aux octets d'origine à la moindre incertitude.
+  /// Écrire une seconde compression ici aurait fait deux règles à tenir
+  /// accordées.
+  ///
+  /// Il corrige au passage un défaut du chemin précédent : le type était
+  /// deviné sur l'extension, et seuls `.mov` et `.mp4` étaient reconnus — un
+  /// PNG, un WebP ou un GIF partaient étiquetés `image/jpeg`.
   Future<void> _pickAndPublishMedia() async {
-    FilePickerResult? result;
+    List<MediaPickResult>? choisis;
     try {
-      result = await FilePicker.platform.pickFiles(
-        type: FileType.media,
-        withData: true,
-      );
+      choisis = await MediaGalleryPickerScreen.open(context);
     } catch (_) {
       _snack("Sélection de média indisponible sur cette plateforme");
       return;
     }
-    if (result == null || result.files.isEmpty) return;
+    if (choisis == null || choisis.isEmpty || !mounted) return;
 
-    final file = result.files.first;
-    final bytes = file.bytes;
-    if (bytes == null) return;
-
-    final mime = file.name.toLowerCase().endsWith('.mov') ||
-            file.name.toLowerCase().endsWith('.mp4')
-        ? 'video/mp4'
-        : 'image/jpeg';
-
-    final isVideo = mime.startsWith('video/');
+    // ⚠️ Une vidéo plus longue que la visionneuse ne sert à rien : elle serait
+    // coupée à `dureeVideoStatutMax` à la lecture, APRÈS avoir été téléversée
+    // en entier. On le dit avant l'envoi plutôt que de faire payer la donnée.
+    if (choisis.any(
+        (m) => (m.durationMs ?? 0) > dureeVideoStatutMax.inMilliseconds)) {
+      _snack("Une vidéo de statut ne peut pas dépasser "
+          "${dureeVideoStatutMax.inSeconds} secondes");
+      return;
+    }
 
     setState(() => _publishing = true);
     final media = context.read<MediaRepository>();
     final repo = context.read<StatusRepository>();
     final nav = Navigator.of(context);
+    var publies = 0;
     try {
-      final uploaded = await media.upload(
-        Uint8List.fromList(bytes),
-        file.name,
-        mime,
-      );
-      await repo.createMedia(
-        uploaded.id,
-        isVideo ? 'VIDEO' : 'IMAGE',
-      );
+      for (final m in choisis) {
+        final uploaded = await media.upload(m.bytes, m.fileName, m.mimeType);
+        await repo.createMedia(
+          uploaded.id,
+          m.mimeType.startsWith('video/') ? 'VIDEO' : 'IMAGE',
+        );
+        publies++;
+      }
       nav.pop(true);
     } on ApiException catch (e) {
-      _snack(e.message);
+      _snack(publies == 0
+          ? e.message
+          : "$publies statut(s) publié(s), puis : ${e.message}");
     } catch (_) {
-      _snack("Publication du média impossible");
+      _snack(publies == 0
+          ? "Publication du média impossible"
+          : "$publies statut(s) publié(s), l'envoi s'est interrompu ensuite");
     } finally {
       if (mounted) setState(() => _publishing = false);
     }
