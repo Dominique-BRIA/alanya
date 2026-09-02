@@ -1265,6 +1265,43 @@ class _ConversationsTabState extends State<_ConversationsTab>
     );
   }
 
+  /// L'aperçu d'un message, avec ses `@mentions` en gras.
+  ///
+  /// 🔴 ICI ON DÉTECTE LES MENTIONS AU MOTIF, contrairement à la bulle de
+  /// discussion qui s'appuie sur la liste portée par le message. La raison est
+  /// dans la charge : la liste des conversations ne reçoit QUE le texte du
+  /// dernier message (`lastMessage`), jamais ses mentions. Les faire remonter
+  /// demanderait de charger, pour chaque conversation, les mentions d'un
+  /// message qu'on ne montre qu'en résumé.
+  ///
+  /// ⚠️ CE QUE CE CHOIX ACCEPTE : un `@` écrit à la main se met en gras ici
+  /// alors qu'il ne désigne personne. C'est une différence de STYLE dans un
+  /// aperçu d'une ligne — aucune notification, aucun compte visé n'en dépend.
+  /// Le `@` doit tout de même ouvrir un mot, ce qui écarte les adresses
+  /// électroniques.
+  List<InlineSpan> _spansApercuAvecMentions(String texte, TextStyle base) {
+    final motif = RegExp(r'(^|\s)(@[^\s@]{1,40})');
+    if (!motif.hasMatch(texte)) return spansWhatsApp(texte);
+
+    final spans = <InlineSpan>[];
+    var position = 0;
+    for (final m in motif.allMatches(texte)) {
+      final debutMention = m.start + m.group(1)!.length;
+      if (debutMention > position) {
+        spans.addAll(spansWhatsApp(texte.substring(position, debutMention)));
+      }
+      spans.add(TextSpan(
+        text: m.group(2),
+        style: base.copyWith(fontWeight: FontWeight.w700),
+      ));
+      position = m.end;
+    }
+    if (position < texte.length) {
+      spans.addAll(spansWhatsApp(texte.substring(position)));
+    }
+    return spans;
+  }
+
   Widget _tile(Conversation c) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final last = c.lastMessage;
@@ -1314,7 +1351,21 @@ class _ConversationsTabState extends State<_ConversationsTab>
        * par le MÊME composeur, sans quoi le défaut reste visible à l'endroit le
        * plus regardé de l'application.
        */
-      if (last.type == "SYSTEM") {
+      /*
+       * ⚠️ ON RECONNAÎT L'AVIS À SA CHARGE, PAS À SON TYPE — et c'est ce qui
+       * manquait (défaut signalé le 01/09/2026 : le JSON s'affichait encore).
+       *
+       * La liste reçoit le type du dernier message sous forme de NOMBRE
+       * (`lastMessageType`), et le serveur range tout ce qui n'est ni texte ni
+       * média sous le 2, que `_typeToString` traduit par « FILE ». Un avis
+       * système arrive donc étiqueté « FILE » : le test `type == "SYSTEM"` ne
+       * pouvait jamais se déclencher.
+       *
+       * `estAvisSysteme` regarde le contenu : `{"code": …}` et rien d'autre.
+       * Un CONTACT ou une LOCATION porte aussi du JSON, mais sans clé `code` —
+       * ils gardent donc leur aperçu habituel.
+       */
+      if (estAvisSysteme(last.content)) {
         return composerMessageSysteme(
           context,
           last.content,
@@ -1376,7 +1427,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
       final raw = last.content!.trim();
       // Coupe à 120 char pour ne pas surcharger le ListTile avec un pavé
       final trimmed = raw.length > 120 ? "${raw.substring(0, 120)}…" : raw;
-      final spans = spansWhatsApp(trimmed);
+      final spans = _spansApercuAvecMentions(trimmed, baseStyle);
       if (c.isGroup && c.members.isNotEmpty) {
         final prefix = "${c.members.length} membres · ";
         return Text.rich(

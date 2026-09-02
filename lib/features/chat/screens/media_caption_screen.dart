@@ -18,7 +18,18 @@ import '../../../widgets/media/media_picker_sheet.dart';
 class MediaCaptionResult {
   final List<MediaPickResult> fichiers;
   final String? legende;
-  const MediaCaptionResult({required this.fichiers, this.legende});
+
+  /// Les `@` de la légende — `{userId, libelle}`, comme pour un texte.
+  ///
+  /// Une légende est un message comme un autre : elle peut désigner quelqu'un,
+  /// et le serveur la traite pareil.
+  final List<Map<String, String>> mentions;
+
+  const MediaCaptionResult({
+    required this.fichiers,
+    this.legende,
+    this.mentions = const [],
+  });
 }
 
 /// Aperçu des médias avant l'envoi, façon WhatsApp : balayage entre les médias,
@@ -30,13 +41,30 @@ class MediaCaptionResult {
 class MediaCaptionScreen extends StatefulWidget {
   final List<MediaPickResult> files;
 
-  const MediaCaptionScreen({super.key, required this.files});
+  /// Les membres du groupe, `id -> nom`. VIDE hors groupe : le `@` ne propose
+  /// alors rien, exactement comme dans le champ de discussion.
+  final Map<String, String> membres;
+
+  /// Mon identifiant — on ne se mentionne pas soi-même.
+  final String? monId;
+
+  const MediaCaptionScreen({
+    super.key,
+    required this.files,
+    this.membres = const {},
+    this.monId,
+  });
 
   static Future<MediaCaptionResult?> open(
-      BuildContext context, List<MediaPickResult> files) {
+    BuildContext context,
+    List<MediaPickResult> files, {
+    Map<String, String> membres = const {},
+    String? monId,
+  }) {
     return Navigator.of(context).push<MediaCaptionResult>(
       MaterialPageRoute(
-        builder: (_) => MediaCaptionScreen(files: files),
+        builder: (_) =>
+            MediaCaptionScreen(files: files, membres: membres, monId: monId),
       ),
     );
   }
@@ -121,7 +149,108 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
     Navigator.of(context).pop(MediaCaptionResult(
       fichiers: _fichiers,
       legende: legende.isEmpty ? null : legende,
+      // Réduites à celles encore présentes dans la légende : effacer
+      // « @Dominique » avant d'envoyer ne doit notifier personne. Même règle
+      // que dans le champ de discussion.
+      mentions: [
+        for (final m in _mentionsEnCours)
+          if (legende.contains("@${m["libelle"]}")) m,
+      ],
     ));
+  }
+
+  // ══════════════════════════════════════════════
+  // MENTIONS @ DANS LA LÉGENDE — groupes seulement
+  // ══════════════════════════════════════════════
+  //
+  // 🔴 UNE LÉGENDE EST UN MESSAGE COMME UN AUTRE. Le serveur la range dans le
+  // même `content`, et rien ne justifiait qu'on puisse mentionner quelqu'un en
+  // écrivant, mais pas en envoyant une photo — c'est même souvent là qu'on veut
+  // le faire (« @Jean regarde ça »).
+  //
+  // Miroir de `chat_screen.dart` : mêmes règles de détection, même filtre à
+  // l'envoi. Les deux écrans doivent produire les mêmes messages.
+
+  final List<Map<String, String>> _mentionsEnCours = [];
+  String? _requeteMention;
+  int _debutMention = -1;
+
+  void _majRequeteMention() {
+    if (widget.membres.isEmpty) return;
+    final sel = _captionCtrl.selection;
+    final texte = _captionCtrl.text;
+    if (!sel.isValid || !sel.isCollapsed || sel.start > texte.length) {
+      if (_requeteMention != null) setState(() => _requeteMention = null);
+      return;
+    }
+    final avant = texte.substring(0, sel.start);
+    final at = avant.lastIndexOf('@');
+    // Le `@` doit ouvrir un mot, et la requête s'arrête à la première espace.
+    if (at < 0 ||
+        (at > 0 && !RegExp(r'\s').hasMatch(avant[at - 1])) ||
+        avant.substring(at + 1).contains(RegExp(r'\s'))) {
+      if (_requeteMention != null) setState(() => _requeteMention = null);
+      return;
+    }
+    setState(() {
+      _requeteMention = avant.substring(at + 1);
+      _debutMention = at;
+    });
+  }
+
+  List<MapEntry<String, String>> _membresProposes() {
+    final requete = (_requeteMention ?? "").toLowerCase();
+    return widget.membres.entries
+        .where((e) => e.key != widget.monId && e.value.trim().isNotEmpty)
+        .where((e) => requete.isEmpty || e.value.toLowerCase().contains(requete))
+        .toList()
+      ..sort((a, b) => a.value.toLowerCase().compareTo(b.value.toLowerCase()));
+  }
+
+  void _insereMention(String userId, String nom) {
+    final texte = _captionCtrl.text;
+    final sel = _captionCtrl.selection;
+    final fin = sel.isValid ? sel.start : texte.length;
+    if (_debutMention < 0 || _debutMention > fin) return;
+    // L'espace finale évite que le curseur reste DANS la mention, ce qui
+    // rouvrirait la liste sur le nom qu'on vient de choisir.
+    final remplacement = "@$nom ";
+    _captionCtrl.value = TextEditingValue(
+      text: texte.replaceRange(_debutMention, fin, remplacement),
+      selection:
+          TextSelection.collapsed(offset: _debutMention + remplacement.length),
+    );
+    setState(() {
+      _requeteMention = null;
+      _debutMention = -1;
+      _mentionsEnCours.removeWhere((m) => m["userId"] == userId);
+      _mentionsEnCours.add({"userId": userId, "libelle": nom});
+    });
+  }
+
+  Widget _panneauMentions() {
+    if (widget.membres.isEmpty || _requeteMention == null) {
+      return const SizedBox.shrink();
+    }
+    final membres = _membresProposes();
+    if (membres.isEmpty) return const SizedBox.shrink();
+    return Container(
+      constraints: const BoxConstraints(maxHeight: 180),
+      color: const Color(0xFF1F2C34),
+      child: ListView.builder(
+        shrinkWrap: true,
+        padding: EdgeInsets.zero,
+        itemCount: membres.length,
+        itemBuilder: (_, i) {
+          final e = membres[i];
+          return ListTile(
+            dense: true,
+            title: Text(e.value, style: const TextStyle(color: Colors.white)),
+            onTap: () => _insereMention(e.key, e.value),
+          );
+        },
+      ),
+    );
   }
 
   @override
@@ -172,6 +301,7 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
             ),
             if (_fichiers.length > 1) _bandeau(),
             ?_ligneCompression(),
+            _panneauMentions(),
             _composeur(),
           ],
         ),
@@ -373,6 +503,7 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
               ),
               child: TextField(
                 controller: _captionCtrl,
+                onChanged: (_) => _majRequeteMention(),
                 textCapitalization: TextCapitalization.sentences,
                 maxLines: 4,
                 minLines: 1,

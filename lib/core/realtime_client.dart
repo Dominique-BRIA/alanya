@@ -305,9 +305,13 @@ class RealtimeClient extends ChangeNotifier {
         if (replyToId != null) "replyToId": replyToId,
       });
 
+  /// [mentions] : les `@` de la LÉGENDE. Une légende est un texte comme un
+  /// autre — elle peut donc désigner quelqu'un, et le serveur la traite pareil.
   void sendMultiMedia(
           String convId, List<String> mediaIds, String msgType, String tempId,
-          {String? replyToId, String? content}) =>
+          {String? replyToId,
+          String? content,
+          List<Map<String, String>>? mentions}) =>
       _send({
         "type": "send",
         "convId": convId,
@@ -316,6 +320,7 @@ class RealtimeClient extends ChangeNotifier {
         "tempId": tempId,
         if (content != null && content.isNotEmpty) "content": content,
         if (replyToId != null) "replyToId": replyToId,
+        if (mentions != null && mentions.isNotEmpty) "mentions": mentions,
       });
 
   /// Message dont la charge utile vit dans `content` : `CONTACT`, `LOCATION`.

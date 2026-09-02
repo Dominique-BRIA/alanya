@@ -236,11 +236,16 @@ class ChatRepository {
     return Message.fromJson(data);
   }
 
-  Future<Message> sendMultiMedia(String convId, List<String> mediaIds, String msgType, {String? replyToId, String? content}) async {
+  /// [mentions] : les `@` de la légende — même règle que pour un texte.
+  Future<Message> sendMultiMedia(String convId, List<String> mediaIds, String msgType,
+      {String? replyToId,
+      String? content,
+      List<Map<String, String>>? mentions}) async {
     final data = await _api.post("/api/conversations/$convId/messages", {
       "type": msgType, "mediaIds": mediaIds,
       if (content != null && content.isNotEmpty) "content": content,
       if (replyToId != null) "replyToId": replyToId,
+      if (mentions != null && mentions.isNotEmpty) "mentions": mentions,
     });
     return Message.fromJson(data as Map<String, dynamic>);
   }

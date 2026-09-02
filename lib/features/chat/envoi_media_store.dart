@@ -127,12 +127,16 @@ class EnvoiMediaStore extends ChangeNotifier {
       if (rt.connected) {
         rt.sendMultiMedia(
             envoi.convId, envoi.mediaIdsObtenus, envoi.msgType, envoi.tempId,
-            replyToId: envoi.replyToId, content: envoi.legende);
+            replyToId: envoi.replyToId,
+            content: envoi.legende,
+            mentions: envoi.mentions);
         _armeAttenteEcho(envoi);
       } else {
         await chat.sendMultiMedia(
             envoi.convId, envoi.mediaIdsObtenus, envoi.msgType,
-            replyToId: envoi.replyToId, content: envoi.legende);
+            replyToId: envoi.replyToId,
+            content: envoi.legende,
+            mentions: envoi.mentions);
         // Le repli REST rend le message créé : l'envoi est terminé, l'écran le
         // rechargera par ses voies normales.
         terminer(envoi.tempId);

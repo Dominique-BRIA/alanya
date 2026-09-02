@@ -24,6 +24,7 @@ class EnvoiMedia {
     required this.msgType,
     this.legende,
     this.replyToId,
+    this.mentions,
   }) : creeA = DateTime.now();
 
   /// Identifiant provisoire, partagé avec le message optimiste du fil.
@@ -51,6 +52,13 @@ class EnvoiMedia {
   final String msgType;
   final String? legende;
   final String? replyToId;
+
+  /// Les `@` de la LÉGENDE, `{userId, libelle}`.
+  ///
+  /// Portées par l'envoi et non recalculées au moment de partir : la file peut
+  /// attendre une reconnexion, et l'écran qui les a choisies n'existe alors
+  /// peut-être plus.
+  final List<Map<String, String>>? mentions;
 
   /// Médias déjà téléversés, dans l'ordre des [fichiers].
   final List<String> mediaIdsObtenus = [];

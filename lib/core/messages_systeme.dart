@@ -54,6 +54,21 @@ String _texte(dynamic valeur) => valeur is String ? valeur : "";
 /// Renvoie une chaîne VIDE pour un code inconnu — un client plus ancien que le
 /// serveur. C'est délibéré et c'est la règle du web : on n'invente pas de
 /// phrase, et on ne montre surtout pas le JSON. L'appelant masque la bulle.
+/// Vrai si [contenu] est la charge d'un AVIS SYSTÈME (`{"code": …}`).
+///
+/// 🔴 EXISTE PARCE QUE LE TYPE NE SUFFIT PAS À LES RECONNAÎTRE. La liste des
+/// discussions reçoit le type du dernier message sous forme de NOMBRE
+/// (`lastMessageType`), et le serveur range tout ce qui n'est ni texte ni média
+/// sous le 2 — que `_typeToString` traduit par « FILE ». Un avis système arrive
+/// donc étiqueté « FILE », et un test sur `type == "SYSTEM"` ne se déclenche
+/// JAMAIS : c'est ce qui laissait le JSON brut s'afficher dans la liste
+/// (« {"code":"member_added",…} »), défaut signalé par le user le 01/09/2026.
+///
+/// On reconnaît donc l'avis à sa CHARGE, pas à son étiquette. `CONTACT` et
+/// `LOCATION` portent aussi du JSON, mais sans clé `code` : ils ne passent pas
+/// ici et gardent leur aperçu habituel.
+bool estAvisSysteme(String? contenu) => _lireCharge(contenu) != null;
+
 String composerMessageSysteme(
   BuildContext context,
   String? contenu,

@@ -16,6 +16,7 @@ import '../../../core/call_cache.dart';
 import '../../../core/call_status.dart';
 import '../../../models/call_record.dart';
 import '../../calls/calls_repository.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -242,6 +243,10 @@ class _ChatScreenState extends State<ChatScreen>
               m["id"] as String:
                   (m["pseudo"] as String?) ?? (m["publicNumber"] as String? ?? ""),
         };
+        // Suis-je ADMINISTRATEUR de ce groupe ? Seul lui peut écrire
+        // « @tout le monde » — la route des membres rend déjà le rôle.
+        _jeSuisAdmin = membres.any((m) =>
+            m["id"] == _myId && (m["role"] as String?)?.toUpperCase() == "ADMIN");
         /*
          * SEMENCE DU COMPTEUR DE LECTURES : ce que les membres avaient déjà lu
          * AVANT qu'on ouvre. Les trames `read` ne racontent que la suite.
@@ -519,6 +524,23 @@ class _ChatScreenState extends State<ChatScreen>
   /// une mention. Chaîne VIDE = « @ » seul, la liste s'affiche entière.
   String? _requeteMention;
 
+  /// Vrai si je suis ADMINISTRATEUR de ce groupe.
+  ///
+  /// Conditionne la seule entrée réservée : « @tout le monde ». Le reste des
+  /// mentions est ouvert à tous les membres, comme sur WhatsApp.
+  bool _jeSuisAdmin = false;
+
+  /// Le libellé de la mention collective.
+  ///
+  /// 🔴 CE N'EST PAS UN COMPTE : c'est un raccourci qui se DÉPLIE en une
+  /// mention par membre au moment de l'insertion. Le serveur n'a donc aucun cas
+  /// particulier à connaître, et un client plus ancien reçoit des mentions
+  /// ordinaires plutôt qu'un code qu'il ne saurait pas lire.
+  ///
+  /// ⚠️ Le texte du message, lui, garde « @tout le monde » — une phrase, pas
+  /// vingt noms collés. C'est ce que voit le lecteur.
+  static const String _libelleTousLesMembres = "tout le monde";
+
   /// Position du `@` qui a ouvert la liste, pour savoir quoi remplacer.
   int _debutMention = -1;
 
@@ -607,6 +629,44 @@ class _ChatScreenState extends State<ChatScreen>
     });
   }
 
+  /// Insère « @tout le monde » et vise TOUS les membres du groupe.
+  ///
+  /// 🔴 LE RACCOURCI SE DÉPLIE ICI, pas au serveur. Le message part donc avec
+  /// une mention par membre — ce que tout client sait déjà lire — et le serveur
+  /// n'a aucun cas particulier à connaître. Un code spécial aurait demandé de
+  /// modifier les trois clients ET le serveur pour le même résultat.
+  ///
+  /// ⚠️ LE TEXTE PORTE UNE SEULE PHRASE, « @tout le monde », et non vingt noms
+  /// collés : c'est ce que lit le destinataire. La mise en évidence retrouve ce
+  /// libellé parce que chaque mention le porte à l'identique.
+  void _insereMentionTous() {
+    final tous = _membresProposes();
+    if (tous.isEmpty) return;
+    final texte = _inputCtrl.text;
+    final sel = _inputCtrl.selection;
+    final fin = sel.isValid ? sel.start : texte.length;
+    if (_debutMention < 0 || _debutMention > fin) return;
+
+    final remplacement = "@$_libelleTousLesMembres ";
+    final nouveau = texte.replaceRange(_debutMention, fin, remplacement);
+    _inputCtrl.value = TextEditingValue(
+      text: nouveau,
+      selection:
+          TextSelection.collapsed(offset: _debutMention + remplacement.length),
+    );
+    setState(() {
+      _requeteMention = null;
+      _debutMention = -1;
+      for (final m in tous) {
+        _mentionsEnCours.removeWhere((x) => x.userId == m.key);
+        // Tous portent le MÊME libellé : c'est lui qui sera retrouvé dans le
+        // texte, aussi bien pour l'envoi que pour la mise en évidence.
+        _mentionsEnCours.add(MentionMessage(
+            userId: m.key, libelle: _libelleTousLesMembres));
+      }
+    });
+  }
+
   /// Les mentions à ENVOYER, réduites à celles encore présentes dans le texte.
   ///
   /// 🔴 SANS CE FILTRE, EFFACER « @Dominique » DU TEXTE LE NOTIFIERAIT QUAND
@@ -630,9 +690,15 @@ class _ChatScreenState extends State<ChatScreen>
       return const SizedBox.shrink();
     }
     final membres = _membresProposes();
+    // « @tout le monde » n'apparaît que pour un administrateur, et seulement
+    // si la frappe le désigne encore.
+    final proposeTous = _jeSuisAdmin &&
+        _libelleTousLesMembres
+            .toLowerCase()
+            .contains((_requeteMention ?? "").toLowerCase());
     // Aucun membre ne correspond : on referme plutôt que d'afficher un panneau
     // vide au-dessus du clavier.
-    if (membres.isEmpty) return const SizedBox.shrink();
+    if (membres.isEmpty && !proposeTous) return const SizedBox.shrink();
     return Container(
       constraints: const BoxConstraints(maxHeight: 200),
       decoration: BoxDecoration(
@@ -642,9 +708,22 @@ class _ChatScreenState extends State<ChatScreen>
       child: ListView.builder(
         shrinkWrap: true,
         padding: EdgeInsets.zero,
-        itemCount: membres.length,
+        // +1 pour l'entrée collective, quand elle est proposée.
+        itemCount: membres.length + (proposeTous ? 1 : 0),
         itemBuilder: (_, i) {
-          final e = membres[i];
+          if (proposeTous && i == 0) {
+            return ListTile(
+              dense: true,
+              leading: Icon(Icons.groups_outlined, color: _accent),
+              title: Text("@$_libelleTousLesMembres",
+                  style: TextStyle(
+                      color: _iconNeutral, fontWeight: FontWeight.w600)),
+              subtitle: Text("Notifie ${_membresProposes().length} membres",
+                  style: TextStyle(color: _muted45, fontSize: 11)),
+              onTap: _insereMentionTous,
+            );
+          }
+          final e = membres[proposeTous ? i - 1 : i];
           return ListTile(
             dense: true,
             leading: AvatarCircle(name: e.value, avatarUrl: null, radius: 16),
@@ -2174,10 +2253,19 @@ class _ChatScreenState extends State<ChatScreen>
     // Aperçu : balayage entre les médias, retrait de l'un d'eux, légende.
     // ⚠️ On envoie la liste RENDUE par l'aperçu, pas celle de la sélection : un
     // média retiré doit disparaître de l'envoi.
-    final apercu = await MediaCaptionScreen.open(context, files);
+    // Les membres ne partent QUE pour un groupe : hors groupe, le `@` de la
+    // legende ne propose rien, comme dans le champ de discussion.
+    final apercu = await MediaCaptionScreen.open(
+      context,
+      files,
+      membres: widget.isGroup
+          ? {...widget.memberNames, ..._membresCharges}
+          : const {},
+      monId: _myId,
+    );
     if (apercu == null || apercu.fichiers.isEmpty) return; // annulé
 
-    await _lanceEnvoiMedias(apercu.fichiers, apercu.legende);
+    await _lanceEnvoiMedias(apercu.fichiers, apercu.legende, apercu.mentions);
   }
 
   // ══════════════════════════════════════════════
@@ -2192,8 +2280,8 @@ class _ChatScreenState extends State<ChatScreen>
   /// message par un 422, et les quinze médias restaient orphelins en base. On
   /// découpe donc en plusieurs messages ; le regroupement à la lecture les
   /// réunira visuellement.
-  Future<void> _lanceEnvoiMedias(
-      List<MediaPickResult> fichiers, String? legende) async {
+  Future<void> _lanceEnvoiMedias(List<MediaPickResult> fichiers, String? legende,
+      [List<Map<String, String>> mentions = const []]) async {
     final replyId = _replyTo?.id;
     if (_replyTo != null) setState(() => _replyTo = null);
 
@@ -2217,6 +2305,9 @@ class _ChatScreenState extends State<ChatScreen>
         // La légende accompagne le PREMIER paquet seulement : répétée sur
         // chacun, elle apparaîtrait plusieurs fois dans le fil.
         legende: debut == 0 ? legende : null,
+        // Comme la legende : sur le PREMIER paquet seulement, puisque ce sont
+        // ses mentions. Repetees, elles notifieraient a chaque paquet.
+        mentions: debut == 0 ? mentions : null,
         replyToId: debut == 0 ? replyId : null,
       );
 
@@ -4373,6 +4464,34 @@ class _ChatScreenState extends State<ChatScreen>
     return m.type == 'TEXT' ? 'FILE' : m.type;
   }
 
+  /// Ouvre la fiche d'une personne mentionnée.
+  ///
+  /// ⚠️ ON N'A QUE SON IDENTIFIANT ET SON LIBELLÉ. Le numéro public et l'avatar
+  /// viennent des membres relus (`_membresCharges` ne porte que les noms) : la
+  /// fiche s'ouvre donc avec ce qu'on sait, et se complète elle-même — c'est
+  /// déjà ce qu'elle fait quand on l'ouvre depuis la liste des contacts.
+  ///
+  /// Se mentionner soi-même n'arrive pas (le serveur l'écarte), mais un ancien
+  /// message pourrait en porter : on n'ouvre alors rien plutôt que d'afficher
+  /// sa propre fiche comme celle d'un correspondant.
+  Future<void> _ouvreFicheMentionne(MentionMessage mention) async {
+    if (mention.userId == _myId) return;
+    final nom = _membresCharges[mention.userId] ??
+        widget.memberNames[mention.userId] ??
+        mention.libelle;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ContactInfoScreen(
+          userId: mention.userId,
+          name: nom,
+          // Le numéro n'est pas connu ici : la fiche l'affiche vide plutôt que
+          // d'inventer, et les actions qui en dépendent le disent.
+          publicNumber: "",
+        ),
+      ),
+    );
+  }
+
   /// Le texte d'un message, avec ses `@mentions` mises en évidence.
   ///
   /// 🔴 ON DÉCOUPE SUR LES LIBELLÉS PORTÉS PAR LE MESSAGE, jamais sur une
@@ -4416,9 +4535,29 @@ class _ChatScreenState extends State<ChatScreen>
       if (meilleurIndex > 0) {
         spans.addAll(spansWhatsApp(reste.substring(0, meilleurIndex)));
       }
+      /*
+       * APPUYER SUR UNE MENTION OUVRE LA FICHE DE LA PERSONNE (comme WhatsApp).
+       *
+       * ⚠️ ON RETROUVE LE COMPTE PAR SON LIBELLÉ, dans les mentions du message.
+       * Deux membres peuvent partager un libellé : on prend le premier, faute
+       * de mieux — c'est le prix de ne pas stocker les positions, et cela reste
+       * incomparablement plus juste que de chercher un pseudo dans une phrase.
+       *
+       * ⚠️ Le `recognizer` est créé À CHAQUE CONSTRUCTION et jamais libéré.
+       * C'est acceptable ici — quelques mentions par écran — mais ce serait
+       * une fuite dans une liste qui en porterait des centaines.
+       */
+      final vise = m.mentions.firstWhere(
+        (x) => x.libelle == meilleurLibelle,
+        orElse: () => const MentionMessage(userId: "", libelle: ""),
+      );
       spans.add(TextSpan(
         text: "@$meilleurLibelle",
         style: TextStyle(color: couleur, fontWeight: FontWeight.w700),
+        recognizer: vise.userId.isEmpty
+            ? null
+            : (TapGestureRecognizer()
+              ..onTap = () => _ouvreFicheMentionne(vise)),
       ));
       reste = reste.substring(meilleurIndex + meilleurLibelle.length + 1);
     }
