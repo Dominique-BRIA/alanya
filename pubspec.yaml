@@ -112,6 +112,27 @@ dependencies:
   # 3.44.6, elles passent ; ne pas y revenir en arrière.
   google_mlkit_translation: ^0.15.1
   google_mlkit_language_id: ^0.15.1
+  # Transcodage vidéo AVANT envoi (statuts). Les photos étaient déjà réduites
+  # par `core/compression_image.dart` ; les vidéos partaient en pleine
+  # définition — 20 Mo la minute en 1080p, pour un statut vu sur un écran de
+  # téléphone pendant 60 s au plus.
+  #
+  # ⚠️ CHOISI POUR CE QU'IL N'EMBARQUE PAS : 100 % natif (MediaCodec), donc pas
+  # de FFmpeg — ni les ~20 Mo d'APK, ni la question de licence qui va avec.
+  # ffmpeg_kit_flutter, l'autre voie, a été retiré par ses auteurs.
+  #
+  # ⚠️ Contraintes vérifiées contre les TROIS CI (toutes à Flutter 3.44.6) :
+  # le paquet demande `sdk >=3.0.0` / `flutter >=2.0.0`, et son module Android
+  # déclare bien un `namespace` — sans lui, AGP 8.11 refuse de bâtir. minSdk 21
+  # (l'app est à 24). Son Kotlin a été COMPILÉ ICI contre notre chaîne
+  # (Kotlin 2.2.20 / AGP 8.11.1 / Gradle 8.14.3) : `:video_compress:
+  # compileDebugKotlin` passe, avec trois avertissements de nullité.
+  #
+  # ⚠️ Défaut connu de la 3.1.4 : le drapeau interne « compression en cours »
+  # n'est pas remis à zéro quand le transcodage échoue. La règle de
+  # `core/compression_video.dart` en tient compte — les suivantes repartent
+  # simplement sans compression, jamais en erreur.
+  video_compress: ^3.1.4
 
 
 dev_dependencies:

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:video_compress/video_compress.dart';
 
 import '../../../core/api_client.dart';
+import '../../../core/compression_video.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/media/media_picker_sheet.dart' show MediaPickResult;
 import '../../chat/screens/media_gallery_picker_screen.dart';
@@ -38,6 +40,11 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
   final _textCtrl = TextEditingController();
   int _colorIndex = 0;
   bool _publishing = false;
+
+  /// Ce que l'écran est en train de faire — « Compression de la vidéo… 42 % »,
+  /// « Envoi… ». Affiché en titre pendant la publication : un transcodage dure
+  /// des dizaines de secondes, et un écran sans un mot passe pour figé.
+  String? _etape;
 
   @override
   void dispose() {
@@ -106,12 +113,41 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
     final repo = context.read<StatusRepository>();
     final nav = Navigator.of(context);
     var publies = 0;
+
+    // Le transcodage d'une vidéo dure des dizaines de secondes : sans ce
+    // compte rendu, l'écran paraît figé et l'utilisateur repart.
+    final progression = VideoCompress.compressProgress$.subscribe((p) {
+      if (mounted) {
+        setState(() => _etape = "Compression de la vidéo… ${p.round()} %");
+      }
+    });
+
     try {
       for (final m in choisis) {
-        final uploaded = await media.upload(m.bytes, m.fileName, m.mimeType);
+        var octets = m.bytes;
+        var nom = m.fileName;
+        var mime = m.mimeType;
+
+        if (mime.startsWith('video/')) {
+          // Les photos sont déjà compressées par le sélecteur ; les vidéos, non
+          // — aucun paquet ne le faisait dans ce projet jusqu'ici.
+          if (mounted) setState(() => _etape = "Compression de la vidéo…");
+          final v = await compresserVideo(
+            m.bytes,
+            chemin: m.path,
+            nomFichier: m.fileName,
+            mimeType: m.mimeType,
+          );
+          octets = v.octets;
+          nom = v.nomFichier;
+          mime = v.mimeType;
+        }
+
+        if (mounted) setState(() => _etape = "Envoi…");
+        final uploaded = await media.upload(octets, nom, mime);
         await repo.createMedia(
           uploaded.id,
-          m.mimeType.startsWith('video/') ? 'VIDEO' : 'IMAGE',
+          mime.startsWith('video/') ? 'VIDEO' : 'IMAGE',
         );
         publies++;
       }
@@ -125,7 +161,13 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
           ? "Publication du média impossible"
           : "$publies statut(s) publié(s), l'envoi s'est interrompu ensuite");
     } finally {
-      if (mounted) setState(() => _publishing = false);
+      progression.unsubscribe();
+      if (mounted) {
+        setState(() {
+          _publishing = false;
+          _etape = null;
+        });
+      }
     }
   }
 
@@ -148,7 +190,7 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
                 onPressed: () => Navigator.of(context).pop(),
               )
             : null,
-        title: const Text("Nouveau statut"),
+        title: Text(_etape ?? "Nouveau statut"),
         actions: [
           IconButton(
             tooltip: "Publier une photo ou vidéo",
