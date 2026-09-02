@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -8,6 +10,7 @@ import '../../../core/token_storage.dart';
 import '../../../models/status.dart';
 import '../../../widgets/auth_network_image.dart';
 import '../../../widgets/avatar_circle.dart';
+import '../gestes_visionneuse.dart';
 import '../horodatage_statut.dart';
 import '../status_repository.dart';
 import 'create_status_screen.dart' show colorFromHex;
@@ -20,7 +23,11 @@ const Duration _dureeFixe = Duration(seconds: 5);
 /// La barre suit la durée RÉELLE de la vidéo, mais une vidéo anormalement
 /// longue immobiliserait la visionneuse sans que rien ne la fasse avancer :
 /// le plafond garantit qu'un statut finit toujours par céder la place.
-const Duration _dureeVideoMax = Duration(seconds: 60);
+///
+/// ⚠️ PUBLIC PARCE QUE L'ÉCRAN DE PUBLICATION S'EN SERT AUSSI : il refuse une
+/// vidéo plus longue, qui serait de toute façon coupée ici après avoir été
+/// téléversée en entier. Les deux doivent parler de la même limite.
+const Duration dureeVideoStatutMax = Duration(seconds: 60);
 
 /// Visionneuse plein écran des statuts, façon WhatsApp.
 ///
@@ -161,15 +168,42 @@ class _VueGroupe extends StatefulWidget {
   State<_VueGroupe> createState() => _VueGroupeState();
 }
 
+/// Ce qui empêche la barre d'avancer.
+///
+/// 🔴 UN ENSEMBLE, ET NON DES BOOLÉENS INDÉPENDANTS. Il suffit qu'UNE raison
+/// subsiste pour rester en pause. Avec deux drapeaux séparés, un doigt posé
+/// pendant le téléchargement d'une image relançait la barre au relâchement
+/// alors que l'image n'était toujours pas arrivée.
+enum _RaisonPause {
+  /// Le doigt est posé sur l'écran.
+  doigt,
+
+  /// Le média du statut courant n'est pas encore affichable.
+  chargement,
+
+  /// Une boîte de dialogue ou une feuille est ouverte par-dessus.
+  dialogue,
+}
+
 class _VueGroupeState extends State<_VueGroupe>
     with SingleTickerProviderStateMixin {
   late int _index = _premierNonVu();
-  bool _enPause = false;
 
-  /// Vrai tant que la vidéo courante n'a pas annoncé sa durée : la barre ne
-  /// doit pas courir pendant le chargement, sinon un statut vidéo est passé
-  /// avant d'avoir commencé sur une connexion lente.
-  bool _attendVideo = false;
+  final Set<_RaisonPause> _pauses = {};
+  bool get _enPause => _pauses.isNotEmpty;
+
+  /// Instant où le doigt s'est posé. Sert à départager, au relâchement, le tap
+  /// (qui change de statut) du maintien (qui reprend sur place).
+  DateTime? _debutAppui;
+
+  /// Au-delà, on cesse d'attendre le média et la barre repart.
+  ///
+  /// Sans ce plafond, un média qui n'arrive jamais — jeton absent, réseau
+  /// coupé, fichier manquant côté serveur — figerait la visionneuse sur un
+  /// écran noir que rien ne fait avancer tout seul. Même famille que le
+  /// plafond de 60 s d'une vidéo.
+  static const Duration _attenteMediaMax = Duration(seconds: 15);
+  Timer? _minuteurChargement;
 
   late final AnimationController _progression = AnimationController(vsync: this)
     ..addStatusListener((s) {
@@ -196,16 +230,24 @@ class _VueGroupeState extends State<_VueGroupe>
     super.didUpdateWidget(old);
     if (widget.actif == old.actif) return;
     if (widget.actif) {
-      // On revient sur cette personne : on repart de son premier statut non vu.
-      setState(() => _index = _premierNonVu());
+      // On revient sur cette personne : on repart de son premier statut non vu,
+      // et d'aucune pause héritée — le doigt qui a fait glisser la page ne
+      // s'est pas relevé sur CETTE vue.
+      setState(() {
+        _index = _premierNonVu();
+        _pauses.clear();
+        _debutAppui = null;
+      });
       _entre();
     } else {
+      _minuteurChargement?.cancel();
       _progression.stop();
     }
   }
 
   @override
   void dispose() {
+    _minuteurChargement?.cancel();
     _progression.dispose();
     super.dispose();
   }
@@ -217,36 +259,59 @@ class _VueGroupeState extends State<_VueGroupe>
 
   StatusItem get _courant => widget.groupe.statuses[_index];
 
-  /// (Re)lance la barre du statut courant. Une vidéo attend sa durée réelle.
+  /// (Re)lance la barre du statut courant.
+  ///
+  /// ⚠️ UN MÉDIA DOIT ÊTRE LÀ AVANT QUE SA BARRE NE COURE. C'est la barre qui
+  /// décide du temps d'affichage, jamais le réseau : sans cette attente, une
+  /// photo ou une vidéo lente est passée avant d'être apparue. L'attente vaut
+  /// désormais pour l'IMAGE aussi, et non plus pour la seule vidéo.
   void _demarreProgression() {
+    _minuteurChargement?.cancel();
     _progression.stop();
-    if (_courant.type == "VIDEO") {
-      setState(() => _attendVideo = true);
-      _progression.value = 0;
-      return;
+    _progression.value = 0;
+    // Durée par défaut ; une vidéo la remplacera par la sienne.
+    _progression.duration = _dureeFixe;
+
+    if (_courant.type == "TEXT") {
+      _pauses.remove(_RaisonPause.chargement);
+    } else {
+      _pauses.add(_RaisonPause.chargement);
+      _minuteurChargement = Timer(_attenteMediaMax, _mediaEchoue);
     }
-    _attendVideo = false;
-    _progression.duration = _dureeFixe;
-    _progression.forward(from: 0);
-  }
-
-  /// Appelé par le lecteur dès que la vidéo connaît sa durée.
-  void _videoPrete(Duration duree) {
-    if (!mounted || !_attendVideo) return;
-    setState(() => _attendVideo = false);
-    final d = duree > _dureeVideoMax || duree <= Duration.zero
-        ? _dureeVideoMax
-        : duree;
-    _progression.duration = d;
+    if (mounted) setState(() {});
     if (!_enPause) _progression.forward(from: 0);
   }
 
-  /// Une vidéo illisible ne doit pas bloquer la personne suivante.
-  void _videoEchouee() {
-    if (!mounted || !_attendVideo) return;
-    setState(() => _attendVideo = false);
-    _progression.duration = _dureeFixe;
-    if (!_enPause) _progression.forward(from: 0);
+  /// Le média du statut courant est affichable : la barre peut partir.
+  ///
+  /// [duree] n'est renseignée que par une vidéo — c'est elle qui règle alors la
+  /// barre, plafonnée. Une image garde la durée fixe.
+  void _mediaPret({Duration? duree}) {
+    if (!mounted || !_pauses.contains(_RaisonPause.chargement)) return;
+    _minuteurChargement?.cancel();
+    if (duree != null) {
+      _progression.duration = duree > dureeVideoStatutMax || duree <= Duration.zero
+          ? dureeVideoStatutMax
+          : duree;
+    }
+    _retirePause(_RaisonPause.chargement);
+  }
+
+  /// Un média illisible ne doit pas bloquer la personne suivante : la barre
+  /// repart sur la durée fixe et le statut cède la place comme les autres.
+  void _mediaEchoue() => _mediaPret();
+
+  void _ajoutePause(_RaisonPause raison) {
+    if (!_pauses.add(raison)) return;
+    _progression.stop();
+    if (mounted) setState(() {});
+  }
+
+  void _retirePause(_RaisonPause raison) {
+    if (!_pauses.remove(raison)) return;
+    if (mounted) setState(() {});
+    // On ne repart que si PLUS AUCUNE raison ne subsiste.
+    if (_pauses.isEmpty) _progression.forward();
   }
 
   void _marqueVu() {
@@ -276,21 +341,48 @@ class _VueGroupeState extends State<_VueGroupe>
     if (!widget.onPrecedent()) _demarreProgression();
   }
 
-  void _pause(bool valeur) {
-    if (_enPause == valeur) return;
-    setState(() => _enPause = valeur);
-    if (valeur) {
-      _progression.stop();
-    } else if (!_attendVideo) {
-      _progression.forward();
+  // ── Gestes ────────────────────────────────────────────────────────────────
+
+  /// Le doigt vient de se poser : le défilement s'arrête immédiatement.
+  void _appuiDebut() {
+    _debutAppui = DateTime.now();
+    _ajoutePause(_RaisonPause.doigt);
+  }
+
+  /// Le doigt se lève. Un appui COURT change de statut ; un maintien reprend
+  /// simplement la lecture là où elle s'était arrêtée.
+  void _appuiFin(double dx) {
+    final debut = _debutAppui;
+    _debutAppui = null;
+    final duree =
+        debut == null ? Duration.zero : DateTime.now().difference(debut);
+
+    if (estAppuiCourt(duree)) {
+      // On quitte ce statut : inutile de relancer sa barre, celle du suivant
+      // repartira de zéro. La pause est donc retirée sans reprise.
+      _pauses.remove(_RaisonPause.doigt);
+      if (zonePrecedente(dx, MediaQuery.of(context).size.width)) {
+        _precedent();
+      } else {
+        _suivant();
+      }
+      return;
     }
+    _retirePause(_RaisonPause.doigt);
+  }
+
+  /// Le geste a été repris par un autre — balayage entre personnes, ou
+  /// fermeture : on reprend la lecture sans changer de statut.
+  void _appuiAnnule() {
+    _debutAppui = null;
+    _retirePause(_RaisonPause.doigt);
   }
 
   Future<void> _supprimer() async {
     final s = _courant;
     final repo = context.read<StatusRepository>();
     final nav = Navigator.of(context);
-    _pause(true);
+    _ajoutePause(_RaisonPause.dialogue);
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -306,7 +398,7 @@ class _VueGroupeState extends State<_VueGroupe>
       ),
     );
     if (ok != true) {
-      _pause(false);
+      _retirePause(_RaisonPause.dialogue);
       return;
     }
     try {
@@ -326,19 +418,22 @@ class _VueGroupeState extends State<_VueGroupe>
       color: bg,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTapUp: (d) {
-          final w = MediaQuery.of(context).size.width;
-          if (d.localPosition.dx < w / 3) {
-            _precedent();
-          } else {
-            _suivant();
-          }
-        },
-        // Maintenir le doigt met en pause, façon WhatsApp : la barre s'arrête
-        // et la vidéo aussi, jusqu'au relâchement.
-        onLongPressStart: (_) => _pause(true),
-        onLongPressEnd: (_) => _pause(false),
-        onLongPressCancel: () => _pause(false),
+        /*
+         * 🔴 PAUSE DÈS QUE LE DOIGT TOUCHE, ET NON APRÈS UN APPUI LONG.
+         *
+         * L'appui long imposait de tenir 500 ms avant que quoi que ce soit ne
+         * s'arrête, et un maintien plus court ne mettait jamais en pause. Sur
+         * WhatsApp, poser le doigt arrête tout de suite ; c'est la DURÉE de
+         * l'appui, mesurée au relâchement, qui dit s'il faut changer de statut.
+         *
+         * ⚠️ Il ne doit plus y avoir de reconnaisseur d'appui long ici : il
+         * gagnerait l'arène au bout de 500 ms et annulerait le tap, si bien que
+         * `onTapUp` ne serait jamais appelé sur un maintien — la lecture ne
+         * repartirait plus au relâchement.
+         */
+        onTapDown: (_) => _appuiDebut(),
+        onTapUp: (d) => _appuiFin(d.localPosition.dx),
+        onTapCancel: _appuiAnnule,
         child: SafeArea(
           child: Column(
             children: [
@@ -448,9 +543,13 @@ class _VueGroupeState extends State<_VueGroupe>
       return ClipRRect(
         borderRadius: BorderRadius.circular(14),
         child: AuthNetworkImage(
+          key: ValueKey(s.id),
           url: "${widget.baseUrl}${s.mediaUrl}",
           token: widget.token,
           fit: BoxFit.contain,
+          // La barre attend la photo, exactement comme elle attend la vidéo.
+          onCharge: _mediaPret,
+          onEchec: _mediaEchoue,
         ),
       );
     }
@@ -458,9 +557,12 @@ class _VueGroupeState extends State<_VueGroupe>
       return _StatusVideoPlayer(
         key: ValueKey(s.id),
         url: "${widget.baseUrl}${s.mediaUrl}?token=${widget.token ?? ''}",
-        enPause: _enPause,
-        onPret: _videoPrete,
-        onEchec: _videoEchouee,
+        // ⚠️ SEUL LE DOIGT met la vidéo en pause. Lui repasser la raison
+        // « chargement » l'empêcherait de démarrer : c'est le lecteur qui lève
+        // cette raison-là, une fois qu'il connaît sa durée.
+        enPause: _pauses.contains(_RaisonPause.doigt),
+        onPret: (duree) => _mediaPret(duree: duree),
+        onEchec: _mediaEchoue,
       );
     }
     return const Text(
@@ -494,7 +596,7 @@ class _VueGroupeState extends State<_VueGroupe>
   // Feuille « Vu par » : liste des personnes ayant vu mon statut + horodatage.
   Future<void> _showViewers(String statusId) async {
     final repo = context.read<StatusRepository>();
-    _pause(true);
+    _ajoutePause(_RaisonPause.dialogue);
     await showModalBottomSheet<void>(
       context: context,
       builder: (ctx) => FutureBuilder<List<Map<String, dynamic>>>(
@@ -543,7 +645,7 @@ class _VueGroupeState extends State<_VueGroupe>
         },
       ),
     );
-    if (mounted) _pause(false);
+    if (mounted) _retirePause(_RaisonPause.dialogue);
   }
 
   /// Horodatage de visionnage : « maintenant », « il y a N min », « à 12h50 »

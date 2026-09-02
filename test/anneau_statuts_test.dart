@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:alanya/features/status/gestes_visionneuse.dart';
 import 'package:alanya/features/status/horodatage_statut.dart';
 import 'package:alanya/features/status/widgets/anneau_statuts.dart';
 
@@ -77,6 +78,32 @@ void main() {
         expect(ecart, closeTo(0.12, 1e-12));
       },
     );
+  });
+
+  group('gestes de la visionneuse', () {
+    test('un appui bref est un tap : il change de statut', () {
+      expect(estAppuiCourt(const Duration(milliseconds: 40)), isTrue);
+      expect(estAppuiCourt(const Duration(milliseconds: 249)), isTrue);
+    });
+
+    test('un maintien n\'est pas un tap : relâcher ne doit rien avancer', () {
+      expect(estAppuiCourt(const Duration(milliseconds: 250)), isFalse);
+      expect(estAppuiCourt(const Duration(seconds: 3)), isFalse);
+    });
+
+    test('le tiers gauche revient en arrière, le reste avance', () {
+      const largeur = 360.0;
+      expect(zonePrecedente(0, largeur), isTrue);
+      expect(zonePrecedente(119, largeur), isTrue);
+      expect(zonePrecedente(120, largeur), isFalse);
+      expect(zonePrecedente(359, largeur), isFalse);
+    });
+
+    test('une largeur nulle ne fait jamais reculer', () {
+      // Peut arriver à la toute première image, avant mesure : mieux vaut
+      // avancer que rejouer indéfiniment le premier statut.
+      expect(zonePrecedente(0, 0), isFalse);
+    });
   });
 
   group('horodatageStatut', () {
