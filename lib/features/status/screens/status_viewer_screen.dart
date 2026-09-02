@@ -8,6 +8,7 @@ import '../../../core/token_storage.dart';
 import '../../../models/status.dart';
 import '../../../widgets/auth_network_image.dart';
 import '../../../widgets/avatar_circle.dart';
+import '../horodatage_statut.dart';
 import '../status_repository.dart';
 import 'create_status_screen.dart' show colorFromHex;
 
@@ -405,7 +406,7 @@ class _VueGroupeState extends State<_VueGroupe>
                 Text(widget.groupe.displayName,
                     style: const TextStyle(
                         color: Colors.white, fontWeight: FontWeight.bold)),
-                Text(_ago(s.createdAt),
+                Text(horodatageStatut(s.createdAt),
                     style:
                         const TextStyle(color: Colors.white70, fontSize: 12)),
               ],
@@ -563,14 +564,6 @@ class _VueGroupeState extends State<_VueGroupe>
     final dd = local.day.toString().padLeft(2, '0');
     final mo = local.month.toString().padLeft(2, '0');
     return "le $dd/$mo à ${hh}h$mm";
-  }
-
-  String _ago(DateTime d) {
-    final diff = DateTime.now().difference(d);
-    if (diff.inMinutes < 1) return "à l'instant";
-    if (diff.inMinutes < 60) return "il y a ${diff.inMinutes} min";
-    if (diff.inHours < 24) return "il y a ${diff.inHours} h";
-    return "il y a ${diff.inDays} j";
   }
 }
 

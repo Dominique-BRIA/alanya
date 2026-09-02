@@ -54,9 +54,11 @@ import '../calls/screens/calls_screen.dart';
 import '../calls/screens/abandoned_clients_screen.dart';
 import '../meetings/meeting_controller.dart';
 import '../meetings/screens/meetings_screen.dart';
+import '../status/horodatage_statut.dart';
 import '../status/screens/create_status_screen.dart';
 import '../status/screens/status_viewer_screen.dart';
 import '../status/status_repository.dart';
+import '../status/widgets/anneau_statuts.dart';
 // L'aperçu d'une ligne d'un message, commun aux quatre écrans qui en affichent
 // un — voir `apercuMessage`.
 import '../../models/message_payload.dart';
@@ -1835,6 +1837,16 @@ class _ConversationsTabState extends State<_ConversationsTab>
   }
 }
 
+/// Diamètre de la vignette d'une ligne de statut, anneau compris.
+///
+/// Il est figé pour que la ligne « Mon statut » ne change pas de largeur selon
+/// qu'elle porte l'anneau ou la pastille « + » : sans ça, publier un statut
+/// décale toute la liste.
+const double _tailleVignetteStatut = 57;
+
+/// Rayon de l'avatar quand il est cerclé — l'anneau occupe le reste.
+const double _rayonAvatarCercle = 23;
+
 class _StatusTab extends StatefulWidget {
   const _StatusTab();
 
@@ -1886,12 +1898,43 @@ class _StatusTabState extends State<_StatusTab> {
     _load();
   }
 
+  /// Date du statut le PLUS RÉCENT d'une personne : c'est elle qui date la
+  /// ligne et qui range la liste.
+  ///
+  /// Elle est recalculée plutôt que lue sur le dernier élément : rien dans le
+  /// format d'échange ne promet que le serveur les envoie triés.
+  static DateTime _dernierStatut(StatusGroup g) {
+    if (g.statuses.isEmpty) return DateTime.fromMillisecondsSinceEpoch(0);
+    var d = g.statuses.first.createdAt;
+    for (final s in g.statuses) {
+      if (s.createdAt.isAfter(d)) d = s.createdAt;
+    }
+    return d;
+  }
+
+  /// Du plus récent au plus ancien.
+  static int _parRecence(StatusGroup a, StatusGroup b) =>
+      _dernierStatut(b).compareTo(_dernierStatut(a));
+
   @override
   Widget build(BuildContext context) {
     final me = _feed?.me;
     final others = _feed?.others ?? [];
     final muted =
         themed(context, light: Colors.black54, dark: AlanyaColors.craie2);
+
+    // Deux sections, comme WhatsApp : ce qui reste à voir d'abord, le reste
+    // ensuite, chacune de la plus récente à la plus ancienne. Le serveur ne
+    // fait que remonter les non-vus en tête — à l'intérieur, il rend l'ordre
+    // d'ajout des contacts, qui ne veut rien dire pour qui regarde.
+    final nonVus = others.where((g) => g.hasUnviewed).toList()
+      ..sort(_parRecence);
+    final dejaVus = others.where((g) => !g.hasUnviewed).toList()
+      ..sort(_parRecence);
+    // La visionneuse enchaîne d'une personne à la suivante DANS L'ORDRE qu'on
+    // lui passe : ce doit être exactement celui affiché, sections comprises.
+    final ordonnes = <StatusGroup>[...nonVus, ...dejaVus];
+
     return Scaffold(
       appBar: AppBar(
         title: const Text("Status"),
@@ -1911,16 +1954,17 @@ class _StatusTabState extends State<_StatusTab> {
                       child:
                           Text("Erreur de chargement. Tire pour réessayer.")),
                 ),
-              if (others.isNotEmpty) ...[
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                  child: Text("Récents",
-                      style:
-                          TextStyle(color: muted, fontWeight: FontWeight.bold)),
-                ),
-                ...List.generate(others.length,
-                    (i) => _statusTile(others, i, isMine: false)),
-              ] else if (!_error && _feed != null && me == null)
+              if (nonVus.isNotEmpty) ...[
+                _enteteSection("Récents", muted),
+                for (var i = 0; i < nonVus.length; i++)
+                  _statusTile(ordonnes, i),
+              ],
+              if (dejaVus.isNotEmpty) ...[
+                _enteteSection("Déjà vus", muted),
+                for (var i = 0; i < dejaVus.length; i++)
+                  _statusTile(ordonnes, nonVus.length + i),
+              ],
+              if (others.isEmpty && !_error && _feed != null && me == null)
                 Padding(
                   padding: const EdgeInsets.all(24),
                   child: Center(
@@ -1938,50 +1982,89 @@ class _StatusTabState extends State<_StatusTab> {
     );
   }
 
+  Widget _enteteSection(String titre, Color muted) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+        child: Text(titre,
+            style: TextStyle(color: muted, fontWeight: FontWeight.bold)),
+      );
+
   Widget _myStatusTile(StatusGroup? me) {
-    final has = me != null && me.statuses.isNotEmpty;
+    // Une variable locale `final` plutôt qu'un booléen : elle seule permet à
+    // l'analyse de promouvoir le type et d'écrire `mien.statuses` sans `!`.
+    final mien = (me != null && me.statuses.isNotEmpty) ? me : null;
     final user = context.read<AuthController>().user;
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     return ListTile(
-      leading: Stack(
-        children: [
-          AvatarCircle(
-            name: user?.pseudo ?? "?",
-            avatarUrl: user?.avatarUrl,
-            radius: 26,
-            backgroundColor: AlanyaColors.terracotta,
-          ),
-          Positioned(
-            right: 0,
-            bottom: 0,
-            child: Container(
-              width: 20,
-              height: 20,
-              decoration: BoxDecoration(
-                color: theme.brightness == Brightness.dark
-                    ? AlanyaColors.terracottaNuit
-                    : AlanyaColors.forest,
-                shape: BoxShape.circle,
-                border: Border.all(
-                    color: themed(context,
-                        light: Colors.white, dark: surfacesOf(context).fond),
-                    width: 2),
-              ),
-              child: const Icon(Icons.add, color: Colors.white, size: 12),
-            ),
-          ),
-        ],
+      leading: SizedBox(
+        width: _tailleVignetteStatut,
+        height: _tailleVignetteStatut,
+        child: Center(
+          child: mien != null
+              ? AnneauStatuts(
+                  // Mes propres statuts ne sont jamais marqués vus par le
+                  // serveur : l'anneau les montre donc tous en accent, et
+                  // compte simplement ce qui est encore en ligne.
+                  vus: mien.statuses.map((s) => s.viewed).toList(),
+                  couleurNonVu: isDark
+                      ? AlanyaColors.terracottaNuit
+                      : AlanyaColors.forest,
+                  couleurVu:
+                      isDark ? AlanyaColors.ligne : AlanyaColors.sand,
+                  child: AvatarCircle(
+                    name: user?.pseudo ?? "?",
+                    avatarUrl: user?.avatarUrl,
+                    radius: _rayonAvatarCercle,
+                    backgroundColor: AlanyaColors.terracotta,
+                  ),
+                )
+              // Sans statut en ligne, pas d'anneau : la pastille « + » dit
+              // qu'il n'y a rien et invite à publier, comme WhatsApp.
+              : Stack(
+                  children: [
+                    AvatarCircle(
+                      name: user?.pseudo ?? "?",
+                      avatarUrl: user?.avatarUrl,
+                      radius: 26,
+                      backgroundColor: AlanyaColors.terracotta,
+                    ),
+                    Positioned(
+                      right: 0,
+                      bottom: 0,
+                      child: Container(
+                        width: 20,
+                        height: 20,
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? AlanyaColors.terracottaNuit
+                              : AlanyaColors.forest,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                              color: themed(context,
+                                  light: Colors.white,
+                                  dark: surfacesOf(context).fond),
+                              width: 2),
+                        ),
+                        child:
+                            const Icon(Icons.add, color: Colors.white, size: 12),
+                      ),
+                    ),
+                  ],
+                ),
+        ),
       ),
       title: const Text("Mon statut",
           style: TextStyle(fontWeight: FontWeight.w600)),
-      subtitle: Text(
-          has ? "${me!.statuses.length} statut(s)" : "Appuie pour ajouter"),
-      onTap:
-          has ? () => _openViewer([me], index: 0, isMine: true) : _openCreate,
-      trailing: has
+      subtitle: Text(mien != null
+          ? horodatageStatut(_dernierStatut(mien))
+          : "Appuie pour ajouter"),
+      onTap: mien != null
+          ? () => _openViewer([mien], index: 0, isMine: true)
+          : _openCreate,
+      trailing: mien != null
           ? IconButton(
               icon: Icon(Icons.camera_alt,
-                  color: theme.brightness == Brightness.dark
+                  color: isDark
                       ? AlanyaColors.terracottaNuit
                       : AlanyaColors.terracotta),
               onPressed: _openCreate,
@@ -1990,34 +2073,39 @@ class _StatusTabState extends State<_StatusTab> {
     );
   }
 
-  Widget _statusTile(List<StatusGroup> groups, int index,
-      {required bool isMine}) {
+  Widget _statusTile(List<StatusGroup> groups, int index) {
     final g = groups[index];
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final unviewedRing =
         isDark ? AlanyaColors.terracottaNuit : AlanyaColors.forest;
     final viewedRing = isDark ? AlanyaColors.ligne : AlanyaColors.sand;
     return ListTile(
-      leading: Container(
-        padding: const EdgeInsets.all(2),
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: Border.all(
-            color: g.hasUnviewed ? unviewedRing : viewedRing,
-            width: 2.5,
+      leading: SizedBox(
+        width: _tailleVignetteStatut,
+        height: _tailleVignetteStatut,
+        child: Center(
+          child: AnneauStatuts(
+            vus: g.statuses.map((s) => s.viewed).toList(),
+            couleurNonVu: unviewedRing,
+            couleurVu: viewedRing,
+            // La photo de profil, et non plus une initiale : la vignette
+            // ignorait `avatarUrl` alors que le serveur l'envoie depuis
+            // toujours.
+            child: AvatarCircle(
+              name: g.displayName,
+              avatarUrl: g.avatarUrl,
+              radius: _rayonAvatarCercle,
+              backgroundColor: AlanyaColors.gold,
+            ),
           ),
-        ),
-        child: CircleAvatar(
-          radius: 24,
-          backgroundColor: AlanyaColors.gold,
-          child: Text(g.displayName[0].toUpperCase(),
-              style: const TextStyle(color: Colors.white)),
         ),
       ),
       title: Text(g.displayName,
           style: const TextStyle(fontWeight: FontWeight.w600)),
-      subtitle: Text(g.hasUnviewed ? "Nouveau" : "Vu"),
-      onTap: () => _openViewer(groups, index: index, isMine: isMine),
+      // L'heure remplace « Nouveau »/« Vu » : l'anneau et la section portent
+      // désormais cette information, la ligne peut dire quelque chose de plus.
+      subtitle: Text(horodatageStatut(_dernierStatut(g))),
+      onTap: () => _openViewer(groups, index: index, isMine: false),
     );
   }
 }
