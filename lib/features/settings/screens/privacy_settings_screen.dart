@@ -5,6 +5,7 @@ import '../../../core/app_snackbar.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../../account/account_repository.dart';
+import '../../status/screens/audience_statuts_screen.dart';
 
 /// Réglages de confidentialité : confirmations de lecture + visibilité « vu à ».
 class PrivacySettingsScreen extends StatefulWidget {
@@ -122,6 +123,23 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
                       color: themed(context,
                           light: Colors.grey, dark: AlanyaColors.craie2)),
                   onTap: _pickVisibility,
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: Icon(Icons.radio_button_checked,
+                      color: themed(context,
+                          light: AlanyaColors.forest,
+                          dark: AlanyaColors.terracottaNuit)),
+                  title: const Text("Statut"),
+                  subtitle: const Text("Qui peut voir tes statuts"),
+                  trailing: Icon(Icons.chevron_right,
+                      color: themed(context,
+                          light: Colors.grey, dark: AlanyaColors.craie2)),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const AudienceStatutsScreen(),
+                    ),
+                  ),
                 ),
                 Padding(
                   padding: const EdgeInsets.all(16),

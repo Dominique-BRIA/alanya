@@ -86,6 +86,24 @@ class ApiClient {
     return _decode(res);
   }
 
+  /// PUT — REMPLACE la ressource, là où `patch` la modifie en partie.
+  ///
+  /// La distinction n'est pas cosmétique : l'audience des statuts envoie son
+  /// état complet (mode + liste), et c'est ce qui rend l'enregistrement
+  /// rejouable. Un PATCH aurait laissé croire à un envoi partiel.
+  Future<Map<String, dynamic>> put(
+    String path,
+    Map<String, dynamic> body, {
+    String? bearer,
+  }) async {
+    final res = await http.put(
+      Uri.parse("$baseUrl$path"),
+      headers: _headers(bearer),
+      body: jsonEncode(body),
+    );
+    return _decode(res);
+  }
+
   Future<Map<String, dynamic>> delete(String path,
       {String? bearer, Map<String, dynamic>? body}) async {
     final res = await http.delete(
