@@ -10,6 +10,7 @@ import '../../../core/token_storage.dart';
 import '../../../models/status.dart';
 import '../../../widgets/auth_network_image.dart';
 import '../../../widgets/avatar_circle.dart';
+import '../../chat/chat_repository.dart';
 import '../gestes_visionneuse.dart';
 import '../horodatage_statut.dart';
 import '../status_repository.dart';
@@ -190,6 +191,10 @@ class _VueGroupeState extends State<_VueGroupe>
   late int _index = _premierNonVu();
 
   final Set<_RaisonPause> _pauses = {};
+
+  /// Le champ « Répondre… » sous le statut de quelqu'un d'autre.
+  final TextEditingController _reponseCtrl = TextEditingController();
+  bool _envoiReponse = false;
   bool get _enPause => _pauses.isNotEmpty;
 
   /// Instant où le doigt s'est posé. Sert à départager, au relâchement, le tap
@@ -249,6 +254,7 @@ class _VueGroupeState extends State<_VueGroupe>
   void dispose() {
     _minuteurChargement?.cancel();
     _progression.dispose();
+    _reponseCtrl.dispose();
     super.dispose();
   }
 
@@ -444,7 +450,7 @@ class _VueGroupeState extends State<_VueGroupe>
               // le répéter ici l'afficherait deux fois.
               if (s.type != "TEXT" && (s.text?.trim().isNotEmpty ?? false))
                 _legende(s.text!),
-              if (widget.estMien) _pieVues(s),
+              if (widget.estMien) _pieVues(s) else _barreReponse(),
             ],
           ),
         ),
@@ -572,6 +578,134 @@ class _VueGroupeState extends State<_VueGroupe>
     return const Text(
       "[Média non pris en charge]",
       style: TextStyle(color: Colors.white70),
+    );
+  }
+
+  /// Réactions rapides, comme WhatsApp.
+  static const _reactions = ["❤️", "😂", "😮", "😢", "🙏", "👏", "🔥", "🎉"];
+
+  /// Répondre à un statut, ou y réagir.
+  ///
+  /// 🔴 UNE RÉPONSE EST UN MESSAGE PRIVÉ, ET RIEN D'AUTRE — c'est ce que fait
+  /// WhatsApp, et c'est ce qui permet de n'écrire AUCUN code serveur : la
+  /// réponse emprunte la voie normale d'un message. Elle hérite donc de tout ce
+  /// qui y est déjà branché — remise par WebSocket, notification push, refus si
+  /// l'un a bloqué l'autre, historique. Une route dédiée aurait redemandé tout
+  /// ça, et l'aurait redemandé de travers.
+  ///
+  /// ⚠️ UNE RÉACTION EST UNE RÉPONSE D'UN SEUL EMOJI. Les deux gestes
+  /// aboutissent au même endroit, ce qui évite un second mécanisme à tenir.
+  ///
+  /// 🚫 LE STATUT N'EST PAS CITÉ dans la conversation : `Message.replyToId` ne
+  /// pointe que vers un autre MESSAGE, jamais vers un statut. Citer demanderait
+  /// une table de correspondance et une modification de l'écran de discussion.
+  /// L'auteur reçoit donc un message normal.
+  Future<void> _repondre(String texte) async {
+    final t = texte.trim();
+    if (t.isEmpty || _envoiReponse) return;
+    setState(() => _envoiReponse = true);
+    final chat = context.read<ChatRepository>();
+    final messenger = ScaffoldMessenger.of(context);
+    // Même raison que pour une feuille : le statut ne doit pas défiler pendant
+    // qu'on écrit ni pendant l'envoi.
+    _ajoutePause(_RaisonPause.dialogue);
+    try {
+      final conv = await chat.getOrCreateDirectConversation(widget.groupe.userId);
+      final convId = conv["id"] as String;
+      await chat.sendText(convId, t);
+      _reponseCtrl.clear();
+      messenger.showSnackBar(
+        SnackBar(content: Text("Envoyé à ${widget.groupe.displayName}")),
+      );
+    } catch (_) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text("Envoi impossible")),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _envoiReponse = false);
+        _retirePause(_RaisonPause.dialogue);
+      }
+    }
+  }
+
+  Widget _barreReponse() {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 12,
+        right: 12,
+        top: 4,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 10,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            height: 42,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: _reactions.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 4),
+              itemBuilder: (_, i) => InkWell(
+                onTap: _envoiReponse ? null : () => _repondre(_reactions[i]),
+                borderRadius: BorderRadius.circular(21),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: Center(
+                    child: Text(_reactions[i],
+                        style: const TextStyle(fontSize: 26)),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _reponseCtrl,
+                  maxLength: 500,
+                  minLines: 1,
+                  maxLines: 3,
+                  style: const TextStyle(color: Colors.white),
+                  cursorColor: Colors.white,
+                  // Le doigt dans le champ ne doit pas faire défiler le statut
+                  // ni le mettre en pause : la saisie a sa propre vie.
+                  onTap: () => _ajoutePause(_RaisonPause.dialogue),
+                  onSubmitted: _repondre,
+                  textInputAction: TextInputAction.send,
+                  decoration: const InputDecoration(
+                    counterText: "",
+                    hintText: "Répondre…",
+                    hintStyle: TextStyle(color: Colors.white54),
+                    filled: true,
+                    fillColor: Colors.white10,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.all(Radius.circular(24)),
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                icon: _envoiReponse
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.send, color: Colors.white),
+                onPressed: _envoiReponse
+                    ? null
+                    : () => _repondre(_reponseCtrl.text),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
