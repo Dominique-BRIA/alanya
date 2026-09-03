@@ -1877,11 +1877,71 @@ class _StatusTabState extends State<_StatusTab> {
     }
   }
 
-  Future<void> _openCreate() async {
+  Future<void> _openCreate([SourceStatut source = SourceStatut.texte]) async {
     final published = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => const CreateStatusScreen()),
+      MaterialPageRoute(builder: (_) => CreateStatusScreen(source: source)),
     );
     if (published == true) _load();
+  }
+
+  /// Le bouton « + » : par où l'on ajoute un statut.
+  ///
+  /// 🔴 DEMANDE DU USER (03/09/2026). Le seul accès était l'icône d'appareil
+  /// photo de la ligne « Mon statut », et elle n'apparaît que si l'on a DÉJÀ un
+  /// statut en ligne — sinon il fallait deviner qu'on appuie sur la ligne
+  /// elle-même. Un bouton flottant, toujours là, à l'endroit où WhatsApp le
+  /// met.
+  ///
+  /// Les quatre sources sont proposées ICI plutôt que dans l'écran suivant :
+  /// choisir « Appareil photo » puis voir l'éditeur de texte s'ouvrir avant la
+  /// caméra donne l'impression de s'être trompé de bouton.
+  Future<void> _menuNouveauStatut() async {
+    final source = await showModalBottomSheet<SourceStatut>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text("Nouveau statut",
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.text_fields),
+              title: const Text("Texte"),
+              subtitle: const Text("Sur un fond coloré"),
+              onTap: () => Navigator.pop(ctx, SourceStatut.texte),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text("Galerie"),
+              subtitle: const Text("Photo ou vidéo de l'appareil"),
+              onTap: () => Navigator.pop(ctx, SourceStatut.galerie),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: const Text("Appareil photo"),
+              onTap: () => Navigator.pop(ctx, SourceStatut.cameraPhoto),
+            ),
+            ListTile(
+              leading: const Icon(Icons.videocam_outlined),
+              title: const Text("Vidéo"),
+              subtitle: Text(
+                  "${dureeVideoStatutMax.inSeconds} secondes au maximum"),
+              onTap: () => Navigator.pop(ctx, SourceStatut.cameraVideo),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (source == null || !mounted) return;
+    await _openCreate(source);
   }
 
   /// Ouvre la visionneuse sur TOUTE la liste, pas sur une seule personne :
@@ -1938,6 +1998,13 @@ class _StatusTabState extends State<_StatusTab> {
     return Scaffold(
       appBar: AppBar(
         title: const Text("Status"),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _menuNouveauStatut,
+        backgroundColor: themed(context,
+            light: AlanyaColors.forest, dark: AlanyaColors.terracottaNuit),
+        tooltip: "Nouveau statut",
+        child: const Icon(Icons.add, color: Colors.white),
       ),
       body: MotifBackground(
         overlayOpacity: 0.92,

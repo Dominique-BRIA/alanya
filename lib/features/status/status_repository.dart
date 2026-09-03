@@ -20,10 +20,18 @@ class StatusRepository {
   }
 
   /// Publie un statut média (image ou vidéo) via l'ID d'un média déjà uploadé.
-  Future<void> createMedia(String mediaId, String type) async {
+  ///
+  /// [legende] est le texte posé sous le média, comme la légende d'un statut
+  /// WhatsApp. ⚠️ AUCUN CHANGEMENT SERVEUR N'A ÉTÉ NÉCESSAIRE : la colonne
+  /// `text` de `statut` existe depuis toujours, et `createStatusSchema`
+  /// n'exigeait `text` que pour un statut TEXTE, sans jamais l'interdire aux
+  /// autres. Elle n'était simplement jamais remplie ni affichée.
+  Future<void> createMedia(String mediaId, String type,
+      {String? legende}) async {
     await _api.post("/api/statuses", {
       "type": type,
       "mediaId": mediaId,
+      if (legende != null && legende.isNotEmpty) "text": legende,
     });
   }
 

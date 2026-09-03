@@ -1,14 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:video_compress/video_compress.dart';
 
 import '../../../core/api_client.dart';
+import '../../../core/compression_image.dart' show imageBordMax, imageQualite;
 import '../../../core/compression_video.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/media/media_picker_sheet.dart' show MediaPickResult;
 import '../../chat/screens/media_gallery_picker_screen.dart';
 import '../../media/media_repository.dart';
 import '../status_repository.dart';
+import '../widgets/choix_emoji.dart';
+import 'editeur_media_statut_screen.dart';
 import 'status_viewer_screen.dart' show dureeVideoStatutMax;
 
 /// Convertit un hex (#RRGGBB) en Color opaque.
@@ -17,9 +21,19 @@ Color colorFromHex(String hex) {
   return Color(int.parse("FF$h", radix: 16));
 }
 
+/// Par où l'on entre dans la composition d'un statut.
+///
+/// Le bouton « + » de l'onglet Status propose les quatre, et l'écran ouvre
+/// directement la bonne source : sans ça, choisir « Appareil photo » aurait
+/// affiché l'éditeur de texte avant d'ouvrir la caméra, ce qui donne
+/// l'impression de s'être trompé de bouton.
+enum SourceStatut { texte, galerie, cameraPhoto, cameraVideo }
+
 /// Composition d'un statut texte sur fond coloré (style WhatsApp).
 class CreateStatusScreen extends StatefulWidget {
-  const CreateStatusScreen({super.key});
+  const CreateStatusScreen({super.key, this.source = SourceStatut.texte});
+
+  final SourceStatut source;
 
   @override
   State<CreateStatusScreen> createState() => _CreateStatusScreenState();
@@ -47,9 +61,73 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
   String? _etape;
 
   @override
+  void initState() {
+    super.initState();
+    if (widget.source == SourceStatut.texte) return;
+    // Après la première trame : ouvrir un sélecteur depuis `initState` pousse
+    // une route sur un Navigator encore en train de bâtir celle-ci.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      switch (widget.source) {
+        case SourceStatut.galerie:
+          _pickAndPublishMedia();
+        case SourceStatut.cameraPhoto:
+          _capturer(video: false);
+        case SourceStatut.cameraVideo:
+          _capturer(video: true);
+        case SourceStatut.texte:
+          break;
+      }
+    });
+  }
+
+  @override
   void dispose() {
     _textCtrl.dispose();
     super.dispose();
+  }
+
+  /// Prise de vue, photo ou vidéo.
+  ///
+  /// ⚠️ LES BORNES SONT POSÉES À LA CAPTURE, pas après.
+  /// - Photo : `image_picker` sait réduire pendant la prise, aux MÊMES bornes
+  ///   que la galerie (`core/compression_image.dart`) — le fichier n'existe
+  ///   donc jamais en pleine définition du capteur, ce qui est plus sobre que
+  ///   de recompresser ensuite. Même chemin que la caméra de la discussion.
+  /// - Vidéo : `maxDuration` coupe à l'enregistrement. Sans lui, on filmerait
+  ///   dix minutes pour se faire refuser à l'envoi, la visionneuse ne lisant
+  ///   qu'une minute.
+  Future<void> _capturer({required bool video}) async {
+    XFile? fichier;
+    try {
+      final picker = ImagePicker();
+      fichier = video
+          ? await picker.pickVideo(
+              source: ImageSource.camera,
+              maxDuration: dureeVideoStatutMax,
+            )
+          : await picker.pickImage(
+              source: ImageSource.camera,
+              maxWidth: imageBordMax.toDouble(),
+              maxHeight: imageBordMax.toDouble(),
+              imageQuality: imageQualite,
+            );
+    } catch (_) {
+      _snack("Appareil photo indisponible");
+      return;
+    }
+    if (fichier == null || !mounted) return;
+
+    final octets = await fichier.readAsBytes();
+    if (!mounted) return;
+    await _editerPuisPublier([
+      MediaPickResult(
+        bytes: octets,
+        fileName: fichier.name,
+        mimeType: video ? 'video/mp4' : 'image/jpeg',
+        path: fichier.path,
+      ),
+    ]);
   }
 
   Future<void> _publish() async {
@@ -97,7 +175,14 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
       return;
     }
     if (choisis == null || choisis.isEmpty || !mounted) return;
+    await _editerPuisPublier(choisis);
+  }
 
+  /// Fait passer CHAQUE média par l'éditeur, puis publie ce qui en ressort.
+  ///
+  /// Un média dont on quitte l'éditeur par le retour est simplement écarté :
+  /// c'est le geste d'annulation, il ne doit pas interrompre les autres.
+  Future<void> _editerPuisPublier(List<MediaPickResult> choisis) async {
     // ⚠️ Une vidéo plus longue que la visionneuse ne sert à rien : elle serait
     // coupée à `dureeVideoStatutMax` à la lecture, APRÈS avoir été téléversée
     // en entier. On le dit avant l'envoi plutôt que de faire payer la donnée.
@@ -107,6 +192,16 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
           "${dureeVideoStatutMax.inSeconds} secondes");
       return;
     }
+
+    // L'édition se fait AVANT toute compression et tout envoi : rien ne part
+    // sur le réseau tant que l'utilisateur n'a pas validé chaque média.
+    final prets = <MediaEdite>[];
+    for (final m in choisis) {
+      if (!mounted) return;
+      final edite = await EditeurMediaStatutScreen.ouvrir(context, m);
+      if (edite != null) prets.add(edite);
+    }
+    if (prets.isEmpty || !mounted) return;
 
     setState(() => _publishing = true);
     final media = context.read<MediaRepository>();
@@ -123,9 +218,9 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
     });
 
     try {
-      for (final m in choisis) {
-        var octets = m.bytes;
-        var nom = m.fileName;
+      for (final m in prets) {
+        var octets = m.octets;
+        var nom = m.nomFichier;
         var mime = m.mimeType;
 
         if (mime.startsWith('video/')) {
@@ -133,9 +228,9 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
           // — aucun paquet ne le faisait dans ce projet jusqu'ici.
           if (mounted) setState(() => _etape = "Compression de la vidéo…");
           final v = await compresserVideo(
-            m.bytes,
-            chemin: m.path,
-            nomFichier: m.fileName,
+            m.octets,
+            chemin: m.chemin,
+            nomFichier: m.nomFichier,
             mimeType: m.mimeType,
           );
           octets = v.octets;
@@ -148,6 +243,7 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
         await repo.createMedia(
           uploaded.id,
           mime.startsWith('video/') ? 'VIDEO' : 'IMAGE',
+          legende: m.legende,
         );
         publies++;
       }
@@ -171,6 +267,27 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
     }
   }
 
+  /// Insère un emoji À L'ENDROIT DU CURSEUR, pas à la fin.
+  ///
+  /// ⚠️ Un emoji ne demande AUCUN changement serveur : c'est du texte, il part
+  /// dans la même colonne que le reste. C'est aussi pourquoi il fonctionne, là
+  /// où le style du texte demanderait une colonne que `statut` n'a pas.
+  Future<void> _insererEmoji() async {
+    final emoji = await choisirEmoji(context);
+    if (emoji == null || !mounted) return;
+    final texte = _textCtrl.text;
+    final selection = _textCtrl.selection;
+    // Une sélection peut être invalide tant que le champ n'a jamais eu le
+    // focus : on écrit alors à la fin.
+    final debut = selection.start < 0 ? texte.length : selection.start;
+    final fin = selection.end < 0 ? texte.length : selection.end;
+    final nouveau = texte.replaceRange(debut, fin, emoji);
+    _textCtrl.value = TextEditingValue(
+      text: nouveau,
+      selection: TextSelection.collapsed(offset: debut + emoji.length),
+    );
+  }
+
   void _snack(String m) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
 
@@ -192,6 +309,11 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
             : null,
         title: Text(_etape ?? "Nouveau statut"),
         actions: [
+          IconButton(
+            tooltip: "Emoji",
+            icon: const Icon(Icons.emoji_emotions_outlined),
+            onPressed: _publishing ? null : _insererEmoji,
+          ),
           IconButton(
             tooltip: "Publier une photo ou vidéo",
             icon: const Icon(Icons.photo_camera_outlined),

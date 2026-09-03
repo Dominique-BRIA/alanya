@@ -440,6 +440,10 @@ class _VueGroupeState extends State<_VueGroupe>
               _barres(),
               _entete(s),
               Expanded(child: Center(child: _contenu(s))),
+              // La légende d'un média. Un statut TEXTE, lui, EST son texte :
+              // le répéter ici l'afficherait deux fois.
+              if (s.type != "TEXT" && (s.text?.trim().isNotEmpty ?? false))
+                _legende(s.text!),
               if (widget.estMien) _pieVues(s),
             ],
           ),
@@ -568,6 +572,29 @@ class _VueGroupeState extends State<_VueGroupe>
     return const Text(
       "[Média non pris en charge]",
       style: TextStyle(color: Colors.white70),
+    );
+  }
+
+  /// La légende posée sous une photo ou une vidéo.
+  ///
+  /// Défilante et bornée en hauteur : une légende de 700 caractères — le
+  /// maximum accepté — chasserait sinon l'image hors de l'écran.
+  Widget _legende(String texte) {
+    return Container(
+      constraints: const BoxConstraints(maxHeight: 140),
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+      child: SingleChildScrollView(
+        child: Text(
+          texte,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 16,
+            shadows: [Shadow(blurRadius: 6, color: Colors.black87)],
+          ),
+        ),
+      ),
     );
   }
 
