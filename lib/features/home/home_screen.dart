@@ -1427,6 +1427,33 @@ class _ConversationsTabState extends State<_ConversationsTab>
           context.read<AuthController>().user?.id,
         );
       }
+
+      /*
+       * 🔴 LA COLONNE EST DÉJÀ DÉCORÉE — ON L'AFFICHE TELLE QUELLE.
+       *
+       * Défaut signalé sur device le 04/09/2026 : « deux icônes avant
+       * Photo/Vidéo ». `conversation.lastMessage` contient DÉJÀ le libellé
+       * complet, emoji compris — c'est `apercuMessage` qui l'y écrit, côté
+       * SERVEUR, et la colonne est faite pour être lue telle quelle par les
+       * trois clients (dont l'application de l'équipe, qu'on ne recompile
+       * pas). La redécorer ici donnait « 📷 📷 Photo ».
+       *
+       * ⚠️ CE N'ÉTAIT PAS UNE QUESTION DE NOMBRE DE MÉDIAS, contrairement à ce
+       * que le symptôme laissait croire : c'est qui a ÉCRIT la ligne. Relevé en
+       * production — `lastMessage` vaut « 📷 Ok » sur les lignes récentes et
+       * « Ok » sur une ligne antérieure au 18/08/2026, quand la colonne
+       * recevait encore le texte brut. Les anciennes n'avaient qu'une icône,
+       * les récentes deux. Elles se corrigent d'elles-mêmes au message suivant.
+       *
+       * 🚫 NE PAS APPLIQUER CE RAISONNEMENT AUX TROIS AUTRES ÉCRANS qui
+       * affichent un aperçu (citation d'une réponse, bandeau du message
+       * épinglé, barre du composeur) : eux reçoivent le contenu BRUT d'un
+       * message et doivent continuer de passer par `apercuMessage`.
+       */
+      final libelle = last.content?.trim() ?? "";
+      if (libelle.isNotEmpty) return libelle;
+      // Colonne vide : on retombe sur la règle commune, qui sait nommer un
+      // média sans légende.
       return apercuMessage(last.type, last.content);
     }
 
