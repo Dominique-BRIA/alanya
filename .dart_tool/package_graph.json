@@ -7,6 +7,7 @@
       "name": "alanya",
       "version": "0.1.0+1",
       "dependencies": [
+        "alanya_telecom",
         "any_link_preview",
         "audioplayers",
         "cupertino_icons",
@@ -24,6 +25,8 @@
         "flutter_svg",
         "flutter_webrtc",
         "geolocator",
+        "google_mlkit_language_id",
+        "google_mlkit_translation",
         "http",
         "http_parser",
         "image_picker",
@@ -42,6 +45,7 @@
         "shared_preferences",
         "sqflite",
         "url_launcher",
+        "video_compress",
         "video_player",
         "video_thumbnail",
         "web_socket_channel"
@@ -91,6 +95,28 @@
       ]
     },
     {
+      "name": "video_compress",
+      "version": "3.1.4",
+      "dependencies": [
+        "flutter"
+      ]
+    },
+    {
+      "name": "google_mlkit_language_id",
+      "version": "0.15.1",
+      "dependencies": [
+        "flutter"
+      ]
+    },
+    {
+      "name": "google_mlkit_translation",
+      "version": "0.15.1",
+      "dependencies": [
+        "flutter",
+        "google_mlkit_commons"
+      ]
+    },
+    {
       "name": "flutter_foreground_task",
       "version": "10.0.0",
       "dependencies": [
@@ -128,6 +154,13 @@
         "sqflite_common",
         "sqflite_darwin",
         "sqflite_platform_interface"
+      ]
+    },
+    {
+      "name": "alanya_telecom",
+      "version": "1.0.0",
+      "dependencies": [
+        "flutter"
       ]
     },
     {
@@ -638,6 +671,13 @@
         "stream_channel",
         "string_scanner",
         "term_glyph"
+      ]
+    },
+    {
+      "name": "google_mlkit_commons",
+      "version": "0.13.0",
+      "dependencies": [
+        "flutter"
       ]
     },
     {

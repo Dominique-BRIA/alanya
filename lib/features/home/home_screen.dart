@@ -1009,11 +1009,56 @@ class _ConversationsTabState extends State<_ConversationsTab>
     await context.read<SonneriesDeListes>().rafraichir();
   }
 
+  /// LES LISTES QUI MÉRITENT UN FILTRE — celles avec qui l'on parle vraiment.
+  ///
+  /// 🔴 Toutes les listes s'affichaient, y compris vides. Depuis que quatre
+  /// listes existent dès le départ — Bureau, Amis, Confiance, Famille —, la
+  /// rangée s'ouvrait sur quatre boutons qui ne filtraient RIEN : les presser
+  /// rendait une liste vide, et ils poussaient hors de vue les onglets système,
+  /// qui eux servent.
+  ///
+  /// Un filtre n'a de sens que s'il a quelque chose à montrer. Une liste
+  /// apparaît donc quand au moins un de ses membres a une conversation, et
+  /// disparaît si cette conversation s'en va. Même règle que le web
+  /// (`chats.tsx`, `listesAvecDiscussion`).
+  ///
+  /// ⚠️ Les correspondants sont rassemblés UNE SEULE FOIS, et non liste par
+  /// liste : la rangée se reconstruit à chaque message reçu, et croiser quatre
+  /// listes avec deux cents conversations à chaque fois se paierait à l'écran.
+  List<ListeContacts> get _listesAvecDiscussion {
+    final convs = _convs ?? const <Conversation>[];
+    if (convs.isEmpty || _listes.isEmpty) return const [];
+
+    final monId = context.read<AuthController>().user?.id;
+    final identifiants = <String>{};
+    final numeros = <String>{};
+    for (final c in convs) {
+      // Un groupe n'a pas de correspondant : une liste rassemble des personnes,
+      // pas des salons. Même règle que `_appliqueListe`.
+      if (c.isGroup) continue;
+      for (final m in c.members) {
+        if (m.id == monId) continue;
+        identifiants.add(m.id.toLowerCase());
+        final n = chiffresSeuls(m.publicNumber);
+        if (n.isNotEmpty) numeros.add(n);
+      }
+    }
+
+    return _listes
+        .where((l) => l.members.any((m) =>
+            identifiants.contains(m.id.toLowerCase()) ||
+            numeros.contains(chiffresSeuls(m.publicNumber))))
+        .toList();
+  }
+
   /// Restreint les conversations à la liste active, s'il y en a une.
   List<Conversation> _appliqueListe(List<Conversation> convs) {
     final id = _listeActive;
     if (id == null) return convs;
     final liste = _listes.where((l) => l.id == id).firstOrNull;
+    // ⚠️ Une liste supprimée — ou dont la dernière conversation vient de
+    // disparaître — laisse un filtre actif sur un bouton absent. On rend alors
+    // TOUTES les conversations plutôt qu'un écran vide sans moyen d'en sortir.
     if (liste == null) return convs;
 
     // Construits UNE FOIS : la liste se refiltre à chaque message reçu.
@@ -1047,9 +1092,10 @@ class _ConversationsTabState extends State<_ConversationsTab>
   /// posée par le web (`chats.tsx`), et la séparation visuelle la rend ici
   /// encore plus littérale.
   Widget _rangeeListes() {
-    if (_listes.isEmpty) return const SizedBox.shrink();
+    final avecDiscussion = _listesAvecDiscussion;
+    if (avecDiscussion.isEmpty) return const SizedBox.shrink();
     final sombre = Theme.of(context).brightness == Brightness.dark;
-    final triees = List<ListeContacts>.from(_listes)
+    final triees = List<ListeContacts>.from(avecDiscussion)
       ..sort((a, b) => comparePourTri(a.name, b.name));
 
     return SizedBox(
