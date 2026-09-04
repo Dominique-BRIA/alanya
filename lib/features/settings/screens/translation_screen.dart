@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../l10n/app_localizations.dart';
 import 'package:google_mlkit_translation/google_mlkit_translation.dart';
 import 'package:provider/provider.dart';
 
@@ -72,7 +73,7 @@ class _TranslationScreenState extends State<TranslationScreen> {
     if (!mounted) return;
     setState(() => _enCours.remove(langue.bcpCode));
     if (!ok) {
-      showAppSnackBar("Installation impossible");
+      showAppSnackBar(tr(context, 'trans_install_failed'));
       return;
     }
     await _charger();
@@ -84,25 +85,23 @@ class _TranslationScreenState extends State<TranslationScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text("Retirer « $nom » ?"),
+        title: Text(tr(context, 'trans_remove_q', {'nom': nom})),
         content: Text(
           cible
               // Retirer la langue de l'application casse TOUTES les traductions,
               // pas seulement celles depuis cette langue : elle est la cible de
               // chacune d'elles.
-              ? "C'est la langue de l'application : sans elle, plus aucun "
-                    "message ne pourra être traduit. Il faudra la réinstaller."
-              : "L'espace disque sera libéré. Il faudra la retélécharger pour "
-                    "traduire à nouveau depuis cette langue.",
+              ? tr(context, 'trans_remove_app_lang_body')
+              : tr(context, 'trans_remove_lang_body'),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text("Annuler"),
+            child: Text(tr(context, 'cancel')),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text("Retirer"),
+            child: Text(tr(context, 'remove')),
           ),
         ],
       ),
@@ -113,7 +112,7 @@ class _TranslationScreenState extends State<TranslationScreen> {
     if (!mounted) return;
     setState(() => _enCours.remove(langue.bcpCode));
     if (!retire) {
-      showAppSnackBar("Suppression impossible");
+      showAppSnackBar(tr(context, 'delete_failed'));
       return;
     }
     await _charger();
@@ -122,7 +121,7 @@ class _TranslationScreenState extends State<TranslationScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: backAppBar(context, "Traduction"),
+      appBar: backAppBar(context, tr(context, 'translated')),
       body: MotifBackground(
         overlayOpacity: 0.92,
         child: Column(
@@ -160,14 +159,14 @@ class _TranslationScreenState extends State<TranslationScreen> {
       builder: (_, actif, __) => SwitchListTile(
         value: actif,
         onChanged: (v) => TraductionAuto.instance.definir(v),
-        title: const Text("Traduction automatique"),
+        title: Text(tr(context, 'trans_auto')),
         subtitle: Text(
           actif
               // Ce que la fonction NE FAIT PAS est aussi important : sans cette
               // phrase, un message resté dans sa langue passerait pour une
               // panne, alors que son modèle n'est simplement pas installé.
-              ? "Les messages reçus sont traduits dès leur arrivée, quand leur langue est installée."
-              : "Les messages restent dans leur langue ; « Traduire » reste disponible sur chacun.",
+              ? tr(context, 'trans_auto_on')
+              : tr(context, 'trans_auto_off'),
           style: TextStyle(color: muted, fontSize: 12),
         ),
         secondary: Icon(Icons.translate, color: accentOf(context)),
@@ -185,7 +184,7 @@ class _TranslationScreenState extends State<TranslationScreen> {
       return Padding(
         padding: const EdgeInsets.all(16),
         child: Text(
-          "La traduction hors ligne n'existe que sur téléphone.",
+          tr(context, 'trans_mobile_only'),
           style: TextStyle(color: muted),
         ),
       );
@@ -196,9 +195,7 @@ class _TranslationScreenState extends State<TranslationScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            "La traduction se fait sur ton téléphone : aucun message n'est "
-            "envoyé sur Internet. Chaque langue s'installe une fois, puis "
-            "fonctionne hors ligne.",
+            tr(context, 'trans_on_device'),
             style: TextStyle(color: muted, fontSize: 13),
           ),
           const SizedBox(height: 8),
@@ -208,8 +205,7 @@ class _TranslationScreenState extends State<TranslationScreen> {
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  "Traduire vers ${nomAutonyme(_langueCible)} — il faut CETTE "
-                  "langue et celle du message.",
+                  tr(context, 'trans_target_hint', {'langue': nomAutonyme(_langueCible)}),
                   style: TextStyle(
                     color: muted,
                     fontSize: 13,
@@ -233,7 +229,7 @@ class _TranslationScreenState extends State<TranslationScreen> {
         decoration: InputDecoration(
           isDense: true,
           prefixIcon: const Icon(Icons.search, size: 20),
-          hintText: "Chercher une langue (nom, code, anglais)",
+          hintText: tr(context, 'trans_search_hint'),
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(24)),
         ),
       ),
@@ -262,16 +258,16 @@ class _TranslationScreenState extends State<TranslationScreen> {
       physics: const AlwaysScrollableScrollPhysics(),
       children: [
         if (presentes.isEmpty && absentes.isEmpty)
-          const Padding(
-            padding: EdgeInsets.all(24),
-            child: Center(child: Text("Aucune langue ne correspond.")),
+          Padding(
+            padding: const EdgeInsets.all(24),
+            child: Center(child: Text(tr(context, 'trans_no_match'))),
           ),
         if (presentes.isNotEmpty) ...[
-          _titreSection("Installées (${presentes.length})"),
+          _titreSection(tr(context, 'trans_installed_n', {'n': '${presentes.length}'})),
           ...presentes.map((l) => _ligne(l, installee: true)),
         ],
         if (absentes.isNotEmpty) ...[
-          _titreSection("Disponibles"),
+          _titreSection(tr(context, 'trans_available')),
           ...absentes.map((l) => _ligne(l, installee: false)),
         ],
         const SizedBox(height: 24),
@@ -312,9 +308,9 @@ class _TranslationScreenState extends State<TranslationScreen> {
       // Sans ce mot, un rond qui tourne longtemps se lit comme un blocage.
       subtitle: Text(
         occupee
-            ? "Installation… durée inconnue, elle continue en arrière-plan"
+            ? tr(context, 'trans_installing')
             : estCible
-            ? "$code · langue de l'application"
+            ? tr(context, 'trans_app_lang', {'code': code})
             : "$code · ${langue.name}",
       ),
       trailing: occupee
@@ -328,7 +324,7 @@ class _TranslationScreenState extends State<TranslationScreen> {
                 installee ? Icons.delete_outline : Icons.download_outlined,
                 color: installee ? null : accentOf(context),
               ),
-              tooltip: installee ? "Retirer" : "Installer",
+              tooltip: installee ? tr(context, 'remove') : tr(context, 'install_action'),
               onPressed: () =>
                   installee ? _retirer(langue) : _installer(langue),
             ),

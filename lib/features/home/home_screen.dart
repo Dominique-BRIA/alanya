@@ -1174,17 +1174,17 @@ class _ConversationsTabState extends State<_ConversationsTab>
           // Tout le contenu est littéral depuis que les couleurs ne dépendent
           // plus du thème : le sous-arbre entier devient constant, donc
           // construit une seule fois.
-          child: const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.phone, color: Colors.white, size: 24),
-                SizedBox(height: 2),
+                const Icon(Icons.phone, color: Colors.white, size: 24),
+                const SizedBox(height: 2),
                 Text(
-                  "Saisir ID",
-                  style: TextStyle(
+                  tr(context, 'home_enter_id'),
+                  style: const TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
                     color: Colors.white,
@@ -1234,7 +1234,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Text(
-              "Aucune discussion.\nAppuie sur le bouton en bas pour accéder à tes contacts et démarrer une discussion.",
+              tr(context, 'home_no_chats'),
               textAlign: TextAlign.center,
               style: TextStyle(color: muted),
             ),
@@ -1273,7 +1273,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
                       light: AlanyaColors.grey300, dark: AlanyaColors.craie2)),
               const SizedBox(height: 12),
               Text(
-                "Aucun résultat pour \"$_searchQuery\"",
+                tr(context, 'home_no_results', {'q': _searchQuery}),
                 style: TextStyle(color: muted2),
               ),
             ],
@@ -2027,7 +2027,7 @@ class _StatusTabState extends State<_StatusTab> {
               leading: const Icon(Icons.videocam_outlined),
               title: Text(tr(context, 'video')),
               subtitle: Text(
-                  "${dureeVideoStatutMax.inSeconds} secondes au maximum"),
+                  tr(context, 'status_max_duration', {'n': '${dureeVideoStatutMax.inSeconds}'})),
               onTap: () => Navigator.pop(ctx, SourceStatut.cameraVideo),
             ),
             const SizedBox(height: 8),
@@ -2131,7 +2131,7 @@ class _StatusTabState extends State<_StatusTab> {
                   padding: const EdgeInsets.all(24),
                   child: Center(
                     child: Text(
-                      "Aucun statut pour le moment.\nPublie le tien avec le bouton +.",
+                      tr(context, 'home_no_status'),
                       textAlign: TextAlign.center,
                       style: TextStyle(color: muted),
                     ),
@@ -2496,7 +2496,7 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(tr(context, 'ai_delete_failed'))),
+          SnackBar(content: Text(tr(context, 'delete_failed'))),
         );
       }
     }

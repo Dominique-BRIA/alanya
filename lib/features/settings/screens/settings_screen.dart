@@ -62,7 +62,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         setState(() {
           _biometricEnabled = false;
           _biometricAvailable = false;
-          _biometricType = "Erreur";
+          _biometricType = tr(context, 'error');
           _loadingBiometric = false;
         });
       }
@@ -72,18 +72,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _toggleBiometric(bool value) async {
     if (value) {
       if (!_biometricAvailable) {
-        _snack("Biométrie non disponible sur cet appareil");
+        _snack(tr(context, 'set_biometric_unavailable'));
         return;
       }
       // Active directement sans vérifier (comme WhatsApp)
       await BiometricService.setEnabled(true);
+      // ⚠️ `tr()` LIT LE CONTEXTE, ce qu'un libellé en dur ne faisait pas :
+      // après un `await`, l'écran a pu être quitté, et lire le contexte d'un
+      // widget démonté lève. La garde protège aussi le `setState` qui suit,
+      // lequel n'en avait aucune.
+      if (!mounted) return;
       setState(() => _biometricEnabled = true);
-      _snack(
-          "Verrouillage biométrique activé. L'app se verrouillera à la prochaine ouverture.");
+      _snack(tr(context, 'set_biometric_on'));
     } else {
       await BiometricService.setEnabled(false);
+      if (!mounted) return;
       setState(() => _biometricEnabled = false);
-      _snack("Verrouillage biométrique désactivé");
+      _snack(tr(context, 'set_biometric_off'));
     }
   }
 
@@ -98,11 +103,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final themeCtrl = context.watch<ThemeController>();
 
     return Scaffold(
-      appBar: backAppBar(context, "Paramètres"),
+      appBar: backAppBar(context, tr(context, 'settings')),
       body: ListView(
         children: [
           // PROFIL
-          _sectionHeader("Profil"),
+          _sectionHeader(tr(context, 'set_section_profile')),
           _card(
             child: ListTile(
               contentPadding:
@@ -113,13 +118,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 radius: 28,
                 backgroundColor: AlanyaColors.terracotta,
               ),
-              title: Text(user?.pseudo ?? "Utilisateur",
+              title: Text(user?.pseudo ?? tr(context, 'set_user_fallback'),
                   style: const TextStyle(
                       fontWeight: FontWeight.bold, fontSize: 16)),
               // Le repli « — » reste hors du formateur : celui-ci ne garde que
               // les chiffres et effacerait le tiret.
               subtitle: Text(
-                  "Alanya ID : ${user == null ? '—' : formatAlanyaId(user.publicNumber)}",
+                  tr(context, 'home_alanya_id', {
+                    'id': user == null
+                        ? '—'
+                        : formatAlanyaId(user.publicNumber)
+                  }),
                   style: TextStyle(
                       fontSize: 13,
                       // Clair inchangé : `_muted` vaut grey500 en clair.
@@ -132,12 +141,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
 
           // SECURITE
-          _sectionHeader("Sécurité"),
+          _sectionHeader(tr(context, 'set_section_security')),
           _settingsTile(
             icon: Icons.shield_outlined,
             iconColor: _positive,
-            title: "Confidentialité",
-            subtitle: "Confirmations de lecture, vu à / en ligne",
+            title: tr(context, 'set_privacy'),
+            subtitle: tr(context, 'set_privacy_sub'),
             trailing: _chevron(),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const PrivacySettingsScreen()),
@@ -146,8 +155,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _settingsTile(
             icon: Icons.history,
             iconColor: _positive,
-            title: "Historique de connexion",
-            subtitle: "Quand et depuis où ton compte a été ouvert",
+            title: tr(context, 'set_login_history'),
+            subtitle: tr(context, 'set_login_history_sub'),
             trailing: _chevron(),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const LoginHistoryScreen()),
@@ -156,8 +165,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _settingsTile(
             icon: Icons.lock_outline,
             iconColor: _accent,
-            title: "Changer le mot de passe",
-            subtitle: "Modifier ton mot de passe de connexion",
+            title: tr(context, 'set_change_password'),
+            subtitle: tr(context, 'set_change_password_sub'),
             trailing: _chevron(),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const ChangePasswordScreen()),
@@ -197,14 +206,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ? Icons.fingerprint
                 : Icons.fingerprint_outlined,
             iconColor: _biometricEnabled ? _positive : _mutedIcon,
-            title: "Verrouillage biométrique",
+            title: tr(context, 'set_biometric_lock'),
             subtitle: _loadingBiometric
-                ? "Chargement..."
+                ? tr(context, 'loading')
                 : (!_biometricAvailable
-                    ? "Non disponible sur cet appareil"
+                    ? tr(context, 'set_unavailable_here')
                     : (_biometricEnabled
-                        ? "Activé — $_biometricType (appuyer pour désactiver)"
-                        : "Désactivé (appuyer pour activer)")),
+                        ? tr(context, 'set_enabled_tap_off', {'type': _biometricType})
+                        : tr(context, 'set_disabled_tap_on'))),
             trailing: _loadingBiometric
                 ? const SizedBox(
                     width: 20,
@@ -235,8 +244,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _settingsTile(
             icon: Icons.star,
             iconColor: AlanyaColors.gold,
-            title: "Messages favoris",
-            subtitle: "Retrouver les messages mis en favori",
+            title: tr(context, 'set_starred'),
+            subtitle: tr(context, 'set_starred_sub'),
             trailing: _chevron(),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const StarredMessagesScreen()),
@@ -246,8 +255,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             icon: Icons.block,
             iconColor: themed(context,
                 light: Colors.red.shade400, dark: AlanyaColors.erreurNuit),
-            title: "Utilisateurs bloqués",
-            subtitle: "Gérer les personnes bloquées",
+            title: tr(context, 'set_blocked'),
+            subtitle: tr(context, 'set_blocked_sub'),
             trailing: _chevron(),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const BlockedUsersScreen()),
@@ -255,12 +264,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
 
           // PREFERENCES
-          _sectionHeader("Préférences"),
+          _sectionHeader(tr(context, 'set_section_preferences')),
           _settingsTile(
             icon: Icons.notifications_outlined,
             iconColor: _accent,
-            title: "Notifications",
-            subtitle: "Messages, appels, aperçu",
+            title: tr(context, 'set_notifications'),
+            subtitle: tr(context, 'set_notifications_sub'),
             trailing: _chevron(),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(
@@ -270,8 +279,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _settingsTile(
             icon: Icons.library_music_outlined,
             iconColor: _accent,
-            title: "Mes sonneries",
-            subtitle: "Importer et gérer vos sonneries",
+            title: tr(context, 'set_ringtones'),
+            subtitle: tr(context, 'set_ringtones_sub'),
             trailing: _chevron(),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const RingtonesScreen()),
@@ -280,8 +289,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _settingsTile(
             icon: Icons.translate,
             iconColor: _accent,
-            title: "Traduction",
-            subtitle: "Langues installées sur l'appareil",
+            title: tr(context, 'translated'),
+            subtitle: tr(context, 'set_translation_sub'),
             trailing: _chevron(),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const TranslationScreen()),
@@ -290,7 +299,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _settingsTile(
             icon: ThemeController.icone(themeCtrl.choix),
             iconColor: _accent,
-            title: "Thème",
+            title: tr(context, 'set_theme'),
             subtitle: ThemeController.label(themeCtrl.choix),
             trailing: _chevron(),
             onTap: () => _showThemePicker(themeCtrl),
@@ -299,10 +308,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             icon:
                 _dataSaverEnabled ? Icons.data_saver_on : Icons.data_saver_off,
             iconColor: _dataSaverEnabled ? _positive : _mutedIcon,
-            title: "Économie de données",
+            title: tr(context, 'set_data_saver'),
             subtitle: _dataSaverEnabled
-                ? "Activé — les médias ne se téléchargent pas automatiquement"
-                : "Désactivé (appuyer pour activer)",
+                ? tr(context, 'set_data_saver_on')
+                : tr(context, 'set_disabled_tap_on'),
             trailing: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
@@ -353,12 +362,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
 
           // COMPTE
-          _sectionHeader("Compte"),
+          _sectionHeader(tr(context, 'set_section_account')),
           _settingsTile(
             icon: Icons.info_outline,
             iconColor: _muted,
-            title: "À propos d'Alanya",
-            subtitle: "Version 1.0.0",
+            title: tr(context, 'set_about'),
+            subtitle: tr(context, 'set_version', {'v': '1.0.0'}),
             trailing: _chevron(),
             onTap: () => _showAbout(),
           ),
@@ -366,8 +375,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             icon: Icons.delete_forever_outlined,
             iconColor: themed(context,
                 light: AlanyaColors.error, dark: AlanyaColors.erreurNuit),
-            title: "Supprimer mon compte",
-            subtitle: "Effacer définitivement le compte et les données",
+            title: tr(context, 'set_delete_account'),
+            subtitle: tr(context, 'set_delete_account_sub'),
             trailing: _chevron(),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const DeleteAccountScreen()),
@@ -381,19 +390,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 showDialog(
                   context: context,
                   builder: (_) => AlertDialog(
-                    title: const Text("Se déconnecter ?"),
-                    content: const Text(
-                        "Vous devrez vous reconnecter pour accéder à vos messages."),
+                    title: Text(tr(context, 'set_logout_q')),
+                    content: Text(
+                        tr(context, 'set_logout_body')),
                     actions: [
                       TextButton(
                           onPressed: () => Navigator.pop(context),
-                          child: const Text("Annuler")),
+                          child: Text(tr(context, 'cancel'))),
                       TextButton(
                         onPressed: () {
                           Navigator.pop(context);
                           context.read<AuthController>().logout();
                         },
-                        child: Text("Déconnexion",
+                        child: Text(tr(context, 'set_logout_action'),
                             style: TextStyle(color: _danger)),
                       ),
                     ],
@@ -401,7 +410,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 );
               },
               icon: Icon(Icons.logout, color: _danger),
-              label: Text("Se déconnecter", style: TextStyle(color: _danger)),
+              label: Text(tr(context, 'logout'), style: TextStyle(color: _danger)),
               style: OutlinedButton.styleFrom(
                 minimumSize: const Size(double.infinity, 48),
                 side: BorderSide(
@@ -507,10 +516,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Padding(
-            padding: EdgeInsets.all(16),
-            child: Text("Thème",
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text(tr(context, 'set_theme'),
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           ),
           const Divider(height: 1),
           ...ChoixTheme.values.map((c) {
@@ -566,19 +575,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 16),
             const AlanyaWordmark(fontSize: 22, letterSpacing: 2),
             const SizedBox(height: 4),
-            Text("Version 1.0.0", style: TextStyle(color: _muted)),
+            Text(tr(context, 'set_version', {'v': '1.0.0'}), style: TextStyle(color: _muted)),
             const SizedBox(height: 8),
-            Text("Application de messagerie instantanée",
+            Text(tr(context, 'set_app_description'),
                 style: TextStyle(color: _muted, fontSize: 13)),
             const SizedBox(height: 16),
-            Text("© 2026 Alanya Communication",
+            Text(tr(context, 'set_copyright'),
                 style: TextStyle(color: _mutedIcon, fontSize: 11)),
           ],
         ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text("Fermer")),
+              child: Text(tr(context, 'close'))),
         ],
       ),
     );

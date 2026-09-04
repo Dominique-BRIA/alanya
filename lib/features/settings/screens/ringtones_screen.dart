@@ -1,4 +1,5 @@
 import 'package:file_picker/file_picker.dart';
+import '../../../l10n/app_localizations.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -66,13 +67,13 @@ class _RingtonesScreenState extends State<RingtonesScreen> {
       if (!mounted) return;
       setState(() {
         _chargement = false;
-        _erreur = "Erreur ${e.statusCode} : ${e.message}";
+        _erreur = tr(context, 'error_with_code', {'code': '${e.statusCode}', 'message': e.message});
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _chargement = false;
-        _erreur = "Impossible de charger vos sonneries.";
+        _erreur = tr(context, 'ring_load_error');
       });
     }
   }
@@ -88,10 +89,15 @@ class _RingtonesScreenState extends State<RingtonesScreen> {
       withData: true,
     );
     if (choix == null || choix.files.isEmpty) return;
+    // ⚠️ `tr()` LIT LE CONTEXTE, ce qu'un libellé en dur ne faisait pas : le
+    // sélecteur de fichiers rend la main après un aller-retour hors de l'app,
+    // pendant lequel l'écran a pu être quitté. Lire le contexte d'un widget
+    // démonté lève.
+    if (!mounted) return;
     final f = choix.files.first;
     final octets = f.bytes;
     if (octets == null) {
-      showAppSnackBar("Fichier illisible");
+      showAppSnackBar(tr(context, 'ring_unreadable'));
       return;
     }
 
@@ -100,7 +106,7 @@ class _RingtonesScreenState extends State<RingtonesScreen> {
     // c'est un morceau entier, pas une sonnerie.
     const plafondOctets = 10 * 1024 * 1024;
     if (octets.length > plafondOctets) {
-      showAppSnackBar("Fichier trop lourd (10 Mo maximum)");
+      showAppSnackBar(tr(context, 'ring_too_big'));
       return;
     }
 
@@ -124,13 +130,18 @@ class _RingtonesScreenState extends State<RingtonesScreen> {
       if (!mounted) return;
       setState(() => _progression = null);
       await _charger();
-      showAppSnackBar("Sonnerie ajoutée");
+      // `_charger()` est un second `await` : la garde d'avant ne couvre pas
+      // ce qui suit.
+      if (!mounted) return;
+      showAppSnackBar(tr(context, 'ring_added'));
     } on ApiException catch (e) {
-      if (mounted) setState(() => _progression = null);
+      if (!mounted) return;
+      setState(() => _progression = null);
       showAppSnackBar(e.message);
     } catch (_) {
-      if (mounted) setState(() => _progression = null);
-      showAppSnackBar("Import impossible");
+      if (!mounted) return;
+      setState(() => _progression = null);
+      showAppSnackBar(tr(context, 'ring_import_failed'));
     }
   }
 
@@ -189,18 +200,17 @@ class _RingtonesScreenState extends State<RingtonesScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text("Retirer cette sonnerie ?"),
+        title: Text(tr(context, 'ring_remove_q')),
         content: Text(
-          "« ${s.label} » sortira de votre catalogue.\n\n"
-          "Les listes qui l'utilisaient reviendront à la sonnerie par défaut.",
+          tr(context, 'ring_remove_body', {'nom': s.label}),
         ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text("Annuler")),
+              child: Text(tr(context, 'cancel'))),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text("Retirer")),
+              child: Text(tr(context, 'remove'))),
         ],
       ),
     );
@@ -209,18 +219,19 @@ class _RingtonesScreenState extends State<RingtonesScreen> {
       await depot.supprimer(s.id);
       await _charger();
     } catch (_) {
-      showAppSnackBar("Suppression impossible");
+      if (!mounted) return;
+      showAppSnackBar(tr(context, 'delete_failed'));
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: backAppBar(context, "Mes sonneries"),
+      appBar: backAppBar(context, tr(context, 'set_ringtones')),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _progression != null ? null : _importer,
         icon: const Icon(Icons.library_music_outlined),
-        label: Text(_progression == null ? "Importer" : "Envoi…"),
+        label: Text(_progression == null ? tr(context, 'import_action') : tr(context, 'sending')),
       ),
       body: MotifBackground(
         overlayOpacity: 0.92,
@@ -252,7 +263,7 @@ class _RingtonesScreenState extends State<RingtonesScreen> {
               Text(_erreur!, textAlign: TextAlign.center),
               const SizedBox(height: 16),
               OutlinedButton(
-                  onPressed: _charger, child: const Text("Réessayer")),
+                  onPressed: _charger, child: Text(tr(context, 'retry'))),
             ]),
           ),
         ),
@@ -272,12 +283,11 @@ class _RingtonesScreenState extends State<RingtonesScreen> {
               Icon(Icons.music_note_outlined,
                   size: 56, color: faintOf(context, Colors.black26)),
               const SizedBox(height: 16),
-              const Text("Aucune sonnerie importée",
-                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+              Text(tr(context, 'ring_empty'),
+                  style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
               Text(
-                "Importez un fichier audio pour l'attribuer ensuite à une "
-                "liste de contacts.",
+                tr(context, 'ring_empty_hint'),
                 textAlign: TextAlign.center,
                 style: TextStyle(color: mutedOf(context, Colors.black54)),
               ),
@@ -301,13 +311,13 @@ class _RingtonesScreenState extends State<RingtonesScreen> {
             color: accentOf(context),
             iconSize: 34,
             onPressed: () => _ecouter(s),
-            tooltip: joue ? "Arrêter" : "Écouter",
+            tooltip: joue ? tr(context, 'stop') : tr(context, 'listen'),
           ),
           title: Text(s.label, maxLines: 1, overflow: TextOverflow.ellipsis),
           trailing: IconButton(
             icon: const Icon(Icons.delete_outline),
             onPressed: () => _supprimer(s),
-            tooltip: "Retirer",
+            tooltip: tr(context, 'remove'),
           ),
         );
       },
