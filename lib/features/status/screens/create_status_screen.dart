@@ -1,15 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
-import 'package:video_compress/video_compress.dart';
 
 import '../../../core/api_client.dart';
 import '../../../core/compression_image.dart' show imageBordMax, imageQualite;
-import '../../../core/compression_video.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/media/media_picker_sheet.dart' show MediaPickResult;
 import '../../chat/screens/media_gallery_picker_screen.dart';
 import '../../media/media_repository.dart';
+import '../publication_statuts.dart';
 import '../status_repository.dart';
 import '../widgets/choix_emoji.dart';
 import 'editeur_media_statut_screen.dart';
@@ -54,11 +53,6 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
   final _textCtrl = TextEditingController();
   int _colorIndex = 0;
   bool _publishing = false;
-
-  /// Ce que l'écran est en train de faire — « Compression de la vidéo… 42 % »,
-  /// « Envoi… ». Affiché en titre pendant la publication : un transcodage dure
-  /// des dizaines de secondes, et un écran sans un mot passe pour figé.
-  String? _etape;
 
   @override
   void initState() {
@@ -114,9 +108,15 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
             );
     } catch (_) {
       _snack("Appareil photo indisponible");
+      _refermeSiEntreeMedia();
       return;
     }
-    if (fichier == null || !mounted) return;
+    // Renoncer à la prise de vue doit ramener à la liste, pas à l'éditeur de
+    // texte — même raison que pour le sélecteur.
+    if (fichier == null || !mounted) {
+      _refermeSiEntreeMedia();
+      return;
+    }
 
     final octets = await fichier.readAsBytes();
     if (!mounted) return;
@@ -172,10 +172,28 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
       choisis = await MediaGalleryPickerScreen.open(context);
     } catch (_) {
       _snack("Sélection de média indisponible sur cette plateforme");
+      _refermeSiEntreeMedia();
       return;
     }
-    if (choisis == null || choisis.isEmpty || !mounted) return;
+    if (choisis == null || choisis.isEmpty || !mounted) {
+      _refermeSiEntreeMedia();
+      return;
+    }
     await _editerPuisPublier(choisis);
+  }
+
+  /// Referme l'écran quand on y est entré PAR UN MÉDIA et qu'on renonce.
+  ///
+  /// 🔴 DÉFAUT SIGNALÉ SUR DEVICE (04/09/2026) : « je mets une photo en statut,
+  /// à la fin l'écran de mettre un texte s'ouvre ». Choisir « Galerie » ou
+  /// « Appareil photo » pousse cet écran — donc l'éditeur de TEXTE — puis
+  /// ouvre le sélecteur par-dessus. Renoncer au sélecteur ou à l'éditeur
+  /// laissait l'utilisateur devant un écran de texte qu'il n'avait pas demandé.
+  void _refermeSiEntreeMedia() {
+    if (widget.source == SourceStatut.texte) return;
+    if (mounted && Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
   }
 
   /// Fait passer CHAQUE média par l'éditeur, puis publie ce qui en ressort.
@@ -190,6 +208,7 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
         (m) => (m.durationMs ?? 0) > dureeVideoStatutMax.inMilliseconds)) {
       _snack("Une vidéo de statut ne peut pas dépasser "
           "${dureeVideoStatutMax.inSeconds} secondes");
+      _refermeSiEntreeMedia();
       return;
     }
 
@@ -201,70 +220,31 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
       final edite = await EditeurMediaStatutScreen.ouvrir(context, m);
       if (edite != null) prets.add(edite);
     }
-    if (prets.isEmpty || !mounted) return;
-
-    setState(() => _publishing = true);
-    final media = context.read<MediaRepository>();
-    final repo = context.read<StatusRepository>();
-    final nav = Navigator.of(context);
-    var publies = 0;
-
-    // Le transcodage d'une vidéo dure des dizaines de secondes : sans ce
-    // compte rendu, l'écran paraît figé et l'utilisateur repart.
-    final progression = VideoCompress.compressProgress$.subscribe((p) {
-      if (mounted) {
-        setState(() => _etape = "Compression de la vidéo… ${p.round()} %");
-      }
-    });
-
-    try {
-      for (final m in prets) {
-        var octets = m.octets;
-        var nom = m.nomFichier;
-        var mime = m.mimeType;
-
-        if (mime.startsWith('video/')) {
-          // Les photos sont déjà compressées par le sélecteur ; les vidéos, non
-          // — aucun paquet ne le faisait dans ce projet jusqu'ici.
-          if (mounted) setState(() => _etape = "Compression de la vidéo…");
-          final v = await compresserVideo(
-            m.octets,
-            chemin: m.chemin,
-            nomFichier: m.nomFichier,
-            mimeType: m.mimeType,
-          );
-          octets = v.octets;
-          nom = v.nomFichier;
-          mime = v.mimeType;
-        }
-
-        if (mounted) setState(() => _etape = "Envoi…");
-        final uploaded = await media.upload(octets, nom, mime);
-        await repo.createMedia(
-          uploaded.id,
-          mime.startsWith('video/') ? 'VIDEO' : 'IMAGE',
-          legende: m.legende,
-        );
-        publies++;
-      }
-      nav.pop(true);
-    } on ApiException catch (e) {
-      _snack(publies == 0
-          ? e.message
-          : "$publies statut(s) publié(s), puis : ${e.message}");
-    } catch (_) {
-      _snack(publies == 0
-          ? "Publication du média impossible"
-          : "$publies statut(s) publié(s), l'envoi s'est interrompu ensuite");
-    } finally {
-      progression.unsubscribe();
-      if (mounted) {
-        setState(() {
-          _publishing = false;
-          _etape = null;
-        });
-      }
+    if (prets.isEmpty || !mounted) {
+      _refermeSiEntreeMedia();
+      return;
     }
+
+    /*
+     * 🔴 L'ÉCRAN REND LA MAIN TOUT DE SUITE — l'envoi continue sans lui.
+     *
+     * Trois défauts signalés sur device tenaient à la même cause : la
+     * publication se faisait ICI. Il fallait regarder l'écran tourner jusqu'au
+     * bout ; l'indicateur s'affichait sur le bouton d'envoi du statut TEXTE,
+     * resté derrière ; et quitter l'application pendant un transcodage perdait
+     * l'envoi.
+     *
+     * `PublicationStatuts` passe par `CentreTransferts`, qui démarre le service
+     * Android de premier plan : c'est LUI qui empêche Android de tuer le
+     * processus quand on sort de l'application. La progression se lit dans la
+     * notification, comme pour un envoi de fichier.
+     */
+    PublicationStatuts.instance.publierMedias(
+      prets,
+      media: context.read<MediaRepository>(),
+      statuts: context.read<StatusRepository>(),
+    );
+    if (mounted) Navigator.of(context).pop(true);
   }
 
   /// Insère un emoji À L'ENDROIT DU CURSEUR, pas à la fin.
@@ -307,7 +287,7 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
                 onPressed: () => Navigator.of(context).pop(),
               )
             : null,
-        title: Text(_etape ?? "Nouveau statut"),
+        title: const Text("Nouveau statut"),
         actions: [
           IconButton(
             tooltip: "Emoji",

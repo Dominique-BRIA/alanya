@@ -55,6 +55,7 @@ import '../calls/screens/abandoned_clients_screen.dart';
 import '../meetings/meeting_controller.dart';
 import '../meetings/screens/meetings_screen.dart';
 import '../status/horodatage_statut.dart';
+import '../status/publication_statuts.dart';
 import '../status/screens/create_status_screen.dart';
 import '../status/screens/status_viewer_screen.dart';
 import '../status/status_repository.dart';
@@ -1862,6 +1863,18 @@ class _StatusTabState extends State<_StatusTab> {
   void initState() {
     super.initState();
     _load();
+    // La publication continue APRÈS la fermeture de l'écran de composition, et
+    // même après la sortie de l'application : la liste ne peut donc pas se
+    // contenter de se recharger au retour de cet écran. Le publieur la prévient.
+    PublicationStatuts.instance.surPublication = () {
+      if (mounted) _load();
+    };
+  }
+
+  @override
+  void dispose() {
+    PublicationStatuts.instance.surPublication = null;
+    super.dispose();
   }
 
   Future<void> _load() async {

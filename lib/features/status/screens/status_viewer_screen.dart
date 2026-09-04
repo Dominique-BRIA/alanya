@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show File;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -6,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../../core/api_client.dart';
+import '../../../core/media_cache.dart';
 import '../../../core/token_storage.dart';
 import '../../../models/status.dart';
 import '../../../widgets/auth_network_image.dart';
@@ -567,6 +569,7 @@ class _VueGroupeState extends State<_VueGroupe>
       return _StatusVideoPlayer(
         key: ValueKey(s.id),
         url: "${widget.baseUrl}${s.mediaUrl}?token=${widget.token ?? ''}",
+        mediaId: s.mediaUrl?.split("/").last,
         // ⚠️ SEUL LE DOIGT met la vidéo en pause. Lui repasser la raison
         // « chargement » l'empêcherait de démarrer : c'est le lecteur qui lève
         // cette raison-là, une fois qu'il connaît sa durée.
@@ -844,12 +847,17 @@ class _StatusVideoPlayer extends StatefulWidget {
   const _StatusVideoPlayer({
     super.key,
     required this.url,
+    required this.mediaId,
     required this.enPause,
     required this.onPret,
     required this.onEchec,
   });
 
   final String url;
+
+  /// L'identifiant du média, qui est AUSSI sa clé de cache disque : pour
+  /// `/api/media/<id>`, `CachedMedia.cacheKey` rend le dernier segment.
+  final String? mediaId;
   final bool enPause;
   final void Function(Duration duree) onPret;
   final VoidCallback onEchec;
@@ -865,7 +873,32 @@ class _StatusVideoPlayerState extends State<_StatusVideoPlayer> {
   @override
   void initState() {
     super.initState();
-    final c = VideoPlayerController.networkUrl(Uri.parse(widget.url));
+    _demarrer();
+  }
+
+  /// Lit la vidéo DEPUIS LE CACHE quand elle y est, du réseau sinon.
+  ///
+  /// 🔴 UNE VIDÉO DE STATUT N'ÉTAIT JAMAIS MISE EN CACHE (signalé sur device le
+  /// 04/09/2026) : `VideoPlayerController.networkUrl` retélécharge à chaque
+  /// ouverture, y compris SA PROPRE vidéo qu'on vient de publier depuis ce
+  /// téléphone. Les images passaient déjà par le cache disque ; les vidéos, qui
+  /// pèsent cent fois plus, non.
+  ///
+  /// ⚠️ LE FICHIER EST ÉCRIT SANS EXTENSION UTILE (`.dat`, comme le reste du
+  /// cache). ExoPlayer reconnaît le conteneur à son contenu, pas à son nom —
+  /// mais si un jour une plateforme s'y refusait, le repli réseau ci-dessous
+  /// resterait le chemin sûr.
+  Future<void> _demarrer() async {
+    VideoPlayerController c;
+    final cache = widget.mediaId == null
+        ? null
+        : await MediaCache.get(widget.mediaId!, 'dat');
+    if (!mounted) return;
+    if (cache != null) {
+      c = VideoPlayerController.file(File(cache));
+    } else {
+      c = VideoPlayerController.networkUrl(Uri.parse(widget.url));
+    }
     _ctrl = c;
     c.initialize().then((_) {
       if (!mounted) return;
