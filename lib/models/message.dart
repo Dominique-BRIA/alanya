@@ -66,6 +66,53 @@ class ReplyPreview {
       );
 }
 
+/// Le statut qu'un message cite, tel que le serveur l'a RECOPIÉ à l'envoi.
+///
+/// 🔴 C'EST UN INSTANTANÉ, PAS UNE RÉFÉRENCE. Un statut vit 24 h puis est
+/// purgé : une citation qui pointerait vers lui deviendrait un trou dans la
+/// conversation le lendemain. L'aperçu reste donc lisible indéfiniment, même
+/// une fois le statut disparu — et c'est aussi pourquoi le client ne peut pas
+/// le fabriquer : seul le serveur le remplit.
+class StatutCite {
+  final String statusId;
+  final String authorId;
+
+  /// TEXT, IMAGE ou VIDEO — celui du statut, pas celui du message.
+  final String type;
+  final String? text;
+  final String? mediaUrl;
+  final String? bgColor;
+
+  StatutCite({
+    required this.statusId,
+    required this.authorId,
+    required this.type,
+    this.text,
+    this.mediaUrl,
+    this.bgColor,
+  });
+
+  factory StatutCite.fromJson(Map<String, dynamic> j) => StatutCite(
+        statusId: j["statusId"] as String,
+        authorId: j["authorId"] as String,
+        type: j["type"] as String? ?? "TEXT",
+        text: j["text"] as String?,
+        mediaUrl: j["mediaUrl"] as String?,
+        bgColor: j["bgColor"] as String?,
+      );
+
+  /// Ce que la citation affiche quand le statut n'a pas de texte.
+  String get apercu {
+    final t = text?.trim();
+    if (t != null && t.isNotEmpty) return t;
+    return switch (type) {
+      "IMAGE" => "Photo",
+      "VIDEO" => "Vidéo",
+      _ => "Statut",
+    };
+  }
+}
+
 class Message {
   final String id;
   final String convId;
@@ -98,6 +145,9 @@ class Message {
   /// s'affiche alors comme une phrase ordinaire, sans rien perdre.
   final List<MentionMessage> mentions;
 
+  /// Le statut auquel ce message répond, recopié par le serveur à l'envoi.
+  final StatutCite? statutCite;
+
   Message({
     required this.id,
     required this.convId,
@@ -115,6 +165,7 @@ class Message {
     this.reactions = const [],
     this.starred = false,
     this.mentions = const [],
+    this.statutCite,
   });
 
   /// Vrai si le message a été supprimé pour tout le monde.
@@ -130,6 +181,9 @@ class Message {
         replyToId: j["replyToId"] as String?,
         replyTo: j["replyTo"] != null
             ? ReplyPreview.fromJson(j["replyTo"] as Map<String, dynamic>)
+            : null,
+        statutCite: j["statutCite"] != null
+            ? StatutCite.fromJson(j["statutCite"] as Map<String, dynamic>)
             : null,
         deletedAt: j["deletedAt"] != null
             ? DateTime.tryParse(j["deletedAt"] as String)

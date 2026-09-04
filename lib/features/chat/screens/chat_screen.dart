@@ -41,6 +41,7 @@ import '../../../models/message.dart';
 import '../../../models/message_payload.dart';
 import '../../../models/conversation.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../../widgets/auth_network_image.dart';
 import '../../../widgets/avatar_circle.dart';
 import '../../../widgets/contact_share_sheet.dart';
 import '../../../widgets/dialogues_traduction.dart';
@@ -980,6 +981,7 @@ class _ChatScreenState extends State<ChatScreen>
                     status: "READ",
                     replyToId: m.replyToId,
                     replyTo: m.replyTo,
+                    statutCite: m.statutCite,
                     deletedAt: m.deletedAt,
                     editedAt: m.editedAt,
                     media: m.media,
@@ -1007,6 +1009,7 @@ class _ChatScreenState extends State<ChatScreen>
                     status: newStatus,
                     replyToId: m.replyToId,
                     replyTo: m.replyTo,
+                    statutCite: m.statutCite,
                     deletedAt: m.deletedAt,
                     editedAt: m.editedAt,
                     media: m.media,
@@ -1036,6 +1039,7 @@ class _ChatScreenState extends State<ChatScreen>
                       status: m.status,
                       replyToId: m.replyToId,
                       replyTo: m.replyTo,
+                      statutCite: m.statutCite,
                       deletedAt: DateTime.now(),
                       media: const [],
                       createdAt: m.createdAt)
@@ -1784,6 +1788,7 @@ class _ChatScreenState extends State<ChatScreen>
       status: m.status,
       replyToId: m.replyToId,
       replyTo: m.replyTo,
+      statutCite: m.statutCite,
       deletedAt: m.deletedAt,
       editedAt: editedAt,
       media: m.media,
@@ -2162,6 +2167,58 @@ class _ChatScreenState extends State<ChatScreen>
         GestureDetector(
             onTap: () => setState(() => _replyTo = null),
             child: Icon(Icons.close, size: 20, color: _muted)),
+      ]),
+    );
+  }
+
+  /// L'aperçu du STATUT auquel ce message répond.
+  ///
+  /// 🔴 IL RÉEMPRUNTE `_citationTexte`, le rendu de la citation d'un message.
+  /// Répondre à un statut et répondre à un message sont le même geste pour qui
+  /// lit la conversation : deux visuels différents auraient fait croire à deux
+  /// choses différentes.
+  ///
+  /// Ce qui le distingue tient en deux détails : l'auteur est remplacé par
+  /// « Statut », et une vignette du média accompagne l'aperçu quand il y en a
+  /// un — c'est elle qui dit DE QUEL statut on parle quand la personne en a
+  /// publié plusieurs dans la journée.
+  ///
+  /// ⚠️ AUCUN LIEN VERS LE STATUT : il a pu expirer depuis, et le texte affiché
+  /// est l'instantané recopié à l'envoi, pas le statut vivant.
+  Widget _citationStatut(StatutCite s, bool mine) {
+    final citation = _citationTexte("Statut", s.apercu, mine);
+    if (s.mediaUrl == null) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: citation,
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Flexible(child: citation),
+        const SizedBox(width: 6),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: SizedBox(
+            width: 38,
+            height: 38,
+            child: s.type == "VIDEO"
+                // Une vidéo n'a pas de vignette prête côté serveur : l'icône
+                // dit au moins de quelle nature était le statut.
+                ? Container(
+                    color: Colors.black26,
+                    child: const Icon(Icons.videocam,
+                        size: 18, color: Colors.white70),
+                  )
+                : AuthNetworkImage(
+                    url: '$_baseUrl${s.mediaUrl}?token=$_token',
+                    token: _token,
+                    width: 38,
+                    height: 38,
+                  ),
+          ),
+        ),
       ]),
     );
   }
@@ -2966,6 +3023,7 @@ class _ChatScreenState extends State<ChatScreen>
                       status: m.status,
                       replyToId: m.replyToId,
                       replyTo: m.replyTo,
+                      statutCite: m.statutCite,
                       deletedAt: DateTime.now(),
                       media: const [],
                       createdAt: m.createdAt)
@@ -4017,6 +4075,8 @@ class _ChatScreenState extends State<ChatScreen>
                       children: [
                         if (m.replyToId != null && !m.isDeleted)
                           _replyPreviewHeader(m, mine),
+                        if (m.statutCite != null && !m.isDeleted)
+                          _citationStatut(m.statutCite!, mine),
                         m.isDeleted
                             ? _deletedBubble(m, mine)
                             // Envoi en cours ou échoué : la bulle montre la vignette

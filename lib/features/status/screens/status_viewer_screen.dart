@@ -604,6 +604,7 @@ class _VueGroupeState extends State<_VueGroupe>
     final t = texte.trim();
     if (t.isEmpty || _envoiReponse) return;
     setState(() => _envoiReponse = true);
+    final statutId = _courant.id;
     final chat = context.read<ChatRepository>();
     final messenger = ScaffoldMessenger.of(context);
     // Même raison que pour une feuille : le statut ne doit pas défiler pendant
@@ -612,7 +613,10 @@ class _VueGroupeState extends State<_VueGroupe>
     try {
       final conv = await chat.getOrCreateDirectConversation(widget.groupe.userId);
       final convId = conv["id"] as String;
-      await chat.sendText(convId, t);
+      // Le statut regardé au moment de l'envoi : c'est lui que la conversation
+      // citera. On le lit AVANT l'await de l'envoi, la barre pouvant avoir
+      // avancé entre-temps.
+      await chat.sendText(convId, t, statutCite: statutId);
       _reponseCtrl.clear();
       messenger.showSnackBar(
         SnackBar(content: Text("Envoyé à ${widget.groupe.displayName}")),

@@ -41,12 +41,20 @@ class ChatRepository {
   /// ⚠️ CE CHEMIN EST LE REPLI du WebSocket, et il doit se comporter comme lui :
   /// une mention retenue en temps réel et perdue ici ferait dépendre la
   /// notification de l'état du réseau au moment de l'envoi.
+  /// [statutCite] : l'identifiant du statut auquel ce message répond.
+  ///
+  /// ⚠️ SEUL L'IDENTIFIANT PART. L'aperçu (texte, image, couleur) est recopié
+  /// par le serveur après contrôle de visibilité — sans quoi n'importe quel
+  /// client pourrait fabriquer une citation d'un statut qu'il n'a jamais vu.
   Future<Message> sendText(String convId, String content,
-      {String? replyToId, List<Map<String, String>>? mentions}) async {
+      {String? replyToId,
+      List<Map<String, String>>? mentions,
+      String? statutCite}) async {
     final data = await _api.post("/api/conversations/$convId/messages", {
       "content": content,
       "type": "TEXT",
       if (replyToId != null) "replyToId": replyToId,
+      if (statutCite != null) "statutCite": statutCite,
       if (mentions != null && mentions.isNotEmpty) "mentions": mentions,
     });
     return Message.fromJson(data);
