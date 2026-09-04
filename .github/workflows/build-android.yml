@@ -17,6 +17,14 @@ jobs:
     # quoi absorber un cache froid sans masquer une vraie régression.
     timeout-minutes: 45
 
+    # `actions: write` est le SEUL droit ajouté, et il l'est pour la purge des
+    # artefacts ci-dessous. Dès qu'un bloc `permissions` est déclaré, il
+    # REMPLACE le jeu par défaut : `contents: read` doit donc y figurer, sans
+    # quoi le `checkout` n'aurait plus le droit de lire le dépôt.
+    permissions:
+      contents: read
+      actions: write
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -145,3 +153,60 @@ jobs:
           name: alanya-apk
           path: build/app/outputs/flutter-apk/app-release.apk
           retention-days: 7
+
+      # Ne garder que les 5 APK les plus récents.
+      #
+      # 🔴 APRÈS L'ENVOI, ET JAMAIS AVANT. Purger d'abord aurait supprimé les
+      # anciens APK au tout début d'un build qui peut encore échouer — on se
+      # retrouverait sans rien à installer. Ici, on ne jette qu'une fois le
+      # nouveau déposé.
+      #
+      # `if: success()` est donc redondant avec l'ordre des étapes, mais il dit
+      # l'intention : cette étape n'a de sens que si l'APK est bien là.
+      #
+      # ⚠️ LE RUN COURANT EST EXCLU DU TRI, pas seulement compté : l'API liste
+      # les artefacts du dépôt entier, et rien ne garantit que celui qu'on vient
+      # de déposer y soit déjà visible. On garde donc les 4 plus récents des
+      # AUTRES runs — soit 5 APK en tout avec celui-ci.
+      #
+      # `retention-days: 7` reste le filet : si cette étape échoue un jour, les
+      # artefacts finissent quand même par expirer.
+      - name: Ne garder que les 5 derniers APK
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const A_GARDER = 5;
+            const { owner, repo } = context.repo;
+
+            const artefacts = await github.paginate(
+              github.rest.actions.listArtifactsForRepo,
+              { owner, repo, per_page: 100 },
+            );
+
+            const miens = artefacts
+              .filter((a) => a.name === 'alanya-apk'
+                          && !a.expired
+                          && a.workflow_run?.id !== context.runId)
+              // Du plus récent au plus ancien.
+              .sort((x, y) => new Date(y.created_at) - new Date(x.created_at));
+
+            const aJeter = miens.slice(A_GARDER - 1);
+            if (aJeter.length === 0) {
+              core.info(`Rien à purger : ${miens.length + 1} APK conserves.`);
+              return;
+            }
+
+            for (const a of aJeter) {
+              try {
+                await github.rest.actions.deleteArtifact(
+                  { owner, repo, artifact_id: a.id },
+                );
+                core.info(`supprimé : #${a.id} du ${a.created_at}`);
+              } catch (e) {
+                // Un artefact déjà expiré ou supprimé entre la liste et ici ne
+                // doit pas faire échouer un build par ailleurs réussi.
+                core.warning(`#${a.id} non supprimé : ${e.message}`);
+              }
+            }
+            core.info(`${aJeter.length} ancien(s) APK supprime(s).`);
