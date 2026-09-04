@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
-import '../../../core/api_client.dart';
+import '../../../core/app_snackbar.dart';
 import '../../../core/compression_image.dart' show imageBordMax, imageQualite;
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/media/media_picker_sheet.dart' show MediaPickResult;
@@ -52,7 +52,6 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
 
   final _textCtrl = TextEditingController();
   int _colorIndex = 0;
-  bool _publishing = false;
 
   @override
   void initState() {
@@ -136,19 +135,15 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
       _snack("Écris quelque chose");
       return;
     }
-    setState(() => _publishing = true);
-    final repo = context.read<StatusRepository>();
-    final nav = Navigator.of(context);
-    try {
-      await repo.createText(text, _palette[_colorIndex]);
-      nav.pop(true);
-    } on ApiException catch (e) {
-      _snack(e.message);
-    } catch (_) {
-      _snack("Publication impossible");
-    } finally {
-      if (mounted) setState(() => _publishing = false);
-    }
+    // Même traitement que les médias : l'écran rend la main tout de suite,
+    // l'envoi se poursuit derrière. Plus rien ne tourne sur le bouton.
+    PublicationStatuts.instance.publierTexte(
+      text,
+      _palette[_colorIndex],
+      statuts: context.read<StatusRepository>(),
+      surEchec: () => showAppSnackBar("Statut non publié. Réessaie."),
+    );
+    Navigator.of(context).pop(true);
   }
 
   /// Sélectionne des médias, les téléverse, puis publie un statut par média.
@@ -292,12 +287,12 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
           IconButton(
             tooltip: "Emoji",
             icon: const Icon(Icons.emoji_emotions_outlined),
-            onPressed: _publishing ? null : _insererEmoji,
+            onPressed: _insererEmoji,
           ),
           IconButton(
             tooltip: "Publier une photo ou vidéo",
             icon: const Icon(Icons.photo_camera_outlined),
-            onPressed: _publishing ? null : _pickAndPublishMedia,
+            onPressed: _pickAndPublishMedia,
           ),
           IconButton(
             tooltip: "Changer la couleur",
@@ -326,7 +321,22 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
                     fontWeight: FontWeight.w600,
                   ),
                   decoration: InputDecoration(
+                    /*
+                     * 🔴 LES QUATRE ÉTATS, PAS SEULEMENT `border`.
+                     *
+                     * Le thème global pose un `OutlineInputBorder` sur
+                     * `enabledBorder` ET `focusedBorder` : `border` seul ne les
+                     * remplace pas, et le cadre terre cuite réapparaissait
+                     * autour du texte dès que le champ prenait le focus
+                     * (signalé sur device le 04/09/2026). Un statut se compose
+                     * en plein écran — aucun cadre n'a de sens ici.
+                     */
                     border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    disabledBorder: InputBorder.none,
+                    errorBorder: InputBorder.none,
+                    focusedErrorBorder: InputBorder.none,
                     // Contour-matériel (résout le fond blanc hérité du thème global).
                     filled: true,
                     fillColor: Colors.transparent,
@@ -369,12 +379,12 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
                     ),
                   ),
                   const SizedBox(width: 12),
+                  // Plus aucun indicateur ici : la publication ne bloque plus
+                  // l ecran, elle se poursuit en arriere-plan.
                   FloatingActionButton(
                     backgroundColor: Colors.white,
-                    onPressed: _publishing ? null : _publish,
-                    child: _publishing
-                        ? const CircularProgressIndicator(color: AlanyaColors.terracotta)
-                        : Icon(Icons.send, color: bg),
+                    onPressed: _publish,
+                    child: Icon(Icons.send, color: bg),
                   ),
                 ],
               ),

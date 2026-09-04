@@ -566,7 +566,18 @@ class _EditeurMediaStatutScreenState extends State<EditeurMediaStatutScreen> {
                 hintStyle: TextStyle(color: Colors.white54),
                 filled: true,
                 fillColor: Colors.white10,
+                // Les quatre états, pour la même raison que l'éditeur de texte :
+                // `border` seul ne remplace pas ceux du thème global, et le
+                // cadre terre cuite revenait au focus.
                 border: OutlineInputBorder(
+                  borderRadius: BorderRadius.all(Radius.circular(24)),
+                  borderSide: BorderSide.none,
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.all(Radius.circular(24)),
+                  borderSide: BorderSide.none,
+                ),
+                focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.all(Radius.circular(24)),
                   borderSide: BorderSide.none,
                 ),

@@ -687,7 +687,18 @@ class _VueGroupeState extends State<_VueGroupe>
                     hintStyle: TextStyle(color: Colors.white54),
                     filled: true,
                     fillColor: Colors.white10,
+                    // Les quatre états : `border` seul ne remplace pas ceux du
+                    // thème global, et un cadre terre cuite apparaissait au
+                    // focus par-dessus le statut.
                     border: OutlineInputBorder(
+                      borderRadius: BorderRadius.all(Radius.circular(24)),
+                      borderSide: BorderSide.none,
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.all(Radius.circular(24)),
+                      borderSide: BorderSide.none,
+                    ),
+                    focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.all(Radius.circular(24)),
                       borderSide: BorderSide.none,
                     ),

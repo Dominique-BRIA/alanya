@@ -49,6 +49,35 @@ class PublicationStatuts {
   /// Appelé après chaque publication réussie, pour rafraîchir la liste.
   void Function()? surPublication;
 
+  /// Publie un statut TEXTE, sans faire attendre l'écran.
+  ///
+  /// 🔴 IL PASSE PAR LA MÊME FILE QUE LES MÉDIAS (demande du user, 04/09/2026 :
+  /// « j'espère que le chargement au niveau du bouton d'envoi a été réglé même
+  /// pour les statuts texte »). Une seule requête suffit pourtant à le
+  /// publier — mais sur un réseau mobile lent, cette requête bloquait quand
+  /// même le bouton d'envoi, et un texte perdu parce qu'on a quitté l'écran
+  /// est aussi désagréable qu'une vidéo perdue.
+  ///
+  /// ⚠️ IL N'OUVRE PAS DE TRANSFERT. Un texte part en une fraction de seconde :
+  /// afficher une notification de progression pour ça ferait clignoter la
+  /// barre système sans rien apprendre à personne. En cas d'échec, en revanche,
+  /// il faut le dire — d'où [surEchec].
+  void publierTexte(
+    String texte,
+    String couleur, {
+    required StatusRepository statuts,
+    void Function()? surEchec,
+  }) {
+    _enfiler(() async {
+      try {
+        await statuts.createText(texte, couleur);
+        surPublication?.call();
+      } catch (_) {
+        surEchec?.call();
+      }
+    });
+  }
+
   /// Publie [medias], un statut par média, dans l'ordre.
   void publierMedias(
     List<MediaEdite> medias, {

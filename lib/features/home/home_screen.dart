@@ -73,6 +73,37 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _tab = 0;
+
+  /// Vitesse à partir de laquelle un balayage change d'onglet, en pixels par
+  /// seconde. En dessous, c'est une hésitation : on ne bouge pas.
+  static const double _vitesseBalayage = 220;
+
+  /// Va à l'onglet [i]. Passe par ici et non par `setState` direct : la
+  /// pastille des appels manqués doit tomber quel que soit le geste — appui
+  /// sur la barre du bas comme balayage.
+  void _allerOnglet(int i) {
+    if (i == _tab) return;
+    setState(() => _tab = i);
+    // Ouvrir l'onglet Appels vaut consultation : la pastille tombe.
+    if (i == 2) MissedCalls.instance.marquerVus();
+  }
+
+  /// Un balayage horizontal fait glisser d'un onglet, façon WhatsApp.
+  ///
+  /// ⚠️ LE SENS EST CELUI DU CONTENU, PAS DU DOIGT : glisser vers la GAUCHE
+  /// tire l'onglet SUIVANT vers soi — de Chats vers Status. C'est l'inverse du
+  /// signe de la vélocité, d'où la comparaison qui suit.
+  ///
+  /// Les extrémités ne bouclent pas : depuis le premier onglet, un balayage
+  /// vers la droite ne fait rien. Boucler ferait atterrir sur l'onglet le plus
+  /// éloigné en croyant reculer d'un cran.
+  void _balayerOnglet(DragEndDetails d, int nombreOnglets) {
+    final v = d.primaryVelocity ?? 0;
+    if (v.abs() < _vitesseBalayage) return;
+    final cible = v < 0 ? _tab + 1 : _tab - 1;
+    if (cible < 0 || cible >= nombreOnglets) return;
+    _allerOnglet(cible);
+  }
   int _appelsManques = 0;
   // Décide seulement l'AFFICHAGE du menu « Clients abandonnés » — un
   // non-agent ne doit rien voir (demande user 15/08/2026), pas même un
@@ -320,7 +351,32 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      body: IndexedStack(index: _tab, children: tabs),
+      /*
+       * BALAYAGE HORIZONTAL ENTRE ONGLETS (demande du user, 04/09/2026).
+       *
+       * 🔴 UN `GestureDetector` PAR-DESSUS L'`IndexedStack`, ET NON UN
+       * `PageView`. Le `PageView` aurait été la voie évidente, et c'est un
+       * piège ici pour deux raisons :
+       *   - il CONSTRUIT LES PAGES VOISINES d'avance — le même défaut que la
+       *     visionneuse de statuts, où les statuts des personnes suivantes
+       *     défilaient en arrière-plan. Ici, cela réveillerait l'annuaire et
+       *     les réunions à chaque passage sur Appels ;
+       *   - il DÉTRUIT les pages éloignées, alors que l'`IndexedStack` garde
+       *     l'état de chaque onglet — position de défilement, recherche en
+       *     cours, filtre choisi. On les perdrait toutes.
+       *
+       * ⚠️ Les listes horizontales des onglets (la rangée de filtres, le
+       * bandeau des collègues) GAGNENT l'arène quand le doigt part sur elles :
+       * un `GestureDetector` de haut niveau ne l'emporte que sur le vide. C'est
+       * exactement le partage voulu.
+       */
+      body: GestureDetector(
+        // `onHorizontalDragEnd` seul : sans `onHorizontalDragStart`, le
+        // détecteur ne réclame pas le geste tant qu'il n'est pas horizontal,
+        // et le défilement vertical des listes n'est jamais gêné.
+        onHorizontalDragEnd: (d) => _balayerOnglet(d, tabs.length),
+        child: IndexedStack(index: _tab, children: tabs),
+      ),
       /*
        * DEUX BOUTONS EMPILÉS, l'IA au-dessus de l'écriture.
        *
@@ -372,11 +428,7 @@ class _HomeScreenState extends State<HomeScreen> {
           : null,
       bottomNavigationBar: AlanyaNavBar(
         currentIndex: _tab,
-        onTap: (i) {
-          setState(() => _tab = i);
-          // Ouvrir l'onglet Appels vaut consultation : la pastille tombe.
-          if (i == 2) MissedCalls.instance.marquerVus();
-        },
+        onTap: _allerOnglet,
         items: [
           const AlanyaNavItem(
             icon: Icons.chat_bubble_outline,
