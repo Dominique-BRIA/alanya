@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../../l10n/app_localizations.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -320,33 +321,33 @@ class _HomeScreenState extends State<HomeScreen> {
               }
             },
             itemBuilder: (_) => [
-              const PopupMenuItem(
+              PopupMenuItem(
                   value: "devices",
                   child: ListTile(
-                    leading: Icon(Icons.devices_outlined),
-                    title: Text("Appareils connectés"),
+                    leading: const Icon(Icons.devices_outlined),
+                    title: Text(tr(context, 'home_devices')),
                     contentPadding: EdgeInsets.zero,
                   )),
               // Un non-agent ne doit RIEN voir (demande user 15/08/2026) —
               // pas un message « réservé ». _isAgent n'est qu'un reflet
               // d'affichage ; la vraie garde reste le 403 serveur.
               if (_isAgent)
-                const PopupMenuItem(
+                PopupMenuItem(
                     value: "abandoned",
                     child: ListTile(
-                      leading: Icon(Icons.person_search_outlined),
-                      title: Text("Clients abandonnés"),
+                      leading: const Icon(Icons.person_search_outlined),
+                      title: Text(tr(context, 'home_abandoned_clients')),
                       contentPadding: EdgeInsets.zero,
                     )),
-              const PopupMenuItem(
+              PopupMenuItem(
                   value: "settings",
                   child: ListTile(
-                    leading: Icon(Icons.settings_outlined),
-                    title: Text("Paramètres"),
+                    leading: const Icon(Icons.settings_outlined),
+                    title: Text(tr(context, 'settings')),
                     contentPadding: EdgeInsets.zero,
                   )),
-              const PopupMenuItem(
-                  value: "logout", child: Text("Se déconnecter")),
+              PopupMenuItem(
+                  value: "logout", child: Text(tr(context, 'logout'))),
             ],
           ),
         ],
@@ -402,7 +403,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   heroTag: "fab-ia",
                   // Même nom que le titre de l'écran qu'il ouvre : un bouton
                   // qui s'annonce autrement que l'endroit où il mène.
-                  tooltip: "Assistant Alanya",
+                  tooltip: tr(context, 'home_assistant'),
                   backgroundColor:
                       Theme.of(context).colorScheme.surfaceContainerHighest,
                   foregroundColor: accentOf(context),
@@ -430,26 +431,26 @@ class _HomeScreenState extends State<HomeScreen> {
         currentIndex: _tab,
         onTap: _allerOnglet,
         items: [
-          const AlanyaNavItem(
+          AlanyaNavItem(
             icon: Icons.chat_bubble_outline,
             activeIcon: Icons.chat_bubble,
-            label: 'Chats',
+            label: tr(context, 'chats'),
           ),
-          const AlanyaNavItem(
+          AlanyaNavItem(
             icon: Icons.radio_button_unchecked,
             activeIcon: Icons.adjust,
-            label: 'Status',
+            label: tr(context, 'status'),
           ),
           AlanyaNavItem(
             icon: Icons.call_outlined,
             activeIcon: Icons.call,
-            label: 'Appels',
+            label: tr(context, 'calls'),
             badge: _appelsManques,
           ),
-          const AlanyaNavItem(
+          AlanyaNavItem(
             icon: Icons.videocam_outlined,
             activeIcon: Icons.videocam,
-            label: 'Réunions',
+            label: tr(context, 'meetings'),
           ),
           // L Annuaire prend la place qu occupait l IA, et disparaît avec elle
           // pour un non-agent : voir la note sur `tabs`, les deux listes doivent
@@ -459,18 +460,18 @@ class _HomeScreenState extends State<HomeScreen> {
           // volets. Le libellé est aussi le plus court des deux, ce qui compte
           // à 60 dp de large.
           if (estAgent)
-            const AlanyaNavItem(
+            AlanyaNavItem(
               icon: Icons.menu_book_outlined,
               activeIcon: Icons.menu_book,
-              label: 'Annuaire',
+              label: tr(context, 'directory'),
             ),
           // Entreprises prend la MÊME place pour un particulier — voir la note
           // sur `tabs` : les deux listes doivent rester de même longueur.
           if (estParticulier)
-            const AlanyaNavItem(
+            AlanyaNavItem(
               icon: Icons.domain_outlined,
               activeIcon: Icons.domain,
-              label: 'Entreprises',
+              label: tr(context, 'directory_companies'),
             ),
         ],
       ),
@@ -734,7 +735,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
         body = "Fichier";
         break;
       case "VIDEO":
-        body = "Vidéo";
+        body = tr(context, 'video');
         break;
       default:
         // Si c'est un message formaté, on n'affiche pas les * _ ~ dans la notif
@@ -885,7 +886,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
     if (isSelecting) {
       return Scaffold(
         appBar: selectAppBar(
-          title: "Conversations",
+          title: tr(context, 'home_conversations'),
           onDelete: _deleteSelected,
           onCancel: clearSelection,
           onSelectAll: () =>
@@ -932,7 +933,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
                 onChanged: (v) =>
                     setState(() => _searchQuery = v.trim().toLowerCase()),
                 decoration: InputDecoration(
-                  hintText: "Rechercher une discussion…",
+                  hintText: tr(context, 'home_search_hint'),
                   prefixIcon:
                       Icon(Icons.search, color: searchIconColor, size: 20),
                   suffixIcon: _searchQuery.isNotEmpty
@@ -1117,7 +1118,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(
                 builder: (_) => AvatarViewerScreen(
-                  name: user.nom ?? user.pseudo ?? "Moi",
+                  name: user.nom ?? user.pseudo ?? tr(context, 'home_me'),
                   avatarUrl: user.avatarUrl,
                 ),
               ),
@@ -1131,9 +1132,11 @@ class _ConversationsTabState extends State<_ConversationsTab>
                 // La carte identifie l'utilisateur par son nom. `nom` est
                 // nullable : repli sur le pseudo pour les comptes qui
                 // n'en ont pas encore, plutôt qu'un « Moi » anonyme.
-                Text(user.nom ?? user.pseudo ?? "Moi",
+                Text(user.nom ?? user.pseudo ?? tr(context, 'home_me'),
                     style: const TextStyle(fontWeight: FontWeight.bold)),
-                Text("Alanya ID : ${formatAlanyaId(user.publicNumber)}",
+                Text(
+                    tr(context, 'home_alanya_id',
+                        {'id': formatAlanyaId(user.publicNumber)}),
                     style: TextStyle(
                         color: alanyaIdOf(context, Colors.black54),
                         fontSize: 13)),
@@ -1210,9 +1213,9 @@ class _ConversationsTabState extends State<_ConversationsTab>
       );
     }
     if (_error) {
-      return ListView(children: const [
-        SizedBox(height: 80),
-        Center(child: Text("Erreur de chargement. Tire pour réessayer.")),
+      return ListView(children: [
+        const SizedBox(height: 80),
+        Center(child: Text(tr(context, 'home_load_error'))),
       ]);
     }
     final allConvs = _convs ?? [];
@@ -1284,12 +1287,12 @@ class _ConversationsTabState extends State<_ConversationsTab>
 
     return ListView(
       children: [
-        // Bouton "Conversations archivées" style WhatsApp
+        // Bouton tr(context, 'home_archived') style WhatsApp
         if (archivedCount > 0 && _searchQuery.isEmpty)
           ListTile(
             leading: Icon(Icons.archive_outlined, color: muted2, size: 24),
             title: Text(
-              "Conversations archivées",
+              tr(context, 'home_archived'),
               style: TextStyle(
                 fontWeight: FontWeight.w500,
                 color: muted2,
@@ -1304,7 +1307,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
               ),
               child: Text(
                 "$archivedCount",
-                style: TextStyle(
+                style: const TextStyle(
                   color: AlanyaColors.terracotta,
                   fontWeight: FontWeight.w600,
                   fontSize: 12,
@@ -1714,8 +1717,8 @@ class _ConversationsTabState extends State<_ConversationsTab>
                   ));
                 } catch (_) {
                   if (!mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                    content: Text("Impossible de contacter le serveur."),
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(tr(context, 'home_server_unreachable')),
                   ));
                 }
               },
@@ -1725,7 +1728,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
                 c.isArchived ? Icons.unarchive : Icons.archive_outlined,
                 color: AlanyaColors.chocolate,
               ),
-              title: Text(c.isArchived ? "Désarchiver" : "Archiver"),
+              title: Text(c.isArchived ? tr(context, 'home_unarchive') : "Archiver"),
               onTap: () async {
                 Navigator.pop(ctx);
                 await context
@@ -1737,22 +1740,22 @@ class _ConversationsTabState extends State<_ConversationsTab>
             ListTile(
               leading: const Icon(Icons.delete_outline, color: Colors.red),
               title:
-                  const Text("Supprimer", style: TextStyle(color: Colors.red)),
+                  Text(tr(context, 'delete'), style: const TextStyle(color: Colors.red)),
               onTap: () async {
                 Navigator.pop(ctx);
                 final ok = await showDialog<bool>(
                   context: context,
                   builder: (_) => AlertDialog(
-                    title: const Text("Supprimer cette conversation ?"),
-                    content: const Text("Cette action est irréversible."),
+                    title: Text(tr(context, 'home_delete_conversation_q')),
+                    content: Text(tr(context, 'action_irreversible')),
                     actions: [
                       TextButton(
                           onPressed: () => Navigator.pop(context, false),
-                          child: const Text("Annuler")),
+                          child: Text(tr(context, 'cancel'))),
                       TextButton(
                           onPressed: () => Navigator.pop(context, true),
-                          child: const Text("Supprimer",
-                              style: TextStyle(color: Colors.red))),
+                          child: Text(tr(context, 'delete'),
+                              style: const TextStyle(color: Colors.red))),
                     ],
                   ),
                 );
@@ -1804,9 +1807,9 @@ class _ConversationsTabState extends State<_ConversationsTab>
               padding: const EdgeInsets.all(16),
               child: Row(
                 children: [
-                  const Text("Conversations archivées",
+                  Text(tr(context, 'home_archived'),
                       style:
-                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   const Spacer(),
                   Text("${_archivedConvs!.length}",
                       style: TextStyle(color: muted2)),
@@ -1838,7 +1841,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
                             : last.type == "IMAGE"
                                 ? "Photo"
                                 : last.type == "VIDEO"
-                                    ? "Vidéo"
+                                    ? tr(context, 'video')
                                     : "Fichier",
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -1874,7 +1877,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
                         Navigator.pop(ctx);
                         _load();
                       },
-                      child: const Text("Désarchiver"),
+                      child: Text(tr(context, 'home_unarchive')),
                     ),
                   );
                 },
@@ -1891,16 +1894,16 @@ class _ConversationsTabState extends State<_ConversationsTab>
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text("Supprimer $count conversation(s) ?"),
-        content: const Text("Cette action est irréversible."),
+        title: Text(tr(context, 'home_delete_n_q', {'n': '$count'})),
+        content: Text(tr(context, 'action_irreversible')),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text("Annuler")),
+              child: Text(tr(context, 'cancel'))),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
               child:
-                  const Text("Supprimer", style: TextStyle(color: Colors.red))),
+                  Text(tr(context, 'delete'), style: const TextStyle(color: Colors.red))),
         ],
       ),
     );
@@ -1997,32 +2000,32 @@ class _StatusTabState extends State<_StatusTab> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text("Nouveau statut",
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(tr(context, 'status_new'),
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             ),
             const Divider(height: 1),
             ListTile(
               leading: const Icon(Icons.text_fields),
-              title: const Text("Texte"),
-              subtitle: const Text("Sur un fond coloré"),
+              title: Text(tr(context, 'text')),
+              subtitle: Text(tr(context, 'status_colored_bg')),
               onTap: () => Navigator.pop(ctx, SourceStatut.texte),
             ),
             ListTile(
               leading: const Icon(Icons.photo_library_outlined),
-              title: const Text("Galerie"),
-              subtitle: const Text("Photo ou vidéo de l'appareil"),
+              title: Text(tr(context, 'gallery')),
+              subtitle: Text(tr(context, 'status_from_device')),
               onTap: () => Navigator.pop(ctx, SourceStatut.galerie),
             ),
             ListTile(
               leading: const Icon(Icons.photo_camera_outlined),
-              title: const Text("Appareil photo"),
+              title: Text(tr(context, 'camera')),
               onTap: () => Navigator.pop(ctx, SourceStatut.cameraPhoto),
             ),
             ListTile(
               leading: const Icon(Icons.videocam_outlined),
-              title: const Text("Vidéo"),
+              title: Text(tr(context, 'video')),
               subtitle: Text(
                   "${dureeVideoStatutMax.inSeconds} secondes au maximum"),
               onTap: () => Navigator.pop(ctx, SourceStatut.cameraVideo),
@@ -2089,13 +2092,13 @@ class _StatusTabState extends State<_StatusTab> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Status"),
+        title: Text(tr(context, 'status')),
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: _menuNouveauStatut,
         backgroundColor: themed(context,
             light: AlanyaColors.forest, dark: AlanyaColors.terracottaNuit),
-        tooltip: "Nouveau statut",
+        tooltip: tr(context, 'status_new'),
         child: const Icon(Icons.add, color: Colors.white),
       ),
       body: MotifBackground(
@@ -2107,11 +2110,11 @@ class _StatusTabState extends State<_StatusTab> {
             children: [
               _myStatusTile(me),
               if (_error)
-                const Padding(
-                  padding: EdgeInsets.all(24),
+                Padding(
+                  padding: const EdgeInsets.all(24),
                   child: Center(
                       child:
-                          Text("Erreur de chargement. Tire pour réessayer.")),
+                          Text(tr(context, 'home_load_error'))),
                 ),
               if (nonVus.isNotEmpty) ...[
                 _enteteSection("Récents", muted),
@@ -2212,8 +2215,8 @@ class _StatusTabState extends State<_StatusTab> {
                 ),
         ),
       ),
-      title: const Text("Mon statut",
-          style: TextStyle(fontWeight: FontWeight.w600)),
+      title: Text(tr(context, 'status_mine'),
+          style: const TextStyle(fontWeight: FontWeight.w600)),
       subtitle: Text(mien != null
           ? horodatageStatut(_dernierStatut(mien))
           : "Appuie pour ajouter"),
@@ -2288,7 +2291,7 @@ class AiScreen extends StatelessWidget {
       // « Assistant Alanya » et non « IA » : c'est le nom du produit, celui que
       // porte déjà l'en-tête d'une conversation partagée. Il ne se traduit pas,
       // d'où la chaîne en clair plutôt qu'un libellé dans les neuf langues.
-      appBar: backAppBar(context, "Assistant Alanya"),
+      appBar: backAppBar(context, tr(context, 'home_assistant')),
       body: const _AiTab(),
     );
   }
@@ -2416,7 +2419,7 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("L'assistant n'a pas répondu")));
+            SnackBar(content: Text(tr(context, 'ai_no_answer'))));
       }
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -2473,16 +2476,16 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text("Supprimer cette conversation ?"),
+        title: Text(tr(context, 'home_delete_conversation_q')),
         content:
-            const Text("Les échanges de cette conversation seront supprimés."),
+            Text(tr(context, 'ai_delete_conversation_body')),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text("Annuler")),
+              child: Text(tr(context, 'cancel'))),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text("Supprimer")),
+              child: Text(tr(context, 'delete'))),
         ],
       ),
     );
@@ -2493,7 +2496,7 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Suppression impossible")),
+          SnackBar(content: Text(tr(context, 'ai_delete_failed'))),
         );
       }
     }
@@ -2511,10 +2514,10 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
         maxChildSize: 0.9,
         builder: (_, scroll) => Column(
           children: [
-            const Padding(
-              padding: EdgeInsets.all(14),
-              child: Text("Mes conversations",
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            Padding(
+              padding: const EdgeInsets.all(14),
+              child: Text(tr(context, 'ai_my_conversations'),
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             ),
             const Divider(height: 1),
             Expanded(
@@ -2526,10 +2529,10 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
                   }
                   final threads = snap.data ?? const [];
                   if (threads.isEmpty) {
-                    return const Center(
+                    return Center(
                         child: Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Text("Aucune conversation. Pose une question !"),
+                      padding: const EdgeInsets.all(24),
+                      child: Text(tr(context, 'ai_empty')),
                     ));
                   }
                   return ListView.separated(
@@ -2578,14 +2581,14 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
   /// Partage la conversation (copie le texte dans le presse-papier).
   Future<void> _shareConversation() async {
     final text = _messages.map((m) {
-      final who = m.isUser ? "Moi" : "IA";
+      final who = m.isUser ? tr(context, 'home_me') : "IA";
       return "$who: ${m.content}";
     }).join("\n\n");
     await Clipboard.setData(ClipboardData(text: "Assistant Alanya\n\n$text"));
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text("Conversation copiée dans le presse-papier")),
+        SnackBar(
+            content: Text(tr(context, 'ai_conversation_copied'))),
       );
     }
   }
@@ -2613,7 +2616,7 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
                     color: isDark ? AlanyaColors.ligne : AlanyaColors.sand),
           ),
           child: typing
-              ? Text("L'assistant écrit…",
+              ? Text(tr(context, 'ai_typing'),
                   style: TextStyle(
                       color: isDark ? AlanyaColors.craie2 : Colors.black54,
                       fontStyle: FontStyle.italic))
@@ -2644,7 +2647,7 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
                       const Icon(Icons.auto_awesome,
                           size: 56, color: AlanyaColors.gold),
                       const SizedBox(height: 12),
-                      Text("Pose-moi une question pour commencer.",
+                      Text(tr(context, 'ai_start_hint'),
                           textAlign: TextAlign.center,
                           style: TextStyle(
                               color: Theme.of(context).brightness ==
@@ -2686,15 +2689,15 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
                 backgroundColor: AlanyaColors.terracotta,
                 child: Icon(Icons.add, color: Colors.white),
               ),
-              title: const Text("Nouvelle conversation",
-                  style: TextStyle(fontWeight: FontWeight.bold)),
+              title: Text(tr(context, 'ai_new_conversation'),
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
               onTap: _newConversation,
             ),
             const Divider(height: 1),
             Expanded(
               child: threads.isEmpty
-                  ? const Center(
-                      child: Text("Aucune conversation. Pose une question !"))
+                  ? Center(
+                      child: Text(tr(context, 'ai_empty')))
                   : ListView.separated(
                       itemCount: threads.length,
                       separatorBuilder: (_, __) => const Divider(height: 1),
@@ -2720,17 +2723,17 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
                                 await Clipboard.setData(
                                     ClipboardData(text: text));
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text("Lien copié")),
+                                  SnackBar(content: Text(tr(context, 'ai_link_copied'))),
                                 );
                               }
                             },
                             itemBuilder: (_) => [
-                              const PopupMenuItem(
-                                  value: 'share', child: Text("Partager")),
-                              const PopupMenuItem(
+                              PopupMenuItem(
+                                  value: 'share', child: Text(tr(context, 'share'))),
+                              PopupMenuItem(
                                   value: 'delete',
-                                  child: Text("Supprimer",
-                                      style: TextStyle(color: Colors.red))),
+                                  child: Text(tr(context, 'delete'),
+                                      style: const TextStyle(color: Colors.red))),
                             ],
                           ),
                           onTap: () => _openThread(t.id),
@@ -2756,12 +2759,12 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
             ListTile(
               leading: Icon(Icons.copy,
                   color: isDark ? AlanyaColors.craie2 : AlanyaColors.chocolate),
-              title: const Text("Copier"),
+              title: Text(tr(context, 'copy')),
               onTap: () {
                 Navigator.pop(ctx);
                 Clipboard.setData(ClipboardData(text: msg.content));
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Copié dans le presse-papier")),
+                  SnackBar(content: Text(tr(context, 'ai_copied'))),
                 );
               },
             ),
@@ -2769,19 +2772,19 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
               leading: Icon(Icons.share,
                   color:
                       isDark ? AlanyaColors.indigoLight : AlanyaColors.forest),
-              title: const Text("Partager"),
+              title: Text(tr(context, 'share')),
               onTap: () {
                 Navigator.pop(ctx);
                 Clipboard.setData(ClipboardData(text: msg.content));
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Message partagé (copié)")),
+                  SnackBar(content: Text(tr(context, 'ai_message_shared'))),
                 );
               },
             ),
             ListTile(
               leading: Icon(Icons.delete_outline,
                   color: isDark ? AlanyaColors.erreurNuit : Colors.red),
-              title: const Text("Supprimer ce message"),
+              title: Text(tr(context, 'ai_delete_message')),
               onTap: () {
                 Navigator.pop(ctx);
                 _deleteAiMessage(msg);
@@ -2802,9 +2805,9 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
     // toute la conversation. On supprime localement pour l'UX.
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: const Text("Message supprimé"),
+        content: Text(tr(context, 'ai_message_deleted')),
         action: SnackBarAction(
-          label: "Annuler",
+          label: tr(context, 'cancel'),
           textColor: Colors.white,
           onPressed: () {
             setState(() {
@@ -2833,10 +2836,10 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
                 maxLines: 4,
                 textInputAction: TextInputAction.send,
                 onSubmitted: (_) => _send(),
-                decoration: const InputDecoration(
-                  hintText: "Demande quelque chose à l'IA…",
+                decoration: InputDecoration(
+                  hintText: tr(context, 'ai_input_hint'),
                   contentPadding:
-                      EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 ),
               ),
             ),
@@ -2874,7 +2877,7 @@ class _Placeholder extends StatelessWidget {
               style:
                   const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
           const SizedBox(height: 4),
-          Text("$soon — bientôt",
+          Text(tr(context, 'home_soon', {'feature': soon}),
               style: TextStyle(
                   color: themed(context,
                       light: Colors.black54, dark: AlanyaColors.craie2))),
