@@ -39,7 +39,16 @@ void main() {
         continue;
       }
       if (courante == null) continue;
-      if (ligne.trimRight() == "},") {
+      // 🔴 LE DERNIER BLOC SE FERME PAR « } », SANS VIRGULE — c'est le dernier
+      // de la table, il n'a rien après lui. Ne reconnaître que « }, » laissait
+      // donc le norvégien OUVERT jusqu'à la fin du fichier, et tout ce qui
+      // ressemble à `'cle': …` plus bas lui était attribué : la ligne
+      // `'n': '$n',` de l'aide `trN` s'est ainsi retrouvée comptée comme une
+      // clé norvégienne absente du français.
+      //
+      // « }; » ferme la table elle-même : au-delà, plus aucune clé à lire.
+      final fin = ligne.trimRight();
+      if (fin == "}," || fin == "}" || fin == "};") {
         courante = null;
         continue;
       }
@@ -70,5 +79,34 @@ void main() {
     expect(manques, isEmpty, reason: "clés absentes de certaines langues");
     expect(surplus, isEmpty,
         reason: "clés présentes ailleurs mais pas en français");
+
+    /*
+     * 🔴 UN COMPTEUR SANS SA SECONDE FORME ÉCHOUE EN SILENCE.
+     *
+     * `trN` compose la clé à l'exécution — `<base>_one` ou `<base>_many` selon
+     * le nombre. Le compilateur n'en sait rien, et `get` retombe sur le
+     * français quand la clé n'existe pas : un `_many` oublié donne un libellé
+     * français au milieu d'une interface chinoise, et seulement à partir de
+     * DEUX éléments. Personne ne le voit en relisant le code.
+     *
+     * ⚠️ `_none` reste FACULTATIF, et c'est voulu : les écrans qui distinguent
+     * le zéro le traitent avant d'appeler `trN` (voir `colleagues_count_none`).
+     * Ne l'exiger que s'il est déjà là aurait interdit les compteurs qui n'en
+     * ont pas besoin.
+     */
+    final orphelines = <String>[];
+    for (final cle in reference) {
+      if (cle.endsWith("_one") &&
+          !reference.contains("${cle.substring(0, cle.length - 4)}_many")) {
+        orphelines.add("$cle (pas de _many)");
+      }
+      if (cle.endsWith("_many") &&
+          !reference.contains("${cle.substring(0, cle.length - 5)}_one")) {
+        orphelines.add("$cle (pas de _one)");
+      }
+    }
+    orphelines.sort();
+    expect(orphelines, isEmpty,
+        reason: "compteurs `trN` auxquels il manque une forme");
   });
 }

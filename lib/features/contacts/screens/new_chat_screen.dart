@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/alanya_id_formatter.dart';
@@ -47,7 +48,7 @@ class _NewChatScreenState extends State<NewChatScreen> {
     // Validation locale du numéro.
     if (!_isNumberValid) {
       setState(() => _numberError =
-          "L'Alanya ID doit comporter $alanyaIdMinLength à $alanyaIdMaxLength chiffres");
+          tr(context, 'add_id_len', {'min': '$alanyaIdMinLength', 'max': '$alanyaIdMaxLength'}));
       return;
     }
     setState(() {
@@ -66,7 +67,7 @@ class _NewChatScreenState extends State<NewChatScreen> {
       // 2) Ajoute aux contacts si ce n'est pas déjà fait (avec alias si fourni).
       if (!user.alreadyContact) {
         await contacts.add(number, alias: alias.isEmpty ? null : alias);
-        if (mounted) showAppSnackBar("Contact enregistré ✓");
+        if (mounted) showAppSnackBar(tr(context, 'contact_saved'));
       }
 
       // 3) Crée (ou récupère) la conversation et l'ouvre.
@@ -88,7 +89,7 @@ class _NewChatScreenState extends State<NewChatScreen> {
       if (!mounted) return;
       setState(() => _saving = false);
       if (e.statusCode == 404) {
-        setState(() => _numberError = "Aucun utilisateur avec cet Alanya ID");
+        setState(() => _numberError = tr(context, 'add_not_found'));
       } else if (e.code == 'ALREADY_CONTACT') {
         // Déjà contact : on ouvre quand même la discussion.
         try {
@@ -101,7 +102,7 @@ class _NewChatScreenState extends State<NewChatScreen> {
             ),
           );
         } catch (_) {
-          showAppSnackBar("Impossible d'ouvrir la discussion");
+          showAppSnackBar(tr(context, 'chat_open_failed'));
         }
       } else {
         showAppSnackBar(e.message);
@@ -109,14 +110,14 @@ class _NewChatScreenState extends State<NewChatScreen> {
     } catch (_) {
       if (!mounted) return;
       setState(() => _saving = false);
-      showAppSnackBar("Enregistrement impossible. Vérifie ta connexion.");
+      showAppSnackBar(tr(context, 'save_failed'));
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: backAppBar(context, "Ajouter un contact"),
+      appBar: backAppBar(context, tr(context, 'add_contact')),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
@@ -138,10 +139,10 @@ class _NewChatScreenState extends State<NewChatScreen> {
               TextField(
                 controller: _nameCtrl,
                 textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(
-                  labelText: "Nom du contact",
-                  hintText: "Ex. Marie, Papa, Collègue…",
-                  prefixIcon: Icon(Icons.person_outline),
+                decoration: InputDecoration(
+                  labelText: tr(context, 'contact_name'),
+                  hintText: tr(context, 'add_local_name_hint'),
+                  prefixIcon: const Icon(Icons.person_outline),
                 ),
               ),
               const SizedBox(height: 16),
@@ -155,7 +156,7 @@ class _NewChatScreenState extends State<NewChatScreen> {
                 // saisie à « 67 64 15 » (8 caractères, 6 chiffres).
                 inputFormatters: const [AlanyaIdInputFormatter()],
                 decoration: InputDecoration(
-                  labelText: "Alanya ID",
+                  labelText: tr(context, 'alanya_id'),
                   hintText: "67 64 15 99",
                   prefixIcon: const Icon(Icons.tag),
                   counterText: "",
@@ -168,8 +169,7 @@ class _NewChatScreenState extends State<NewChatScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                "L'Alanya ID est l'identifiant public d'un compte : "
-                "8 chiffres pour un utilisateur, moins pour un numéro de service.",
+                tr(context, 'add_id_explain_short'),
                 style: TextStyle(
                     fontSize: 12, color: mutedOf(context, Colors.black54)),
               ),
@@ -188,7 +188,7 @@ class _NewChatScreenState extends State<NewChatScreen> {
                               strokeWidth: 2, color: Colors.white),
                         )
                       : const Icon(Icons.save_outlined),
-                  label: Text(_saving ? "Enregistrement…" : "Enregistrer"),
+                  label: Text(_saving ? tr(context, 'saving') : tr(context, 'save')),
                 ),
               ),
             ],

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../l10n/app_localizations.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mlkit_translation/google_mlkit_translation.dart';
 import 'package:provider/provider.dart';
@@ -116,8 +117,12 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_muteKey, value);
     } catch (_) {}
+    // ⚠️ `tr()` LIT LE CONTEXTE, ce qu'un libellé en dur ne faisait pas :
+    // l'écriture des préférences est asynchrone, l'écran a pu être quitté
+    // entre-temps.
+    if (!mounted) return;
     showAppSnackBar(
-        value ? "Notifications en sourdine" : "Notifications réactivées");
+        value ? tr(context, 'ci_muted') : tr(context, 'ci_unmuted'));
   }
 
   Future<void> _loadSharedMedia() async {
@@ -145,7 +150,7 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
     final contactId = widget.contactId;
     if (contactId == null) {
       showAppSnackBar(
-          "Ajoute d'abord ce contact à ton répertoire pour le bloquer");
+          tr(context, 'ci_add_first_to_block'));
       return;
     }
     final newState = !_isBlocked;
@@ -153,11 +158,11 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
       await context.read<ContactsRepository>().setBlocked(contactId, newState);
       if (!mounted) return;
       setState(() => _isBlocked = newState);
-      showAppSnackBar(newState ? "Contact bloqué" : "Contact débloqué");
+      showAppSnackBar(newState ? tr(context, 'ci_blocked') : tr(context, 'ci_unblocked'));
     } on ApiException catch (e) {
       showAppSnackBar(e.message);
     } catch (_) {
-      showAppSnackBar("Action impossible");
+      showAppSnackBar(tr(context, 'action_failed'));
     }
   }
 
@@ -201,7 +206,7 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
     if (Navigator.of(context).canPop()) {
       Navigator.of(context).pop();
     } else {
-      showAppSnackBar("Ouvre la conversation depuis l'accueil");
+      showAppSnackBar(tr(context, 'ci_open_from_home'));
     }
   }
 
@@ -416,14 +421,14 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
   }
 
   String? _presenceLabel() {
-    if (widget.isOnline) return "en ligne";
+    if (widget.isOnline) return tr(context, 'presence_online');
     final ls = widget.lastSeen;
     if (ls == null) return null;
     final diff = DateTime.now().difference(ls);
-    if (diff.inMinutes < 1) return "vu à l'instant";
-    if (diff.inMinutes < 60) return "vu il y a ${diff.inMinutes} min";
-    if (diff.inHours < 24) return "vu il y a ${diff.inHours} h";
-    return "vu il y a ${diff.inDays} j";
+    if (diff.inMinutes < 1) return tr(context, 'presence_just_now');
+    if (diff.inMinutes < 60) return tr(context, 'presence_min', {'n': '${diff.inMinutes}'});
+    if (diff.inHours < 24) return tr(context, 'presence_hour', {'n': '${diff.inHours}'});
+    return tr(context, 'presence_day', {'n': '${diff.inDays}'});
   }
 
   // ---------------------------------------------------------------------------
@@ -435,17 +440,17 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
       children: [
         _RoundAction(
           icon: Icons.call_rounded,
-          label: "Appeler",
+          label: tr(context, 'call_action'),
           onTap: () => _startCall("AUDIO"),
         ),
         _RoundAction(
           icon: Icons.chat_bubble_rounded,
-          label: "Message",
+          label: tr(context, 'message_action'),
           onTap: _openMessage,
         ),
         _RoundAction(
           icon: Icons.videocam_rounded,
-          label: "Vidéo",
+          label: tr(context, 'video'),
           onTap: () => _startCall("VIDEO"),
         ),
       ],
@@ -458,7 +463,7 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
   Widget _infoCard() {
     final bio = widget.statusMsg?.isNotEmpty == true
         ? widget.statusMsg!
-        : "Hey ! J'utilise Alanya.";
+        : tr(context, 'ci_default_invite');
     final username = widget.username;
     return GlassCard(
       radius: 22,
@@ -467,25 +472,25 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
         children: [
           _infoRow(
             icon: Icons.phone_rounded,
-            label: "Téléphone",
+            label: tr(context, 'phone'),
             value: "#${_formatNumber(widget.publicNumber)}",
             onTap: () {
               Clipboard.setData(ClipboardData(text: widget.publicNumber));
-              showAppSnackBar("Numéro copié");
+              showAppSnackBar(tr(context, 'number_copied'));
             },
             trailing: Icons.copy_rounded,
           ),
           _divider(),
           _infoRow(
             icon: Icons.info_outline_rounded,
-            label: "À propos",
+            label: tr(context, 'about'),
             value: bio,
           ),
           if (username != null && username.isNotEmpty) ...[
             _divider(),
             _infoRow(
               icon: Icons.alternate_email_rounded,
-              label: "Nom d'utilisateur",
+              label: tr(context, 'username'),
               value: username,
             ),
           ],
@@ -587,7 +592,7 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  "Médias partagés",
+                  tr(context, 'shared_media'),
                   style: TextStyle(
                     fontWeight: FontWeight.w600,
                     fontSize: 15,
@@ -646,7 +651,7 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
           if (_sharedMedia != null && _sharedMedia!.isEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 10),
-              child: Text("Aucun média partagé",
+              child: Text(tr(context, 'no_shared_media'),
                   style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13)),
             ),
         ],
@@ -680,13 +685,13 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
             const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
         leading: Icon(Icons.translate_rounded, color: accentOf(context)),
         title: Text(
-          "Langue de ${widget.name}",
+          tr(context, 'ci_language_of', {'nom': widget.name}),
           style: TextStyle(
               fontSize: 15, fontWeight: FontWeight.w500, color: cs.onSurface),
         ),
         subtitle: Text(
           _langueFixee == null
-              ? "Auto — détectée à la lecture"
+              ? tr(context, 'lang_auto')
               : nomAutonyme(_langueFixee!),
           style: TextStyle(fontSize: 12.5, color: cs.onSurfaceVariant),
         ),
@@ -712,7 +717,7 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
                 return ListTile(
                   leading: Icon(Icons.auto_awesome_outlined,
                       color: accentOf(context)),
-                  title: const Text("Auto — détectée à la lecture"),
+                  title: Text(tr(context, 'lang_auto')),
                   trailing: _langueFixee == null
                       ? Icon(Icons.check, color: accentOf(context))
                       : null,
@@ -740,8 +745,8 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
     if (!mounted) return;
     setState(() => _langueFixee = langue);
     showAppSnackBar(langue == null
-        ? "Langue détectée automatiquement"
-        : "Messages de ${widget.name} lus comme du ${nomAutonyme(langue)}");
+        ? tr(context, 'lang_auto_detected')
+        : tr(context, 'ci_read_as', {'nom': widget.name, 'langue': nomAutonyme(langue)}));
     if (langue != null) await _installeCoupleSiNecessaire(langue);
   }
 
@@ -786,8 +791,8 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
     }
     if (!mounted) return;
     showAppSnackBar(installe
-        ? "${nomAutonyme(source)} installé — les messages seront traduits"
-        : "Installation impossible");
+        ? tr(context, 'lang_installed', {'langue': nomAutonyme(source)})
+        : tr(context, 'trans_install_failed'));
   }
 
   Widget _settingsCard() {
@@ -807,14 +812,14 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
               color: accentOf(context),
             ),
             title: Text(
-              "Notifications",
+              tr(context, 'set_notifications'),
               style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w500,
                   color: cs.onSurface),
             ),
             subtitle: Text(
-              _muted ? "En sourdine" : "Activées",
+              _muted ? tr(context, 'ci_muted_state') : tr(context, 'ci_active_state'),
               style: TextStyle(fontSize: 12.5, color: cs.onSurfaceVariant),
             ),
             value: !_muted,
@@ -835,8 +840,8 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
               ),
               title: Text(
                 _isBlocked
-                    ? "Débloquer ${widget.name}"
-                    : "Bloquer ${widget.name}",
+                    ? tr(context, 'ci_unblock_name', {'nom': widget.name})
+                    : tr(context, 'ci_block_name', {'nom': widget.name}),
                 style: const TextStyle(
                     color: AlanyaColors.error,
                     fontWeight: FontWeight.w500,

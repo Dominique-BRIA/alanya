@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/api_client.dart';
@@ -75,13 +76,13 @@ class _ContactListsScreenState extends State<ContactListsScreen> {
       if (!mounted) return;
       setState(() {
         _chargement = false;
-        _erreur = "Erreur ${e.statusCode} : ${e.message}";
+        _erreur = tr(context, 'error_with_code', {'code': '${e.statusCode}', 'message': e.message});
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _chargement = false;
-        _erreur = "Impossible de charger les listes.\nVérifie ta connexion.";
+        _erreur = tr(context, 'lists_load_error');
       });
     }
   }
@@ -106,20 +107,19 @@ class _ContactListsScreenState extends State<ContactListsScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text("Supprimer la liste ?"),
+        title: Text(tr(context, 'list_delete_q')),
         // Dit ce que ça NE fait PAS : la crainte naturelle est de perdre les
         // contacts eux-mêmes.
         content: Text(
-          "« ${l.name} » sera supprimée.\n\n"
-          "Vos contacts, eux, ne sont pas touchés : seule la liste disparaît.",
+          tr(context, 'list_delete_body', {'nom': l.name}),
         ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text("Annuler")),
+              child: Text(tr(context, 'cancel'))),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text("Supprimer")),
+              child: Text(tr(context, 'delete'))),
         ],
       ),
     );
@@ -128,18 +128,18 @@ class _ContactListsScreenState extends State<ContactListsScreen> {
       await depot.supprimer(l.id);
       await _charger();
     } catch (_) {
-      showAppSnackBar("Suppression impossible");
+      showAppSnackBar(tr(context, 'delete_failed'));
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: backAppBar(context, "Listes de contacts"),
+      appBar: backAppBar(context, tr(context, 'contact_lists')),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _editer(),
         icon: const Icon(Icons.playlist_add),
-        label: const Text("Nouvelle liste"),
+        label: Text(tr(context, 'list_new')),
       ),
       body: MotifBackground(
         overlayOpacity: 0.92,
@@ -165,7 +165,7 @@ class _ContactListsScreenState extends State<ContactListsScreen> {
               Text(_erreur!, textAlign: TextAlign.center),
               const SizedBox(height: 16),
               OutlinedButton(
-                  onPressed: _charger, child: const Text("Réessayer")),
+                  onPressed: _charger, child: Text(tr(context, 'retry'))),
             ]),
           ),
         ),
@@ -185,14 +185,13 @@ class _ContactListsScreenState extends State<ContactListsScreen> {
               Icon(Icons.playlist_add_check,
                   size: 56, color: faintOf(context, Colors.black26)),
               const SizedBox(height: 16),
-              const Text(
-                "Aucune liste pour le moment",
-                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+              Text(
+                tr(context, 'lists_empty'),
+                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 8),
               Text(
-                "Regroupez vos contacts — famille, équipe, clients — "
-                "pour les retrouver et leur écrire plus vite.",
+                tr(context, 'lists_empty_hint'),
                 textAlign: TextAlign.center,
                 style: TextStyle(color: mutedOf(context, Colors.black54)),
               ),
@@ -229,10 +228,10 @@ class _ContactListsScreenState extends State<ContactListsScreen> {
       title: Text(l.name, style: const TextStyle(fontWeight: FontWeight.w600)),
       subtitle: Text(
         nb == 0
-            ? "Aucun membre"
+            ? tr(context, 'list_no_members')
             : nb == 1
-                ? "1 membre · ${l.members.first.displayName}"
-                : "$nb membres · ${l.members.take(2).map((m) => m.displayName).join(", ")}…",
+                ? trN(context, 'list_members', 1, {'noms': l.members.first.displayName})
+                : trN(context, 'list_members', nb, {'noms': l.members.take(2).map((m) => m.displayName).join(", ")}),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
@@ -242,9 +241,9 @@ class _ContactListsScreenState extends State<ContactListsScreen> {
           if (v == "editer") _editer(existante: l);
           if (v == "supprimer") _supprimer(l);
         },
-        itemBuilder: (_) => const [
-          PopupMenuItem(value: "editer", child: Text("Modifier")),
-          PopupMenuItem(value: "supprimer", child: Text("Supprimer")),
+        itemBuilder: (_) => [
+          PopupMenuItem(value: "editer", child: Text(tr(context, 'edit'))),
+          PopupMenuItem(value: "supprimer", child: Text(tr(context, 'delete'))),
         ],
       ),
     );
@@ -355,8 +354,8 @@ class _EditeurListeState extends State<_EditeurListe> {
     ];
     final choisis = await ContactPickerSheet.show(
       context,
-      title: "Ajouter à la liste",
-      confirmLabel: "Ajouter",
+      title: tr(context, 'list_add_to'),
+      confirmLabel: tr(context, 'add'),
       excludeNumbers: dejaLa,
     );
     if (choisis == null || choisis.isEmpty || !mounted) return;
@@ -398,7 +397,7 @@ class _EditeurListeState extends State<_EditeurListe> {
   Future<void> _valider() async {
     final nom = _nomCtrl.text.trim();
     if (nom.isEmpty) {
-      showAppSnackBar("Donnez un nom à la liste");
+      showAppSnackBar(tr(context, 'list_name_required'));
       return;
     }
     setState(() => _envoi = true);
@@ -424,7 +423,8 @@ class _EditeurListeState extends State<_EditeurListe> {
       if (r.numerosInconnus.isNotEmpty) {
         // Dit lesquels n'ont pas été retenus, plutôt que de laisser compter.
         showAppSnackBar(
-          "Non ajoutés (compte introuvable) : ${r.numerosInconnus.join(", ")}",
+          tr(context, 'list_unknown_numbers',
+              {'numeros': r.numerosInconnus.join(", ")}),
         );
       }
       Navigator.pop(context, true);
@@ -433,7 +433,7 @@ class _EditeurListeState extends State<_EditeurListe> {
       showAppSnackBar(e.message);
     } catch (_) {
       if (mounted) setState(() => _envoi = false);
-      showAppSnackBar("Enregistrement impossible");
+      showAppSnackBar(tr(context, 'save_failed_short'));
     }
   }
 
@@ -466,10 +466,10 @@ class _EditeurListeState extends State<_EditeurListe> {
             child: TextField(
               controller: _nomCtrl,
               textCapitalization: TextCapitalization.words,
-              decoration: const InputDecoration(
-                labelText: "Nom de la liste",
-                hintText: "Famille, Équipe, Clients…",
-                prefixIcon: Icon(Icons.label_outline),
+              decoration: InputDecoration(
+                labelText: tr(context, 'list_name'),
+                hintText: tr(context, 'list_name_hint'),
+                prefixIcon: const Icon(Icons.label_outline),
               ),
             ),
           ),
@@ -481,7 +481,7 @@ class _EditeurListeState extends State<_EditeurListe> {
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 6, 20, 6),
             child: Row(children: [
-              Text("Couleur",
+              Text(tr(context, 'color'),
                   style: TextStyle(
                       fontSize: 13, color: mutedOf(context, Colors.black54))),
               const SizedBox(width: 14),
@@ -539,7 +539,7 @@ class _EditeurListeState extends State<_EditeurListe> {
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 2, 20, 6),
               child: Row(children: [
-                Text("Sonnerie",
+                Text(tr(context, 'ringtone'),
                     style: TextStyle(
                         fontSize: 13, color: mutedOf(context, Colors.black54))),
                 const SizedBox(width: 14),
@@ -554,9 +554,9 @@ class _EditeurListeState extends State<_EditeurListe> {
                           // choix vide, et l'enregistrement la corrigera.
                           : null,
                       items: [
-                        const DropdownMenuItem<String?>(
+                        DropdownMenuItem<String?>(
                           value: null,
-                          child: Text("Par défaut"),
+                          child: Text(tr(context, 'default_value')),
                         ),
                         ..._catalogue.map((s) => DropdownMenuItem<String?>(
                               value: s.url,
@@ -577,7 +577,7 @@ class _EditeurListeState extends State<_EditeurListe> {
               onChanged: (v) => setState(() => _recherche = v),
               decoration: InputDecoration(
                 isDense: true,
-                hintText: "Rechercher un contact",
+                hintText: tr(context, 'search_contact'),
                 prefixIcon: const Icon(Icons.search, size: 20),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(24),
@@ -600,7 +600,7 @@ class _EditeurListeState extends State<_EditeurListe> {
               child: TextButton.icon(
                 onPressed: _ajouterParNumero,
                 icon: const Icon(Icons.dialpad, size: 18),
-                label: const Text("Ajouter par numéro"),
+                label: Text(tr(context, 'list_add_by_number')),
               ),
             ),
           ),
@@ -638,8 +638,8 @@ class _EditeurListeState extends State<_EditeurListe> {
                 // compter quatre.
                 (() {
                   final n = _choisis.length + _numeros.length;
-                  if (n == 0) return "Aucun membre sélectionné";
-                  return "$n membre${n > 1 ? "s" : ""} sélectionné${n > 1 ? "s" : ""}";
+                  if (n == 0) return tr(context, 'list_none_selected');
+                  return trN(context, 'list_selected', n);
                 })(),
                 style: TextStyle(
                     fontSize: 12.5, color: mutedOf(context, Colors.black54)),
@@ -653,8 +653,8 @@ class _EditeurListeState extends State<_EditeurListe> {
                       padding: const EdgeInsets.all(24),
                       child: Text(
                         widget.contacts.isEmpty
-                            ? "Votre répertoire est vide."
-                            : "Aucun contact ne correspond à « ${_recherche.trim()} ».",
+                            ? tr(context, 'book_empty')
+                            : tr(context, 'no_contact_matches', {'q': _recherche.trim()}),
                         textAlign: TextAlign.center,
                         style:
                             TextStyle(color: mutedOf(context, Colors.black54)),
@@ -681,7 +681,7 @@ class _EditeurListeState extends State<_EditeurListe> {
                           }),
                           title: Text(m.displayName),
                           subtitle: Text(
-                            "${formatAlanyaId(m.publicNumber)} · hors répertoire",
+                            tr(context, 'out_of_book', {'id': formatAlanyaId(m.publicNumber)}),
                             style: alanyaIdStyleOf(context),
                           ),
                         );
@@ -721,10 +721,10 @@ class _EditeurListeState extends State<_EditeurListe> {
                         )
                       : const Icon(Icons.check),
                   label: Text(_envoi
-                      ? "Enregistrement…"
+                      ? tr(context, 'saving')
                       : widget.existante == null
-                          ? "Créer la liste"
-                          : "Enregistrer"),
+                          ? tr(context, 'list_create')
+                          : tr(context, 'save')),
                 ),
               ),
             ),

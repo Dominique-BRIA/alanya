@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/api_client.dart';
@@ -117,7 +118,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
         _loading = false;
         // Ne montre l'erreur que si le cache était vide (aucun contenu à afficher).
         _errorMsg = (_contacts?.isEmpty ?? true)
-            ? "Erreur ${e.statusCode} : ${e.message}"
+            ? tr(context, 'error_with_code', {'code': '${e.statusCode}', 'message': e.message})
             : null;
       });
     } catch (_) {
@@ -125,7 +126,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
       setState(() {
         _loading = false;
         _errorMsg = (_contacts?.isEmpty ?? true)
-            ? "Impossible de charger les contacts.\nVérifie ta connexion."
+            ? tr(context, 'contacts_load_error')
             : null;
       });
     }
@@ -152,7 +153,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
     } on ApiException catch (e) {
       _snack(e.message);
     } catch (_) {
-      _snack("Impossible d'ouvrir la discussion");
+      _snack(tr(context, 'chat_open_failed'));
     }
   }
 
@@ -161,7 +162,12 @@ class _ContactsScreenState extends State<ContactsScreen> {
       await context.read<ContactsRepository>().setBlocked(c.id, !c.isBlocked);
       await _load();
     } catch (_) {
-      _snack("Action impossible");
+      // ⚠️ `tr()` LIT LE CONTEXTE, ce qu'un libellé en dur ne faisait pas :
+      // après ces `await`, l'écran a pu être quitté, et lire le contexte d'un
+      // widget démonté lève. La garde protège aussi le bandeau, qui n'en avait
+      // aucune auparavant.
+      if (!mounted) return;
+      _snack(tr(context, 'action_failed'));
     }
   }
 
@@ -169,24 +175,28 @@ class _ContactsScreenState extends State<ContactsScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text("Supprimer le contact ?"),
-        content: Text("${c.displayName} sera retiré de ton répertoire."),
+        title: Text(tr(context, 'contact_delete_q')),
+        content: Text(tr(context, 'contact_delete_body', {'nom': c.displayName})),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text("Annuler")),
+              child: Text(tr(context, 'cancel'))),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text("Supprimer")),
+              child: Text(tr(context, 'delete'))),
         ],
       ),
     );
     if (ok != true) return;
+    // La boîte de dialogue est un `await` : l'écran a pu être quitté pendant
+    // qu'elle était ouverte.
+    if (!mounted) return;
     try {
       await context.read<ContactsRepository>().remove(c.id);
       await _load();
     } catch (_) {
-      _snack("Suppression impossible");
+      if (!mounted) return;
+      _snack(tr(context, 'delete_failed'));
     }
   }
 
@@ -197,12 +207,12 @@ class _ContactsScreenState extends State<ContactsScreen> {
     return Scaffold(
       appBar: backAppBar(
         context,
-        "Contacts",
+        tr(context, 'contacts_title'),
         titreWidget: _enRecherche ? _champRecherche() : null,
         actions: _enRecherche
             ? [
                 IconButton(
-                  tooltip: "Fermer la recherche",
+                  tooltip: tr(context, 'search_close'),
                   icon: const Icon(Icons.close),
                   onPressed: _fermerRecherche,
                 ),
@@ -212,13 +222,13 @@ class _ContactsScreenState extends State<ContactsScreen> {
                 // geste le plus fréquent du carnet, il tombe donc sous le
                 // pouce avant celui qu'on ne fait qu'une fois.
                 IconButton(
-                  tooltip: "Rechercher",
+                  tooltip: tr(context, 'search'),
                   icon: const Icon(Icons.search),
                   onPressed: () => setState(() => _enRecherche = true),
                 ),
                 // Synchronisation depuis le répertoire téléphonique
                 IconButton(
-                  tooltip: "Importer depuis le téléphone",
+                  tooltip: tr(context, 'import_from_phone'),
                   icon: const Icon(Icons.contacts_outlined),
                   onPressed: () async {
                     final added = await Navigator.of(context).push<bool>(
@@ -229,7 +239,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                 ),
                 // Bouton actualiser toujours visible
                 IconButton(
-                  tooltip: "Actualiser",
+                  tooltip: tr(context, 'refresh'),
                   icon: const Icon(Icons.refresh),
                   onPressed: _loading ? null : _load,
                 ),
@@ -270,7 +280,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                   ElevatedButton.icon(
                     onPressed: _load,
                     icon: const Icon(Icons.refresh, size: 18),
-                    label: const Text("Réessayer"),
+                    label: Text(tr(context, 'retry')),
                     style: ElevatedButton.styleFrom(
                         backgroundColor: accentOf(context)),
                   ),
@@ -292,8 +302,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
             icon: Icons.group_add,
             color: themed(context,
                 light: AlanyaColors.forest, dark: AlanyaColors.indigoLight),
-            title: "Nouveau groupe",
-            subtitle: "Créer un groupe avec des contacts",
+            title: tr(context, 'new_group'),
+            subtitle: tr(context, 'new_group_sub'),
             onTap: () async {
               await Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const NewGroupScreen()),
@@ -305,8 +315,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
           _actionTile(
             icon: Icons.person_add,
             color: accentOf(context),
-            title: "Ajouter un contact",
-            subtitle: "Rechercher par Alanya ID",
+            title: tr(context, 'add_contact'),
+            subtitle: tr(context, 'add_contact_sub'),
             onTap: () async {
               await Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const NewChatScreen()),
@@ -327,7 +337,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                       size: 56, color: faintOf(context, Colors.black12)),
                   const SizedBox(height: 12),
                   Text(
-                    "Aucun contact pour l'instant.\nUtilise les options ci-dessus pour en ajouter.",
+                    tr(context, 'contacts_empty'),
                     textAlign: TextAlign.center,
                     style: TextStyle(color: mutedOf(context, Colors.black54)),
                   ),
@@ -348,8 +358,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
               icon: Icons.group_add,
               color: themed(context,
                   light: AlanyaColors.forest, dark: AlanyaColors.indigoLight),
-              title: "Nouveau groupe",
-              subtitle: "Créer un groupe avec des contacts",
+              title: tr(context, 'new_group'),
+              subtitle: tr(context, 'new_group_sub'),
               onTap: () async {
                 await Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const NewGroupScreen()),
@@ -361,8 +371,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
             _actionTile(
               icon: Icons.person_add,
               color: accentOf(context),
-              title: "Ajouter un contact",
-              subtitle: "Rechercher par Alanya ID",
+              title: tr(context, 'add_contact'),
+              subtitle: tr(context, 'add_contact_sub'),
               onTap: () async {
                 await Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const NewChatScreen()),
@@ -375,8 +385,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
             _actionTile(
               icon: Icons.playlist_add_check,
               color: AlanyaColors.gold,
-              title: "Listes de contacts",
-              subtitle: "Regrouper famille, équipe, clients…",
+              title: tr(context, 'contact_lists'),
+              subtitle: tr(context, 'contact_lists_sub'),
               onTap: () async {
                 await Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const ContactListsScreen()),
@@ -397,7 +407,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                 padding:
                     const EdgeInsets.symmetric(vertical: 32, horizontal: 24),
                 child: Text(
-                  "Aucun contact ne correspond à « ${_recherche.trim()} ».",
+                  tr(context, 'no_contact_matches', {'q': _recherche.trim()}),
                   textAlign: TextAlign.center,
                   style: TextStyle(color: mutedOf(context, Colors.black54)),
                 ),
@@ -433,10 +443,10 @@ class _ContactsScreenState extends State<ContactsScreen> {
       autofocus: true,
       textInputAction: TextInputAction.search,
       onChanged: (v) => setState(() => _recherche = v),
-      decoration: const InputDecoration(
+      decoration: InputDecoration(
         isDense: true,
         border: InputBorder.none,
-        hintText: "Rechercher un contact",
+        hintText: tr(context, 'search_contact'),
       ),
     );
   }
@@ -465,16 +475,16 @@ class _ContactsScreenState extends State<ContactsScreen> {
     if (moi == null) return const SizedBox.shrink();
     return ListTile(
       leading: AvatarCircle(
-        name: moi.nom ?? moi.pseudo ?? "Moi",
+        name: moi.nom ?? moi.pseudo ?? tr(context, 'home_me'),
         avatarUrl: moi.avatarUrl,
         radius: 22,
         backgroundColor: themed(context,
             light: AlanyaColors.indigo, dark: AlanyaColors.indigoLight),
       ),
-      title: const Text("Moi (vous)",
-          style: TextStyle(fontWeight: FontWeight.w600)),
+      title: Text(tr(context, 'me_you'),
+          style: const TextStyle(fontWeight: FontWeight.w600)),
       subtitle: Text(
-        "Notes personnelles, brouillons, liens à garder",
+        tr(context, 'me_notes_sub'),
         style: TextStyle(color: mutedOf(context, Colors.black54), fontSize: 13),
       ),
       onTap: () => _ouvrirMesNotes(moi),
@@ -490,7 +500,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
         MaterialPageRoute(
           builder: (_) => ChatScreen(
             convId: convId,
-            title: "Moi (vous)",
+            title: tr(context, 'me_you'),
             avatarUrl: moi.avatarUrl,
             // ⚠️ `otherUserId` vaut MON identifiant, faute de correspondant.
             // C'est cohérent : dans mes notes, l'autre bout, c'est moi.
@@ -537,7 +547,9 @@ class _ContactsScreenState extends State<ContactsScreen> {
       title: Text(c.displayName,
           style: const TextStyle(fontWeight: FontWeight.w600)),
       subtitle: Text(
-          "Alanya ID : ${formatAlanyaId(c.publicNumber)}${c.isBlocked ? " · bloqué" : ""}",
+          tr(context, 'home_alanya_id',
+                  {'id': formatAlanyaId(c.publicNumber)}) +
+              (c.isBlocked ? tr(context, 'suffix_blocked') : ''),
           style: alanyaIdStyleOf(context)),
       onTap: c.isBlocked ? null : () => _startChat(c),
       trailing: PopupMenuButton<String>(
@@ -548,11 +560,11 @@ class _ContactsScreenState extends State<ContactsScreen> {
         },
         itemBuilder: (_) => [
           if (!c.isBlocked)
-            const PopupMenuItem(value: "chat", child: Text("Discuter")),
+            PopupMenuItem(value: "chat", child: Text(tr(context, 'chat_action'))),
           PopupMenuItem(
               value: "block",
-              child: Text(c.isBlocked ? "Débloquer" : "Bloquer")),
-          const PopupMenuItem(value: "delete", child: Text("Supprimer")),
+              child: Text(c.isBlocked ? tr(context, 'unblock') : tr(context, 'block'))),
+          PopupMenuItem(value: "delete", child: Text(tr(context, 'delete'))),
         ],
       ),
     );

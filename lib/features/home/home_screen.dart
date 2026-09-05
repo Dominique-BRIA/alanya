@@ -292,8 +292,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   : AlanyaColors.terracotta,
             ),
             tooltip: Theme.of(context).brightness == Brightness.dark
-                ? "Passer au mode clair"
-                : "Passer au mode sombre",
+                ? tr(context, 'theme_to_light')
+                : tr(context, 'theme_to_dark'),
             onPressed: () {
               final themeCtrl = context.read<ThemeController>();
               themeCtrl.basculerClairSombre(
@@ -719,20 +719,20 @@ class _ConversationsTabState extends State<_ConversationsTab>
      * regarde.
      */
     if (conv?.sourdine == true) return;
-    final title = conv?.title ?? "Nouveau message";
+    final title = conv?.title ?? tr(context, 'notif_new_message');
 
     // Aperçu du message selon le type — on retire les marqueurs pour les
     // notifications système, qui ne peuvent pas afficher de rich text.
     String body;
     switch (type) {
       case "IMAGE":
-        body = "Photo";
+        body = tr(context, 'media_photo');
         break;
       case "AUDIO":
-        body = "Message vocal";
+        body = tr(context, 'media_voice');
         break;
       case "FILE":
-        body = "Fichier";
+        body = tr(context, 'media_file');
         break;
       case "VIDEO":
         body = tr(context, 'video');
@@ -740,14 +740,14 @@ class _ConversationsTabState extends State<_ConversationsTab>
       default:
         // Si c'est un message formaté, on n'affiche pas les * _ ~ dans la notif
         body = content == null
-            ? "Nouveau message"
+            ? tr(context, 'notif_new_message')
             : sansMarqueursWhatsApp(content);
-        if (body.trim().isEmpty) body = "Nouveau message";
+        if (body.trim().isEmpty) body = tr(context, 'notif_new_message');
     }
 
     // Aperçu désactivé → texte générique (dans le bandeau ET la notif système).
     if (!NotificationSettings.instance.previewOn) {
-      body = "Nouveau message";
+      body = tr(context, 'notif_new_message');
     }
 
     // Le bandeau interne a été retiré : il faisait DOUBLON avec la notification
@@ -973,10 +973,10 @@ class _ConversationsTabState extends State<_ConversationsTab>
             ),
             // --- Onglets : Tous / Non lues / Groupes ---
             TabBar(
-              tabs: const [
-                Tab(text: "Tous"),
-                Tab(text: "Non lues"),
-                Tab(text: "Groupes"),
+              tabs: [
+                Tab(text: tr(context, 'filter_all')),
+                Tab(text: tr(context, 'filter_unread')),
+                Tab(text: tr(context, 'filter_groups')),
               ],
               labelColor: AlanyaColors.terracotta,
               unselectedLabelColor: AlanyaColors.craie2,
@@ -1503,7 +1503,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
       if (!isText) {
         final label = typeLabel();
         final full = c.isGroup && c.members.isNotEmpty
-            ? "${c.members.length} membres · $label"
+            ? tr(context, 'group_members_prefix', {'n': '${c.members.length}'}) + label
             : label;
         return Text(full,
             style: baseStyle, maxLines: 1, overflow: TextOverflow.ellipsis);
@@ -1514,7 +1514,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
       final trimmed = raw.length > 120 ? "${raw.substring(0, 120)}…" : raw;
       final spans = _spansApercuAvecMentions(trimmed, baseStyle);
       if (c.isGroup && c.members.isNotEmpty) {
-        final prefix = "${c.members.length} membres · ";
+        final prefix = tr(context, 'group_members_prefix', {'n': '${c.members.length}'});
         return Text.rich(
           TextSpan(
             style: baseStyle,
@@ -1534,7 +1534,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
       );
     }
 
-    final title = c.title ?? "Discussion";
+    final title = c.title ?? tr(context, 'chat_untitled');
     final myId = context.read<AuthController>().user?.id;
     final other = c.isGroup
         ? null
@@ -1652,7 +1652,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
           children: [
             Padding(
               padding: const EdgeInsets.all(16),
-              child: Text(c.title ?? "Conversation",
+              child: Text(c.title ?? tr(context, 'chat_untitled'),
                   style: const TextStyle(
                       fontSize: 18, fontWeight: FontWeight.bold)),
             ),
@@ -1662,7 +1662,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
                 c.isPinned ? Icons.push_pin_outlined : Icons.push_pin,
                 color: AlanyaColors.terracotta,
               ),
-              title: Text(c.isPinned ? "Désépingler" : "Épingler"),
+              title: Text(c.isPinned ? tr(context, 'unpin') : tr(context, 'pin')),
               onTap: () async {
                 Navigator.pop(ctx);
                 await context
@@ -1692,8 +1692,8 @@ class _ConversationsTabState extends State<_ConversationsTab>
                 color: AlanyaColors.terracotta,
               ),
               title: Text(c.sourdine
-                  ? "Réactiver les notifications"
-                  : "Couper les notifications"),
+                  ? tr(context, 'unmute')
+                  : tr(context, 'mute')),
               onTap: () async {
                 Navigator.pop(ctx);
                 try {
@@ -1712,8 +1712,8 @@ class _ConversationsTabState extends State<_ConversationsTab>
                   });
                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                     content: Text(etat
-                        ? "Notifications coupées pour cette conversation"
-                        : "Notifications rétablies"),
+                        ? tr(context, 'muted_toast')
+                        : tr(context, 'unmuted_toast')),
                   ));
                 } catch (_) {
                   if (!mounted) return;
@@ -1728,7 +1728,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
                 c.isArchived ? Icons.unarchive : Icons.archive_outlined,
                 color: AlanyaColors.chocolate,
               ),
-              title: Text(c.isArchived ? tr(context, 'home_unarchive') : "Archiver"),
+              title: Text(c.isArchived ? tr(context, 'home_unarchive') : tr(context, 'archive')),
               onTap: () async {
                 Navigator.pop(ctx);
                 await context
@@ -1823,7 +1823,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
                 itemCount: _archivedConvs!.length,
                 itemBuilder: (_, i) {
                   final c = _archivedConvs![i];
-                  final title = c.title ?? "Discussion";
+                  final title = c.title ?? tr(context, 'chat_untitled');
                   // Aperçu formaté également dans les archivées : on affiche
                   // le style réel (gras/italique) et plus les marqueurs.
                   Widget archivedPreview() {
@@ -1837,12 +1837,12 @@ class _ConversationsTabState extends State<_ConversationsTab>
                     if (last.type != "TEXT") {
                       return Text(
                         last.type == "AUDIO"
-                            ? "Message vocal"
+                            ? tr(context, 'media_voice')
                             : last.type == "IMAGE"
-                                ? "Photo"
+                                ? tr(context, 'media_photo')
                                 : last.type == "VIDEO"
                                     ? tr(context, 'video')
-                                    : "Fichier",
+                                    : tr(context, 'media_file'),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(fontSize: 12, color: muted2),
@@ -2117,12 +2117,12 @@ class _StatusTabState extends State<_StatusTab> {
                           Text(tr(context, 'home_load_error'))),
                 ),
               if (nonVus.isNotEmpty) ...[
-                _enteteSection("Récents", muted),
+                _enteteSection(tr(context, 'status_recent'), muted),
                 for (var i = 0; i < nonVus.length; i++)
                   _statusTile(ordonnes, i),
               ],
               if (dejaVus.isNotEmpty) ...[
-                _enteteSection("Déjà vus", muted),
+                _enteteSection(tr(context, 'status_seen'), muted),
                 for (var i = 0; i < dejaVus.length; i++)
                   _statusTile(ordonnes, nonVus.length + i),
               ],
@@ -2219,7 +2219,7 @@ class _StatusTabState extends State<_StatusTab> {
           style: const TextStyle(fontWeight: FontWeight.w600)),
       subtitle: Text(mien != null
           ? horodatageStatut(_dernierStatut(mien))
-          : "Appuie pour ajouter"),
+          : tr(context, 'status_tap_to_add')),
       onTap: mien != null
           ? () => _openViewer([mien], index: 0, isMine: true)
           : _openCreate,
@@ -2447,9 +2447,9 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
           // --- Onglets Discussion / Mes Conversations ---
           TabBar(
             controller: _tabCtrl,
-            tabs: const [
-              Tab(text: "Discussion"),
-              Tab(text: "Mes Conversations"),
+            tabs: [
+              Tab(text: tr(context, 'ai_tab_chat')),
+              Tab(text: tr(context, 'ai_my_conversations')),
             ],
             labelColor: AlanyaColors.terracotta,
             unselectedLabelColor: AlanyaColors.craie2,
@@ -2584,7 +2584,7 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
       final who = m.isUser ? tr(context, 'home_me') : "IA";
       return "$who: ${m.content}";
     }).join("\n\n");
-    await Clipboard.setData(ClipboardData(text: "Assistant Alanya\n\n$text"));
+    await Clipboard.setData(ClipboardData(text: '${tr(context, 'home_assistant')}\n\n$text'));
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -2719,7 +2719,7 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
                                 await repo.deleteThread(t.id);
                                 if (_threadId == t.id) _newConversation();
                               } else if (v == 'share') {
-                                final text = "Conversation: ${t.title}";
+                                final text = tr(context, 'ai_conversation_label', {'titre': t.title});
                                 await Clipboard.setData(
                                     ClipboardData(text: text));
                                 ScaffoldMessenger.of(context).showSnackBar(
