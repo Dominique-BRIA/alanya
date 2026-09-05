@@ -21,7 +21,45 @@ import '../../theme/alanya_theme.dart';
 /// sa propre palette.
 
 /// L'ordre de la palette proposée à la création, identique au web.
-const List<String> paletteListes = ["amber", "blue", "violet", "teal", "rose"];
+///
+/// 🔴 **VINGT TEINTES EN HEXADÉCIMAL, ET NON PLUS CINQ NOMS.**
+///
+/// Cinq ne suffisaient pas : au-delà de cinq listes, deux portaient forcément la
+/// même pastille. Le rouge manquait, alors que c'est la teinte qu'on cherche en
+/// premier pour une liste qui compte.
+///
+/// ⚠️ Le web a basculé sur ces mêmes valeurs hexadécimales
+/// (`contact-lists-affichage.ts`, `PALETTE_LISTES`). Garder les cinq NOMS ici
+/// aurait fait diverger les deux clients : une liste créée sur mobile aurait
+/// porté « blue », une liste créée sur le web « #1e88e5 », et les deux se
+/// seraient dessinées différemment sur le même écran.
+///
+/// Les noms restent LUS par [couleurDeListe] — les listes déjà créées avec
+/// « amber » continuent de s'afficher. Ils ne sont simplement plus PROPOSÉS.
+const List<String> paletteListes = [
+  // L'arc-en-ciel, dans son ordre.
+  "#e53935", // rouge
+  "#f4511e", // vermillon
+  "#fb8c00", // orange
+  "#fdd835", // jaune
+  "#c0ca33", // citron
+  "#7cb342", // vert clair
+  "#43a047", // vert
+  "#00897b", // sarcelle
+  "#00acc1", // cyan
+  "#039be5", // bleu ciel
+  "#1e88e5", // bleu
+  "#3949ab", // indigo
+  "#5e35b1", // violet
+  "#8e24aa", // pourpre
+  "#d81b60", // magenta
+  // Quelques teintes sourdes, pour les listes qu'on ne veut pas voir crier.
+  "#6d4c41", // brun
+  "#546e7a", // ardoise
+  "#795548", // terre
+  "#8d6e63", // taupe
+  "#607d8b", // gris bleu
+];
 
 /// La couleur à peindre pour une teinte nommée.
 ///
@@ -58,6 +96,11 @@ Color? couleurDeListe(String? teinte, {required bool sombre}) {
 }
 
 /// Le nom lisible d'une teinte, pour l'accessibilité et les info-bulles.
+///
+/// Les cinq NOMS historiques gardent leur libellé — des listes en portent
+/// encore. Les vingt teintes hexadécimales n'en ont pas : nommer vingt couleurs
+/// dans neuf langues serait un catalogue à tenir pour un texte que personne ne
+/// lit, et le rang dans la palette suffit à les désigner.
 String libelleTeinte(String teinte) {
   switch (teinte) {
     case "amber":

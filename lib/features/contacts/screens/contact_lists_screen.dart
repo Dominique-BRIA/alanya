@@ -296,8 +296,21 @@ class _EditeurListeState extends State<_EditeurListe> {
     // nouvelle prend la première de la palette plutôt que « aucune » — une
     // pastille grise ne se distingue de rien.
     final actuelle = widget.existante?.color;
-    _teinte =
-        paletteListes.contains(actuelle) ? actuelle! : paletteListes.first;
+    /*
+     * ⚠️ UNE LISTE EXISTANTE GARDE SA TEINTE, même absente de la palette.
+     *
+     * La palette est passée de cinq NOMS à vingt hexadécimaux. Le test
+     * d'appartenance seul aurait donc rejeté « amber » — porté par toutes les
+     * listes créées avant — et l'aurait remplacée par le premier rouge de la
+     * nouvelle palette. Ouvrir une liste pour renommer en aurait CHANGÉ LA
+     * COULEUR, sans que rien ne le dise.
+     *
+     * On ne retombe sur la première teinte que pour une liste NEUVE : une
+     * pastille grise ne se distingue de rien.
+     */
+    _teinte = (actuelle != null && actuelle.trim().isNotEmpty)
+        ? actuelle
+        : paletteListes.first;
     _sonnerie = widget.existante?.ringtone;
     _chargerCatalogue();
     // Les membres déjà en place, par identifiant de COMPTE — c'est ce que le
@@ -475,12 +488,22 @@ class _EditeurListeState extends State<_EditeurListe> {
           ),
           // --- Teinte de la liste ---
           //
-          // Palette FIXE de cinq teintes, celle du web. Un choix libre laisserait
-          // prendre une couleur illisible sur l'un des quatre thèmes ; c'est la
-          // raison que donne `contact-lists-affichage.ts`, et elle vaut ici.
+          // Palette FIXE, celle du web — vingt teintes depuis que cinq ne
+          // suffisaient plus. Un choix libre laisserait prendre une couleur
+          // illisible sur l'un des quatre thèmes ; c'est la raison que donne
+          // `contact-lists-affichage.ts`, et elle vaut ici.
+          //
+          // ⚠️ `Wrap` et non `Row` : vingt pastilles de 30 px plus leurs marges
+          // font 800 px, soit le double d'un écran de téléphone. Une rangée les
+          // aurait fait déborder — et Flutter signale un débordement par une
+          // bande rayée, pas en repliant.
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 6, 20, 6),
-            child: Row(children: [
+            child: Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 0,
+                runSpacing: 10,
+                children: [
               Text(tr(context, 'color'),
                   style: TextStyle(
                       fontSize: 13, color: mutedOf(context, Colors.black54))),
