@@ -27,3 +27,17 @@ android/key.properties
 # exist ». Flutter le régénère automatiquement à chaque build — c'est d'ailleurs
 # pourquoi il ressortait modifié après chaque compilation.
 android/local.properties
+
+# ⚠️ SORTIE DE COMPILATION — NE JAMAIS VERSIONNER.
+#
+# Ces deux dossiers sont REGENERES par `flutter pub get` et `flutter build` a
+# chaque fois. Ils etaient pourtant suivis, partiellement : 58 fichiers sous
+# `build/`, 39 sous `.dart_tool/`, le reste ignore de personne. Un simple
+# `git add -A` apres un `flutter test` y ajoutait alors une trentaine de
+# fichiers de plus — dont une COPIE de tous les assets, ce qui a valu au depot
+# l'avertissement « Large files detected » de GitHub le 08/09/2026.
+#
+# Rien ici n'est reproductible d'une machine a l'autre, et rien n'y est
+# necessaire a la compilation : tout se regenere.
+build/
+.dart_tool/
