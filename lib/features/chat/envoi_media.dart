@@ -72,6 +72,17 @@ class EnvoiMedia {
   /// Vrai quand l'envoi a échoué et attend une décision de l'utilisateur.
   bool echoue = false;
 
+  /// Vrai quand l'envoi attend simplement le RETOUR DU RÉSEAU.
+  ///
+  /// 🔴 CE N'EST PAS UN ÉCHEC, et les deux états ne doivent surtout pas se
+  /// confondre. [echoue] veut dire « le serveur a refusé, décide quoi faire » :
+  /// il montre une croix, un message rouge et deux boutons. Celui-ci veut dire
+  /// « ça partira tout seul » : rien à décider, rien à relire, aucune alerte.
+  ///
+  /// Les afficher pareil, c'est demander à l'utilisateur d'agir là où il n'a
+  /// rien à faire — et lui faire croire qu'il a perdu son fichier.
+  bool enAttenteReseau = false;
+
   /// Message d'erreur à afficher dans la bulle.
   String? erreur;
 

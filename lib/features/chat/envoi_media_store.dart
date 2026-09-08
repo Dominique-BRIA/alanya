@@ -1,9 +1,12 @@
 import 'dart:async';
+import 'dart:io' show SocketException;
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' show ClientException;
 
 import '../../core/api_client.dart';
+import '../../core/connectivity_service.dart';
 import '../../core/centre_transferts.dart';
 import '../../core/realtime_client.dart';
 import '../media/media_repository.dart';
@@ -35,6 +38,24 @@ class EnvoiMediaStore extends ChangeNotifier {
 
   final Map<String, EnvoiMedia> _envois = {};
   final Map<String, Timer> _attentesEcho = {};
+
+  /*
+   * LES SERVICES DU DERNIER LANCEMENT, retenus pour repartir tout seul.
+   *
+   * ⚠️ AUCUN `BuildContext` ICI, et c'est la regle que ce magasin s'est fixee
+   * des l'origine. Ce sont des depots et des clients construits une fois au
+   * demarrage de l'application, dans `main.dart` : les garder ne rattache
+   * l'envoi a aucun ecran, et c'est justement ce qui lui permet de continuer
+   * quand plus aucun ecran n'existe.
+   *
+   * Sans eux, une reprise automatique serait impossible : le retour du reseau
+   * n'arrive jamais pendant qu'un ecran nous tend ses services.
+   */
+  MediaRepository? _media;
+  ChatRepository? _chat;
+  RealtimeClient? _rt;
+  ConnectivityService? _conn;
+  String Function()? _messageErreurGenerique;
 
   /// Envois — en cours ou échoués — d'une conversation, du plus ancien au plus
   /// récent. C'est ce que l'écran ajoute au fil sous forme de bulles.
@@ -75,9 +96,21 @@ class EnvoiMediaStore extends ChangeNotifier {
     required ChatRepository chat,
     required RealtimeClient rt,
     required String Function() messageErreurGenerique,
+    ConnectivityService? conn,
   }) async {
+    _media = media;
+    _chat = chat;
+    _rt = rt;
+    _messageErreurGenerique = messageErreurGenerique;
+    if (conn != null && !identical(conn, _conn)) {
+      _conn?.removeListener(_auRetourDuReseau);
+      _conn = conn;
+      conn.addListener(_auRetourDuReseau);
+    }
+
     _envois[envoi.tempId] = envoi;
     envoi.echoue = false;
+    envoi.enAttenteReseau = false;
     envoi.erreur = null;
     notifyListeners();
 
@@ -143,9 +176,86 @@ class EnvoiMediaStore extends ChangeNotifier {
       }
     } on ApiException catch (e) {
       _echec(envoi, e.message);
-    } catch (_) {
-      _echec(envoi, messageErreurGenerique());
+    } catch (e) {
+      if (_estPanneReseau(e)) {
+        _enAttente(envoi);
+      } else {
+        _echec(envoi, messageErreurGenerique());
+      }
     }
+  }
+
+  /// L'envoi attend le reseau. Aucune alerte, aucune decision a prendre.
+  ///
+  /// ⚠️ LA NOTIFICATION DE TRANSFERT EST RETIREE SANS ETRE MARQUEE EN ECHEC.
+  /// `CentreTransferts.echouer` affiche une ligne rouge persistante, qu'il faut
+  /// balayer a la main : exactement ce que l'utilisateur n'a pas a faire ici.
+  /// Elle reparaitra d'elle-meme quand l'envoi repartira.
+  ///
+  /// ⚠️ `mediaIdsObtenus` EST CONSERVE, comme pour un echec : les fichiers deja
+  /// televerses avant la coupure ne repartiront pas une seconde fois.
+  void _enAttente(EnvoiMedia envoi) {
+    envoi.echoue = false;
+    envoi.enAttenteReseau = true;
+    envoi.erreur = null;
+    envoi.progressionFichier = 0;
+    CentreTransferts.instance.reussir(envoi.tempId);
+    notifyListeners();
+  }
+
+  /// Le reseau est revenu : tout ce qui attendait repart, dans l'ordre.
+  ///
+  /// ⚠️ SEQUENTIEL, PAS EN PARALLELE. Dix envois relances d'un coup se
+  /// partageraient la bande passante d'une connexion qui vient tout juste de
+  /// revenir — et arriveraient dans le desordre. On les enchaine.
+  void _auRetourDuReseau() {
+    final conn = _conn;
+    if (conn == null || !conn.isOnline) return;
+    final media = _media;
+    final chat = _chat;
+    final rt = _rt;
+    final message = _messageErreurGenerique;
+    if (media == null || chat == null || rt == null || message == null) return;
+
+    final aRelancer =
+        _envois.values.where((e) => e.enAttenteReseau).toList()
+          ..sort((a, b) => a.creeA.compareTo(b.creeA));
+    if (aRelancer.isEmpty) return;
+
+    unawaited(() async {
+      for (final envoi in aRelancer) {
+        if (!conn.isOnline) break;
+        // `lancer` reprend a `mediaIdsObtenus.length` : rien n'est refait.
+        await lancer(envoi,
+            media: media,
+            chat: chat,
+            rt: rt,
+            messageErreurGenerique: message,
+            conn: conn);
+      }
+    }());
+  }
+
+  /// L'ECHEC VIENT-IL DU RESEAU, ou le serveur a-t-il REFUSE ?
+  ///
+  /// 🔴 TOUTE LA DIFFERENCE EST LA. Un refus du serveur — fichier trop lourd,
+  /// correspondant bloque, conversation disparue — ne se repare pas en
+  /// reessayant : il faut le dire et laisser l'utilisateur decider. Une panne de
+  /// reseau se repare toute seule des que la connexion revient : l'annoncer
+  /// comme une erreur, avec une croix rouge et un bouton, demande d'agir la ou
+  /// il n'y a rien a faire.
+  ///
+  /// ⚠️ `ApiException` NE SIGNIFIE QUE « LE SERVEUR A REPONDU ≥400 » — c'est le
+  /// seul cas ou `api_client` la leve. Une coupure remonte telle quelle, en
+  /// `SocketException` ou `ClientException`. Le type suffit donc a trancher.
+  ///
+  /// ⚠️ ON NE TRAITE PAS N'IMPORTE QUELLE EXCEPTION COMME UNE PANNE. Une erreur
+  /// de programmation prise pour une coupure laisserait la bulle tourner
+  /// indefiniment, sans que rien ne dise pourquoi. On nomme donc les trois
+  /// formes possibles, et tout le reste reste un echec.
+  bool _estPanneReseau(Object e) {
+    if (e is ApiException) return false;
+    return e is SocketException || e is ClientException || e is TimeoutException;
   }
 
   /// Nom court du premier fichier, pour la notification.
@@ -161,6 +271,7 @@ class EnvoiMediaStore extends ChangeNotifier {
     // Les médias déjà téléversés RESTENT dans `mediaIdsObtenus` : c'est ce qui
     // permet au réessai de ne pas les envoyer une seconde fois.
     envoi.echoue = true;
+    envoi.enAttenteReseau = false;
     envoi.erreur = message;
     envoi.progressionFichier = 0;
     // L'échec, LUI, reste affiché : un envoi qui disparaît sans rien dire fait

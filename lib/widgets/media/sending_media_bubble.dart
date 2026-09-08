@@ -74,6 +74,11 @@ class SendingMediaBubble extends StatelessWidget {
                 Container(color: Colors.black.withValues(alpha: 0.35)),
                 if (envoi.echoue)
                   const Icon(Icons.error_outline, size: 40, color: Colors.white)
+                else if (envoi.enAttenteReseau)
+                  // ⚠️ UNE HORLOGE, PAS UNE CROIX. Rien n'a échoué : l'envoi
+                  // attend le réseau et partira seul. Une croix ferait croire
+                  // que le fichier est perdu et qu'il faut tout refaire.
+                  const Icon(Icons.schedule, size: 40, color: Colors.white)
                 else
                   _anneau(),
               ],
@@ -100,7 +105,26 @@ class SendingMediaBubble extends StatelessWidget {
               style: TextStyle(fontSize: 11.5, color: onSub),
             ),
           ],
-          if (envoi.echoue) ...[
+          if (envoi.enAttenteReseau) ...[
+            const SizedBox(height: 2),
+            // ⚠️ PAS DE BOUTON « RÉESSAYER » ICI, et c'est délibéré : il n'y a
+            // rien à réessayer, l'envoi repart de lui-même au retour du réseau.
+            // Un bouton laisserait croire que rien ne se passera sans lui.
+            // « Supprimer » reste, pour qui change d'avis.
+            Text(
+              "En attente de connexion",
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, color: onSub),
+            ),
+            const SizedBox(height: 2),
+            Row(children: [
+              _action(context,
+                  icone: Icons.delete_outline,
+                  label: "Supprimer",
+                  onTap: onAbandonner),
+            ]),
+          ] else if (envoi.echoue) ...[
             const SizedBox(height: 2),
             Text(
               envoi.erreur ?? "Échec de l'envoi",

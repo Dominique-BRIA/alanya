@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 
 import '../../../core/compression_image.dart';
+import '../../../core/connectivity_service.dart';
 import '../../../core/memoire_langues.dart';
 import '../../../core/message_cache.dart';
 import '../../../core/messages_systeme.dart';
@@ -2403,6 +2404,10 @@ class _ChatScreenState extends State<ChatScreen>
     final media = context.read<MediaRepository>();
     final chat = context.read<ChatRepository>();
     final rt = context.read<RealtimeClient>();
+    // Lu ICI comme les trois autres, et pour la même raison : le magasin ne
+    // touche jamais un `BuildContext`. C'est lui qui, ensuite, écoute le retour
+    // du réseau et relance ce qui attendait — même si cet écran a disparu.
+    final conn = context.read<ConnectivityService>();
     final erreur = tr(context, 'send_failed');
     return EnvoiMediaStore.instance.lancer(
       envoi,
@@ -2410,6 +2415,7 @@ class _ChatScreenState extends State<ChatScreen>
       chat: chat,
       rt: rt,
       messageErreurGenerique: () => erreur,
+      conn: conn,
     );
   }
 
@@ -2424,47 +2430,6 @@ class _ChatScreenState extends State<ChatScreen>
       _messages = _messages.where((m) => m.id != envoi.tempId).toList();
       _rebuildCombined();
     });
-  }
-
-  Future<void> _uploadAndSend(
-      List<int> bytes, String filename, String mime, String msgType,
-      {int? durationMs}) async {
-    setState(() => _uploading = true);
-    final replyId = _replyTo?.id;
-    final replyMsg = _replyTo;
-    final replySnapshot = replyMsg != null
-        ? ReplyPreview(
-            id: replyMsg.id,
-            senderId: replyMsg.senderId,
-            type: replyMsg.type,
-            content: replyMsg.isDeleted ? null : replyMsg.content,
-            isDeleted: replyMsg.isDeleted)
-        : null;
-    if (mounted) setState(() => _replyTo = null);
-    final media = context.read<MediaRepository>();
-    final rt = context.read<RealtimeClient>();
-    try {
-      final uploaded = await media.upload(
-          Uint8List.fromList(bytes), filename, mime,
-          durationMs: durationMs);
-      if (rt.connected) {
-        rt.sendMedia(widget.convId, uploaded.id, msgType,
-            "tmp-${DateTime.now().microsecondsSinceEpoch}",
-            replyToId: replyId);
-      } else {
-        final msg = await context
-            .read<ChatRepository>()
-            .sendMedia(widget.convId, uploaded.id, msgType, replyToId: replyId);
-        if (mounted) setState(() => _messages = [..._messages, msg]);
-      }
-      _scrollToBottom();
-    } on ApiException catch (e) {
-      _showError(e.message);
-    } catch (_) {
-      _showError(tr(context, 'send_failed'));
-    } finally {
-      if (mounted) setState(() => _uploading = false);
-    }
   }
 
   /// Prise de vue, depuis l'écran de discussion et non depuis la feuille : la
@@ -2802,9 +2767,25 @@ class _ChatScreenState extends State<ChatScreen>
     if (result == null || result.bytes.isEmpty) return;
     final ext = kIsWeb ? "webm" : "m4a";
     final mime = kIsWeb ? "audio/webm" : "audio/mp4";
-    await _uploadAndSend(result.bytes,
-        "vocal-${DateTime.now().millisecondsSinceEpoch}.$ext", mime, "AUDIO",
-        durationMs: result.durationMs);
+    /*
+     * 🔴 LE VOCAL PASSE PAR LE MEME CHEMIN QUE LES AUTRES MEDIAS.
+     *
+     * Il court-circuitait le magasin d'envois : ni bulle provisoire, ni
+     * progression, ni reessai — et, sans reseau, une simple alerte rouge et un
+     * enregistrement PERDU. Or c'est le media qu'on ne peut justement pas
+     * refaire : une photo se reprend, un message vocal se re-dit.
+     *
+     * Par cette voie il gagne tout d'un coup : la bulle qui attend, le depart
+     * automatique au retour du reseau, et le reessai en cas de vrai refus.
+     */
+    await _lanceEnvoiMedias([
+      MediaPickResult(
+        bytes: Uint8List.fromList(result.bytes),
+        fileName: "vocal-${DateTime.now().millisecondsSinceEpoch}.$ext",
+        mimeType: mime,
+        durationMs: result.durationMs,
+      ),
+    ], null);
   }
 
   String _ext(String name) {
