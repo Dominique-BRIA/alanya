@@ -35,6 +35,7 @@ import 'features/calls/calls_repository.dart';
 import 'features/calls/enregistrements_repository.dart';
 import 'features/calls/plaintes_repository.dart';
 import 'features/chat/chat_repository.dart';
+import 'features/chat/envoi_media_store.dart';
 import 'core/pays_repository.dart';
 import 'features/collegues/collegues_repository.dart';
 import 'features/entreprises/entreprises_repository.dart';
@@ -168,6 +169,25 @@ void main() async {
         ),
         ChangeNotifierProvider<ConnectivityService>(
           create: (ctx) => ConnectivityService(ctx.read<RealtimeClient>()),
+        ),
+        /*
+         * REPREND LES ENVOIS DE MEDIAS INTERROMPUS PAR UNE FERMETURE.
+         *
+         * ⚠️ `lazy: false` EST LE POINT ENTIER DE CE BLOC. Un provider paresseux
+         * n'est construit qu'a sa premiere lecture — or personne ne lit ce
+         * magasin par le `context` : les ecrans passent par son singleton. Il ne
+         * serait donc JAMAIS construit, et les envois relus du disque
+         * n'existeraient pas.
+         */
+        Provider<EnvoiMediaStore>(
+          lazy: false,
+          create: (ctx) => EnvoiMediaStore.instance
+            ..brancher(
+              media: ctx.read<MediaRepository>(),
+              chat: ctx.read<ChatRepository>(),
+              rt: ctx.read<RealtimeClient>(),
+              conn: ctx.read<ConnectivityService>(),
+            ),
         ),
         ChangeNotifierProvider<Outbox>(
           create: (ctx) => Outbox(

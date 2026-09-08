@@ -25,7 +25,12 @@ class EnvoiMedia {
     this.legende,
     this.replyToId,
     this.mentions,
-  }) : creeA = DateTime.now();
+    /// ⚠️ FOURNI UNIQUEMENT PAR LA RELECTURE SUR DISQUE. Un envoi restauré après
+    /// que le système a tué l'application doit retrouver SA place dans le fil —
+    /// celle du moment où on l'a envoyé — et non se poser en bas de la
+    /// conversation à l'heure du redémarrage.
+    DateTime? creeA,
+  }) : creeA = creeA ?? DateTime.now();
 
   /// Identifiant provisoire, partagé avec le message optimiste du fil.
   final String tempId;

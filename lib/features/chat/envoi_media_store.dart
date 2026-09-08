@@ -12,6 +12,7 @@ import '../../core/realtime_client.dart';
 import '../media/media_repository.dart';
 import 'chat_repository.dart';
 import 'envoi_media.dart';
+import 'envois_persistes.dart';
 
 /// File des envois de médias, **hors de l'écran de discussion**.
 ///
@@ -57,6 +58,51 @@ class EnvoiMediaStore extends ChangeNotifier {
   ConnectivityService? _conn;
   String Function()? _messageErreurGenerique;
 
+  /// La relecture sur disque n'a lieu qu'UNE FOIS par lancement.
+  bool _restaure = false;
+
+  /// Branche les services et REPREND ce qui attendait avant la fermeture.
+  ///
+  /// 🔴 APPELE AU DEMARRAGE DE L'APPLICATION, et c'est indispensable. Sans lui,
+  /// les envois relus du disque seraient bien affiches mais ne partiraient
+  /// JAMAIS : la reprise a besoin des depots, et ceux-ci n'arrivaient jusqu'ici
+  /// qu'au moment ou un ecran lancait un envoi. Or apres un redemarrage, aucun
+  /// envoi n'est lance — c'est justement le probleme a resoudre.
+  ///
+  /// ⚠️ Les services passes ici sont construits une fois dans `main.dart` : ce
+  /// magasin ne detient toujours aucun `BuildContext`.
+  Future<void> brancher({
+    required MediaRepository media,
+    required ChatRepository chat,
+    required RealtimeClient rt,
+    required ConnectivityService conn,
+    String Function()? messageErreurGenerique,
+  }) async {
+    _media = media;
+    _chat = chat;
+    _rt = rt;
+    _messageErreurGenerique ??=
+        messageErreurGenerique ?? () => "Échec de l'envoi";
+    if (!identical(conn, _conn)) {
+      _conn?.removeListener(_auRetourDuReseau);
+      _conn = conn;
+      conn.addListener(_auRetourDuReseau);
+    }
+
+    if (_restaure) return;
+    _restaure = true;
+
+    final repris = await EnvoisPersistes.charger();
+    if (repris.isEmpty) return;
+    for (final e in repris) {
+      // `putIfAbsent` : un envoi lance depuis un ecran pendant la relecture ne
+      // doit pas etre ecrase par sa copie disque, plus ancienne.
+      _envois.putIfAbsent(e.tempId, () => e);
+    }
+    notifyListeners();
+    _auRetourDuReseau();
+  }
+
   /// Envois — en cours ou échoués — d'une conversation, du plus ancien au plus
   /// récent. C'est ce que l'écran ajoute au fil sous forme de bulles.
   List<EnvoiMedia> pour(String convId) {
@@ -73,6 +119,9 @@ class EnvoiMediaStore extends ChangeNotifier {
   /// la seule preuve que le message existe vraiment.
   void terminer(String tempId) {
     _attentesEcho.remove(tempId)?.cancel();
+    // Les octets ne servent plus a rien : ni le disque ni la memoire ne doivent
+    // les garder.
+    unawaited(EnvoisPersistes.oublier(tempId));
     // La notification disparaît : la preuve de l'envoi est la bulle dans la
     // conversation, pas une ligne « terminé » à balayer.
     CentreTransferts.instance.reussir(tempId);
@@ -201,6 +250,9 @@ class EnvoiMediaStore extends ChangeNotifier {
     envoi.progressionFichier = 0;
     CentreTransferts.instance.reussir(envoi.tempId);
     notifyListeners();
+    // Sur disque : le systeme peut tuer l'application avant le retour du reseau,
+    // et c'est le cas NORMAL quand elle passe en arriere-plan.
+    unawaited(EnvoisPersistes.enregistrer(envoi));
   }
 
   /// Le reseau est revenu : tout ce qui attendait repart, dans l'ordre.
@@ -278,6 +330,9 @@ class EnvoiMediaStore extends ChangeNotifier {
     // croire qu'il est parti.
     CentreTransferts.instance.echouer(envoi.tempId);
     notifyListeners();
+    // Un echec attend une decision de l'utilisateur, qui peut ne venir que
+    // demain : lui aussi doit survivre a la fermeture de l'application.
+    unawaited(EnvoisPersistes.enregistrer(envoi));
   }
 
   /// Borne l'attente de l'écho du serveur pour un envoi parti par WebSocket.
