@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:file_picker/file_picker.dart';
 import '../../core/galerie.dart';
+import '../../core/plafond_media.dart';
 import '../../theme/alanya_theme.dart';
 
 /// Résultat de la sélection de médias.
@@ -217,8 +218,16 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
       );
       if (result == null || result.files.isEmpty || !mounted) return;
       final results = <MediaPickResult>[];
+      final tropGros = <String>[];
       for (final file in result.files) {
         if (file.bytes == null) continue;
+        // ⚠️ MÊME PLAFOND QUE LES DOCUMENTS, quinze lignes plus bas. Ce chemin
+        // ne sert que si l'accès à la galerie est refusé, ce qui l'avait fait
+        // oublier — mais il envoie exactement les mêmes fichiers.
+        if (depassePlafondMedia(file.bytes!.length)) {
+          tropGros.add(file.name);
+          continue;
+        }
         results.add(MediaPickResult(
           bytes: file.bytes!,
           fileName: file.name,
@@ -226,7 +235,13 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
           path: file.path,
         ));
       }
-      if (mounted && results.isNotEmpty) navigator.pop(results);
+      if (!mounted) return;
+      final avis = messageMediasEcartes(tropGros);
+      if (avis != null) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(avis)));
+      }
+      if (results.isNotEmpty) navigator.pop(results);
     } catch (_) {}
   }
 
@@ -248,10 +263,10 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
     final tropGros = <String>[];
     for (final file in result.files) {
       if (file.bytes == null) continue;
-      // ⚠️ Plafond du serveur (MEDIA_MAX_SIZE_MB, 50 par défaut) : sans ce
-      // contrôle, un fichier de 200 Mo était intégralement TÉLÉVERSÉ avant de
-      // se faire refuser par un 413. On le dit avant, en nommant le fichier.
-      if (file.bytes!.length > _maxOctets) {
+      // Le plafond et le message vivent dans `core/plafond_media.dart` : ce
+      // contrôle n'existait qu'ICI, et les trois autres chemins de sélection
+      // laissaient tout passer.
+      if (depassePlafondMedia(file.bytes!.length)) {
         tropGros.add(file.name);
         continue;
       }
@@ -263,18 +278,12 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
       ));
     }
     if (!mounted) return;
-    if (tropGros.isNotEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(tropGros.length == 1
-            ? "« ${tropGros.first} » dépasse 50 Mo et n'a pas été joint"
-            : "${tropGros.length} fichiers dépassent 50 Mo et n'ont pas été joints"),
-      ));
+    final avis = messageMediasEcartes(tropGros);
+    if (avis != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(avis)));
     }
     if (results.isNotEmpty) Navigator.pop(context, results);
   }
-
-  /// Taille maximale acceptée par le serveur, en octets.
-  static const int _maxOctets = 50 * 1024 * 1024;
 
   // ══ CONTACT — fiche de contact partagée (type de message CONTACT) ══
   //

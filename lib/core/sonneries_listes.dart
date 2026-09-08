@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../features/contacts/contact_lists_repository.dart';
 import '../models/contact_list.dart';
 import 'api_client.dart';
+import 'sonneries_livrees.dart';
 import 'texte_recherche.dart';
 import 'token_storage.dart';
 
@@ -102,21 +103,57 @@ class SonneriesDeListes extends ChangeNotifier {
     return candidates.isEmpty ? null : candidates.first;
   }
 
-  /// L'URL JOUABLE de la sonnerie de cet appelant, ou `null` pour la défaut.
+  /// Ce qu'il faut jouer pour cet appelant, ou `null` pour la sonnerie défaut.
   ///
-  /// ⚠️ Le catalogue rend une URL RELATIVE (`/api/media/<id>`) et la route des
-  /// médias exige un jeton, que le lecteur audio ne sait pas joindre en en-tête.
-  /// Il passe donc en paramètre, comme partout ailleurs dans l'application.
-  /// Sans cela, la lecture rendrait un silence sans erreur — le pire des échecs.
-  Future<String?> urlPourAppelant({String? callerId, String? numero}) async {
+  /// 🔴 DEUX FORMES, ET C'EST TOUT LE SUJET. Le champ `ringtone` d'une liste
+  /// porte soit une URL de média importé, soit le NOM D'UN FICHIER LIVRÉ avec
+  /// l'application — ce qu'utilisent les quatre listes créées d'office.
+  ///
+  /// Cette méthode ne connaissait que la première : elle collait l'adresse de
+  /// l'API devant la valeur, quelle qu'elle soit. « liste-bureau.mp3 » devenait
+  /// `https://…comliste-bureau.mp3`, sans même la barre oblique. Les quatre
+  /// sonneries livrées ne pouvaient donc pas sonner sur Android.
+  ///
+  /// ⚠️ Une forme INCONNUE rend `null` plutôt qu'une URL construite au hasard :
+  /// mieux vaut la sonnerie par défaut, qui s'entend, qu'un appel muet.
+  ///
+  /// ⚠️ Le catalogue importé rend une URL RELATIVE (`/api/media/<id>`) et la
+  /// route des médias exige un jeton, que le lecteur audio ne sait pas joindre
+  /// en en-tête. Il passe donc en paramètre, comme partout ailleurs.
+  Future<SonnerieAJouer?> sonneriePourAppelant({
+    String? callerId,
+    String? numero,
+  }) async {
     final liste = listePourAppelant(callerId: callerId, numero: numero);
-    final relative = liste?.ringtone;
-    if (relative == null || relative.isEmpty) return null;
-    if (relative.startsWith("http://") || relative.startsWith("https://")) {
-      return relative;
+    final brut = liste?.ringtone;
+    if (brut == null || brut.isEmpty) return null;
+
+    // Sonnerie livrée : aucun réseau, aucun jeton, elle est dans le paquet.
+    final asset = assetDeSonnerie(brut);
+    if (asset != null) return SonnerieAJouer.livree(asset);
+
+    if (brut.startsWith("http://") || brut.startsWith("https://")) {
+      return SonnerieAJouer.distante(brut);
     }
+    // Seule la forme absolue `/api/media/<id>` se complète en URL. Tout le
+    // reste est inconnu, et le silence serait la pire des réponses.
+    if (!brut.startsWith("/")) return null;
+
     final jeton = await _jetons.accessToken;
     if (jeton == null || jeton.isEmpty) return null;
-    return "${_api.baseUrl}$relative?token=$jeton";
+    return SonnerieAJouer.distante("${_api.baseUrl}$brut?token=$jeton");
   }
+}
+
+/// Ce qu'il faut jouer, et d'où : du paquet de l'application, ou du réseau.
+///
+/// Deux natures qu'on ne peut pas confondre — l'une se joue instantanément,
+/// l'autre demande un téléchargement et peut échouer.
+class SonnerieAJouer {
+  const SonnerieAJouer.livree(this.valeur) : estLivree = true;
+  const SonnerieAJouer.distante(this.valeur) : estLivree = false;
+
+  /// Vrai : [valeur] est un chemin d'asset. Faux : c'est une URL complète.
+  final bool estLivree;
+  final String valeur;
 }

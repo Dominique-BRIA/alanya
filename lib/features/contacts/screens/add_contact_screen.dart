@@ -8,8 +8,11 @@ import '../../../models/contact.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../../../core/alanya_id_formatter.dart';
+import '../../../core/sonneries_listes.dart';
+import '../../../models/contact_list.dart';
 import '../../chat/chat_repository.dart';
 import '../../chat/screens/chat_screen.dart';
+import '../contact_lists_repository.dart';
 import '../contacts_repository.dart';
 
 /// Recherche par Alanya ID (6 chiffres) puis ajout au répertoire.
@@ -32,6 +35,16 @@ class _AddContactScreenState extends State<AddContactScreen> {
   UserSearchResult? _result;
   String? _error;
 
+  /// Les listes du compte, pour ranger le contact dès son ajout.
+  ///
+  /// ⚠️ CHARGÉES EN SILENCE, ET LEUR ABSENCE NE BLOQUE RIEN. Ranger dans une
+  /// liste est un confort ; ajouter un contact est le but de l'écran. Un
+  /// catalogue injoignable fait disparaître le choix, rien d'autre.
+  List<ListeContacts> _listes = const [];
+
+  /// La liste choisie, ou `null` pour n'en choisir aucune.
+  String? _listeChoisie;
+
   @override
   void initState() {
     super.initState();
@@ -42,6 +55,67 @@ class _AddContactScreenState extends State<AddContactScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _search();
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Ici et non dans `initState` : lire un Provider y est trop tôt. Le drapeau
+    // évite de recharger à chaque changement de dépendance.
+    if (_listesDemandees) return;
+    _listesDemandees = true;
+    _chargerListes();
+  }
+
+  bool _listesDemandees = false;
+
+  Future<void> _chargerListes() async {
+    try {
+      final l = await context.read<ContactListsRepository>().list();
+      if (mounted) setState(() => _listes = l);
+    } catch (_) {
+      // Silencieux : voir la note sur `_listes`.
+    }
+  }
+
+  /// Range le nouveau contact dans la liste choisie, s'il y en a une.
+  ///
+  /// ⚠️ `memberIds` REMPLACE l'ensemble des membres, il n'ajoute pas — c'est le
+  /// contrat du serveur, rappelé par `ContactListsRepository.modifier`. Il faut
+  /// donc RELIRE la liste juste avant, et renvoyer l'ensemble complet. Envoyer
+  /// le seul nouvel identifiant viderait la liste de tous ses autres membres.
+  ///
+  /// ⚠️ Entre cette relecture et l'écriture, un autre appareil pourrait modifier
+  /// la même liste : sa modification serait alors perdue. La fenêtre se compte
+  /// en millisecondes et le contrat du serveur ne permet pas de faire mieux —
+  /// c'est un remplacement, pas un ajout.
+  ///
+  /// Rend `true` si le rangement a eu lieu (ou n'était pas demandé).
+  Future<bool> _rangerDansListe(String userId) async {
+    final id = _listeChoisie;
+    if (id == null) return true;
+    try {
+      final depot = context.read<ContactListsRepository>();
+      final fraiches = await depot.list();
+      ListeContacts? cible;
+      for (final l in fraiches) {
+        if (l.id == id) cible = l;
+      }
+      if (cible == null) return false;
+
+      final membres = <String>{...cible.members.map((m) => m.id), userId};
+      final res = await depot.modifier(id, membreIds: membres.toList());
+      if (!mounted) return true;
+      // ⚠️ Le cache en mémoire décide de la SONNERIE d'un appel entrant : sans
+      // cette mise à jour, le contact qu'on vient de ranger n'aurait la
+      // sonnerie de sa liste qu'au prochain démarrage de l'application.
+      context.read<SonneriesDeListes>().alimenter([
+        for (final l in fraiches) l.id == id ? res.liste : l,
+      ]);
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   @override
@@ -99,8 +173,14 @@ class _AddContactScreenState extends State<AddContactScreen> {
             user.publicNumber,
             alias: alias.isEmpty ? null : alias,
           );
+      final range = await _rangerDansListe(user.id);
       if (!mounted) return;
-      showAppSnackBar(tr(context, 'add_done'));
+      // ⚠️ DEUX MESSAGES DISTINCTS, parce que le contact EST ajouté même si le
+      // rangement échoue. Un « ajouté » seul laisserait croire que la liste a
+      // été renseignée ; une erreur seule laisserait croire que rien n'a été
+      // fait, et l'utilisateur recommencerait pour rien.
+      showAppSnackBar(
+          range ? tr(context, 'add_done') : tr(context, 'list_add_failed'));
       Navigator.of(context).pop(true); // signale que la liste doit se recharger
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -124,7 +204,15 @@ class _AddContactScreenState extends State<AddContactScreen> {
       if (!user.alreadyContact) {
         await contacts.add(user.publicNumber,
             alias: alias.isEmpty ? null : alias);
+        final range = await _rangerDansListe(user.id);
+        if (mounted && !range) {
+          showAppSnackBar(tr(context, 'list_add_failed'));
+        }
       }
+      // ⚠️ Garde ANTÉRIEURE à la lecture du Provider, pas après. L'ajout du
+      // contact peut avoir duré assez pour que l'écran soit quitté : `read` sur
+      // un contexte démonté lève, et l'erreur ne dirait rien d'utile.
+      if (!mounted) return;
       final convId =
           await context.read<ChatRepository>().createDirect(user.publicNumber);
       if (!mounted) return;
@@ -280,6 +368,35 @@ class _AddContactScreenState extends State<AddContactScreen> {
                   prefixIcon: const Icon(Icons.badge_outlined),
                 ),
               ),
+              // --- Ranger directement dans une liste ---
+              //
+              // ⚠️ N'APPARAÎT QUE S'IL EXISTE AU MOINS UNE LISTE. Un choix sans
+              // option laisserait croire à une fonctionnalité cassée. Le cas est
+              // rare — tout compte en reçoit quatre d'office — mais existe pour
+              // qui les a toutes supprimées.
+              if (_listes.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String?>(
+                  initialValue: _listeChoisie,
+                  isExpanded: true,
+                  decoration: InputDecoration(
+                    labelText: tr(context, 'list_add_to'),
+                    prefixIcon: const Icon(Icons.folder_outlined),
+                  ),
+                  items: [
+                    DropdownMenuItem<String?>(
+                      value: null,
+                      child: Text(tr(context, 'list_none')),
+                    ),
+                    ..._listes.map((l) => DropdownMenuItem<String?>(
+                          value: l.id,
+                          child: Text(l.name,
+                              maxLines: 1, overflow: TextOverflow.ellipsis),
+                        )),
+                  ],
+                  onChanged: (v) => setState(() => _listeChoisie = v),
+                ),
+              ],
             ],
             const SizedBox(height: 16),
             ElevatedButton(

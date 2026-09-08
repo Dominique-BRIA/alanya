@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
 
 import '../../../core/compression_image.dart';
+import '../../../core/plafond_media.dart';
 import '../../../core/galerie.dart';
 import '../../../theme/alanya_theme.dart';
 import 'apercu_selection_screen.dart';
@@ -235,6 +236,7 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
     if (_choisis.isEmpty || _preparation) return;
     setState(() => _preparation = true);
     final resultats = <MediaPickResult>[];
+    final tropGros = <String>[];
     for (final asset in _choisis) {
       try {
         final octets = await asset.originBytes;
@@ -257,6 +259,18 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
           nomFichier: asset.title ?? 'media_${asset.id}',
           mimeType: _mime(asset),
         );
+        /*
+         * ⚠️ LE PLAFOND SE MESURE APRÈS COMPRESSION, jamais avant.
+         *
+         * Une photo de 12 Mo sortie du capteur en fait 400 Ko une fois réduite :
+         * la refuser sur sa taille d'origine interdirait d'envoyer des photos
+         * parfaitement acceptables. Ce contrôle vise donc ce qui PART
+         * réellement — en pratique, les vidéos, que rien ne compresse ici.
+         */
+        if (depassePlafondMedia(compresse.octets.length)) {
+          tropGros.add(compresse.nomFichier);
+          continue;
+        }
         resultats.add(MediaPickResult(
           bytes: compresse.octets,
           fileName: compresse.nomFichier,
@@ -279,6 +293,10 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
       }
     }
     if (!mounted) return;
+    final avis = messageMediasEcartes(tropGros);
+    if (avis != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(avis)));
+    }
     if (resultats.isEmpty) {
       setState(() => _preparation = false);
       ScaffoldMessenger.of(context).showSnackBar(

@@ -1683,12 +1683,20 @@ class CallController extends ChangeNotifier {
           // personnalisée » : un appel ne doit jamais attendre le réseau pour
           // sonner. Le cache est en mémoire, donc la réponse est immédiate dans
           // le cas normal ; la borne ne couvre que la lecture du jeton.
-          final urlListe = await _sonneriesListes
-              .urlPourAppelant(callerId: incoming!.callerId)
+          final sonnerieListe = await _sonneriesListes
+              .sonneriePourAppelant(callerId: incoming!.callerId)
               .timeout(const Duration(milliseconds: 400),
                   onTimeout: () => null)
               .catchError((_) => null);
-          RingtoneService.instance.startIncoming(url: urlListe);
+          // Livrée : elle se joue depuis le paquet, sans réseau ni jeton.
+          RingtoneService.instance.startIncoming(
+            asset: sonnerieListe != null && sonnerieListe.estLivree
+                ? sonnerieListe.valeur
+                : null,
+            url: sonnerieListe != null && !sonnerieListe.estLivree
+                ? sonnerieListe.valeur
+                : null,
+          );
         } else {
           traceAppel("sonnerie interne ignorée — le natif sonne déjà");
         }

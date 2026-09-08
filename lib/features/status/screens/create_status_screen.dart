@@ -3,6 +3,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/app_snackbar.dart';
+import '../../../core/plafond_media.dart';
 import '../../../core/compression_image.dart' show imageBordMax, imageQualite;
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/media/media_picker_sheet.dart' show MediaPickResult;
@@ -119,6 +120,17 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
 
     final octets = await fichier.readAsBytes();
     if (!mounted) return;
+    /*
+     * ⚠️ LA DURÉE NE BORNE PAS LE POIDS. `maxDuration` coupe à une minute, mais
+     * une minute filmée en haute définition dépasse largement le plafond du
+     * serveur sur un téléphone récent. Le refus arrivait donc après le
+     * téléversement complet, sur un 413 que rien n'annonçait.
+     */
+    if (depassePlafondMedia(octets.length)) {
+      _snack("Cette vidéo dépasse $plafondMediaMo Mo et ne peut pas être publiée");
+      _refermeSiEntreeMedia();
+      return;
+    }
     await _editerPuisPublier([
       MediaPickResult(
         bytes: octets,

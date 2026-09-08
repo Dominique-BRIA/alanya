@@ -86,7 +86,19 @@ class RingtoneService {
   /// (base + jeton) par `SonneriesDeListes`. Absente ou injouable, on retombe
   /// sur l'asset embarqué : une sonnerie personnalisée qui ne se télécharge pas
   /// ne doit jamais produire un appel silencieux.
-  Future<void> startIncoming({String? url}) {
+  ///
+  /// [asset] sert le même besoin pour une sonnerie LIVRÉE avec l'application —
+  /// celles des quatre listes créées d'office. ⚠️ Ne pas la faire passer par
+  /// [url] : elle n'est sur AUCUN serveur, et la route des médias répondrait 404
+  /// après un aller-retour réseau inutile, pour finir par le repli. Une sonnerie
+  /// qui est déjà dans le paquet doit se jouer sans toucher au réseau.
+  ///
+  /// [asset] l'emporte quand les deux sont fournis : le local est toujours plus
+  /// sûr et plus rapide que le distant.
+  Future<void> startIncoming({String? url, String? asset}) {
+    if (asset != null && asset.isNotEmpty) {
+      return _play(asset, hautParleur: true);
+    }
     if (url == null || url.isEmpty) {
       return _play(_incomingAsset, hautParleur: true);
     }

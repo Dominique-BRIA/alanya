@@ -9,6 +9,7 @@ import '../../../core/texte_recherche.dart';
 import '../../../models/contact.dart';
 import '../../../models/contact_list.dart';
 import '../../../core/sonneries_listes.dart';
+import '../../../core/sonneries_livrees.dart';
 import '../../../models/sonnerie.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
@@ -271,10 +272,29 @@ class _EditeurListeState extends State<_EditeurListe> {
   /// Teinte retenue, parmi les cinq du contrat partagé avec le web.
   late String _teinte;
 
-  /// Sonnerie retenue — l'URL `/api/media/<id>`, ou `null` pour celle par
-  /// défaut. C'est la MÊME valeur que le catalogue porte, comparable telle
-  /// quelle : ne jamais la transformer avant de l'envoyer.
+  /// Sonnerie retenue — soit l'URL `/api/media/<id>` d'une sonnerie importée,
+  /// soit le NOM d'un fichier livré (« liste-bureau.mp3 »). C'est la MÊME valeur
+  /// que la base porte, comparable telle quelle : ne jamais la transformer avant
+  /// de l'envoyer.
   String? _sonnerie;
+
+  /// La sonnerie retenue si elle figure encore parmi les choix proposés.
+  ///
+  /// 🐛 CE TEST NE REGARDAIT QUE LE CATALOGUE IMPORTÉ. Les quatre listes créées
+  /// d'office portent une sonnerie LIVRÉE, qui n'y est par définition jamais :
+  /// ouvrir « Bureau » affichait donc « par défaut » alors qu'elle a bien une
+  /// sonnerie. Rien n'était perdu — la valeur repartait intacte tant qu'on n'y
+  /// touchait pas — mais l'écran affirmait le contraire de la vérité, et le seul
+  /// moyen de la retrouver après l'avoir changée n'existait pas.
+  String? get _sonnerieProposee {
+    final v = _sonnerie;
+    if (v == null || v.isEmpty) return null;
+    if (libelleDeSonnerie(v) != null) return v;
+    if (_catalogue.any((s) => s.url == v)) return v;
+    // Retirée du catalogue depuis : on retombe sur « par défaut » plutôt que
+    // d'afficher un choix vide, et l'enregistrement la corrigera.
+    return null;
+  }
 
   /// Le catalogue de l'utilisateur, chargé une fois à l'ouverture.
   List<Sonnerie> _catalogue = const [];
@@ -554,12 +574,12 @@ class _EditeurListeState extends State<_EditeurListe> {
           ),
           // --- Sonnerie de la liste ---
           //
-          // ⚠️ N'APPARAÎT QUE SI LE CATALOGUE N'EST PAS VIDE. Proposer un choix
-          // sans option laisserait croire à une fonctionnalité cassée ; renvoyer
-          // vers l'import depuis ici mêlerait deux tâches. Le libellé de l'état
-          // vide, lui, dit où aller.
-          if (_catalogue.isNotEmpty)
-            Padding(
+          // ⚠️ TOUJOURS VISIBLE DÉSORMAIS. La rangée ne s'affichait que si le
+          // compte avait importé au moins une sonnerie — donc presque jamais, et
+          // surtout pas pour les quatre listes créées d'office, dont la sonnerie
+          // devenait alors invisible et impossible à retrouver. Les sonneries
+          // livrées étant toujours là, il y a toujours quelque chose à proposer.
+          Padding(
               padding: const EdgeInsets.fromLTRB(20, 2, 20, 6),
               child: Row(children: [
                 Text(tr(context, 'ringtone'),
@@ -570,17 +590,21 @@ class _EditeurListeState extends State<_EditeurListe> {
                   child: DropdownButtonHideUnderline(
                     child: DropdownButton<String?>(
                       isExpanded: true,
-                      value: _catalogue.any((s) => s.url == _sonnerie)
-                          ? _sonnerie
-                          // Une sonnerie retirée du catalogue depuis : on
-                          // retombe sur « par défaut » plutôt que d'afficher un
-                          // choix vide, et l'enregistrement la corrigera.
-                          : null,
+                      value: _sonnerieProposee,
                       items: [
                         DropdownMenuItem<String?>(
                           value: null,
                           child: Text(tr(context, 'default_value')),
                         ),
+                        // Les livrées d'abord : ce sont celles que tout le monde
+                        // a, et celles des quatre listes créées d'office.
+                        ...sonneriesLivrees
+                            .map((s) => DropdownMenuItem<String?>(
+                                  value: s.fichier,
+                                  child: Text(s.libelle,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis),
+                                )),
                         ..._catalogue.map((s) => DropdownMenuItem<String?>(
                               value: s.url,
                               child: Text(s.label,
