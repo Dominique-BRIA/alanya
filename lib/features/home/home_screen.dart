@@ -56,6 +56,7 @@ import '../calls/screens/abandoned_clients_screen.dart';
 import '../meetings/meeting_controller.dart';
 import '../meetings/screens/meetings_screen.dart';
 import '../status/horodatage_statut.dart';
+import '../status/statuts_persistes.dart';
 import '../status/publication_statuts.dart';
 import '../status/screens/create_status_screen.dart';
 import '../status/screens/status_viewer_screen.dart';
@@ -1987,6 +1988,9 @@ class _StatusTabState extends State<_StatusTab> {
   StatusFeed? _feed;
   bool _error = false;
 
+  /// Statuts qui attendent le réseau — voir [_compterAttente].
+  int _enAttente = 0;
+
   @override
   void initState() {
     super.initState();
@@ -1997,11 +2001,28 @@ class _StatusTabState extends State<_StatusTab> {
     PublicationStatuts.instance.surPublication = () {
       if (mounted) _load();
     };
+    // Un statut qui se met à attendre le réseau — ou qui repart — change le
+    // compte affiché, sans rien changer au fil lui-même.
+    PublicationStatuts.instance.surAttente = _compterAttente;
+    _compterAttente();
+  }
+
+  /// Combien de statuts attendent le réseau.
+  ///
+  /// ⚠️ UN COMPTE, PAS UNE VIGNETTE FANTÔME dans « Mon statut ». Un statut en
+  /// attente n'existe encore nulle part côté serveur : l'insérer dans le fil
+  /// obligerait à lui inventer un identifiant, une expiration et un compteur de
+  /// vues qu'il n'a pas. Un compte dit la même chose sans mentir sur ce qui
+  /// existe.
+  Future<void> _compterAttente() async {
+    final n = await StatutsPersistes.compter();
+    if (mounted && n != _enAttente) setState(() => _enAttente = n);
   }
 
   @override
   void dispose() {
     PublicationStatuts.instance.surPublication = null;
+    PublicationStatuts.instance.surAttente = null;
     super.dispose();
   }
 
@@ -2155,6 +2176,20 @@ class _StatusTabState extends State<_StatusTab> {
           child: ListView(
             children: [
               _myStatusTile(me),
+              // Ce qui attend encore le réseau. Absent quand il n'y a rien :
+              // un compteur à zéro n'apprend rien et occupe une ligne.
+              if (_enAttente > 0)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Row(children: [
+                    Icon(Icons.schedule, size: 15, color: muted),
+                    const SizedBox(width: 6),
+                    Text(
+                      tr(context, 'statut_en_attente_n', {'n': '$_enAttente'}),
+                      style: TextStyle(fontSize: 12.5, color: muted),
+                    ),
+                  ]),
+                ),
               if (_error)
                 Padding(
                   padding: const EdgeInsets.all(24),

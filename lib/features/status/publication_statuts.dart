@@ -1,13 +1,19 @@
 import 'dart:async';
+import 'dart:io' show SocketException;
+import 'dart:typed_data';
 
+import 'package:http/http.dart' show ClientException;
 import 'package:video_compress/video_compress.dart';
 
+import '../../core/api_client.dart';
 import '../../core/centre_transferts.dart';
+import '../../core/connectivity_service.dart';
 import '../../core/compression_video.dart';
 import '../../core/media_cache.dart';
 import '../media/media_repository.dart';
 import 'screens/editeur_media_statut_screen.dart' show MediaEdite;
 import 'status_repository.dart';
+import 'statuts_persistes.dart';
 
 /// PUBLIE LES STATUTS EN ARRIÈRE-PLAN.
 ///
@@ -48,6 +54,90 @@ class PublicationStatuts {
 
   /// Appelé après chaque publication réussie, pour rafraîchir la liste.
   void Function()? surPublication;
+
+  /// Appelé quand un statut se met à attendre le réseau, ou repart.
+  void Function()? surAttente;
+
+  MediaRepository? _media;
+  StatusRepository? _statuts;
+  ConnectivityService? _conn;
+  bool _restaure = false;
+  bool _reprise = false;
+
+  /// Branche le réseau et REPREND les statuts qui attendaient.
+  ///
+  /// 🔴 APPELÉ AU DÉMARRAGE DE L'APPLICATION. Sans lui, un statut relu du disque
+  /// ne repartirait jamais : la reprise a besoin des dépôts, et ceux-ci
+  /// n'arrivaient jusqu'ici qu'au moment où un écran publiait. Or après un
+  /// redémarrage, personne ne publie — c'est justement le cas à résoudre.
+  ///
+  /// ⚠️ Aucun `BuildContext` : ce sont des objets construits une fois dans
+  /// `main.dart`, comme pour `EnvoiMediaStore`.
+  Future<void> brancher({
+    required MediaRepository media,
+    required StatusRepository statuts,
+    required ConnectivityService conn,
+  }) async {
+    _media = media;
+    _statuts = statuts;
+    if (!identical(conn, _conn)) {
+      _conn?.removeListener(_auRetourDuReseau);
+      _conn = conn;
+      conn.addListener(_auRetourDuReseau);
+    }
+    if (_restaure) return;
+    _restaure = true;
+    _auRetourDuReseau();
+  }
+
+  /// L'ECHEC VIENT-IL DU RESEAU, ou le serveur a-t-il REFUSE ?
+  ///
+  /// ⚠️ `ApiException` ne signifie que « le serveur a répondu ≥400 » — c'est le
+  /// seul cas où `api_client` la lève. Une coupure remonte telle quelle. On ne
+  /// traite pas pour autant n'importe quelle exception comme une panne : une
+  /// erreur de programmation prise pour une coupure ferait réessayer sans fin.
+  bool _estPanneReseau(Object e) {
+    if (e is ApiException) return false;
+    return e is SocketException || e is ClientException || e is TimeoutException;
+  }
+
+  /// Le réseau est revenu : ce qui attendait repart, dans l'ordre.
+  void _auRetourDuReseau() {
+    final conn = _conn;
+    final media = _media;
+    final statuts = _statuts;
+    if (conn == null || media == null || statuts == null) return;
+    if (!conn.isOnline || _reprise) return;
+    _reprise = true;
+
+    _enfiler(() async {
+      try {
+        final attente = await StatutsPersistes.charger();
+        for (final s in attente) {
+          if (!conn.isOnline) break;
+          await _televerserEtDeclarer(
+            id: s.id,
+            octets: s.octets,
+            nom: s.nomFichier,
+            mime: s.mimeType,
+            durationMs: s.durationMs,
+            legende: s.legende,
+            mediaDeja: s.mediaId,
+            creeA: s.creeA,
+            media: media,
+            statuts: statuts,
+            // ⚠️ Pas de transcodage ici : les octets rangés sont ceux d'APRÈS.
+            // La progression occupe donc toute la barre, et non sa seconde
+            // moitié.
+            partTranscodage: 0,
+          );
+        }
+      } finally {
+        _reprise = false;
+      }
+    });
+    surAttente?.call();
+  }
 
   /// Publie un statut TEXTE, sans faire attendre l'écran.
   ///
@@ -142,17 +232,63 @@ class PublicationStatuts {
         }
       }
 
-      final envoye = await media.upload(
-        octets,
-        nom,
-        mime,
+      await _televerserEtDeclarer(
+        id: id,
+        octets: octets,
+        nom: nom,
+        mime: mime,
         durationMs: m.durationMs,
-        onProgress: (envoyes, total) {
-          if (total <= 0) return;
-          final part = envoyes / total;
-          centre.avancer(id, estVideo ? 0.5 + part * 0.5 : part);
-        },
+        legende: m.legende,
+        mediaDeja: null,
+        creeA: DateTime.now(),
+        media: media,
+        statuts: statuts,
+        partTranscodage: estVideo ? 0.5 : 0,
       );
+      return;
+    } catch (_) {
+      // Le transcodage a échoué : rien n'a encore quitté l'appareil, et ce n'est
+      // pas une affaire de réseau.
+      centre.echouer(id);
+      return;
+    }
+  }
+
+  /// Téléverse les octets puis déclare le statut. Utilisé au premier essai comme
+  /// à la reprise après une coupure.
+  ///
+  /// [mediaDeja] est renseigné quand le téléversement avait déjà abouti et que
+  /// seule la déclaration a échoué : les octets ne repartent alors pas.
+  Future<void> _televerserEtDeclarer({
+    required String id,
+    required Uint8List octets,
+    required String nom,
+    required String mime,
+    required int? durationMs,
+    required String? legende,
+    required String? mediaDeja,
+    required DateTime creeA,
+    required MediaRepository media,
+    required StatusRepository statuts,
+    required double partTranscodage,
+  }) async {
+    final centre = CentreTransferts.instance;
+    String? idMedia = mediaDeja;
+    try {
+      if (idMedia == null) {
+        final envoye = await media.upload(
+          octets,
+          nom,
+          mime,
+          durationMs: durationMs,
+          onProgress: (envoyes, total) {
+            if (total <= 0) return;
+            final part = envoyes / total;
+            centre.avancer(
+                id, partTranscodage + part * (1 - partTranscodage));
+          },
+        );
+        idMedia = envoye.id;
 
       /*
        * 🔴 LE CACHE EST SEMÉ AVEC LES OCTETS QU'ON A DÉJÀ EN MAIN.
@@ -168,23 +304,56 @@ class PublicationStatuts {
        * Une clé qui ne coïncide pas ne casse rien : elle ne sert simplement à
        * personne, et le téléchargement recommence.
        */
-      try {
-        await MediaCache.put(envoye.id, 'dat', octets);
-      } catch (_) {
-        // Un cache qui échoue ne doit pas faire échouer une publication.
+        try {
+          await MediaCache.put(idMedia, 'dat', octets);
+        } catch (_) {
+          // Un cache qui échoue ne doit pas faire échouer une publication.
+        }
       }
 
       await statuts.createMedia(
-        envoye.id,
+        idMedia,
         mime.startsWith('video/') ? 'VIDEO' : 'IMAGE',
-        legende: m.legende,
+        legende: legende,
       );
       centre.reussir(id);
+      await StatutsPersistes.oublier(id);
       surPublication?.call();
-    } catch (_) {
+    } catch (e) {
+      if (_estPanneReseau(e)) {
+        /*
+         * 🔴 PAS DE RÉSEAU N'EST PAS UN ÉCHEC — c'est une attente.
+         *
+         * L'écran marquait le transfert en échec : une ligne rouge dans la barre
+         * système, à balayer à la main, et la photo perdue. Il fallait la
+         * reprendre, la recadrer, la réannoter.
+         *
+         * ⚠️ `reussir` ET NON `echouer` : il ne s'agit pas de mentir sur le
+         * résultat, mais de RETIRER la notification sans la marquer en rouge.
+         * Elle reparaîtra d'elle-même quand le statut repartira.
+         *
+         * ⚠️ L'IDENTIFIANT DE MÉDIA EST RANGÉ S'IL A ÉTÉ OBTENU : les octets ne
+         * repartiront pas une seconde fois, et aucun média orphelin ne restera
+         * en base.
+         */
+        await StatutsPersistes.enregistrer(
+          id: id,
+          octets: octets,
+          nomFichier: nom,
+          mimeType: mime,
+          durationMs: durationMs,
+          legende: legende,
+          mediaId: idMedia,
+          creeA: creeA,
+        );
+        centre.reussir(id);
+        surAttente?.call();
+        return;
+      }
       // ⚠️ L'entrée est CONSERVÉE, marquée échouée : la retirer laisserait une
       // notification d'échec orpheline. Même règle que les transferts.
       centre.echouer(id);
+      await StatutsPersistes.oublier(id);
     }
   }
 }

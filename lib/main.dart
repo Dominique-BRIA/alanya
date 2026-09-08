@@ -36,6 +36,7 @@ import 'features/calls/enregistrements_repository.dart';
 import 'features/calls/plaintes_repository.dart';
 import 'features/chat/chat_repository.dart';
 import 'features/chat/envoi_media_store.dart';
+import 'features/status/publication_statuts.dart';
 import 'core/pays_repository.dart';
 import 'features/collegues/collegues_repository.dart';
 import 'features/entreprises/entreprises_repository.dart';
@@ -186,6 +187,18 @@ void main() async {
               media: ctx.read<MediaRepository>(),
               chat: ctx.read<ChatRepository>(),
               rt: ctx.read<RealtimeClient>(),
+              conn: ctx.read<ConnectivityService>(),
+            ),
+        ),
+        // Même raison, même `lazy: false` : ce publieur est un singleton que
+        // personne ne lit par le `context`, et les statuts relus du disque ne
+        // repartiraient jamais sans ce branchement.
+        Provider<PublicationStatuts>(
+          lazy: false,
+          create: (ctx) => PublicationStatuts.instance
+            ..brancher(
+              media: ctx.read<MediaRepository>(),
+              statuts: ctx.read<StatusRepository>(),
               conn: ctx.read<ConnectivityService>(),
             ),
         ),
