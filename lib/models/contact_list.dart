@@ -48,6 +48,7 @@ class ListeContacts {
     required this.name,
     required this.ringtone,
     required this.color,
+    required this.cle,
     required this.createdAt,
     required this.members,
   });
@@ -64,6 +65,24 @@ class ListeContacts {
   /// Couleur d'accent choisie par l'utilisateur, ou `null`.
   final String? color;
 
+  /// Clé de la liste créée d'office — `bureau`, `amis`, `confiance`,
+  /// `famille` — ou `null` pour une liste faite par l'utilisateur.
+  ///
+  /// ⚠️ UNE CLÉ ET NON UN BOOLÉEN, et ce n'est pas un détail de forme : le
+  /// serveur sème clé par clé, il doit savoir si « Bureau » existe déjà après
+  /// que l'utilisateur l'a renommée en « Travail ». Le nom ne peut donc pas
+  /// servir d'identité.
+  ///
+  /// Elle ne se SUPPRIME pas. Elle se renomme, se recolore et change de
+  /// sonnerie comme n'importe quelle autre — ne verrouiller que la suppression.
+  /// ⚠️ Masquer le bouton n'est qu'un confort d'affichage : c'est le serveur
+  /// qui refuse (409 `LISTE_PAR_DEFAUT`, un état et non un droit), y compris à
+  /// un APK plus ancien que ce champ.
+  final String? cle;
+
+  /// Vrai pour les quatre listes semées avec le compte.
+  bool get estParDefaut => cle != null;
+
   final DateTime createdAt;
   final List<MembreDeListe> members;
 
@@ -72,6 +91,9 @@ class ListeContacts {
         name: j["name"] as String? ?? "",
         ringtone: j["ringtone"] as String?,
         color: j["color"] as String?,
+        // Repli sur `null` : un serveur antérieur à ce champ laisse tout
+        // supprimable, ce qui est son comportement d'alors.
+        cle: j["cle"] as String?,
         // ⚠️ Repli sur MAINTENANT plutôt que de lever : une date illisible ne
         // doit pas faire disparaître une liste que l'utilisateur voit dans son
         // compte. Elle ne sert qu'à ordonner.

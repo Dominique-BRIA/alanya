@@ -244,7 +244,15 @@ class _ContactListsScreenState extends State<ContactListsScreen> {
         },
         itemBuilder: (_) => [
           PopupMenuItem(value: "editer", child: Text(tr(context, 'edit'))),
-          PopupMenuItem(value: "supprimer", child: Text(tr(context, 'delete'))),
+          // Les quatre listes d'origine ne se suppriment pas. Le serveur refuse
+          // de toute façon (409 `LISTE_PAR_DEFAUT`) : cacher l'entrée évite
+          // d'offrir un geste qui ne finirait qu'en message d'erreur.
+          //
+          // ⚠️ SEULE LA SUPPRESSION EST MASQUÉE. « Modifier » reste offert :
+          // ces listes se renomment, se recolorent et changent de sonnerie
+          // comme les autres — c'est la clé, pas le nom, qui les identifie.
+          if (!l.estParDefaut)
+            PopupMenuItem(value: "supprimer", child: Text(tr(context, 'delete'))),
         ],
       ),
     );
@@ -498,6 +506,11 @@ class _EditeurListeState extends State<_EditeurListe> {
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
             child: TextField(
               controller: _nomCtrl,
+              // ⚠️ LE NOM D'UNE LISTE D'ORIGINE S'ÉDITE, lui aussi. Verrouiller
+              // ce champ pour les quatre listes semées serait inventer une
+              // règle que le serveur n'applique pas : il n'y refuse QUE la
+              // suppression. Et c'est `cle`, pas le nom, qui les identifie —
+              // renommer « Bureau » en « Travail » ne casse rien.
               textCapitalization: TextCapitalization.words,
               decoration: InputDecoration(
                 labelText: tr(context, 'list_name'),
