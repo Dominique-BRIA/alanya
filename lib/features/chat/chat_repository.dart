@@ -46,16 +46,29 @@ class ChatRepository {
   /// ⚠️ SEUL L'IDENTIFIANT PART. L'aperçu (texte, image, couleur) est recopié
   /// par le serveur après contrôle de visibilité — sans quoi n'importe quel
   /// client pourrait fabriquer une citation d'un statut qu'il n'a jamais vu.
+  /// [tempId] : l'identifiant que la file d'envois donne à ce message.
+  ///
+  /// 🔴 SANS LUI, UN REJEU CRÉE UN DOUBLON. `OutboxStore` ne retire son entrée
+  /// qu'une fois la réponse reçue : si la coupure tombe APRÈS que le serveur a
+  /// écrit le message mais AVANT que la réponse n'arrive, l'envoi est compté
+  /// comme échoué et rejoué — le message part alors deux fois. Transmis, cet
+  /// identifiant permet au serveur de reconnaître le rejeu et de renvoyer le
+  /// message d'origine au lieu d'en écrire un second.
+  ///
+  /// ⚠️ Un serveur plus ancien l'ignore simplement : le champ est facultatif
+  /// des deux côtés, et son absence ramène au comportement d'avant.
   Future<Message> sendText(String convId, String content,
       {String? replyToId,
       List<Map<String, String>>? mentions,
-      String? statutCite}) async {
+      String? statutCite,
+      String? tempId}) async {
     final data = await _api.post("/api/conversations/$convId/messages", {
       "content": content,
       "type": "TEXT",
       if (replyToId != null) "replyToId": replyToId,
       if (statutCite != null) "statutCite": statutCite,
       if (mentions != null && mentions.isNotEmpty) "mentions": mentions,
+      if (tempId != null) "tempId": tempId,
     });
     return Message.fromJson(data);
   }
