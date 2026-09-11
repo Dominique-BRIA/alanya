@@ -54,6 +54,32 @@ const sonneriesLivrees = <SonnerieLivree>[
   SonnerieLivree("incoming_ring.mp3", "Sonnerie Alanya"),
   SonnerieLivree("outgoing_ring.mp3", "Tonalité Alanya"),
   SonnerieLivree("notification.mp3", "Notification Alanya"),
+  // Le catalogue livré, ajouté le 11/09/2026 : huit sonneries d'appel et dix
+  // sons courts de notification. Avant, choisir « une autre sonnerie » voulait
+  // dire importer un fichier depuis son téléphone — un catalogue vide ne se
+  // parcourt pas.
+  //
+  // ⚠️ FORMAT OGG, ET C'EST VOULU : à qualité égale il pèse la moitié d'un MP3,
+  // et Android le lit nativement. Voir la note de `STAGE-WEB` : Safari ne sait
+  // pas le lire, ces entrées ne sont donc pas proposées au web.
+  SonnerieLivree("sonnerie-1.ogg", "Sonnerie 1"),
+  SonnerieLivree("sonnerie-2.ogg", "Sonnerie 2"),
+  SonnerieLivree("sonnerie-3.ogg", "Sonnerie 3"),
+  SonnerieLivree("sonnerie-4.ogg", "Sonnerie 4"),
+  SonnerieLivree("sonnerie-5.ogg", "Sonnerie 5"),
+  SonnerieLivree("sonnerie-6.ogg", "Sonnerie 6"),
+  SonnerieLivree("sonnerie-7.ogg", "Sonnerie 7"),
+  SonnerieLivree("sonnerie-8.ogg", "Sonnerie 8"),
+  SonnerieLivree("notif-blip.ogg", "Bip"),
+  SonnerieLivree("notif-bloom.ogg", "Éclosion"),
+  SonnerieLivree("notif-chime.ogg", "Carillon"),
+  SonnerieLivree("notif-drop.ogg", "Goutte"),
+  SonnerieLivree("notif-duo.ogg", "Duo"),
+  SonnerieLivree("notif-ping.ogg", "Ping"),
+  SonnerieLivree("notif-pop.ogg", "Pop"),
+  SonnerieLivree("notif-tap.ogg", "Tape"),
+  SonnerieLivree("notif-tick.ogg", "Tic"),
+  SonnerieLivree("notif-trio.ogg", "Trio"),
 ];
 
 /// Le chemin d'asset correspondant à [valeur], ou `null` si ce n'en est pas une.
