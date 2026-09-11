@@ -56,6 +56,7 @@ import '../../contacts/contacts_repository.dart';
 import '../../contacts/screens/contact_info_screen.dart';
 import '../../group/screens/group_info_screen.dart';
 import '../../media/media_repository.dart';
+import '../../settings/screens/translation_screen.dart';
 import '../chat_repository.dart';
 import '../envoi_media.dart';
 import '../envoi_media_store.dart';
@@ -3510,6 +3511,21 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
+  /// Réglages ▸ Traduction, ouvert depuis la conversation.
+  ///
+  /// Au retour, la passe automatique reprend : une langue qu'on vient
+  /// d'installer, ou la traduction automatique qu'on vient d'activer, doit se
+  /// voir tout de suite sur les messages déjà affichés — sans attendre le
+  /// prochain message reçu. La passe ne télécharge rien et saute ce qui est
+  /// déjà traduit.
+  Future<void> _openTranslation() async {
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const TranslationScreen()));
+    if (!mounted) return;
+    _traduitAutomatiquement();
+  }
+
   // ══════════════════════════════════════════════
   // APPBAR
   // ══════════════════════════════════════════════
@@ -3576,11 +3592,20 @@ class _ChatScreenState extends State<ChatScreen>
         ]),
       ),
       actions: [
-        IconButton(
-            tooltip: "Rechercher",
-            icon: const Icon(Icons.search),
-            onPressed: _openSearch),
-        if (!widget.isGroup) ...[
+        // Avec une personne, la place de la loupe revient à la traduction :
+        // la recherche descend dans le menu ⋮ plus bas, elle n'est pas perdue.
+        // Un groupe garde sa loupe — il n'a pas les deux boutons d'appel, la
+        // barre y a de la place.
+        if (widget.isGroup)
+          IconButton(
+              tooltip: "Rechercher",
+              icon: const Icon(Icons.search),
+              onPressed: _openSearch)
+        else ...[
+          IconButton(
+              tooltip: tr(context, 'translated'),
+              icon: const Icon(Icons.translate),
+              onPressed: _openTranslation),
           IconButton(
               tooltip: "Appel vidéo",
               icon: const Icon(Icons.videocam),
@@ -3594,9 +3619,21 @@ class _ChatScreenState extends State<ChatScreen>
           tooltip: "Plus",
           icon: const Icon(Icons.more_vert),
           onSelected: (v) {
+            if (v == 'search') _openSearch();
             if (v == 'disappearing') _showDisappearingDialog();
           },
           itemBuilder: (_) => [
+            if (!widget.isGroup)
+              PopupMenuItem(
+                value: 'search',
+                child: Row(
+                  children: [
+                    Icon(Icons.search, size: 20, color: _accent),
+                    const SizedBox(width: 12),
+                    Expanded(child: Text(tr(context, 'search'))),
+                  ],
+                ),
+              ),
             PopupMenuItem(
               value: 'disappearing',
               child: Row(children: [
