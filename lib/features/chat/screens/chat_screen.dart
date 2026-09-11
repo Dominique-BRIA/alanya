@@ -44,6 +44,7 @@ import '../../../models/conversation.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/auth_network_image.dart';
 import '../../../widgets/avatar_circle.dart';
+import '../../../widgets/choix_langue_interlocuteur.dart';
 import '../../../widgets/contact_share_sheet.dart';
 import '../../../widgets/dialogues_traduction.dart';
 import '../../../widgets/motif_background.dart';
@@ -4829,7 +4830,20 @@ class _ChatScreenState extends State<ChatScreen>
   /// rien.
   String? _langueManquante;
 
-  /// Le bandeau qui propose d'installer la langue manquante.
+  /// La langue de l'interlocuteur était-elle DÉJÀ fixée quand la passe a buté ?
+  ///
+  /// Ce qui manque n'est alors plus la langue, mais le paquet : proposer de
+  /// « fixer la langue » à quelqu'un qui vient de le faire serait une boucle.
+  /// Le bandeau repasse dans ce cas à sa proposition d'installation.
+  bool _langueManquanteFixee = false;
+
+  /// Le bandeau affiché quand la traduction automatique ne peut pas travailler.
+  ///
+  /// 🔴 IL INVITE À FIXER LA LANGUE, PAS À TÉLÉCHARGER — demande du user du
+  /// 11/09/2026. La langue devinée sur quelques mots est souvent fausse, et
+  /// installer le mauvais paquet coûte des dizaines de mégaoctets pour rien.
+  /// Dire de qui l'on parle règle les deux : le paquet juste s'installe dans la
+  /// foulée, par le même chemin que la fiche du contact.
   ///
   /// Un geste, pas une notification : le téléchargement reste déclenché par
   /// l'utilisateur, avec la confirmation habituelle qui annonce le poids.
@@ -4837,6 +4851,32 @@ class _ChatScreenState extends State<ChatScreen>
     final langue = _langueManquante;
     if (langue == null || !TraductionAuto.instance.activee) {
       return const SizedBox.shrink();
+    }
+    // Un groupe n'a pas UN interlocuteur : plusieurs personnes y écrivent, et
+    // `_langueManquante` est une langue, pas quelqu'un. L'ancienne proposition
+    // d'installation y reste donc la bonne.
+    final uid = widget.otherUserId;
+    if (!widget.isGroup && uid != null && !_langueManquanteFixee) {
+      return Material(
+        color: AlanyaColors.gold.withValues(alpha: 0.18),
+        child: InkWell(
+          onTap: _fixeLangueInterlocuteur,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+            child: Row(children: [
+              Icon(Icons.translate, size: 16, color: _iconNeutral),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  tr(context, 'chat_fix_language', {'nom': widget.title}),
+                  style: TextStyle(fontSize: 12.5, color: _iconNeutral),
+                ),
+              ),
+              Icon(Icons.chevron_right, size: 18, color: _iconNeutral),
+            ]),
+          ),
+        ),
+      );
     }
     return Material(
       color: AlanyaColors.gold.withValues(alpha: 0.18),
@@ -4860,6 +4900,32 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
+  /// Ouvre la liste des langues pour l'interlocuteur, depuis le bandeau.
+  ///
+  /// Même chemin que « Langue de {nom} » dans la fiche du contact, y compris
+  /// l'installation du paquet dans la foulée.
+  Future<void> _fixeLangueInterlocuteur() async {
+    final uid = widget.otherUserId;
+    if (uid == null) return;
+    final choix = await choisirLangueInterlocuteur(
+      context,
+      userId: uid,
+      nom: widget.title,
+    );
+    if (choix == null || !mounted) return;
+    if (choix.langue != null) {
+      await installerCoupleSiNecessaire(context, choix.langue!);
+      if (!mounted) return;
+    }
+    // Le bandeau repart de zéro : la passe le repose aussitôt s'il manque
+    // encore quelque chose, avec cette fois la langue que l'on vient de fixer.
+    setState(() {
+      _langueManquante = null;
+      _langueManquanteFixee = false;
+    });
+    _traduitAutomatiquement();
+  }
+
   Future<void> _installeLangueManquante(String source) async {
     final cible = context.read<LocaleController>().languageCode;
     final manquantes = await nomsLanguesManquantes(source, cible);
@@ -4880,7 +4946,10 @@ class _ChatScreenState extends State<ChatScreen>
       _messageTraduction('translation_download_failed');
       return;
     }
-    setState(() => _langueManquante = null);
+    setState(() {
+      _langueManquante = null;
+      _langueManquanteFixee = false;
+    });
     // La passe reprend aussitôt : les messages qui l'attendaient sont
     // maintenant traduisibles, et l'utilisateur vient de le demander.
     _traduitAutomatiquement();
@@ -4997,8 +5066,14 @@ class _ChatScreenState extends State<ChatScreen>
         // resterait allumé sans effet visible.
         if (await etatCouple(source, cible) != EtatCouple.pret) {
           if (!mounted) return;
-          if (_langueManquante != source) {
-            setState(() => _langueManquante = source);
+          // `fixee` dit lequel des deux bandeaux est juste : fixer la langue,
+          // ou installer le paquet de celle qui est déjà fixée.
+          if (_langueManquante != source ||
+              _langueManquanteFixee != (fixee != null)) {
+            setState(() {
+              _langueManquante = source;
+              _langueManquanteFixee = fixee != null;
+            });
           }
           continue;
         }

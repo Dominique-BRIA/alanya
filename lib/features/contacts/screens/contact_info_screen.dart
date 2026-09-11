@@ -1,21 +1,19 @@
 import 'package:flutter/material.dart';
 import '../../../l10n/app_localizations.dart';
 import 'package:flutter/services.dart';
-import 'package:google_mlkit_translation/google_mlkit_translation.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/api_client.dart';
 import '../../../core/alanya_id_formatter.dart';
 import '../../../core/app_snackbar.dart';
-import '../../../core/locale_controller.dart';
 import '../../../core/memoire_langues.dart';
 import '../../../core/traduction_appareil.dart';
 import '../../../core/token_storage.dart';
 import '../../../models/message.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
-import '../../../widgets/dialogues_traduction.dart';
+import '../../../widgets/choix_langue_interlocuteur.dart';
 import '../../../widgets/glass_card.dart';
 import '../../../widgets/media/cached_media.dart';
 import '../../account/screens/avatar_viewer_screen.dart';
@@ -702,97 +700,19 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
   }
 
   Future<void> _choisirLangue() async {
-    final choix = await showModalBottomSheet<String>(
-      context: context,
-      isScrollControlled: true,
-      builder: (ctx) {
-        final langues = languesTraduisibles();
-        return SafeArea(
-          child: ListView.builder(
-            shrinkWrap: true,
-            // +1 : la première ligne est « Auto », qui n'est pas une langue.
-            itemCount: langues.length + 1,
-            itemBuilder: (_, i) {
-              if (i == 0) {
-                return ListTile(
-                  leading: Icon(Icons.auto_awesome_outlined,
-                      color: accentOf(context)),
-                  title: Text(tr(context, 'lang_auto')),
-                  trailing: _langueFixee == null
-                      ? Icon(Icons.check, color: accentOf(context))
-                      : null,
-                  onTap: () => Navigator.pop(ctx, ""),
-                );
-              }
-              final code = langues[i - 1].bcpCode;
-              return ListTile(
-                title: Text(nomAutonyme(code)),
-                trailing: _langueFixee == code
-                    ? Icon(Icons.check, color: accentOf(context))
-                    : null,
-                onTap: () => Navigator.pop(ctx, code),
-              );
-            },
-          ),
-        );
-      },
+    // La liste, l'enregistrement et l'installation vivent dans
+    // `widgets/choix_langue_interlocuteur.dart` : le bandeau de la conversation
+    // ouvre exactement la même chose.
+    final choix = await choisirLangueInterlocuteur(
+      context,
+      userId: widget.userId,
+      nom: widget.name,
     );
     if (choix == null || !mounted) return;
-    // La chaîne vide porte « auto » : `null` voudrait dire « annulé », et les
-    // deux ne se distingueraient plus au retour de la feuille.
-    final langue = choix.isEmpty ? null : choix;
-    await MemoireLangues.fixe(widget.userId, langue);
-    if (!mounted) return;
-    setState(() => _langueFixee = langue);
-    showAppSnackBar(langue == null
-        ? tr(context, 'lang_auto_detected')
-        : tr(context, 'ci_read_as', {'nom': widget.name, 'langue': nomAutonyme(langue)}));
-    if (langue != null) await _installeCoupleSiNecessaire(langue);
-  }
-
-  /// Installe le couple de langues DANS LA FOULÉE, une seule fois.
-  ///
-  /// 🔴 DEMANDE DU USER (31/08/2026), et c'est le bon moment : fixer la langue
-  /// de quelqu'un, c'est annoncer qu'on va lire ses messages traduits. Attendre
-  /// le premier message pour découvrir qu'il manque un modèle repousse le
-  /// téléchargement au pire instant — celui où l'on veut lire, souvent sans
-  /// Wi-Fi.
-  ///
-  /// ⚠️ « UNE FOIS » AU SENS STRICT : si le couple est déjà prêt, rien ne se
-  /// passe et rien ne s'affiche. La question n'est reposée que si l'état change
-  /// — modèle évincé par le système, ou langue de lecture changée.
-  ///
-  /// ⚠️ LE TÉLÉCHARGEMENT RESTE UN GESTE : la confirmation habituelle annonce
-  /// le poids, et le repli données mobiles n'est proposé que si le Wi-Fi était
-  /// bien la contrainte. On ne tire pas des dizaines de mégaoctets parce que
-  /// quelqu'un a touché un menu.
-  Future<void> _installeCoupleSiNecessaire(String source) async {
-    final cible = context.read<LocaleController>().languageCode;
-    final etat = await etatCouple(source, cible);
-    if (!mounted) return;
-    // `pret` : déjà là. `indisponible` : même langue que la mienne, ou langue
-    // non traduisible — dans les deux cas il n'y a rien à télécharger, et
-    // proposer une installation impossible serait trompeur.
-    if (etat != EtatCouple.aTelecharger) return;
-
-    final manquantes = await nomsLanguesManquantes(source, cible);
-    if (!mounted) return;
-    final libelle =
-        manquantes.isEmpty ? nomAutonyme(source) : manquantes.join(" + ");
-    if (!await confirmerInstallationLangues(context, libelle)) return;
-    if (!mounted) return;
-
-    var installe = await telechargerCouple(source, cible);
-    if (!installe &&
-        wifiExige &&
-        mounted &&
-        await proposerDonneesMobiles(context)) {
-      installe = await telechargerCouple(source, cible, wifiSeulement: false);
+    setState(() => _langueFixee = choix.langue);
+    if (choix.langue != null) {
+      await installerCoupleSiNecessaire(context, choix.langue!);
     }
-    if (!mounted) return;
-    showAppSnackBar(installe
-        ? tr(context, 'lang_installed', {'langue': nomAutonyme(source)})
-        : tr(context, 'trans_install_failed'));
   }
 
   Widget _settingsCard() {
