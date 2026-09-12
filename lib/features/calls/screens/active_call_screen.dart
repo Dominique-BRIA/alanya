@@ -5,6 +5,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/app_snackbar.dart';
+import '../../../l10n/app_localizations.dart';
 import '../../../core/authed_api.dart';
 import '../../../core/push_service.dart';
 import '../../../theme/alanya_theme.dart';
@@ -547,6 +548,11 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                   cc,
                   remotes,
                   anonymiseLesInvites: transfereVersUnInvite,
+                  // Ma propre image devient UNE VIGNETTE PARMI LES AUTRES, au
+                  // lieu de l'encart épinglé dans le coin. C'est ce que fait
+                  // WhatsApp en appel de groupe, et cela règle le chevauchement
+                  // : l'encart couvrait le haut de la première vignette.
+                  local: cc.localStream != null ? _localRenderer : null,
                 ),
               // Lot 6 : couche de tap plein écran (toggle des contrôles en vidéo).
               Positioned.fill(
@@ -808,9 +814,20 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                   ),
                 ),
               ),
-              // Auto-vue locale (mode NON dynamique : groupe). En 1-1 vidéo, le
-              // PiP est géré par _draggablePip ci-dessous.
+              // Auto-vue locale dans le COIN — uniquement quand il n'y a pas de
+              // grille où se ranger.
+              //
+              // ⚠️ CE CAS EXISTE ENCORE, ne pas le supprimer : `showVideo`
+              // exige au moins un flux distant. Entre le décrochage et
+              // l'arrivée de la première image des autres, il n'y a aucune
+              // grille — sans cet encart, on ne se verrait pas du tout pendant
+              // toute la négociation WebRTC.
+              //
+              // Dès que la grille apparaît, on y est une vignette comme les
+              // autres : c'est `_remoteGrid(local: …)` plus haut qui s'en
+              // charge, et l'encart disparaît au lieu de la recouvrir.
               if (!useDynamic &&
+                  !showVideo &&
                   isVideo &&
                   showActive &&
                   cc.localStream != null)
@@ -944,13 +961,30 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     CallController cc,
     Map<String, MediaStream> remotes, {
     required bool anonymiseLesInvites,
+    RTCVideoRenderer? local,
   }) {
     final ids = remotes.keys.toList();
     if (ids.isEmpty) return const SizedBox.shrink();
 
+    /*
+     * MA PROPRE VIGNETTE EN DERNIER, ET NON DANS UN COIN.
+     *
+     * Avant, l'auto-vue était un encart de 100 × 140 épinglé en haut à droite,
+     * PAR-DESSUS la grille : il recouvrait le coin de la première vignette, et
+     * ne bougeait pas quand le nombre de participants changeait. WhatsApp ne
+     * fait ça qu'en tête-à-tête ; en groupe, on est une tuile comme les autres.
+     *
+     * ⚠️ EN DERNIER, pas en premier : l'ordre des autres ne doit pas se
+     * déplacer sous les yeux quand ma caméra s'ouvre avec un temps de retard.
+     */
+    final tuiles = <Widget>[
+      for (final id in ids) _vignette(cc, id, anonymise: anonymiseLesInvites),
+      if (local != null) _vignetteLocale(local),
+    ];
+
     // Beaucoup de monde : on garde une grille qui défile, mais on la laisse
     // courir jusqu'en bas — les contrôles flottent par-dessus, comme ailleurs.
-    if (ids.length > maxVignettesSansDefilement) {
+    if (tuiles.length > maxVignettesSansDefilement) {
       return Positioned.fill(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(4, 4, 4, 96),
@@ -961,30 +995,28 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
               crossAxisSpacing: 4,
               childAspectRatio: 0.75,
             ),
-            itemCount: ids.length,
-            itemBuilder: (_, i) =>
-                _vignette(cc, ids[i], anonymise: anonymiseLesInvites),
+            itemCount: tuiles.length,
+            itemBuilder: (_, i) => tuiles[i],
           ),
         ),
       );
     }
 
-    final rangees = dispositionVignettes(ids.length);
+    final rangees = dispositionVignettes(tuiles.length);
     var curseur = 0;
     final lignes = <Widget>[];
     for (final combien in rangees) {
-      final deLaRangee = ids.sublist(curseur, curseur + combien);
+      final deLaRangee = tuiles.sublist(curseur, curseur + combien);
       curseur += combien;
       lignes.add(
         Expanded(
           child: Row(
             children: [
-              for (final id in deLaRangee)
+              for (final tuile in deLaRangee)
                 Expanded(
                   child: Padding(
                     padding: const EdgeInsets.all(2),
-                    child:
-                        _vignette(cc, id, anonymise: anonymiseLesInvites),
+                    child: tuile,
                   ),
                 ),
             ],
@@ -1064,6 +1096,55 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                 ),
                 child: Text(
                   texte,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Ma propre vignette dans la grille — image en MIROIR, et « Vous » pour
+  /// étiquette.
+  ///
+  /// ⚠️ LE MIROIR N'EST PAS UN DÉTAIL. Sans lui, on se voit inversé par rapport
+  /// à ce qu'un miroir montre, et lever la main droite fait bouger celle de
+  /// gauche à l'écran — c'est la seule vignette concernée, les autres doivent
+  /// rester telles qu'elles arrivent.
+  Widget _vignetteLocale(RTCVideoRenderer local) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          RTCVideoView(
+            local,
+            mirror: true,
+            objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+          ),
+          Positioned(
+            left: 8,
+            right: 8,
+            bottom: 8,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.55),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Text(
+                  tr(context, 'you'),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
