@@ -11,9 +11,6 @@
 /// sans que personne ne comprenne pourquoi. Si la valeur du serveur change, ce
 /// fichier est le seul à modifier de ce côté-ci.
 
-import 'package:flutter/material.dart';
-
-import '../l10n/app_localizations.dart';
 ///
 /// 🔴 CE MODULE EST NÉ D'UN OUBLI PARTIEL. Le contrôle existait sur UN SEUL des
 /// quatre chemins de sélection — celui des documents. La galerie interne, le
@@ -21,6 +18,10 @@ import '../l10n/app_localizations.dart';
 /// Recopier la condition à trois endroits de plus aurait reproduit la cause :
 /// c'est en la dispersant qu'on avait fini par n'en avoir qu'une.
 library;
+
+import 'package:flutter/material.dart';
+
+import '../l10n/app_localizations.dart';
 
 /// Taille maximale acceptée par le serveur, en octets.
 const int plafondMediaOctets = 50 * 1024 * 1024;

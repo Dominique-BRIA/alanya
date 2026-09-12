@@ -8,6 +8,7 @@ import '../../../core/downloader.dart';
 import '../../../core/telechargement_suivi.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/media/cached_media.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Un média (image ou vidéo) d'une conversation, pour la galerie navigable.
 class ConvMediaItem {

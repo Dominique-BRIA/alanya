@@ -910,7 +910,7 @@ class AppLocalizations {
 'album_items_many': '{n} éléments',
 'starred_title': 'Messages favoris',
 'grp_name_hint': 'Entrez le nom du groupe',
-'grp_add_failed': 'Erreur lors de l'ajout',
+'grp_add_failed': 'Erreur lors de l\'ajout',
 'grp_member': 'Membre',
 'grp_leave_action': 'Quitter le groupe',
 'meet_subject_required': 'L\'objet est requis',

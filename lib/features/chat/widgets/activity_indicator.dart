@@ -85,7 +85,7 @@ class _TypingContent extends StatelessWidget {
     final accent = dark ? AlanyaColors.indigoLight : AlanyaColors.forest;
     final label = name == null
         ? tr(context, 'typing_hint')
-        : tr(context, 'typing_name_hint', {'nom': name});
+        : tr(context, 'typing_name_hint', {'nom': name!});
     return _Pill(
       accent: accent,
       child: Row(

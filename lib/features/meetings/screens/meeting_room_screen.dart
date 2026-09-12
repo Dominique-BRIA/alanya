@@ -1385,7 +1385,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
           value: "audio",
           child: ListTile(
             dense: true,
-            contentPadding: const EdgeInsets.zero,
+            contentPadding: EdgeInsets.zero,
             leading: const Icon(Icons.mic_off, color: Colors.white),
             title:
                 Text(tr(context, 'meet_mute_mic'), style: const TextStyle(color: Colors.white)),
@@ -1401,7 +1401,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
             value: "video",
             child: ListTile(
               dense: true,
-              contentPadding: const EdgeInsets.zero,
+              contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.videocam_off, color: Colors.white),
               title: Text(tr(context, 'meet_camera_off_action'),
                   style: const TextStyle(color: Colors.white)),
@@ -1415,7 +1415,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
           value: "exclure",
           child: ListTile(
             dense: true,
-            contentPadding: const EdgeInsets.zero,
+            contentPadding: EdgeInsets.zero,
             leading: const Icon(Icons.person_remove, color: Colors.redAccent),
             title: Text(tr(context, 'meet_expel_action'),
                 style: const TextStyle(color: Colors.redAccent)),
