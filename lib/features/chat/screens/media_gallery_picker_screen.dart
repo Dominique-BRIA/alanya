@@ -9,6 +9,7 @@ import '../../../core/galerie.dart';
 import '../../../theme/alanya_theme.dart';
 import 'apercu_selection_screen.dart';
 import '../../../widgets/media/media_picker_sheet.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Sélecteur de médias plein écran, façon WhatsApp.
 ///
@@ -293,14 +294,14 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
       }
     }
     if (!mounted) return;
-    final avis = messageMediasEcartes(tropGros);
+    final avis = messageMediasEcartes(tropGros, context: context);
     if (avis != null) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(avis)));
     }
     if (resultats.isEmpty) {
       setState(() => _preparation = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Aucun média lisible dans la sélection")),
+        SnackBar(content: Text(tr(context, 'no_media_readable'))),
       );
       return;
     }
@@ -398,7 +399,7 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
         leading: dansUnAlbum
             ? IconButton(
                 icon: const Icon(Icons.arrow_back),
-                tooltip: "Retour aux albums",
+                tooltip: tr(context, 'back_to_albums'),
                 onPressed: _fermeAlbum,
               )
             : null,
@@ -458,7 +459,7 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
                           child: CircularProgressIndicator(color: _accent))
                       : _assets.isEmpty
                           ? Center(
-                              child: Text("Aucun média",
+                              child: Text(tr(context, 'no_media'),
                                   style: TextStyle(color: _texteDoux)))
                           : _grille(),
         ),
@@ -514,7 +515,7 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
   Widget _listeAlbums() {
     if (_albums.isEmpty) {
       return Center(
-        child: Text("Aucun album", style: TextStyle(color: _texteDoux)),
+        child: Text(tr(context, 'no_album'), style: TextStyle(color: _texteDoux)),
       );
     }
     return ListView.builder(
@@ -558,7 +559,7 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
           subtitle: FutureBuilder<int>(
             future: album.assetCountAsync,
             builder: (_, compte) => Text(
-              compte.data == null ? "" : "${compte.data} élément(s)",
+              compte.data == null ? "" : trN(context, 'album_items', compte.data!),
               style: TextStyle(color: _texteDoux, fontSize: 12),
             ),
           ),
@@ -579,13 +580,13 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           Icon(Icons.photo_library_outlined, size: 52, color: _texteDoux),
           const SizedBox(height: 12),
-          Text("Accès à la galerie refusé",
+          Text(tr(context, 'gallery_access_denied'),
               textAlign: TextAlign.center,
               style: TextStyle(color: _texte)),
           const SizedBox(height: 8),
           TextButton(
             onPressed: () => PhotoManager.openSetting(),
-            child: const Text("Ouvrir les paramètres"),
+            child: Text(tr(context, 'open_settings')),
           ),
         ]),
       ),
@@ -707,7 +708,7 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
           // renverrait à la discussion alors que le geste attendu ici est
           // « je recommence ma sélection ».
           IconButton(
-            tooltip: "Vider la sélection",
+            tooltip: tr(context, 'clear_selection'),
             icon: Icon(Icons.close, color: _texte),
             onPressed: _preparation ? null : () => setState(_choisis.clear),
           ),
@@ -723,7 +724,7 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
                 child: Text(
                   // On ne bloque pas : on annonce le découpage, pour que le
                   // résultat dans le fil ne surprenne pas.
-                  "10 par message",
+                  tr(context, 'max_per_message'),
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(color: _texteDoux, fontSize: 11),
                 ),
@@ -744,7 +745,7 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
             child: TextButton(
               onPressed: _preparation ? null : _previsualise,
               style: TextButton.styleFrom(foregroundColor: _texte),
-              child: const Text("Prévisualiser",
+              child: Text(tr(context, 'preview'),
                   overflow: TextOverflow.ellipsis, maxLines: 1),
             ),
           ),
@@ -792,7 +793,7 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
         child: Row(children: [
           Expanded(
             child: Text(
-              "Seules les photos que tu as autorisées sont visibles.",
+              tr(context, 'photos_limited'),
               style: TextStyle(color: _texte, fontSize: 12),
             ),
           ),
@@ -812,7 +813,7 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
               });
               await _chargePageSuivante(premiere: true);
             },
-            child: const Text("Gérer"),
+            child: Text(tr(context, 'manage')),
           ),
         ]),
       ),

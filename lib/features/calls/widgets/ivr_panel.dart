@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../../../theme/alanya_theme.dart';
 import '../call_controller.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Pavé numérique d'un standard téléphonique, affiché DANS l'écran d'appel.
 ///
@@ -210,13 +211,13 @@ class _IvrPanelState extends State<IvrPanel> {
     String? sous;
     if (digit != null) {
       if (option == null) {
-        titre = "Aucun service sur cette touche";
+        titre = tr(context, 'ivr_no_service');
       } else {
         // `nom_service` d'abord, `libelle` en repli — demande du user du
         // 12/08/2026. Les deux viennent de la table `center` : le premier est le
         // nom montré au public, le second le nom interne de la ligne.
         titre = option.nomAffiche;
-        if (!option.disponible) sous = "Bientôt disponible";
+        if (!option.disponible) sous = tr(context, 'coming_soon');
       }
     }
 
@@ -319,7 +320,7 @@ class _IvrPanelState extends State<IvrPanel> {
                   TextButton.icon(
                     onPressed: () => widget.onRetourAccueil(),
                     icon: const Icon(Icons.home_outlined, size: 16),
-                    label: const Text("Accueil"),
+                    label: Text(tr(context, 'ivr_home')),
                     style: TextButton.styleFrom(
                       foregroundColor: Colors.white,
                       backgroundColor: Colors.white.withValues(alpha: 0.16),

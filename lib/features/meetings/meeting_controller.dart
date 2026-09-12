@@ -1545,18 +1545,6 @@ class MeetingRefus {
         "organisateur compris. $prises\n\n$suite";
   }
 
-  /// La même chose en une phrase, pour le bandeau global.
-  ///
-  /// Une version courte et non le [texte] tronqué : ce message-là s'affiche
-  /// quand la salle était RÉDUITE, donc par-dessus autre chose et sans qu'on
-  /// l'ait demandé. Il doit se lire d'un coup d'œil, dire que la réunion s'est
-  /// arrêtée et pourquoi — le conseil sur l'audio, lui, n'a pas sa place dans un
-  /// bandeau qui disparaît en quatre secondes.
-  String get texteCourt {
-    if (!estSallePleine || plafond == null) return messageServeur;
-    return "Réunion quittée : elle est limitée à $plafond participants, "
-        "et toutes les places sont prises.";
-  }
 }
 
 /// La composition d'une réunion vient de changer, depuis une route REST.

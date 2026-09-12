@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../core/biometric_service.dart';
 import '../../../widgets/alanya_wordmark.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../../l10n/app_localizations.dart';
 
 class BiometricLockScreen extends StatefulWidget {
   const BiometricLockScreen({super.key, required this.onUnlocked});
@@ -107,8 +108,8 @@ class _BiometricLockScreenState extends State<BiometricLockScreen> {
                 const SizedBox(height: 12),
                 Text(
                   _authenticating
-                      ? "Vérification..."
-                      : "Appuyez pour déverrouiller",
+                      ? tr(context, 'biometric_verifying')
+                      : tr(context, 'biometric_tap_unlock'),
                   style: TextStyle(
                       fontSize: 13, color: mutedOf(context, AlanyaColors.grey500)),
                 ),
@@ -119,7 +120,7 @@ class _BiometricLockScreenState extends State<BiometricLockScreen> {
                   onPressed: _authenticating ? null : _authenticateWithPin,
                   icon: Icon(Icons.lock_outline,
                       size: 18, color: mutedOf(context, AlanyaColors.grey500)),
-                  label: Text("Utiliser le code de l'appareil",
+                  label: Text(tr(context, 'use_device_code'),
                       style: TextStyle(color: mutedOf(context, AlanyaColors.grey500))),
                 ),
                 const SizedBox(height: 8),
@@ -133,7 +134,7 @@ class _BiometricLockScreenState extends State<BiometricLockScreen> {
                           widget.onUnlocked();
                         },
                   child: Text(
-                    "Désactiver le verrouillage",
+                    tr(context, 'disable_lock'),
                     style: TextStyle(
                         fontSize: 12, color: mutedOf(context, AlanyaColors.grey400)),
                   ),

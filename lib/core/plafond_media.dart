@@ -10,6 +10,10 @@
 /// quand même. Un plafond plus BAS interdirait des envois parfaitement légitimes
 /// sans que personne ne comprenne pourquoi. Si la valeur du serveur change, ce
 /// fichier est le seul à modifier de ce côté-ci.
+
+import 'package:flutter/material.dart';
+
+import '../l10n/app_localizations.dart';
 ///
 /// 🔴 CE MODULE EST NÉ D'UN OUBLI PARTIEL. Le contrôle existait sur UN SEUL des
 /// quatre chemins de sélection — celui des documents. La galerie interne, le
@@ -35,11 +39,13 @@ bool depassePlafondMedia(int octets) => octets > plafondMediaOctets;
 /// quand il n'y en a qu'un — c'est la seule information qui permet d'agir.
 ///
 /// Rend `null` si rien n'a été écarté : à l'appelant de ne rien afficher.
-String? messageMediasEcartes(List<String> noms) {
+String? messageMediasEcartes(List<String> noms,
+    {required BuildContext context}) {
   if (noms.isEmpty) return null;
   if (noms.length == 1) {
-    return "« ${noms.first} » dépasse $plafondMediaMo Mo et n'a pas été joint";
+    return tr(context, 'media_skipped_one',
+        {'nom': noms.first, 'plafond': '$plafondMediaMo'});
   }
-  return "${noms.length} fichiers dépassent $plafondMediaMo Mo "
-      "et n'ont pas été joints";
+  return tr(context, 'media_skipped_many',
+      {'n': '${noms.length}', 'plafond': '$plafondMediaMo'});
 }

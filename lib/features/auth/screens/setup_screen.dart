@@ -227,17 +227,17 @@ class _SetupScreenState extends State<SetupScreen> {
                   controller: _nomCtrl,
                   textCapitalization: TextCapitalization.words,
                   maxLength: 100,
-                  decoration: const InputDecoration(
-                    labelText: "Nom",
-                    hintText: "Ex: BRIA Dominique",
+                  decoration: InputDecoration(
+                    labelText: tr(context, 'name_label'),
+                    hintText: tr(context, 'name_hint'),
                     counterText: "",
-                    prefixIcon: Icon(Icons.badge_outlined),
+                    prefixIcon: const Icon(Icons.badge_outlined),
                   ),
                   // Minimum 2 caractères, et non 1 : le nom sert de pseudo au
                   // serveur, qui en exige deux. Un nom d'une seule lettre
                   // passerait ici puis serait rejeté à l'envoi.
                   validator: (v) => (v ?? "").trim().length < 2
-                      ? "Entre ton nom (2 caractères minimum)"
+                      ? tr(context, 'name_min_2')
                       : null,
                 ),
                 const SizedBox(height: 16),
@@ -319,7 +319,7 @@ class _SetupScreenState extends State<SetupScreen> {
                   controller: _confirmCtrl,
                   obscureText: _obscureConfirm,
                   decoration: InputDecoration(
-                    labelText: "Confirmer le mot de passe",
+                    labelText: tr(context, 'confirm_password'),
                     prefixIcon: const Icon(Icons.lock_outline),
                     suffixIcon: IconButton(
                       icon: Icon(_obscureConfirm

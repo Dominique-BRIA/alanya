@@ -75,7 +75,7 @@ class _OtpScreenState extends State<OtpScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                "Un code à 6 chiffres a été envoyé à ${widget.email}.",
+                tr(context, 'code_sent_to', {'email': widget.email}),
                 style: TextStyle(color: mutedOf(context, Colors.black54)),
               ),
               const SizedBox(height: 24),

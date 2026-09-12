@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../models/meeting.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Une DEMANDE D'INVITATION en attente, telle qu'elle s'affiche.
 ///
@@ -78,8 +79,8 @@ class TuileDemandeInvitation extends StatelessWidget {
         // Le proposant lit « ta demande », les autres lisent qui a proposé :
         // « Proposé par Dominique » n'apprend rien à Dominique.
         jeSuisLeProposant
-            ? "Ta demande · en attente"
-            : "Proposé par ${demande.demandeur.displayName}",
+            ? tr(context, 'meet_your_request')
+            : tr(context, 'meet_proposed_by', {'nom': demande.demandeur.displayName}),
         style: TextStyle(fontSize: 12, color: couleurDetail),
       ),
       trailing: jeSuisOrganisateur
@@ -87,12 +88,12 @@ class TuileDemandeInvitation extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 IconButton(
-                  tooltip: "Refuser",
+                  tooltip: tr(context, 'decline'),
                   icon: Icon(Icons.close, color: dangerOf(context)),
                   onPressed: actif ? onRefuser : null,
                 ),
                 IconButton(
-                  tooltip: "Accepter",
+                  tooltip: tr(context, 'accept'),
                   icon: Icon(Icons.check, color: positiveOf(context)),
                   onPressed: actif ? onAccepter : null,
                 ),
@@ -102,7 +103,7 @@ class TuileDemandeInvitation extends StatelessWidget {
               ? TextButton(
                   onPressed: actif ? onRetirer : null,
                   child: Text(
-                    "Retirer",
+                    tr(context, 'remove'),
                     style: TextStyle(color: dangerOf(context)),
                   ),
                 )

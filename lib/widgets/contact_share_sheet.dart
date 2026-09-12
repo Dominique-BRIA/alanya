@@ -7,6 +7,7 @@ import '../models/contact.dart' as modele;
 import '../models/message_payload.dart';
 import '../theme/alanya_theme.dart';
 import 'avatar_circle.dart';
+import '../l10n/app_localizations.dart';
 
 /// Ce que l'écran de discussion doit envoyer après la sélection.
 ///
@@ -78,7 +79,7 @@ class _ContactShareSheetState extends State<ContactShareSheet> {
       if (!mounted) return;
       setState(() {
         _chargement = false;
-        _erreur = "Impossible de charger les contacts";
+        _erreur = tr(context, 'contacts_load_failed_short');
       });
     }
   }
@@ -90,7 +91,7 @@ class _ContactShareSheetState extends State<ContactShareSheet> {
       } else {
         if (_retenus.length >= _maxContacts) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("10 contacts au maximum par message")),
+            SnackBar(content: Text(tr(context, 'contacts_max_per_message'))),
           );
           return;
         }
@@ -152,8 +153,8 @@ class _ContactShareSheetState extends State<ContactShareSheet> {
             borderRadius: BorderRadius.circular(2),
           ),
         ),
-        const Text("Partager un contact",
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+        Text(tr(context, 'share_contact_title'),
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
         const SizedBox(height: 10),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -161,7 +162,7 @@ class _ContactShareSheetState extends State<ContactShareSheet> {
             onChanged: (v) => setState(() => _recherche = v.trim()),
             decoration: InputDecoration(
               isDense: true,
-              hintText: "Rechercher un contact",
+              hintText: tr(context, 'search_contact'),
               prefixIcon: const Icon(Icons.search, size: 20),
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -181,7 +182,7 @@ class _ContactShareSheetState extends State<ContactShareSheet> {
                 child: ElevatedButton.icon(
                   onPressed: _envoyer,
                   icon: const Icon(Icons.send, size: 18),
-                  label: Text("Envoyer (${_retenus.length})"),
+                  label: Text(tr(context, 'send_count', {'n': '${_retenus.length}'})),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: accentOf(context),
                     foregroundColor: Colors.white,
@@ -209,7 +210,7 @@ class _ContactShareSheetState extends State<ContactShareSheet> {
       return _message(
         icone: Icons.cloud_off_rounded,
         texte: _erreur!,
-        action: TextButton(onPressed: _charge, child: const Text("Réessayer")),
+        action: TextButton(onPressed: _charge, child: Text(tr(context, 'retry'))),
         onSub: onSub,
       );
     }
@@ -219,8 +220,8 @@ class _ContactShareSheetState extends State<ContactShareSheet> {
       return _message(
         icone: Icons.person_search_outlined,
         texte: _recherche.isEmpty
-            ? "Aucun contact Alanya à partager"
-            : "Aucun résultat",
+            ? tr(context, 'no_alanya_to_share')
+            : tr(context, 'no_results'),
         onSub: onSub,
       );
     }

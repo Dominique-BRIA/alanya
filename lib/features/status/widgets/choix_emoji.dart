@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Choix d'un emoji, en feuille.
 ///
@@ -11,6 +12,19 @@ import 'package:flutter/material.dart';
 ///
 /// La sélection est volontairement COURTE. Ce n'est pas un clavier : c'est le
 /// nécessaire pour décorer un statut, rangé par usage et non par ordre Unicode.
+/// Les clés restent françaises (identifiants internes) ; seuls les
+/// libellés affichés passent par `tr()`.
+const Map<String, String> _familleTraduites = {
+  'Visages': 'emoji_faces',
+  'Gestes': 'emoji_gestures',
+  'Cœurs': 'emoji_hearts',
+  'Nature': 'emoji_nature',
+  'Animaux': 'emoji_animals',
+  'Nourriture': 'emoji_food',
+  'Objets': 'emoji_objects',
+  'Symboles': 'emoji_symbols',
+};
+
 const Map<String, List<String>> emojisParFamille = {
   "Visages": [
     "😀",
@@ -244,7 +258,7 @@ class _FeuilleEmoji extends StatelessWidget {
                     Padding(
                       padding: const EdgeInsets.fromLTRB(4, 10, 4, 6),
                       child: Text(
-                        famille.key,
+                        tr(context, _familleTraduites[famille.key] ?? famille.key),
                         style: const TextStyle(
                           color: Colors.white54,
                           fontSize: 12,

@@ -203,7 +203,7 @@ class _EntreprisesTabState extends State<EntreprisesTab> {
     return Padding(
       padding: const EdgeInsets.only(left: 8),
       child: PopupMenuButton<int>(
-        tooltip: "Filtrer par pays",
+        tooltip: tr(context, 'filter_by_country'),
         onSelected: _appliquePays,
         itemBuilder: (_) => [
           for (final p in _pays)
@@ -236,7 +236,7 @@ class _EntreprisesTabState extends State<EntreprisesTab> {
             ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 90),
               child: Text(
-                choisi?.libelle ?? "Pays",
+                choisi?.libelle ?? tr(context, 'country'),
                 overflow: TextOverflow.ellipsis,
                 maxLines: 1,
                 style: const TextStyle(fontSize: 13),

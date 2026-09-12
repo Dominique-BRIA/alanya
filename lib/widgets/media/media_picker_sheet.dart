@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import '../../core/galerie.dart';
 import '../../core/plafond_media.dart';
 import '../../theme/alanya_theme.dart';
+import '../../l10n/app_localizations.dart';
 
 /// Résultat de la sélection de médias.
 class MediaPickResult {
@@ -236,7 +237,7 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
         ));
       }
       if (!mounted) return;
-      final avis = messageMediasEcartes(tropGros);
+      final avis = messageMediasEcartes(tropGros, context: context);
       if (avis != null) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(avis)));
@@ -278,7 +279,7 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
       ));
     }
     if (!mounted) return;
-    final avis = messageMediasEcartes(tropGros);
+    final avis = messageMediasEcartes(tropGros, context: context);
     if (avis != null) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(avis)));
     }
@@ -390,31 +391,31 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
               children: [
                 _optionButton(
                   icon: Icons.photo_library,
-                  label: "Galerie",
+                  label: tr(context, 'gallery'),
                   color: AlanyaColors.forest,
                   onTap: _pickFullGallery,
                 ),
                 _optionButton(
                   icon: Icons.camera_alt,
-                  label: "Caméra",
+                  label: tr(context, 'camera_short'),
                   color: const Color(0xFFE53935),
                   onTap: _pickCamera,
                 ),
                 _optionButton(
                   icon: Icons.insert_drive_file,
-                  label: "Document",
+                  label: tr(context, 'document'),
                   color: const Color(0xFF7B1FA2),
                   onTap: _pickDocuments,
                 ),
                 _optionButton(
                   icon: Icons.person,
-                  label: "Contact",
+                  label: tr(context, 'contacts'),
                   color: const Color(0xFF2196F3),
                   onTap: _pickContact,
                 ),
                 _optionButton(
                   icon: Icons.location_on,
-                  label: "Position",
+                  label: tr(context, 'position'),
                   color: const Color(0xFF009688),
                   onTap: _pickLocation,
                 ),
@@ -429,9 +430,9 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             child: Row(
               children: [
-                const Text(
-                  "Récents",
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                Text(
+                  tr(context, 'status_recent'),
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
                 ),
                 const Spacer(),
                 if (_selectedIds.isNotEmpty)
@@ -444,7 +445,7 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
                         borderRadius: BorderRadius.circular(16),
                       ),
                       child: Text(
-                        "Envoyer (${_selectedIds.length})",
+                        tr(context, 'send_count', {'n': '${_selectedIds.length}'}),
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 13,
@@ -468,18 +469,18 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
                           children: [
                             Icon(Icons.folder_off, size: 48, color: AlanyaColors.grey400),
                             const SizedBox(height: 12),
-                            Text("Accès aux fichiers refusé",
+                            Text(tr(context, 'files_access_denied'),
                                 style: TextStyle(color: AlanyaColors.grey500, fontSize: 14)),
                             const SizedBox(height: 8),
                             TextButton(
                               onPressed: () => PhotoManager.openSetting(),
-                              child: const Text("Ouvrir les paramètres"),
+                              child: Text(tr(context, 'open_settings')),
                             ),
                           ],
                         ),
                       )
                     : _recentMedia.isEmpty
-                        ? Center(child: Text("Aucun média récent",
+                        ? Center(child: Text(tr(context, 'no_recent_media'),
                             style: TextStyle(color: AlanyaColors.grey400)))
                         : _buildGalleryGrid(),
           ),

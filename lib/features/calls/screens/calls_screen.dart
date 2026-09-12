@@ -16,6 +16,7 @@ import '../ouvrir_appel_en_cours.dart';
 import '../calls_repository.dart';
 import 'dialer_screen.dart';
 import '../../chat/screens/chat_screen.dart';
+import '../../../l10n/app_localizations.dart';
 
 class CallsScreen extends StatefulWidget {
   const CallsScreen({super.key});
@@ -117,15 +118,15 @@ class _CallsScreenState extends State<CallsScreen>
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text("Supprimer $count appel(s) ?"),
-        content: const Text("Cette action est irréversible."),
+        title: Text(tr(context, 'delete_calls_q', {'n': '$count'})),
+        content: Text(tr(context, 'action_irreversible')),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text("Annuler")),
+              child: Text(tr(context, 'cancel'))),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: Text("Supprimer",
+              child: Text(tr(context, 'delete'),
                   style: TextStyle(color: dangerOf(context)))),
         ],
       ),
@@ -150,7 +151,7 @@ class _CallsScreenState extends State<CallsScreen>
       child: isSelecting
           ? Scaffold(
               appBar: selectAppBar(
-                title: "Appels",
+                title: tr(context, 'calls'),
                 onDelete: _deleteSelected,
                 onCancel: clearSelection,
                 onSelectAll: () => selectAll(
@@ -166,9 +167,9 @@ class _CallsScreenState extends State<CallsScreen>
                 title: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text("Appels"),
+                    Text(tr(context, 'calls')),
                     if (_calls != null)
-                      Text("${_calls!.length} derniers appels",
+                      Text(trN(context, 'recent_calls', _calls!.length),
                           style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w400)),
                   ],
                 ),
@@ -204,9 +205,9 @@ class _CallsScreenState extends State<CallsScreen>
       ]);
     }
     if (_error) {
-      return ListView(children: const [
-        SizedBox(height: 80),
-        Center(child: Text("Erreur de chargement. Tire pour réessayer.")),
+      return ListView(children: [
+        const SizedBox(height: 80),
+        Center(child: Text(tr(context, 'home_load_error'))),
       ]);
     }
     final calls = _calls ?? [];
@@ -217,7 +218,7 @@ class _CallsScreenState extends State<CallsScreen>
           child: Padding(
             padding: EdgeInsets.all(24),
             child: Text(
-              "Aucun appel pour le moment.\nLance un appel depuis une discussion.",
+              tr(context, 'calls_empty'),
               textAlign: TextAlign.center,
               style: TextStyle(color: mutedOf(context, Colors.black54)),
             ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/alanya_theme.dart';
+import '../l10n/app_localizations.dart';
 
 /// Mixin réutilisable pour ajouter le mode sélection multiple à une liste.
 ///
@@ -72,17 +73,17 @@ mixin MultiSelectMixin<T extends StatefulWidget> on State<T> {
         icon: const Icon(Icons.close),
         onPressed: onCancel,
       ),
-      title: Text("$title ($_selectedIds.length)"),
+      title: Text(tr(context, 'selection_title', {'titre': title, 'n': '${_selectedIds.length}'})),
       actions: [
         if (onSelectAll != null)
           IconButton(
             icon: const Icon(Icons.select_all),
-            tooltip: "Tout sélectionner",
+            tooltip: tr(context, 'select_all'),
             onPressed: onSelectAll,
           ),
         IconButton(
           icon: const Icon(Icons.delete_outline),
-          tooltip: "Supprimer",
+          tooltip: tr(context, 'delete'),
           onPressed: onDelete,
         ),
       ],

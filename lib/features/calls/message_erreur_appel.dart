@@ -1,4 +1,6 @@
 import '../../core/api_client.dart';
+import 'package:flutter/material.dart';
+import '../../l10n/app_localizations.dart';
 
 /// Traduit en une phrase l'échec du démarrage d'un appel.
 ///
@@ -15,13 +17,16 @@ import '../../core/api_client.dart';
 /// deviner — « Vous êtes déjà en appel » (409 BUSY) et « Le correspondant est
 /// déjà en appel » (409 CALLEE_BUSY) ne se ressemblent que par leur code.
 ///
+/// [context] : requis — les messages du client passent par `tr()`.
+///
 /// [messageSi404] : le clavier cherche un compte par son Alanya ID, un 404 y
 /// signifie « ce numéro n'existe pas ». Depuis une conversation déjà ouverte,
 /// ce cas n'a pas le même sens — d'où le paramètre plutôt qu'une phrase figée.
-String messageErreurAppel(Object erreur, {String? messageSi404}) {
+String messageErreurAppel(Object erreur,
+    {String? messageSi404, required BuildContext context}) {
   // Levée par le contrôleur avant tout appel réseau : un appel est déjà en
   // cours SUR CET APPAREIL.
-  if (erreur is StateError) return "Tu es déjà en appel";
+  if (erreur is StateError) return tr(context, 'call_err_on_call');
 
   if (erreur is ApiException) {
     if (erreur.statusCode == 404 && messageSi404 != null) return messageSi404;
@@ -30,12 +35,12 @@ String messageErreurAppel(Object erreur, {String? messageSi404}) {
 
   final texte = erreur.toString();
   if (texte.contains("PERMISSION_DENIED")) {
-    return "Micro/caméra requis. Accorde les permissions dans les réglages.";
+    return tr(context, 'call_err_perms');
   }
   // Repli : un 409 remonté autrement que par une ApiException. Rare, mais le
   // message générique serait trompeur — il parlerait de connexion réseau.
   if (texte.contains("409") || texte.contains("BUSY")) {
-    return "Impossible de démarrer l'appel. Réessaie dans un instant.";
+    return tr(context, 'call_err_start');
   }
-  return "Erreur d'appel : vérifie ta connexion et réessaie.";
+  return tr(context, 'call_err_network');
 }

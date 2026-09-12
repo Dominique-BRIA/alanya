@@ -7,6 +7,7 @@ import 'package:video_player/video_player.dart';
 import '../../../core/compression_image.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/media/media_picker_sheet.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Ce que l'aperçu rend à l'écran de discussion.
 ///
@@ -276,7 +277,7 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
         ),
         actions: [
           IconButton(
-            tooltip: "Retirer ce média",
+            tooltip: tr(context, 'remove_media'),
             icon: const Icon(Icons.delete_outline, color: Colors.white),
             onPressed: () => _retire(_index),
           ),
@@ -439,8 +440,8 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
         const SizedBox(width: 10),
         GestureDetector(
           onTap: _restaureOriginal,
-          child: const Text(
-            "Envoyer l'original",
+          child: Text(
+            tr(context, 'send_original'),
             style: TextStyle(
                 color: Colors.white,
                 fontSize: 12,
@@ -478,12 +479,12 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
       });
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("L'original sera envoyé")),
+        SnackBar(content: Text(tr(context, 'original_will_be_sent'))),
       );
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Original introuvable — envoi réduit")),
+        SnackBar(content: Text(tr(context, 'original_missing'))),
       );
     }
   }
@@ -511,8 +512,8 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
                 cursorColor: Colors.white,
                 decoration: InputDecoration(
                   hintText: _fichiers.length > 1
-                      ? "Légende (tous les médias)"
-                      : "Ajouter une légende…",
+                      ? tr(context, 'caption_all_media')
+                      : tr(context, 'status_add_caption'),
                   hintStyle:
                       const TextStyle(color: Colors.white54, fontSize: 15),
                   border: InputBorder.none,

@@ -12,6 +12,7 @@ import '../../auth/auth_controller.dart';
 import '../../chat/chat_repository.dart';
 import '../../../widgets/contact_picker_sheet.dart';
 import '../../chat/screens/chat_screen.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Écran d'infos d'un groupe — style WhatsApp.
 ///
@@ -75,7 +76,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   Future<void> _editName() async {
     if (!_amAdmin) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Seul un admin peut modifier le nom du groupe")),
+        SnackBar(content: Text(tr(context, 'grp_admin_only_name'))),
       );
       return;
     }
@@ -83,17 +84,17 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     final newName = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("Nom du groupe"),
+        title: Text(tr(ctx, 'grp_name_label')),
         content: TextField(
           controller: ctrl,
-          decoration: const InputDecoration(hintText: "Entrez le nom du groupe"),
+          decoration: InputDecoration(hintText: tr(ctx, 'grp_name_hint')),
           autofocus: true,
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Annuler")),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr(context, 'cancel'))),
           TextButton(
               onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-              child: const Text("Enregistrer")),
+              child: Text(tr(ctx, 'save'))),
         ],
       ),
     );
@@ -103,13 +104,13 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
         setState(() => _title = newName);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Nom du groupe mis à jour")),
+            SnackBar(content: Text(tr(context, 'grp_name_updated'))),
           );
         }
       } catch (_) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Erreur lors de la mise à jour")),
+            SnackBar(content: Text(tr(context, 'grp_update_failed'))),
           );
         }
       }
@@ -121,7 +122,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   Future<void> _editAvatar() async {
     if (!_amAdmin) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Seul un admin peut modifier l'avatar du groupe")),
+        SnackBar(content: Text(tr(context, 'grp_admin_only_avatar'))),
       );
       return;
     }
@@ -135,7 +136,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Impossible d'ouvrir la galerie")),
+          SnackBar(content: Text(tr(context, 'gallery_open_failed'))),
         );
       }
       return;
@@ -149,7 +150,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     if (bytes.length > 5 * 1024 * 1024) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Image trop lourde (max 5 Mo)")),
+          SnackBar(content: Text(tr(context, 'image_too_large'))),
         );
       }
       return;
@@ -164,13 +165,13 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
       setState(() => _avatarUrl = uploaded.url);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Photo du groupe mise à jour")),
+          SnackBar(content: Text(tr(context, 'grp_avatar_updated'))),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Erreur lors de la mise à jour de l'avatar: $e")),
+          SnackBar(content: Text(tr(context, 'grp_avatar_failed'))),
         );
       }
     }
@@ -197,7 +198,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   Future<void> _addMembers() async {
     if (!_amAdmin) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Seul un admin peut ajouter des membres")),
+        SnackBar(content: Text(tr(context, 'grp_admin_only_add'))),
       );
       return;
     }
@@ -207,8 +208,8 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
         .toList();
     final result = await ContactPickerSheet.show(
       context,
-      title: "Ajouter des membres",
-      confirmLabel: "Ajouter",
+      title: tr(context, 'grp_add_members'),
+      confirmLabel: tr(context, 'add'),
       excludeNumbers: existingNumbers,
     );
     if (result != null && result.isNotEmpty) {
@@ -217,12 +218,12 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
         await _refreshMembers();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("${result.length} membre(s) ajouté(s)")),
+            SnackBar(content: Text(trN(context, 'grp_members_added', result.length))),
           );
         }
       } catch (e) {
         if (mounted) {
-          final msg = (e is ApiException) ? e.message : "Erreur lors de l'ajout";
+          final msg = (e is ApiException) ? e.message : tr(context, 'grp_add_failed');
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
         }
       }
@@ -232,17 +233,17 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   // ===================== RETIRER UN MEMBRE =====================
 
   Future<void> _removeMember(Map<String, dynamic> member) async {
-    final name = member['pseudo'] ?? member['publicNumber'] ?? 'Membre';
+    final name = member['pseudo'] ?? member['publicNumber'] ?? tr(context, 'grp_member');
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text("Retirer $name ?"),
-        content: Text("$name sera retiré du groupe."),
+        title: Text(tr(context, 'grp_remove_q', {'nom': name})),
+        content: Text(tr(context, 'grp_remove_body', {'nom': name})),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Annuler")),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr(context, 'cancel'))),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: Text("Retirer", style: TextStyle(color: dangerOf(context)))),
+              child: Text(tr(context, 'remove'), style: TextStyle(color: dangerOf(context)))),
         ],
       ),
     );
@@ -255,7 +256,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
         await _refreshMembers();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("$name retiré du groupe")),
+            SnackBar(content: Text(tr(context, 'grp_member_removed', {'nom': name}))),
           );
         }
       } catch (e) {
@@ -268,7 +269,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   }
 
   Future<void> _changeMemberRole(Map<String, dynamic> member, String role) async {
-    final name = member['pseudo'] ?? member['publicNumber'] ?? 'Membre';
+    final name = member['pseudo'] ?? member['publicNumber'] ?? tr(context, 'grp_member');
     try {
       await context
           .read<ChatRepository>()
@@ -298,14 +299,14 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text("Quitter le groupe ?"),
-        content: const Text(
-            "Vous ne recevrez plus de messages de ce groupe. Vous pouvez être réinvité plus tard."),
+        title: Text(tr(context, 'grp_leave_q')),
+        content: Text(
+            tr(context, 'grp_leave_body')),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Annuler")),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr(context, 'cancel'))),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: Text("Quitter", style: TextStyle(color: dangerOf(context)))),
+              child: Text(tr(context, 'leave_action'), style: TextStyle(color: dangerOf(context)))),
         ],
       ),
     );
@@ -315,13 +316,13 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
         if (mounted) {
           Navigator.of(context).pop(); // retour à la liste
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Vous avez quitté le groupe")),
+            SnackBar(content: Text(tr(context, 'grp_left'))),
           );
         }
       } catch (_) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Erreur lors de la sortie")),
+            SnackBar(content: Text(tr(context, 'grp_leave_failed'))),
           );
         }
       }
@@ -332,7 +333,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
 
   Future<void> _sendMessageTo(Map<String, dynamic> member) async {
     final targetId = member['id'] as String;
-    final name = member['pseudo'] ?? member['publicNumber'] ?? 'Membre';
+    final name = member['pseudo'] ?? member['publicNumber'] ?? tr(context, 'grp_member');
     final avatarUrl = member['avatarUrl'] as String?;
 
     try {
@@ -353,7 +354,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Impossible d'ouvrir la conversation")),
+          SnackBar(content: Text(tr(context, 'chat_open_failed'))),
         );
       }
     }
@@ -415,7 +416,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                       ),
                   ],
                 ),
-                Text("${_members.length} membres",
+                Text(trN(context, 'grp_members', _members.length),
                     style: TextStyle(color: mutedOf(context, AlanyaColors.grey500))),
               ],
             ),
@@ -443,7 +444,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
           // ====== LISTE DES MEMBRES ======
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text("Membres",
+            child: Text(tr(context, 'members_label'),
                 style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
@@ -453,7 +454,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
 
           ..._members.map((m) {
             final isMe = m['id'] == _myId;
-            final name = m['pseudo'] ?? m['publicNumber'] ?? 'Membre';
+            final name = m['pseudo'] ?? m['publicNumber'] ?? tr(context, 'grp_member');
             final online = (m['isOnline'] as int?) == 1;
             final isAdmin = (m['role'] as String?) == 'ADMIN';
 
@@ -478,7 +479,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                         color: accentOf(context).withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(6),
                       ),
-                      child: Text("Admin",
+                      child: Text(tr(context, 'grp_admin'),
                           style: TextStyle(
                               fontSize: 10,
                               color: accentOf(context),
@@ -531,7 +532,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   }
 
   void _showMemberOptions(Map<String, dynamic> member) {
-    final name = member['pseudo'] ?? member['publicNumber'] ?? 'Membre';
+    final name = member['pseudo'] ?? member['publicNumber'] ?? tr(context, 'grp_member');
     final isMe = member['id'] == _myId;
 
     showModalBottomSheet(
@@ -553,7 +554,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
             if (!isMe) ...[
               ListTile(
                 leading: Icon(Icons.message, color: positiveOf(context)),
-                title: const Text("Envoyer un message"),
+                title: Text(tr(context, 'send_message_action')),
                 onTap: () {
                   Navigator.pop(ctx);
                   _sendMessageTo(member);
@@ -564,7 +565,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                   ListTile(
                     leading: Icon(Icons.remove_moderator_outlined,
                         color: themed(context, light: AlanyaColors.chocolate, dark: AlanyaColors.craie2)),
-                    title: const Text("Retirer le rôle admin"),
+                    title: Text(tr(context, 'remove_admin')),
                     onTap: () {
                       Navigator.pop(ctx);
                       _changeMemberRole(member, 'MEMBER');
@@ -574,7 +575,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                   ListTile(
                     leading: Icon(Icons.shield_outlined,
                         color: positiveOf(context)),
-                    title: const Text("Nommer administrateur"),
+                    title: Text(tr(context, 'make_admin')),
                     onTap: () {
                       Navigator.pop(ctx);
                       _changeMemberRole(member, 'ADMIN');
@@ -582,7 +583,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                   ),
                 ListTile(
                   leading: Icon(Icons.remove_circle_outline, color: dangerOf(context)),
-                  title: Text("Retirer du groupe",
+                  title: Text(tr(context, 'remove_from_group'),
                       style: TextStyle(color: dangerOf(context))),
                   onTap: () {
                     Navigator.pop(ctx);
@@ -594,7 +595,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
             if (isMe)
               ListTile(
                 leading: Icon(Icons.exit_to_app, color: dangerOf(context)),
-                title: Text("Quitter le groupe",
+                title: Text(tr(context, 'grp_leave_action'),
                     style: TextStyle(color: dangerOf(context))),
                 onTap: () {
                   Navigator.pop(ctx);

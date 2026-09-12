@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 
 /// AppBar premium avec bouton retour (utilisé dans les sous-écrans).
 ///
@@ -23,7 +24,7 @@ PreferredSizeWidget backAppBar(
     leading: canPop
         ? IconButton(
             icon: const Icon(Icons.arrow_back_ios_new, size: 20),
-            tooltip: "Retour",
+            tooltip: tr(context, 'back'),
             onPressed: onBack ?? () => Navigator.maybePop(context),
           )
         : null,

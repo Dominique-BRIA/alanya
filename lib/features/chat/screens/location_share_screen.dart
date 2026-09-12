@@ -5,6 +5,7 @@ import '../../../models/message_payload.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/media/location_bubble.dart';
 import '../../../widgets/media/osm_static_map.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Aperçu d'une position avant de l'envoyer.
 ///
@@ -59,7 +60,7 @@ class _LocationShareScreenState extends State<LocationShareScreen> {
       setState(() {
         _chargement = false;
         _serviceCoupe = true;
-        _erreur = "La localisation est désactivée sur ce téléphone";
+        _erreur = tr(context, 'location_disabled_phone');
       });
       return;
     }
@@ -74,8 +75,8 @@ class _LocationShareScreenState extends State<LocationShareScreen> {
       setState(() {
         _chargement = false;
         _erreur = permission == LocationPermission.deniedForever
-            ? "Accès à la position refusé définitivement. À réactiver dans les réglages du téléphone."
-            : "Accès à la position refusé";
+            ? tr(context, 'location_denied_forever')
+            : tr(context, 'location_denied');
       });
       return;
     }
@@ -112,7 +113,7 @@ class _LocationShareScreenState extends State<LocationShareScreen> {
       if (!mounted) return;
       setState(() {
         _chargement = false;
-        _erreur = "Position introuvable. Sors à découvert et réessaie.";
+        _erreur = tr(context, 'position_not_found');
       });
     }
   }
@@ -138,10 +139,10 @@ class _LocationShareScreenState extends State<LocationShareScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text("Saisir des coordonnées"),
+        title: Text(tr(ctx, 'enter_coordinates')),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Text(
-            "Pour partager un lieu plutôt que ta position actuelle — une boutique, un point de rendez-vous.",
+          Text(
+            tr(ctx, 'coordinates_explain'),
             style: TextStyle(fontSize: 12.5),
           ),
           const SizedBox(height: 10),
@@ -149,31 +150,31 @@ class _LocationShareScreenState extends State<LocationShareScreen> {
             controller: ctrlLat,
             keyboardType: const TextInputType.numberWithOptions(
                 decimal: true, signed: true),
-            decoration: const InputDecoration(
-                labelText: "Latitude", hintText: "3.8480", isDense: true),
+            decoration: InputDecoration(
+                labelText: tr(ctx, 'latitude'), hintText: "3.8480", isDense: true),
           ),
           const SizedBox(height: 8),
           TextField(
             controller: ctrlLng,
             keyboardType: const TextInputType.numberWithOptions(
                 decimal: true, signed: true),
-            decoration: const InputDecoration(
-                labelText: "Longitude", hintText: "11.5020", isDense: true),
+            decoration: InputDecoration(
+                labelText: tr(ctx, 'longitude'), hintText: "11.5020", isDense: true),
           ),
           const SizedBox(height: 8),
           TextField(
             controller: ctrlNom,
-            decoration: const InputDecoration(
-                labelText: "Nom du lieu (optionnel)", isDense: true),
+            decoration: InputDecoration(
+                labelText: tr(ctx, 'place_name_optional'), isDense: true),
           ),
         ]),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text("Annuler")),
+              child: Text(tr(ctx, 'cancel'))),
           ElevatedButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text("Valider")),
+              child: Text(tr(ctx, 'validate'))),
         ],
       ),
     );
@@ -190,9 +191,8 @@ class _LocationShareScreenState extends State<LocationShareScreen> {
         lng < -180 ||
         lng > 180) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text(
-              "Coordonnées invalides (latitude entre -90 et 90, longitude entre -180 et 180)")));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(tr(context, 'coordinates_invalid'))));
       return;
     }
     final nom = ctrlNom.text.trim();
@@ -209,10 +209,10 @@ class _LocationShareScreenState extends State<LocationShareScreen> {
     final p = _position;
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Partager ma position"),
+        title: Text(tr(context, 'share_location')),
         actions: [
           IconButton(
-            tooltip: "Saisir des coordonnées",
+            tooltip: tr(context, 'enter_coordinates'),
             icon: const Icon(Icons.edit_location_alt_outlined),
             onPressed: _saisieManuelle,
           ),
@@ -228,7 +228,7 @@ class _LocationShareScreenState extends State<LocationShareScreen> {
                       children: [
                         CircularProgressIndicator(color: accentOf(context)),
                         const SizedBox(height: 12),
-                        const Text("Recherche de ta position…"),
+                        Text(tr(context, 'locating')),
                       ],
                     ),
                   )
@@ -261,7 +261,11 @@ class _LocationShareScreenState extends State<LocationShareScreen> {
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: Text(
-                                "Précision ${p.accuracy.round()} m · ${p.latitude.toStringAsFixed(5)}, ${p.longitude.toStringAsFixed(5)}",
+                                tr(context, 'location_accuracy', {
+                                  'precision': '${p.accuracy.round()}',
+                                  'lat': p.latitude.toStringAsFixed(5),
+                                  'lng': p.longitude.toStringAsFixed(5),
+                                }),
                                 style: const TextStyle(
                                     color: Colors.white, fontSize: 12),
                               ),
@@ -280,7 +284,7 @@ class _LocationShareScreenState extends State<LocationShareScreen> {
                     textCapitalization: TextCapitalization.sentences,
                     decoration: InputDecoration(
                       isDense: true,
-                      hintText: "Ajouter une précision (optionnel)",
+                      hintText: tr(context, 'accuracy_note_optional'),
                       border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(24)),
                       contentPadding: const EdgeInsets.symmetric(
@@ -315,7 +319,7 @@ class _LocationShareScreenState extends State<LocationShareScreen> {
           const Icon(Icons.location_off_outlined,
               size: 52, color: AlanyaColors.grey400),
           const SizedBox(height: 12),
-          Text(_erreur ?? "Position indisponible",
+          Text(_erreur ?? tr(context, 'position_unavailable'),
               textAlign: TextAlign.center,
               style: const TextStyle(fontSize: 14)),
           const SizedBox(height: 12),
@@ -324,17 +328,17 @@ class _LocationShareScreenState extends State<LocationShareScreen> {
               OutlinedButton.icon(
                 onPressed: () => Geolocator.openLocationSettings(),
                 icon: const Icon(Icons.settings, size: 16),
-                label: const Text("Activer la localisation"),
+                label: Text(tr(context, 'enable_location')),
               ),
             OutlinedButton.icon(
               onPressed: _releve,
               icon: const Icon(Icons.refresh, size: 16),
-              label: const Text("Réessayer"),
+              label: Text(tr(context, 'retry')),
             ),
             TextButton.icon(
               onPressed: _saisieManuelle,
               icon: const Icon(Icons.edit_location_alt_outlined, size: 16),
-              label: const Text("Saisir des coordonnées"),
+              label: Text(tr(context, 'enter_coordinates')),
             ),
           ]),
         ]),

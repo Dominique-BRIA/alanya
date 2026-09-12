@@ -8,6 +8,7 @@ import 'package:alanya/core/push_service.dart';
 import 'package:alanya/theme/alanya_theme.dart';
 import 'meeting_controller.dart';
 import 'screens/meeting_room_screen.dart';
+import '../../l10n/app_localizations.dart';
 
 /// Bandeau global « réunion en cours » affiché par-dessus toutes les pages
 /// quand une réunion est active mais que l'écran de salle n'est pas affiché
@@ -59,7 +60,12 @@ class _MeetingBannerState extends State<MeetingBanner> {
   /// c'est elle qui parle, avec un vrai dialogue et le message complet.
   void _onRefus(MeetingRefus refus) {
     if (refus.salleAffichee) return;
-    showAppSnackBar(refus.texteCourt);
+    // Composé ici et non dans le contrôleur : la phrase du client doit passer
+    // par `tr()`, et seul l'écran a le contexte. Le message du serveur, lui,
+    // reste tel quel — c'est lui qui sait dire pourquoi l'entrée a été refusée.
+    showAppSnackBar(refus.estSallePleine && refus.plafond != null
+        ? tr(context, 'meet_room_full_short', {'plafond': '${refus.plafond}'})
+        : refus.messageServeur);
   }
 
   @override
@@ -86,8 +92,8 @@ class _MeetingBannerState extends State<MeetingBanner> {
 
     final elapsed = _elapsed(mc.connectedSince);
     final label = elapsed.isNotEmpty
-        ? "Réunion en cours · $elapsed"
-        : "Réunion en cours…";
+        ? tr(context, 'meet_ongoing_banner', {'temps': elapsed})
+        : tr(context, 'meet_ongoing_dots');
 
     // Combien de mains sont levées, la mienne comprise. Le bandeau est la SEULE
     // surface visible quand la salle est réduite : sans ce compte, une demande
@@ -119,7 +125,7 @@ class _MeetingBannerState extends State<MeetingBanner> {
                     fullscreenDialog: true,
                     builder: (_) => MeetingRoomScreen(
                       meetingId: id,
-                      objet: mc.activeObjet ?? "Réunion",
+                      objet: mc.activeObjet ?? tr(context, 'meet_page_title'),
                       isVideo: mc.activeIsVideo,
                     ),
                   ),
@@ -173,8 +179,8 @@ class _MeetingBannerState extends State<MeetingBanner> {
                         ),
                       ),
                     ],
-                    const Text("Revenir",
-                        style: TextStyle(color: Colors.white70)),
+                    Text(tr(context, 'meet_return'),
+                        style: const TextStyle(color: Colors.white70)),
                   ],
                 ),
               ),

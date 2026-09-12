@@ -9,6 +9,7 @@ import '../call_controller.dart';
 import '../calls_repository.dart';
 import '../message_erreur_appel.dart';
 import 'active_call_screen.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// « Clients abandonnés » — menu ⋮ de l'accueil (demande user 15/08/2026).
 ///
@@ -51,8 +52,8 @@ class _AbandonedClientsScreenState extends State<AbandonedClientsScreen> {
       final reserveAuxAgents = e is ApiException && e.statusCode == 403;
       setState(() {
         _erreur = reserveAuxAgents
-            ? "Réservé aux agents d'un centre d'appels."
-            : "Impossible de charger la liste.";
+            ? tr(context, 'abandoned_agents_only')
+            : tr(context, 'abandoned_load_failed');
         _chargement = false;
       });
     }
@@ -85,7 +86,7 @@ class _AbandonedClientsScreenState extends State<AbandonedClientsScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(messageErreurAppel(e))),
+        SnackBar(content: Text(messageErreurAppel(e, context: context))),
       );
     } finally {
       if (mounted) setState(() => _rappelEnCours = null);
@@ -95,7 +96,7 @@ class _AbandonedClientsScreenState extends State<AbandonedClientsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: backAppBar(context, "Clients abandonnés"),
+      appBar: backAppBar(context, tr(context, 'abandoned_title')),
       body: _chargement
           ? const Center(child: CircularProgressIndicator())
           : _erreur != null
@@ -110,9 +111,9 @@ class _AbandonedClientsScreenState extends State<AbandonedClientsScreen> {
                   ),
                 )
               : _clients.isEmpty
-                  ? const Center(
-                      child: Text("Aucun client abandonné pour l'instant.",
-                          style: TextStyle(color: Colors.grey)))
+                  ? Center(
+                      child: Text(tr(context, 'no_abandoned'),
+                          style: const TextStyle(color: Colors.grey)))
                   : RefreshIndicator(
                       onRefresh: _charger,
                       child: ListView.builder(
@@ -132,8 +133,9 @@ class _AbandonedClientsScreenState extends State<AbandonedClientsScreen> {
                             title: Text(nom),
                             subtitle: Text(
                               [
-                                statut == "TIMEOUT" ? "Expiré" : "Abandonné",
-                                "après ${_duree(attente)}",
+                                statut == "TIMEOUT"
+                                  ? tr(context, 'queue_expired_after', {'duree': _duree(attente)})
+                                  : tr(context, 'queue_abandoned_after', {'duree': _duree(attente)}),
                                 if (serviceName != null) serviceName,
                                 if (centreName != null) centreName,
                               ].join(" · "),
@@ -146,7 +148,7 @@ class _AbandonedClientsScreenState extends State<AbandonedClientsScreen> {
                                     child: CircularProgressIndicator(strokeWidth: 2))
                                 : IconButton(
                                     icon: const Icon(Icons.call, color: AlanyaColors.forest),
-                                    tooltip: "Rappeler",
+                                    tooltip: tr(context, 'call_back'),
                                     onPressed: _rappelEnCours != null ? null : () => _rappeler(c),
                                   ),
                           );

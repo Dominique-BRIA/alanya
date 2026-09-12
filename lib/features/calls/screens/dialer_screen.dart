@@ -16,6 +16,7 @@ import '../../contacts/screens/add_contact_screen.dart';
 import '../call_controller.dart';
 import '../message_erreur_appel.dart';
 import 'active_call_screen.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Clavier d'appel : on compose un Alanya ID et on appelle directement.
 ///
@@ -141,7 +142,7 @@ class _DialerScreenState extends State<DialerScreen> {
       if (!mounted || asked != _digits) return null;
       setState(() {
         _searching = false;
-        _lookupError = "Recherche impossible. Vérifie ta connexion.";
+        _lookupError = tr(context, 'dial_lookup_failed');
       });
       return null;
     }
@@ -154,7 +155,7 @@ class _DialerScreenState extends State<DialerScreen> {
   Future<void> _call(String type) async {
     if (_calling) return;
     if (!_isComplete) {
-      showAppSnackBar("Compose un Alanya ID à 6 ou 8 chiffres");
+      showAppSnackBar(tr(context, 'dial_invalid_id'));
       return;
     }
     _debounce?.cancel();
@@ -165,7 +166,7 @@ class _DialerScreenState extends State<DialerScreen> {
       final user = _found ?? await _lookup();
       if (!mounted) return;
       if (user == null) {
-        showAppSnackBar(_lookupError ?? "Aucun compte avec cet Alanya ID");
+        showAppSnackBar(_lookupError ?? tr(context, 'dial_no_account'));
         return;
       }
 
@@ -186,7 +187,7 @@ class _DialerScreenState extends State<DialerScreen> {
       // Le 404 est propre à cet écran : on y cherche un compte par son Alanya
       // ID, et son absence n'a pas le même sens depuis une conversation.
       showAppSnackBar(messageErreurAppel(e,
-          messageSi404: "Aucun compte avec cet Alanya ID"));
+          messageSi404: tr(context, 'dial_no_account'), context: context));
     } finally {
       if (mounted) setState(() => _calling = false);
     }
@@ -194,7 +195,7 @@ class _DialerScreenState extends State<DialerScreen> {
 
   Future<void> _addContact() async {
     if (!_isComplete) {
-      showAppSnackBar("Compose un Alanya ID à 6 ou 8 chiffres");
+      showAppSnackBar(tr(context, 'dial_invalid_id'));
       return;
     }
     await Navigator.of(context).push(
@@ -222,7 +223,7 @@ class _DialerScreenState extends State<DialerScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.search),
-            tooltip: "Chercher ce compte",
+            tooltip: tr(context, 'lookup_this_account'),
             onPressed: _isComplete && !_searching
                 ? () {
                     _debounce?.cancel();
@@ -232,7 +233,7 @@ class _DialerScreenState extends State<DialerScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.videocam_outlined),
-            tooltip: "Appel vidéo",
+            tooltip: tr(context, 'video_call'),
             onPressed: _calling ? null : () => _call("VIDEO"),
           ),
         ],
@@ -277,7 +278,7 @@ class _DialerScreenState extends State<DialerScreen> {
         ),
         decoration: InputDecoration(
           border: InputBorder.none,
-          hintText: "Alanya ID",
+          hintText: tr(context, 'alanya_id'),
           hintStyle: TextStyle(
             color: faintOf(context, Colors.black26),
             fontSize: 28,
@@ -305,7 +306,7 @@ class _DialerScreenState extends State<DialerScreen> {
             ),
           ),
           const SizedBox(width: 8),
-          Text("Recherche…",
+          Text(tr(context, 'searching'),
               style: TextStyle(color: mutedOf(context, Colors.black54))),
         ],
       );
@@ -321,7 +322,7 @@ class _DialerScreenState extends State<DialerScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            u.pseudo ?? "Utilisateur ${formatAlanyaId(u.publicNumber)}",
+            u.pseudo ?? tr(context, 'user_numbered', {'id': formatAlanyaId(u.publicNumber)}),
             style: TextStyle(
               color: positiveOf(context),
               fontWeight: FontWeight.w600,
@@ -330,7 +331,7 @@ class _DialerScreenState extends State<DialerScreen> {
           ),
           if (u.alreadyContact)
             Text(
-              "Déjà dans ton répertoire",
+              tr(context, 'add_already_in_book'),
               style: TextStyle(
                   color: mutedOf(context, Colors.black54), fontSize: 12),
             ),
@@ -338,7 +339,7 @@ class _DialerScreenState extends State<DialerScreen> {
       );
     } else {
       content = Text(
-        "$alanyaIdMinLength à $alanyaIdMaxLength chiffres",
+        tr(context, 'digits_range', {'min': '$alanyaIdMinLength', 'max': '$alanyaIdMaxLength'}),
         style: TextStyle(color: mutedOf(context, Colors.black45), fontSize: 13),
       );
     }
@@ -456,7 +457,7 @@ class _DialerScreenState extends State<DialerScreen> {
             foreground:
                 _isComplete ? cs.onSurface : faintOf(context, Colors.black26),
             icon: Icons.person_add_alt_1,
-            tooltip: "Ajouter à mes contacts",
+            tooltip: tr(context, 'add_to_contacts'),
             onPressed: _isComplete ? _addContact : null,
             size: 56,
           ),
@@ -465,7 +466,7 @@ class _DialerScreenState extends State<DialerScreen> {
                 _isComplete ? vertAppel : vertAppel.withValues(alpha: 0.35),
             foreground: Colors.white,
             icon: Icons.phone,
-            tooltip: "Appeler",
+            tooltip: tr(context, 'call'),
             onPressed: _isComplete && !_calling ? () => _call("AUDIO") : null,
             size: 68,
             busy: _calling,

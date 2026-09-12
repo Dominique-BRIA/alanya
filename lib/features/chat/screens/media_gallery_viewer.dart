@@ -64,8 +64,8 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
     if (!mounted) return;
     setState(() => _downloading = false);
     showAppSnackBar(path != null
-        ? "Enregistré dans Alanya/"
-        : "Échec du téléchargement");
+        ? tr(context, 'saved_to_alanya', {'nom': item.filename})
+        : tr(context, 'download_failed'));
   }
 
   @override

@@ -6,6 +6,7 @@ import 'package:video_player/video_player.dart';
 import '../../../core/downloader.dart';
 import '../../../core/telechargement_suivi.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Visionneuse vidéo plein écran (style WhatsApp).
 /// - Lecture/pause au tap
@@ -102,10 +103,10 @@ class _VideoViewerScreenState extends State<VideoViewerScreen> {
     if (path != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('Vidéo enregistrée dans Alanya/'),
+          content: Text(tr(context, 'video_saved')),
           backgroundColor: AlanyaColors.forest,
           action: SnackBarAction(
-            label: 'Ouvrir',
+            label: tr(context, 'open'),
             textColor: Colors.white,
             onPressed: () => openLocalFile(path),
           ),
@@ -113,8 +114,8 @@ class _VideoViewerScreenState extends State<VideoViewerScreen> {
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Échec du téléchargement'),
+        SnackBar(
+          content: Text(tr(context, 'download_failed')),
           backgroundColor: Colors.red,
         ),
       );
@@ -170,14 +171,14 @@ class _VideoViewerScreenState extends State<VideoViewerScreen> {
                         ),
                     ],
                   )
-                : const Center(
+                : Center(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        CircularProgressIndicator(color: Colors.white),
-                        SizedBox(height: 16),
+                        const CircularProgressIndicator(color: Colors.white),
+                        const SizedBox(height: 16),
                         Text(
-                          'Chargement de la vidéo…',
+                          tr(context, 'video_loading'),
                           style: TextStyle(color: Colors.white70),
                         ),
                       ],
@@ -194,13 +195,13 @@ class _VideoViewerScreenState extends State<VideoViewerScreen> {
       children: [
         const Icon(Icons.error_outline, size: 56, color: Colors.white54),
         const SizedBox(height: 12),
-        const Text(
-          'Lecture impossible',
+        Text(
+          tr(context, 'playback_failed'),
           style: TextStyle(color: Colors.white70, fontSize: 16),
         ),
         const SizedBox(height: 8),
-        const Text(
-          'Télécharge la vidéo pour la lire avec une autre application.',
+        Text(
+          tr(context, 'download_to_play'),
           textAlign: TextAlign.center,
           style: TextStyle(color: Colors.white54, fontSize: 13),
         ),
@@ -208,7 +209,7 @@ class _VideoViewerScreenState extends State<VideoViewerScreen> {
         ElevatedButton.icon(
           onPressed: _downloading ? null : _download,
           icon: const Icon(Icons.download),
-          label: const Text('Télécharger'),
+          label: Text(tr(context, 'download')),
         ),
       ],
     );

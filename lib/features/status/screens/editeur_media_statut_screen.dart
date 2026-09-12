@@ -9,6 +9,7 @@ import 'package:video_player/video_player.dart';
 import '../../../core/compression_image.dart' show imageBordMax;
 import '../../../widgets/media/media_picker_sheet.dart';
 import '../widgets/choix_emoji.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Ce que l'éditeur rend à l'écran de publication.
 class MediaEdite {
@@ -194,21 +195,21 @@ class _EditeurMediaStatutScreenState extends State<EditeurMediaStatutScreen> {
     final texte = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("Ajouter du texte"),
+        title: Text(tr(ctx, 'status_add_text')),
         content: TextField(
           controller: ctrl,
           autofocus: true,
           maxLength: 80,
-          decoration: const InputDecoration(hintText: "Ton texte…"),
+          decoration: InputDecoration(hintText: tr(ctx, 'status_your_text')),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text("Annuler"),
+            child: Text(tr(ctx, 'cancel')),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-            child: const Text("Ajouter"),
+            child: Text(tr(ctx, 'add_action')),
           ),
         ],
       ),
@@ -344,13 +345,13 @@ class _EditeurMediaStatutScreenState extends State<EditeurMediaStatutScreen> {
         const Spacer(),
         if (_historique.isNotEmpty)
           IconButton(
-            tooltip: "Annuler la dernière",
+            tooltip: tr(context, 'status_undo_last'),
             icon: const Icon(Icons.undo, color: Colors.white),
             onPressed: _defaire,
           ),
         if (actifs) ...[
           IconButton(
-            tooltip: "Emoji",
+            tooltip: tr(context, 'status_emoji'),
             icon: const Icon(
               Icons.emoji_emotions_outlined,
               color: Colors.white,
@@ -358,12 +359,12 @@ class _EditeurMediaStatutScreenState extends State<EditeurMediaStatutScreen> {
             onPressed: _ajouterEmoji,
           ),
           IconButton(
-            tooltip: "Texte",
+            tooltip: tr(context, 'text_action'),
             icon: const Icon(Icons.title, color: Colors.white),
             onPressed: _ajouterTexte,
           ),
           IconButton(
-            tooltip: "Dessin",
+            tooltip: tr(context, 'status_draw'),
             icon: Icon(
               Icons.brush,
               color: _outil == _Outil.dessin
@@ -560,10 +561,10 @@ class _EditeurMediaStatutScreenState extends State<EditeurMediaStatutScreen> {
               minLines: 1,
               style: const TextStyle(color: Colors.white),
               cursorColor: Colors.white,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 counterText: "",
-                hintText: "Ajouter une légende…",
-                hintStyle: TextStyle(color: Colors.white54),
+                hintText: tr(context, 'status_add_caption'),
+                hintStyle: const TextStyle(color: Colors.white54),
                 filled: true,
                 fillColor: Colors.white10,
                 // Les quatre états, pour la même raison que l'éditeur de texte :

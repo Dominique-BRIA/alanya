@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../../theme/alanya_theme.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Bandeau d'activité du correspondant, affiché au-dessus de la barre de
 /// saisie : « en train d'écrire… » (3 points dansants décalés) ou « en train
@@ -82,7 +83,9 @@ class _TypingContent extends StatelessWidget {
     // Nuit : l'indigo clair remplace le vert forêt, illisible sur fond nuit.
     // Le mode clair garde le vert forêt.
     final accent = dark ? AlanyaColors.indigoLight : AlanyaColors.forest;
-    final label = name == null ? "en train d'écrire" : "$name écrit";
+    final label = name == null
+        ? tr(context, 'typing_hint')
+        : tr(context, 'typing_name_hint', {'nom': name});
     return _Pill(
       accent: accent,
       child: Row(

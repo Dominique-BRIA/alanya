@@ -10,6 +10,7 @@ import '../../../models/meeting.dart';
 import '../meetings_repository.dart';
 import 'create_meeting_screen.dart';
 import 'meeting_detail_screen.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Onglet "Réunions" intégré dans la barre de navigation du HomeScreen.
 class MeetingsScreen extends StatefulWidget {
@@ -107,15 +108,15 @@ class _MeetingsScreenState extends State<MeetingsScreen>
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text("Supprimer $count réunion(s) ?"),
-        content: const Text("Seules les réunions terminées peuvent être supprimées."),
+        title: Text(tr(context, 'meet_delete_q', {'n': '$count'})),
+        content: Text(tr(context, 'meet_only_ended')),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text("Annuler")),
+              child: Text(tr(context, 'cancel'))),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: Text("Supprimer",
+              child: Text(tr(context, 'delete'),
                   style: TextStyle(color: dangerOf(context)))),
         ],
       ),
@@ -140,7 +141,7 @@ class _MeetingsScreenState extends State<MeetingsScreen>
       child: isSelecting
           ? Scaffold(
               appBar: selectAppBar(
-                title: "Réunions",
+                title: tr(context, 'meetings_title'),
                 onDelete: _deleteSelected,
                 onCancel: clearSelection,
                 onSelectAll: () => selectAll(
@@ -163,13 +164,13 @@ class _MeetingsScreenState extends State<MeetingsScreen>
             )
           : Scaffold(
               appBar: AppBar(
-                title: const Text("Réunions"),
+                title: Text(tr(context, 'meetings_title')),
                 bottom: TabBar(
                   controller: _tabController,
-                  tabs: const [
-                    Tab(text: "En cours"),
-                    Tab(text: "À venir"),
-                    Tab(text: "Terminée"),
+                  tabs: [
+                    Tab(text: tr(context, 'meet_ongoing')),
+                    Tab(text: tr(context, 'meet_upcoming')),
+                    Tab(text: tr(context, 'meet_finished')),
                   ],
                   labelColor: AlanyaColors.terracotta,
                   unselectedLabelColor: AlanyaColors.craie2,
@@ -205,9 +206,9 @@ class _MeetingsScreenState extends State<MeetingsScreen>
       return const Center(child: CircularProgressIndicator());
     }
     if (_error) {
-      return ListView(children: const [
-        SizedBox(height: 80),
-        Center(child: Text("Erreur de chargement. Tire pour réessayer.")),
+      return ListView(children: [
+        const SizedBox(height: 80),
+        Center(child: Text(tr(context, 'load_error'))),
       ]);
     }
 
@@ -241,8 +242,10 @@ class _MeetingsScreenState extends State<MeetingsScreen>
                 SizedBox(height: 12),
                 Text(
                   tabName == "Terminée"
-                      ? "Aucune réunion terminée."
-                      : "Aucune réunion ${tabName.toLowerCase()}.",
+                      ? tr(context, 'meet_none_ended')
+                      : tabName == "À venir"
+                          ? tr(context, 'meet_none_upcoming')
+                          : tr(context, 'meet_none_ongoing'),
                   textAlign: TextAlign.center,
                   style: TextStyle(color: mutedOf(context, Colors.black54)),
                 ),
@@ -264,9 +267,9 @@ class _MeetingsScreenState extends State<MeetingsScreen>
 
   Widget _tile(Meeting m) {
     final icon = m.isVideo ? Icons.videocam : Icons.call;
-    final typeLabel = m.isVideo ? "Vidéo" : "Audio";
+    final typeLabel = m.isVideo ? tr(context, 'video') : tr(context, 'meet_audio');
     final statusLabel =
-        m.isFinished ? "Terminée" : "${m.connectedCount} connecté(s)";
+        m.isFinished ? tr(context, 'meet_finished') : tr(context, 'meet_n_connected', {'n': '${m.connectedCount}'});
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),

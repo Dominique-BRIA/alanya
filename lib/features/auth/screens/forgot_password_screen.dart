@@ -121,7 +121,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     } on ApiException catch (e) {
       _onError(e.message);
     } catch (_) {
-      _onError("Erreur réseau. Vérifie ta connexion.");
+      _onError(tr(context, 'network_error_retry'));
     }
   }
 
@@ -129,7 +129,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   Future<void> _sendCode() async {
     final email = _emailCtrl.text.trim();
     if (email.isEmpty || !email.contains('@')) {
-      showAppSnackBar("Entre un email valide");
+      showAppSnackBar(tr(context, 'email_invalid'));
       return;
     }
 
@@ -141,11 +141,11 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         _codeSent = true;
         _loading = false;
       });
-      showAppSnackBar("Un code a été envoyé à cet email (s'il existe).");
+      showAppSnackBar(tr(context, 'forgot_code_sent'));
     } on ApiException catch (e) {
       _onError(e.message);
     } catch (_) {
-      _onError("Erreur réseau. Vérifie ta connexion.");
+      _onError(tr(context, 'network_error_retry'));
     }
   }
 
@@ -156,11 +156,11 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     final newPass = _passCtrl.text;
 
     if (code.length != 6) {
-      showAppSnackBar("Le code doit comporter 6 chiffres");
+      showAppSnackBar(tr(context, 'code_must_be_6'));
       return;
     }
     if (newPass.length < 8) {
-      showAppSnackBar("Le mot de passe doit faire au moins 8 caractères");
+      showAppSnackBar(tr(context, 'password_8_min'));
       return;
     }
 
@@ -172,13 +172,13 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
             newPassword: newPass,
           );
       if (!mounted) return;
-      showAppSnackBar("Mot de passe réinitialisé avec succès 🎉");
+      showAppSnackBar(tr(context, 'password_reset_success'));
       // Retour à l'écran de connexion
       Navigator.of(context).popUntil((route) => route.isFirst);
     } on ApiException catch (e) {
       _onError(e.message);
     } catch (_) {
-      _onError("Erreur réseau. Vérifie ta connexion.");
+      _onError(tr(context, 'network_error_retry'));
     }
   }
 
@@ -191,7 +191,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: backAppBar(context, "Mot de passe oublié"),
+      appBar: backAppBar(context, tr(context, 'forgot_password_title')),
       body: MotifBackground(
         child: SafeArea(
           child: Center(
@@ -234,10 +234,10 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
 
                   Text(
                     _parIdRecuperation
-                        ? "Réinitialise ton mot de passe"
+                        ? tr(context, 'forgot_title')
                         : _codeSent
-                            ? "Vérifie ta boîte mail"
-                            : "Réinitialise ton mot de passe",
+                            ? tr(context, 'forgot_check_inbox')
+                            : tr(context, 'forgot_title'),
                     textAlign: TextAlign.center,
                     style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                   ),
@@ -246,8 +246,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                     _parIdRecuperation
                         ? tr(context, 'recovery_id_hint')
                         : _codeSent
-                            ? "Saisis le code à 6 chiffres reçu par email et ton nouveau mot de passe."
-                            : "Saisis ton adresse email. Si un compte existe, tu recevras un code de vérification.",
+                            ? tr(context, 'forgot_code_step')
+                            : tr(context, 'forgot_email_step'),
                     textAlign: TextAlign.center,
                     style: TextStyle(color: mutedOf(context, Colors.black54)),
                   ),
@@ -300,9 +300,9 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                       controller: _emailCtrl,
                       keyboardType: TextInputType.emailAddress,
                       enabled: !_codeSent, // Grisé si le code a été envoyé
-                      decoration: const InputDecoration(
-                        labelText: "Email",
-                        prefixIcon: Icon(Icons.mail_outline),
+                      decoration: InputDecoration(
+                        labelText: tr(context, 'email'),
+                        prefixIcon: const Icon(Icons.mail_outline),
                       ),
                     ),
 
@@ -314,9 +314,9 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                       keyboardType: TextInputType.number,
                       maxLength: 6,
                       inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                      decoration: const InputDecoration(
-                        labelText: "Code de vérification (6 chiffres)",
-                        prefixIcon: Icon(Icons.password),
+                      decoration: InputDecoration(
+                        labelText: tr(context, 'verification_code_label'),
+                        prefixIcon: const Icon(Icons.password),
                         counterText: "",
                       ),
                     ),
@@ -324,9 +324,9 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                     TextField(
                       controller: _passCtrl,
                       obscureText: true,
-                      decoration: const InputDecoration(
-                        labelText: "Nouveau mot de passe",
-                        prefixIcon: Icon(Icons.lock_outline),
+                      decoration: InputDecoration(
+                        labelText: tr(context, 'recovery_id_new_password'),
+                        prefixIcon: const Icon(Icons.lock_outline),
                       ),
                     ),
                   ],
@@ -354,7 +354,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                           : Text(_parIdRecuperation
                               ? tr(context, 'continue')
                               : _codeSent
-                                  ? "Réinitialiser"
+                                  ? tr(context, 'reset_password_action')
                                   : "Envoyer le code"),
                     ),
                   ),

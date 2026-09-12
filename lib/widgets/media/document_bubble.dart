@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import '../../core/media_helper.dart';
 import '../../theme/alanya_theme.dart';
+import '../../l10n/app_localizations.dart';
 
 /// Bulle document style WhatsApp :
 /// - PDF : aperçu 1ère page via pdfx → au clic ouvre PdfViewerScreen
@@ -129,7 +130,7 @@ class _DocumentBubbleState extends State<DocumentBubble> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Impossible d'ouvrir le document")),
+          SnackBar(content: Text(tr(context, 'open_document_failed'))),
         );
       }
     }

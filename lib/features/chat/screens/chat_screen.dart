@@ -722,7 +722,7 @@ class _ChatScreenState extends State<ChatScreen>
               title: Text("@$_libelleTousLesMembres",
                   style: TextStyle(
                       color: _iconNeutral, fontWeight: FontWeight.w600)),
-              subtitle: Text("Notifie ${_membresProposes().length} membres",
+              subtitle: Text(tr(context, 'notify_members', {'n': '${_membresProposes().length}'}),
                   style: TextStyle(color: _muted45, fontSize: 11)),
               onTap: _insereMentionTous,
             );
@@ -1647,12 +1647,12 @@ class _ChatScreenState extends State<ChatScreen>
             const Divider(height: 1),
             ListTile(
               leading: Icon(Icons.call, color: _positive),
-              title: const Text("Appel audio"),
+              title: Text(tr(context, 'audio_call')),
               onTap: () => Navigator.pop(ctx, "AUDIO"),
             ),
             ListTile(
               leading: Icon(Icons.videocam, color: _positive),
-              title: const Text("Appel vidéo"),
+              title: Text(tr(context, 'video_call')),
               onTap: () => Navigator.pop(ctx, "VIDEO"),
             ),
             const SizedBox(height: 8),
@@ -1881,7 +1881,7 @@ class _ChatScreenState extends State<ChatScreen>
         const SizedBox(width: 4),
       ],
       if (m.editedAt != null) ...[
-        Text("modifié",
+        Text(tr(context, 'edited'),
             style: TextStyle(
                 fontSize: 10, fontStyle: FontStyle.italic, color: color)),
         const SizedBox(width: 4),
@@ -1903,7 +1903,7 @@ class _ChatScreenState extends State<ChatScreen>
           if (n <= 0) return const SizedBox.shrink();
           return Padding(
             padding: const EdgeInsets.only(left: 4),
-            child: Text("$n lu",
+            child: Text(tr(context, 'n_read', {'n': '$n'}),
                 style: TextStyle(fontSize: 10, color: color)),
           );
         }),
@@ -1970,9 +1970,9 @@ class _ChatScreenState extends State<ChatScreen>
     }
     if (foundIdx < 0) {
       if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text("Message introuvable"),
-            duration: Duration(seconds: 2)));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(tr(context, 'message_not_found')),
+            duration: const Duration(seconds: 2)));
       return;
     }
     if (!_scrollCtrl.hasClients) return;
@@ -2664,7 +2664,7 @@ class _ChatScreenState extends State<ChatScreen>
       // `messageErreurAppel` traite déjà l'ApiException : le message du serveur
       // passe tel quel (« Le correspondant est déjà en appel »), et c'est le
       // point unique des trois écrans qui lancent un appel.
-      _showError(messageErreurAppel(e));
+      _showError(messageErreurAppel(e, context: context));
     }
   }
 
@@ -2682,10 +2682,10 @@ class _ChatScreenState extends State<ChatScreen>
     try {
       await context.read<ContactsRepository>().add(id, alias: contact.name);
       if (!mounted) return;
-      showAppSnackBar("${contact.displayName} ajouté à tes contacts");
+      showAppSnackBar(tr(context, 'contact_added_toast', {'nom': contact.displayName}));
     } on ApiException catch (e) {
       if (e.code == "ALREADY_CONTACT") {
-        showAppSnackBar("${contact.displayName} est déjà dans tes contacts");
+        showAppSnackBar(tr(context, 'add_already_contact', {'nom': contact.displayName}));
         return;
       }
       _showError(e.message);
@@ -2859,9 +2859,9 @@ class _ChatScreenState extends State<ChatScreen>
         idTransfert: "dl-${m.id}", ouvrirEnsuite: true);
     if (!mounted) return;
     if (path != null) {
-      showAppSnackBar("Enregistré dans Alanya/ : $name");
+      showAppSnackBar(tr(context, 'saved_to_alanya', {'nom': name}));
     } else {
-      showAppSnackBar("Échec du téléchargement");
+      showAppSnackBar(tr(context, 'download_failed'));
     }
   }
 
@@ -2871,13 +2871,13 @@ class _ChatScreenState extends State<ChatScreen>
     final token = await _freshToken();
     final url = "$_baseUrl${m.url}?download=1&token=$token";
     final name = m.filename ?? "fichier-${m.id}";
-    showAppSnackBar("Ouverture…");
+    showAppSnackBar(tr(context, 'opening'));
     final path = await downloadToCache(url, name);
     if (!mounted) return;
     if (path != null) {
       await openLocalFile(path);
     } else {
-      showAppSnackBar("Impossible d'ouvrir le fichier");
+      showAppSnackBar(tr(context, 'open_file_failed'));
     }
   }
 
@@ -3154,8 +3154,8 @@ class _ChatScreenState extends State<ChatScreen>
                 height: 160, child: Center(child: CircularProgressIndicator()));
           }
           if (snap.hasError || snap.data == null) {
-            return const SizedBox(
-                height: 120, child: Center(child: Text("Infos indisponibles")));
+            return SizedBox(
+                height: 120, child: Center(child: Text(tr(fctx, 'infos_unavailable'))));
           }
           final members = ((snap.data!["members"] as List?) ?? [])
               .map((e) => Map<String, dynamic>.from(e as Map))
@@ -3164,20 +3164,20 @@ class _ChatScreenState extends State<ChatScreen>
           final pending = members.where((x) => x["read"] != true).toList();
           return SafeArea(
             child: Column(mainAxisSize: MainAxisSize.min, children: [
-              const Padding(
-                padding: EdgeInsets.all(14),
-                child: Text("Infos du message",
-                    style:
-                        TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              Padding(
+                padding: const EdgeInsets.all(14),
+                child: Text(tr(fctx, 'message_infos'),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 16)),
               ),
               const Divider(height: 1),
               _infoSection(
-                  Icons.done_all, AlanyaColors.tickRead, "Lu", readList),
-              _infoSection(Icons.done, _mutedIcon, "En attente", pending),
+                  Icons.done_all, AlanyaColors.tickRead, tr(fctx, 'read_label'), readList),
+              _infoSection(Icons.done, _mutedIcon, tr(fctx, 'pending_label'), pending),
               if (readList.isEmpty && pending.isEmpty)
-                const Padding(
-                    padding: EdgeInsets.all(20),
-                    child: Text("Aucun destinataire.")),
+                Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Text(tr(fctx, 'no_recipient'))),
               const SizedBox(height: 8),
             ]),
           );
@@ -3195,7 +3195,7 @@ class _ChatScreenState extends State<ChatScreen>
         child: Row(children: [
           Icon(icon, size: 18, color: color),
           const SizedBox(width: 8),
-          Text("$title (${list.length})",
+          Text(tr(context, 'selection_title', {'titre': title, 'n': '${list.length}'}),
               style: TextStyle(fontWeight: FontWeight.w600, color: color)),
         ]),
       ),
@@ -3228,14 +3228,15 @@ class _ChatScreenState extends State<ChatScreen>
     } catch (_) {}
   }
 
-  static const Map<int, String> _disappearingOptions = {
-    0: "Désactivé",
-    86400: "24 heures",
-    604800: "7 jours",
-    7776000: "90 jours",
+  Map<int, String> get _disappearingOptions => {
+    0: tr(context, 'disappearing_off'),
+    86400: tr(context, 'duration_24h'),
+    604800: tr(context, 'duration_7d'),
+    7776000: tr(context, 'duration_90d'),
   };
 
-  String _disappearingLabel(int s) => _disappearingOptions[s] ?? "Personnalisé";
+  String _disappearingLabel(int s) =>
+      _disappearingOptions[s] ?? tr(context, 'custom_word');
 
   void _setDisappearing(int seconds) {
     setState(() => _disappearingSeconds = seconds);
@@ -3255,22 +3256,22 @@ class _ChatScreenState extends State<ChatScreen>
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Padding(
-            padding: EdgeInsets.all(16),
+          Padding(
+            padding: const EdgeInsets.all(16),
             child: Row(children: [
-              Icon(Icons.timer_outlined, size: 20),
-              SizedBox(width: 10),
+              const Icon(Icons.timer_outlined, size: 20),
+              const SizedBox(width: 10),
               Expanded(
-                child: Text("Messages éphémères",
-                    style:
-                        TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                child: Text(tr(context, 'ephemeral_title'),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 16)),
               ),
             ]),
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: Text(
-              "Les nouveaux messages disparaîtront après la durée choisie, pour tout le monde.",
+              tr(context, 'ephemeral_body'),
               style: TextStyle(fontSize: 13, color: _muted),
             ),
           ),
@@ -3317,7 +3318,7 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   String _pinnedPreviewText(Message m) {
-    if (m.isDeleted) return "Message supprimé";
+    if (m.isDeleted) return tr(context, 'ai_message_deleted');
     // Même raison que pour la citation d'une réponse : le bandeau ne montre
     // qu'une ligne, et la charge d'un message structuré est du JSON.
     return apercuMessage(
@@ -3355,7 +3356,7 @@ class _ChatScreenState extends State<ChatScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text("Message épinglé",
+                  Text(tr(context, 'pinned_message'),
                       style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
@@ -3368,7 +3369,7 @@ class _ChatScreenState extends State<ChatScreen>
               ),
             ),
             IconButton(
-              tooltip: "Détacher",
+              tooltip: tr(context, 'unpin_action'),
               icon: Icon(Icons.close, size: 20, color: _muted45),
               onPressed: () {
                 setState(() => _pinnedMessageId = null);
@@ -3453,7 +3454,7 @@ class _ChatScreenState extends State<ChatScreen>
                 if (m.senderId == _myId && m.type == 'TEXT')
                   ListTile(
                       leading: Icon(Icons.edit_outlined, color: _positive),
-                      title: const Text("Modifier"),
+                      title: Text(tr(context, 'edit')),
                       onTap: () {
                         Navigator.pop(ctx);
                         _startEdit(m);
@@ -3479,7 +3480,7 @@ class _ChatScreenState extends State<ChatScreen>
               if (!m.isDeleted && m.media.isNotEmpty)
                 ListTile(
                     leading: Icon(Icons.download_outlined, color: _iconNeutral),
-                    title: const Text("Enregistrer"),
+                    title: Text(tr(context, 'save')),
                     onTap: () {
                       Navigator.pop(ctx);
                       _download(m.media.first);
@@ -3508,7 +3509,7 @@ class _ChatScreenState extends State<ChatScreen>
       // fiche de contact. Ici manquait la clause `on ApiException` : appeler
       // quelqu'un déjà en ligne affichait « vérifie ta connexion » au lieu du
       // « Le correspondant est déjà en appel » que le serveur renvoyait.
-      _showError(messageErreurAppel(e));
+      _showError(messageErreurAppel(e, context: context));
     }
   }
 
@@ -3558,7 +3559,7 @@ class _ChatScreenState extends State<ChatScreen>
                     style: const TextStyle(
                         fontSize: 16, fontWeight: FontWeight.w600)),
                 if (widget.isGroup)
-                  Text("${widget.memberNames.length} membres",
+                  Text(trN(context, 'grp_members', widget.memberNames.length),
                       style: TextStyle(fontSize: 11, color: _onAppBarSub))
                 else
                   // Présence LIVE : lit le PresenceStore (mis à jour par les events WS
@@ -3599,7 +3600,7 @@ class _ChatScreenState extends State<ChatScreen>
         // barre y a de la place.
         if (widget.isGroup)
           IconButton(
-              tooltip: "Rechercher",
+              tooltip: tr(context, 'search'),
               icon: const Icon(Icons.search),
               onPressed: _openSearch)
         else ...[
@@ -3608,16 +3609,16 @@ class _ChatScreenState extends State<ChatScreen>
               icon: const Icon(Icons.translate),
               onPressed: _openTranslation),
           IconButton(
-              tooltip: "Appel vidéo",
+              tooltip: tr(context, 'video_call'),
               icon: const Icon(Icons.videocam),
               onPressed: () => _startCall("VIDEO")),
           IconButton(
-              tooltip: "Appel audio",
+              tooltip: tr(context, 'audio_call'),
               icon: const Icon(Icons.call),
               onPressed: () => _startCall("AUDIO")),
         ],
         PopupMenuButton<String>(
-          tooltip: "Plus",
+          tooltip: tr(context, 'more'),
           icon: const Icon(Icons.more_vert),
           onSelected: (v) {
             if (v == 'search') _openSearch();
@@ -3647,8 +3648,8 @@ class _ChatScreenState extends State<ChatScreen>
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(_disappearingSeconds > 0
-                      ? "Éphémères · ${_disappearingLabel(_disappearingSeconds)}"
-                      : "Messages éphémères"),
+                      ? tr(context, 'ephemeral_active', {'duree': _disappearingLabel(_disappearingSeconds)})
+                      : tr(context, 'ephemeral_title')),
                 ),
               ]),
             ),
@@ -3677,7 +3678,7 @@ class _ChatScreenState extends State<ChatScreen>
         textInputAction: TextInputAction.search,
         onChanged: _onSearchChanged,
         decoration: InputDecoration(
-          hintText: "Rechercher…",
+          hintText: tr(context, 'search_hint_dots'),
           hintStyle: TextStyle(color: _onAppBarSub),
           border: InputBorder.none,
         ),
@@ -3702,11 +3703,11 @@ class _ChatScreenState extends State<ChatScreen>
                 style: TextStyle(color: _onAppBar, fontSize: 13)),
           ),
           IconButton(
-              tooltip: "Plus ancien",
+              tooltip: tr(context, 'older'),
               icon: const Icon(Icons.keyboard_arrow_up),
               onPressed: total == 0 ? null : () => _searchNav(1)),
           IconButton(
-              tooltip: "Plus récent",
+              tooltip: tr(context, 'newer'),
               icon: const Icon(Icons.keyboard_arrow_down),
               onPressed: total == 0 ? null : () => _searchNav(-1)),
         ],
@@ -3724,41 +3725,41 @@ class _ChatScreenState extends State<ChatScreen>
       backgroundColor: _appBarBg,
       foregroundColor: _onAppBar,
       leading: IconButton(
-          tooltip: "Annuler",
+          tooltip: tr(context, 'cancel'),
           icon: const Icon(Icons.close),
           onPressed: _clearSelection),
       title: const SizedBox.shrink(),
       actions: [
         IconButton(
-            tooltip: "Répondre",
+            tooltip: tr(context, 'reply'),
             icon: const Icon(Icons.reply),
             onPressed: () {
               _clearSelection();
               _setReplyTo(m);
             }),
         IconButton(
-            tooltip: m.starred ? "Retirer des favoris" : "Ajouter aux favoris",
+            tooltip: m.starred ? tr(context, 'star_remove') : tr(context, 'star_add'),
             icon: Icon(m.starred ? Icons.star : Icons.star_border),
             onPressed: () {
               _clearSelection();
               _toggleStar(m);
             }),
         IconButton(
-            tooltip: "Transférer",
+            tooltip: tr(context, 'forward'),
             icon: const Icon(Icons.forward),
             onPressed: () {
               _clearSelection();
               _forwardMessage(m);
             }),
         IconButton(
-            tooltip: "Supprimer",
+            tooltip: tr(context, 'delete'),
             icon: const Icon(Icons.delete_outline),
             onPressed: () {
               _clearSelection();
               _deleteMessage(m);
             }),
         PopupMenuButton<String>(
-          tooltip: "Plus",
+          tooltip: tr(context, 'more'),
           icon: const Icon(Icons.more_vert),
           // Retire la bulle de réactions (et sa barrière) dès l'ouverture du menu,
           // sinon la barrière intercepte le tap sur les items → « rien ne se passe ».
@@ -3788,7 +3789,7 @@ class _ChatScreenState extends State<ChatScreen>
                   child: Row(children: [
                     Icon(Icons.info_outline, size: 20, color: _iconNeutral),
                     const SizedBox(width: 12),
-                    const Text("Infos"),
+                    Text(tr(context, 'infos')),
                   ])),
             // Enregistrer dans le stockage public du téléphone.
             //
@@ -3803,7 +3804,7 @@ class _ChatScreenState extends State<ChatScreen>
                     Icon(Icons.download_outlined,
                         size: 20, color: _iconNeutral),
                     const SizedBox(width: 12),
-                    const Text("Enregistrer"),
+                    Text(tr(context, 'save')),
                   ])),
             if (hasText)
               PopupMenuItem(
@@ -3811,7 +3812,7 @@ class _ChatScreenState extends State<ChatScreen>
                   child: Row(children: [
                     Icon(Icons.copy, size: 20, color: _iconNeutral),
                     const SizedBox(width: 12),
-                    const Text("Copier"),
+                    Text(tr(context, 'copy')),
                   ])),
             PopupMenuItem(
                 value: 'pin',
@@ -3823,7 +3824,7 @@ class _ChatScreenState extends State<ChatScreen>
                       size: 20,
                       color: _accent),
                   const SizedBox(width: 12),
-                  Text(_pinnedMessageId == m.id ? "Détacher" : "Épingler"),
+                  Text(_pinnedMessageId == m.id ? tr(context, 'unpin_action') : tr(context, 'pin')),
                 ])),
             if (mine && m.type == 'TEXT')
               PopupMenuItem(
@@ -3831,7 +3832,7 @@ class _ChatScreenState extends State<ChatScreen>
                   child: Row(children: [
                     Icon(Icons.edit_outlined, size: 20, color: _positive),
                     const SizedBox(width: 12),
-                    const Text("Modifier"),
+                    Text(tr(context, 'edit')),
                   ])),
           ],
         ),
@@ -4887,13 +4888,13 @@ class _ChatScreenState extends State<ChatScreen>
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              "Traduction automatique : installer ${nomAutonyme(langue)}",
+              tr(context, 'auto_translation_install', {'langue': nomAutonyme(langue)}),
               style: TextStyle(fontSize: 12.5, color: _iconNeutral),
             ),
           ),
           TextButton(
             onPressed: () => _installeLangueManquante(langue),
-            child: const Text("Installer"),
+            child: Text(tr(context, 'install_action')),
           ),
         ]),
       ),
@@ -5245,10 +5246,10 @@ class _ChatScreenState extends State<ChatScreen>
 
   String _lastSeenLabel(DateTime d) {
     final diff = DateTime.now().difference(d);
-    if (diff.inMinutes < 1) return "vu à l'instant";
-    if (diff.inMinutes < 60) return "vu il y a ${diff.inMinutes} min";
-    if (diff.inHours < 24) return "vu il y a ${diff.inHours}h";
-    return "vu il y a ${diff.inDays}j";
+    if (diff.inMinutes < 1) return tr(context, 'presence_just_now');
+    if (diff.inMinutes < 60) return tr(context, 'presence_min', {'n': '${diff.inMinutes}'});
+    if (diff.inHours < 24) return tr(context, 'presence_hour', {'n': '${diff.inHours}'});
+    return tr(context, 'presence_day', {'n': '${diff.inDays}'});
   }
 
   Widget _dateChip(String label) {
@@ -5383,7 +5384,7 @@ class _ChatScreenState extends State<ChatScreen>
                       child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                        Text("Modifier le message",
+                        Text(tr(context, 'edit_message'),
                             style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.bold,
@@ -5468,7 +5469,7 @@ class _ChatScreenState extends State<ChatScreen>
                                     horizontal: 8, vertical: 10),
                                 // Smiley À L'INTÉRIEUR du champ, contre le bord gauche.
                                 prefixIcon: IconButton(
-                                  tooltip: "Emojis",
+                                  tooltip: tr(context, 'emojis'),
                                   icon: Icon(
                                       _emojiPanelOpen
                                           ? Icons.keyboard
@@ -5505,7 +5506,7 @@ class _ChatScreenState extends State<ChatScreen>
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
                                       IconButton(
-                                        tooltip: "Mise en forme",
+                                        tooltip: tr(context, 'formatting'),
                                         icon: _iconeFormatA(_formatBarOpen
                                             ? _accent
                                             : _iconNeutral),
@@ -5972,8 +5973,8 @@ class _ForwardPickerState extends State<_ForwardPicker> {
                               : themed(context,
                                   light: AlanyaColors.chocolate,
                                   dark: AlanyaColors.craie2))),
-                  title: Text(conv.title ?? 'Conversation'),
-                  subtitle: conv.isGroup ? const Text('Groupe') : null,
+                  title: Text(conv.title ?? tr(context, 'conversation')),
+                  subtitle: conv.isGroup ? Text(tr(context, 'group_label')) : null,
                   onTap: () {
                     setState(() {
                       if (isSelected) {

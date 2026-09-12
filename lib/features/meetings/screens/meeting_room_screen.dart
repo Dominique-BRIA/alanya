@@ -118,17 +118,17 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         final retry = await showDialog<bool>(
           context: context,
           builder: (ctx) => AlertDialog(
-            title: const Text("Caméra indisponible"),
-            content: const Text(
-                "La caméra n'a pas pu être activée. Rejoindre la réunion en audio ?"),
+            title: Text(tr(ctx, 'meet_camera_unavailable')),
+            content: Text(
+                tr(ctx, 'meet_camera_failed_body')),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx, false),
-                child: const Text("Annuler"),
+                child: Text(tr(ctx, 'cancel')),
               ),
               TextButton(
                 onPressed: () => Navigator.pop(ctx, true),
-                child: const Text("Rejoindre en audio"),
+                child: Text(tr(ctx, 'meet_join_audio')),
               ),
             ],
           ),
@@ -142,8 +142,8 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
               content: Text(wantVideo
-                  ? "Impossible de rejoindre la réunion."
-                  : "Impossible de rejoindre la réunion en audio.")),
+                  ? tr(context, 'meet_join_failed')
+                  : tr(context, 'meet_join_audio_failed'))),
         );
         Navigator.of(context).maybePop();
       }
@@ -203,7 +203,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   void _onExclu() {
     if (!mounted) return;
     Navigator.of(context).maybePop();
-    showAppSnackBar("Vous avez été retiré de la réunion.");
+    showAppSnackBar(tr(context, 'meet_removed'));
   }
 
   /// Le serveur a refusé l'entrée — salle pleine, le plus souvent.
@@ -237,7 +237,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text("Fermer"),
+            child: Text(tr(ctx, 'close')),
           ),
         ],
       ),
@@ -258,14 +258,14 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   /// que l'on accorde, alors que le droit n'a jamais été retiré.
   void _onCoupure(MeetingCoupure c) {
     if (!mounted) return;
-    final par = c.parNom ?? "l'organisateur";
+    final par = c.parNom ?? tr(context, 'meet_the_organizer');
     final messenger = ScaffoldMessenger.of(context);
     messenger.hideCurrentSnackBar();
     messenger.showSnackBar(
       SnackBar(
         content: Text(c.estAudio
-            ? "Votre micro a été coupé par $par."
-            : "Votre caméra a été coupée par $par."),
+            ? tr(context, 'meet_mic_muted_by', {'par': par})
+            : tr(context, 'meet_cam_off_by', {'par': par})),
         duration: const Duration(seconds: 5),
       ),
     );
@@ -279,8 +279,8 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     final ctrl = context.read<MeetingController>();
     final organisateur = ctrl.jeSuisOrganisateur;
     final texte = a == MeetingAlerte.finProche
-        ? "Il reste 2 minutes sur la durée prévue."
-        : "La durée prévue de la réunion est atteinte.";
+        ? tr(context, 'meet_2min_left')
+        : tr(context, 'meet_time_reached');
     final messenger = ScaffoldMessenger.of(context);
     // Le bandeau précédent n'a plus lieu d'être : « il reste 2 minutes » devient
     // faux à l'instant où le terme est atteint.
@@ -293,7 +293,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
             a == MeetingAlerte.depassement ? AlanyaColors.terracotta : null,
         action: organisateur
             ? SnackBarAction(
-                label: "Prolonger",
+                label: tr(context, 'meet_extend'),
                 textColor: Colors.white,
                 onPressed: () {
                   ctrl.prolonger();
@@ -302,7 +302,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                 },
               )
             : SnackBarAction(
-                label: "Ignorer",
+                label: tr(context, 'meet_ignore'),
                 textColor: Colors.white,
                 onPressed: messenger.hideCurrentSnackBar,
               ),
@@ -323,8 +323,8 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
 
     final numeros = await ContactPickerSheet.show(
       context,
-      title: "Ajouter à la réunion",
-      confirmLabel: "Ajouter",
+      title: tr(context, 'meet_add_to'),
+      confirmLabel: tr(context, 'meet_add_btn'),
     );
     if (numeros == null || numeros.isEmpty || !mounted) return;
 
@@ -335,10 +335,10 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       if (!mounted) return;
       showAppSnackBar(
         ajoutes == 0
-            ? "Ces contacts sont déjà dans la réunion"
+            ? tr(context, 'meet_already_in')
             : ajoutes == 1
-                ? "1 participant ajouté et prévenu"
-                : "$ajoutes participants ajoutés et prévenus",
+                ? tr(context, 'meet_added_one')
+                : tr(context, 'meet_added_many', {'n': '$ajoutes'}),
       );
     } on ApiException catch (e) {
       if (mounted) showAppSnackBar(e.message);
@@ -353,8 +353,8 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   Future<void> _proposerParticipant() async {
     final numeros = await ContactPickerSheet.show(
       context,
-      title: "Proposer à l'organisateur",
-      confirmLabel: "Proposer",
+      title: tr(context, 'meet_propose_to_org'),
+      confirmLabel: tr(context, 'meet_propose'),
     );
     if (numeros == null || numeros.isEmpty || !mounted) return;
 
@@ -368,8 +368,8 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         // d'entrer — et celui qui proposait attendait alors une décision qui
         // n'aurait jamais lieu.
         showAppSnackBar(entreeDirecte
-            ? "Cette réunion accepte les invitations sans approbation : la personne a été ajoutée."
-            : "Demande envoyée. La personne n'est prévenue que si l'organisateur accepte.");
+            ? tr(context, 'meet_auto_added')
+            : tr(context, 'meet_request_sent'));
       }
     } on ApiException catch (e) {
       if (mounted) showAppSnackBar(e.message);
@@ -403,10 +403,10 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
           );
       if (!mounted) return;
       showAppSnackBar(accepter
-          ? "${d.invite.displayName} a été ajouté et prévenu"
+          ? tr(context, 'meet_invite_added', {'nom': d.invite.displayName})
           // La portée du refus est rappelée : il vaut pour tout le monde et
           // pour toujours, ce n'est pas un « pas maintenant ».
-          : "Demande refusée. ${d.invite.displayName} n'en saura rien.");
+          : tr(context, 'meet_request_refused', {'nom': d.invite.displayName}));
     } on ApiException catch (e) {
       showAppSnackBar(e.message);
     } catch (_) {
@@ -476,14 +476,14 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         backgroundColor: const Color(0xFF1A1A1A),
         body: SafeArea(
           child: _joining
-              ? const Center(
+              ? Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      CircularProgressIndicator(color: Colors.white),
-                      SizedBox(height: 16),
-                      Text("Connexion en cours...",
-                          style: TextStyle(color: Colors.white70)),
+                      const CircularProgressIndicator(color: Colors.white),
+                      const SizedBox(height: 16),
+                      Text(tr(context, 'meet_connecting'),
+                          style: const TextStyle(color: Colors.white70)),
                     ],
                   ),
                 )
@@ -507,7 +507,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         children: [
           IconButton(
             icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white),
-            tooltip: "Réduire",
+            tooltip: tr(context, 'meet_reduce'),
             onPressed: _minimize,
           ),
           Expanded(
@@ -557,7 +557,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
               final ctrl = context.read<MeetingController>();
               final unread = ctrl.unreadChatCount;
               return IconButton(
-                tooltip: "Chat",
+                tooltip: tr(context, 'meet_chat'),
                 onPressed: _showChat,
                 icon: Stack(
                   clipBehavior: Clip.none,
@@ -624,13 +624,13 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         }
 
         if (restant >= 0) {
-          return "$compte · $t · ${fmt(restant)} restantes";
+          return tr(context, 'meet_time_remaining', {'compte': '$compte', 'temps': t, 'restant': fmt(restant)});
         }
-        return "$compte · $t · +${fmt(-restant)} de dépassement";
+        return tr(context, 'meet_overtime', {'compte': '$compte', 'temps': t, 'depassement': fmt(-restant)});
       }
-      return "$compte · $t";
+      return tr(context, 'meet_count_time', {'compte': '$compte', 'temps': t});
     }
-    return "$compte participant(s)";
+    return trN(context, 'meet_n_participants', compte);
   }
 
   /// Couleur du sous-titre : elle seule signale l'approche du terme sans qu'on
@@ -665,8 +665,8 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         final noms = <String>[
           for (final id in ctrl.peerIds)
             if (ctrl.isHandRaised(id))
-              ctrl.participantNames[id] ?? "Participant",
-          if (ctrl.myHandRaised) "Vous",
+              ctrl.participantNames[id] ?? tr(context, 'meet_participant'),
+          if (ctrl.myHandRaised) tr(context, 'you'),
         ];
         if (noms.isEmpty) return const SizedBox.shrink();
 
@@ -712,10 +712,10 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   String _texteMainsLevees(List<String> noms, bool laMienne) {
     if (noms.length == 1) {
       return laMienne
-          ? "Vous demandez la parole"
-          : "${noms.first} demande la parole";
+          ? tr(context, 'meet_hand_you')
+          : tr(context, 'meet_hand_other', {'nom': noms.first});
     }
-    return "${noms.length} mains levées · ${noms.join(', ')}";
+    return tr(context, 'meet_hands_raised', {'n': '${noms.length}', 'noms': noms.join(', ')});
   }
 
   /// Zone centrale : vignettes des participants.
@@ -769,8 +769,8 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
               children: [
                 _localVideo(isLarge: true),
                 const SizedBox(height: 16),
-                const Text("En attente d'autres participants...",
-                    style: TextStyle(color: Colors.white54)),
+                Text(tr(context, 'meet_waiting_others'),
+                    style: const TextStyle(color: Colors.white54)),
               ],
             ),
           );
@@ -830,7 +830,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     String presentateurId,
     MediaStream flux,
   ) {
-    final nom = ctrl.participantNames[presentateurId] ?? "Participant";
+    final nom = ctrl.participantNames[presentateurId] ?? tr(context, 'meet_participant');
     final autres = ctrl.peerIds.where((id) => id != presentateurId).toList();
 
     return Column(
@@ -874,7 +874,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                                 const SizedBox(width: 6),
                                 Flexible(
                                   child: Text(
-                                    "$nom · Écran partagé",
+                                    tr(context, 'meet_sharing_screen', {'nom': nom}),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(
@@ -944,7 +944,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     })>[
       (
         id: "me",
-        name: me?.pseudo ?? "Vous",
+        name: me?.pseudo ?? tr(context, 'you'),
         avatar: me?.avatarUrl,
         muted: ctrl.isMuted,
         hand: ctrl.myHandRaised,
@@ -954,7 +954,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       for (final id in ctrl.peerIds)
         (
           id: id,
-          name: ctrl.participantNames[id] ?? "Participant",
+          name: ctrl.participantNames[id] ?? tr(context, 'meet_participant'),
           avatar: ctrl.participantAvatars[id],
           muted: ctrl.isPeerMuted(id),
           hand: ctrl.isHandRaised(id),
@@ -1030,14 +1030,14 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                 // ne nous parvient donc pas. On dit ce qui se passe plutôt que
                 // de faire croire à une image qu'on pourrait ouvrir.
                 if (e.partage)
-                  const SizedBox(
+                  SizedBox(
                     width: 96,
                     child: Text(
-                      "Partage son écran",
+                      tr(context, 'meet_is_sharing'),
                       textAlign: TextAlign.center,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: AlanyaColors.gold, fontSize: 10),
+                      style: const TextStyle(color: AlanyaColors.gold, fontSize: 10),
                     ),
                   ),
               ],
@@ -1100,7 +1100,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   Widget _remoteVideoTile(String peerId) {
     final ctrl = context.watch<MeetingController>();
     final stream = ctrl.remoteStreams[peerId];
-    final name = ctrl.participantNames[peerId] ?? "Participant";
+    final name = ctrl.participantNames[peerId] ?? tr(context, 'meet_participant');
     final avatarUrl = ctrl.participantAvatars[peerId];
     final muted = ctrl.isPeerMuted(peerId);
     final hand = ctrl.isHandRaised(peerId);
@@ -1224,7 +1224,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
               // Micro
               _controlButton(
                 icon: ctrl.isMuted ? Icons.mic_off : Icons.mic,
-                label: ctrl.isMuted ? "Activer" : "Muet",
+                label: ctrl.isMuted ? tr(context, 'meet_unmute') : tr(context, 'meet_mute'),
                 isActive: !ctrl.isMuted,
                 onTap: ctrl.toggleMute,
               ),
@@ -1232,7 +1232,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
               if (ctrl.activeIsVideo)
                 _controlButton(
                   icon: ctrl.isCameraOff ? Icons.videocam_off : Icons.videocam,
-                  label: ctrl.isCameraOff ? "Caméra off" : "Caméra",
+                  label: ctrl.isCameraOff ? tr(context, 'camera_off') : tr(context, 'meet_camera'),
                   isActive: !ctrl.isCameraOff,
                   onTap: ctrl.toggleCamera,
                 ),
@@ -1240,7 +1240,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
               if (ctrl.activeIsVideo)
                 _controlButton(
                   icon: Icons.cameraswitch,
-                  label: "Retourner",
+                  label: tr(context, 'meet_flip_camera'),
                   // Actif pour signaler que le bouton est utilisable (il
                   // paraissait désactivé avec son fond gris).
                   isActive: true,
@@ -1249,7 +1249,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
               // Haut-parleur
               _controlButton(
                 icon: ctrl.isSpeakerOn ? Icons.volume_up : Icons.volume_off,
-                label: "Haut-parleur",
+                label: tr(context, 'meet_speaker'),
                 isActive: ctrl.isSpeakerOn,
                 onTap: () => ctrl.toggleSpeaker(),
               ),
@@ -1258,14 +1258,14 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                 icon: ctrl.myHandRaised
                     ? Icons.back_hand
                     : Icons.back_hand_outlined,
-                label: "Main",
+                label: tr(context, 'meet_hand'),
                 isActive: ctrl.myHandRaised,
                 onTap: ctrl.toggleHandRaised,
               ),
               // Quitter
               _controlButton(
                 icon: Icons.call_end,
-                label: "Quitter",
+                label: tr(context, 'meet_leave'),
                 isActive: false,
                 isLeave: true,
                 onTap: _leave,
@@ -1368,7 +1368,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   Widget _menuOrganisateur(MeetingController ctrl, String peerId, String nom) {
     return PopupMenuButton<String>(
       icon: const Icon(Icons.more_vert, color: Colors.white54, size: 20),
-      tooltip: "Actions",
+      tooltip: tr(context, 'meet_actions'),
       color: const Color(0xFF2A2A2A),
       onSelected: (action) {
         if (action == "exclure") {
@@ -1377,18 +1377,18 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         }
         ctrl.couperParticipant(peerId, action);
         showAppSnackBar(action == "audio"
-            ? "Micro de $nom coupé."
-            : "Caméra de $nom coupée.");
+            ? tr(context, 'meet_mic_of', {'nom': nom})
+            : tr(context, 'meet_cam_of', {'nom': nom}));
       },
       itemBuilder: (_) => [
-        const PopupMenuItem(
+        PopupMenuItem(
           value: "audio",
           child: ListTile(
             dense: true,
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.mic_off, color: Colors.white),
+            contentPadding: const EdgeInsets.zero,
+            leading: const Icon(Icons.mic_off, color: Colors.white),
             title:
-                Text("Couper le micro", style: TextStyle(color: Colors.white)),
+                Text(tr(context, 'meet_mute_mic'), style: const TextStyle(color: Colors.white)),
           ),
         ),
         // ⚠️ `widget.isVideo` ET NON `ctrl.activeIsVideo` : le second dit
@@ -1397,28 +1397,28 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         // pourrait alors plus couper la caméra de personne dans une réunion qui
         // en est pourtant une.
         if (widget.isVideo)
-          const PopupMenuItem(
+          PopupMenuItem(
             value: "video",
             child: ListTile(
               dense: true,
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.videocam_off, color: Colors.white),
-              title: Text("Couper la caméra",
-                  style: TextStyle(color: Colors.white)),
+              contentPadding: const EdgeInsets.zero,
+              leading: const Icon(Icons.videocam_off, color: Colors.white),
+              title: Text(tr(context, 'meet_camera_off_action'),
+                  style: const TextStyle(color: Colors.white)),
             ),
           ),
         const PopupMenuDivider(),
         // Séparé des deux coupures, et en rouge : couper se répare d'un geste,
         // exclure efface la place de quelqu'un. Deux gestes de nature
         // différente ne se ressemblent pas dans un menu.
-        const PopupMenuItem(
+        PopupMenuItem(
           value: "exclure",
           child: ListTile(
             dense: true,
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.person_remove, color: Colors.redAccent),
-            title: Text("Exclure de la réunion",
-                style: TextStyle(color: Colors.redAccent)),
+            contentPadding: const EdgeInsets.zero,
+            leading: const Icon(Icons.person_remove, color: Colors.redAccent),
+            title: Text(tr(context, 'meet_expel_action'),
+                style: const TextStyle(color: Colors.redAccent)),
           ),
         ),
       ],
@@ -1434,17 +1434,17 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("Exclure de la réunion ?"),
+        title: Text(tr(ctx, 'meet_expel_q')),
         content: Text(
-            "$nom sera retiré de la salle et ne pourra pas y revenir seul."),
+            tr(ctx, 'meet_expel_body', {'nom': nom})),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text("Annuler"),
+            child: Text(tr(ctx, 'cancel')),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text("Exclure",
+            child: Text(tr(ctx, 'meet_expel_confirm'),
                 style: TextStyle(color: dangerOf(context))),
           ),
         ],
@@ -1459,7 +1459,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       // Rien n'est retiré de la grille ici : c'est le serveur qui annonce le
       // départ à toute la salle (`meeting_user_left`), et le contrôleur suit.
       // Le faire aussi localement ferait disparaître la vignette deux fois.
-      showAppSnackBar("$nom a été exclu de la réunion.");
+      showAppSnackBar(tr(context, 'meet_expelled', {'nom': nom}));
     } on ApiException catch (e) {
       showAppSnackBar(e.message);
     } catch (_) {
@@ -1516,9 +1516,9 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                     padding: const EdgeInsets.all(16),
                     child: Row(
                       children: [
-                        const Expanded(
-                          child: Text("Participants",
-                              style: TextStyle(
+                        Expanded(
+                          child: Text(tr(context, 'meet_participants'),
+                              style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 18,
                                   fontWeight: FontWeight.bold)),
@@ -1532,8 +1532,8 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                         const SizedBox(width: 8),
                         IconButton(
                           tooltip: ctrl.jeSuisOrganisateur
-                              ? "Ajouter un participant"
-                              : "Proposer un participant",
+                              ? tr(context, 'meet_add_one_participant')
+                              : tr(context, 'meet_propose_one_participant'),
                           icon: Icon(
                             ctrl.jeSuisOrganisateur
                                 ? Icons.person_add_alt_1
@@ -1567,7 +1567,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                             radius: 18,
                             backgroundColor: AlanyaColors.terracotta,
                           ),
-                          title: Text(me?.pseudo ?? "Vous",
+                          title: Text(me?.pseudo ?? tr(context, 'you'),
                               style: const TextStyle(color: Colors.white)),
                           trailing: _etatParticipant(
                             muted: ctrl.isMuted,
@@ -1579,7 +1579,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                         // Autres
                         ...peerIds.map((peerId) {
                           final name =
-                              ctrl.participantNames[peerId] ?? "Participant";
+                              ctrl.participantNames[peerId] ?? tr(context, 'meet_participant');
                           final avatar = ctrl.participantAvatars[peerId];
                           final muted = ctrl.isPeerMuted(peerId);
                           return ListTile(
@@ -1620,7 +1620,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                           Padding(
                             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                             child: Text(
-                              "Attendus (${attendus.length})",
+                              tr(context, 'meet_expected', {'n': '${attendus.length}'}),
                               style: const TextStyle(
                                 color: Colors.white54,
                                 fontSize: 12,
@@ -1647,9 +1647,9 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                                 invite.nom,
                                 style: const TextStyle(color: Colors.white54),
                               ),
-                              subtitle: const Text(
-                                "Invité · pas encore arrivé",
-                                style: TextStyle(
+                              subtitle: Text(
+                                tr(context, 'meet_guest_not_arrived'),
+                                style: const TextStyle(
                                     color: Colors.white38, fontSize: 12),
                               ),
                             );
@@ -1677,8 +1677,8 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                             child: Text(
                               ctrl.jeSuisOrganisateur
-                                  ? "À approuver (${demandes.length})"
-                                  : "Tes demandes (${demandes.length})",
+                                  ? tr(context, 'meet_to_approve', {'n': '${demandes.length}'})
+                                  : tr(context, 'meet_your_requests', {'n': '${demandes.length}'}),
                               style: const TextStyle(
                                 color: Colors.white54,
                                 fontSize: 12,
@@ -1788,12 +1788,12 @@ class _MeetingChatPanelState extends State<_MeetingChatPanel> {
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
-                const Padding(
-                  padding: EdgeInsets.all(16),
+                Padding(
+                  padding: const EdgeInsets.all(16),
                   child: Align(
                     alignment: Alignment.centerLeft,
-                    child: Text("Messages de la réunion",
-                        style: TextStyle(
+                    child: Text(tr(context, 'meet_room_messages'),
+                        style: const TextStyle(
                             color: Colors.white,
                             fontSize: 18,
                             fontWeight: FontWeight.bold)),
@@ -1802,12 +1802,12 @@ class _MeetingChatPanelState extends State<_MeetingChatPanel> {
                 const Divider(color: Colors.white12, height: 1),
                 Flexible(
                   child: messages.isEmpty
-                      ? const Center(
+                      ? Center(
                           child: Padding(
-                            padding: EdgeInsets.all(24),
+                            padding: const EdgeInsets.all(24),
                             child: Text(
-                              "Aucun message. Démarre la conversation.",
-                              style: TextStyle(color: Colors.white54),
+                              tr(context, 'meet_no_messages'),
+                              style: const TextStyle(color: Colors.white54),
                             ),
                           ),
                         )
@@ -1835,7 +1835,7 @@ class _MeetingChatPanelState extends State<_MeetingChatPanel> {
                           maxLines: 4,
                           onSubmitted: (_) => _send(),
                           decoration: InputDecoration(
-                            hintText: "Ton message…",
+                            hintText: tr(context, 'meet_your_message'),
                             hintStyle: const TextStyle(color: Colors.white38),
                             filled: true,
                             fillColor: Colors.white.withValues(alpha: 0.08),

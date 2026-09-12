@@ -193,7 +193,7 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
         ),
       );
     } catch (e) {
-      showAppSnackBar(messageErreurAppel(e));
+      showAppSnackBar(messageErreurAppel(e, context: context));
     } finally {
       if (mounted) setState(() => _callStarting = false);
     }

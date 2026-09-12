@@ -2299,7 +2299,7 @@ class _StatusTabState extends State<_StatusTab> {
       title: Text(tr(context, 'status_mine'),
           style: const TextStyle(fontWeight: FontWeight.w600)),
       subtitle: Text(mien != null
-          ? horodatageStatut(_dernierStatut(mien))
+          ? horodatageStatut(_dernierStatut(mien), context)
           : tr(context, 'status_tap_to_add')),
       onTap: mien != null
           ? () => _openViewer([mien], index: 0, isMine: true)
@@ -2347,7 +2347,7 @@ class _StatusTabState extends State<_StatusTab> {
           style: const TextStyle(fontWeight: FontWeight.w600)),
       // L'heure remplace « Nouveau »/« Vu » : l'anneau et la section portent
       // désormais cette information, la ligne peut dire quelque chose de plus.
-      subtitle: Text(horodatageStatut(_dernierStatut(g))),
+      subtitle: Text(horodatageStatut(_dernierStatut(g), context)),
       onTap: () => _openViewer(groups, index: index, isMine: false),
     );
   }

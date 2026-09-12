@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../core/authed_api.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Tiroir « Liste d'attente » — ouvert depuis l'écran d'appel d'un agent,
 /// pour le centre qui a routé l'appel EN COURS (voir `CallController.
@@ -69,7 +70,7 @@ class _QueueStatusSheetState extends State<QueueStatusSheet> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _erreur = "Impossible de charger la file d'attente";
+        _erreur = tr(context, 'queue_load_failed');
         _chargement = false;
       });
     }
@@ -140,9 +141,9 @@ class _QueueStatusSheetState extends State<QueueStatusSheet> {
                               for (final l in _enAttente)
                                 _ligneAttente(l),
                               const SizedBox(height: 20),
-                              _sectionTitre("Abandons récents (${_abandonnes.length})"),
+                              _sectionTitre(tr(context, 'queue_recent_abandons', {'n': '${_abandonnes.length}'})),
                               if (_abandonnes.isEmpty)
-                                _videMessage("Aucun abandon récent."),
+                                _videMessage(tr(context, 'queue_no_abandons')),
                               for (final l in _abandonnes) _ligneAbandon(l),
                               const SizedBox(height: 24),
                             ],
@@ -194,7 +195,7 @@ class _QueueStatusSheetState extends State<QueueStatusSheet> {
       leading: AvatarCircle(name: nom, avatarUrl: l['customerAvatarUrl'] as String?, radius: 20),
       title: Text(nom, style: const TextStyle(color: Colors.white)),
       subtitle: Text(
-        "${statut == 'TIMEOUT' ? 'Expiré' : 'Abandonné'} après ${_duree(attente)}",
+        tr(context, statut == 'TIMEOUT' ? 'queue_expired_after' : 'queue_abandoned_after', {'duree': _duree(attente)}),
         style: const TextStyle(color: Colors.white54, fontSize: 12),
       ),
       trailing: const Icon(Icons.call_end, color: Colors.redAccent, size: 18),

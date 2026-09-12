@@ -4,6 +4,9 @@ import 'package:alanya_telecom/alanya_telecom.dart';
 import 'package:flutter_callkit_incoming/entities/entities.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 
+import '../l10n/app_localizations.dart';
+import 'push_service.dart';
+
 /// Écran d'appel entrant NATIF, façon téléphone.
 ///
 /// Remplace la notification locale pour les appels entrants. La différence est
@@ -19,6 +22,22 @@ import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 /// exactement ce point, sur les deux plateformes.
 class CallUiNative {
   CallUiNative._();
+
+  /// Libellé traduit quand l'interface existe, repli français sinon.
+  ///
+  /// L'écran natif d'appel peut être déclenché depuis l'isolate d'arrière-plan
+  /// de Firebase, où aucun contexte Flutter n'est disponible : dans ce cas la
+  /// clé de navigation est nulle et l'on garde le français, seule langue
+  /// toujours correcte à afficher.
+  static String _libelle(String cle, String repliFrancais) {
+    final ctx = PushService.navigatorKey.currentContext;
+    if (ctx == null) return repliFrancais;
+    try {
+      return tr(ctx, cle);
+    } catch (_) {
+      return repliFrancais;
+    }
+  }
 
   /// Affiche l'appel entrant.
   ///
@@ -77,16 +96,16 @@ class CallUiNative {
         // 60 s : un écran qui sonnerait plus longtemps afficherait un appel que
         // plus personne ne passe.
         duration: 60000,
-        missedCallNotification: const NotificationParams(
+        missedCallNotification: NotificationParams(
           showNotification: true,
           isShowCallback: false,
-          subtitle: 'Appel manqué',
+          subtitle: _libelle('missed_call', 'Appel manqué'),
         ),
-        android: const AndroidParams(
+        android: AndroidParams(
           // Libellés des boutons : ils appartiennent à AndroidParams et non à
           // CallKitParams, l'écran étant rendu par la couche Android.
-          textAccept: 'Répondre',
-          textDecline: 'Refuser',
+          textAccept: _libelle('reply', 'Répondre'),
+          textDecline: _libelle('decline', 'Refuser'),
           isCustomNotification: true,
           isShowLogo: false,
           // Les deux réglages qui font tout le comportement recherché :
@@ -98,8 +117,8 @@ class CallUiNative {
           backgroundColor: '#B85C38',
           actionColor: '#2D6A4F',
           textColor: '#FFFFFF',
-          incomingCallNotificationChannelName: 'Appels entrants',
-          missedCallNotificationChannelName: 'Appels manqués',
+          incomingCallNotificationChannelName: _libelle('incoming_calls', 'Appels entrants'),
+          missedCallNotificationChannelName: _libelle('missed_calls', 'Appels manqués'),
         ),
         ios: const IOSParams(supportsVideo: true),
       ),
