@@ -202,11 +202,37 @@ class _ContactListsScreenState extends State<ContactListsScreen> {
       ]);
     }
 
-    return ListView.separated(
-      padding: const EdgeInsets.only(bottom: 88),
-      itemCount: listes.length,
-      separatorBuilder: (_, __) => const Divider(height: 1),
-      itemBuilder: (_, i) => _tuile(listes[i]),
+    /*
+     * DES CARTES DÉTACHÉES, ET NON UN TABLEAU DE LIGNES SÉPARÉES PAR UN TRAIT.
+     *
+     * Une liste de contacts est un OBJET qu'on ouvre, qu'on colore et qu'on
+     * renomme — pas une ligne dans un inventaire. La carte le dit : chacune a
+     * son bord, son ombre et sa couleur, et l'on comprend au premier regard
+     * qu'il y en a quatre distinctes plutôt qu'un bloc de quatre lignes.
+     *
+     * Le trait de séparation faisait l'inverse : il liait les quatre en un seul
+     * pavé, où seule l'initiale changeait.
+     */
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
+      children: [
+        ...listes.map(_tuile),
+        // L'AIDE VIENT APRÈS LA LISTE, jamais avant : elle répond à une question
+        // qu'on ne se pose qu'après avoir vu les listes — « pourquoi ne puis-je
+        // pas ajouter n'importe qui ? ». Placée en tête, elle retarderait
+        // l'essentiel pour tout le monde, à chaque ouverture.
+        Padding(
+          padding: const EdgeInsets.fromLTRB(10, 14, 10, 0),
+          child: Text(
+            tr(context, 'list_help'),
+            style: TextStyle(
+              fontSize: 13,
+              height: 1.45,
+              color: mutedOf(context, Colors.black54),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -215,45 +241,84 @@ class _ContactListsScreenState extends State<ContactListsScreen> {
     final couleur =
         couleurDeListe(l.color, sombre: sombre) ?? accentOf(context);
     final nb = l.members.length;
-    return ListTile(
-      leading: CircleAvatar(
-        backgroundColor: couleur,
-        child: Text(
-          // L'initiale de la liste : un repère visuel qui ne dépend d'aucune
-          // ressource à charger.
-          l.name.isEmpty ? "?" : l.name.characters.first.toUpperCase(),
-          style:
-              const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+    return Card(
+      // Posée à plat, bordée : l'ombre portée d'un `Card` par défaut se perd sur
+      // le motif de fond, alors qu'un liseré tient sur les quatre thèmes.
+      elevation: 0,
+      margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 5),
+      color: surfacesOf(context).surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: faintOf(context, Colors.black12)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: ListTile(
+        contentPadding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
+        /*
+         * UNE PUCE CARRÉE, ET NON UN CERCLE PORTANT L'INITIALE.
+         *
+         * Le cercle à initiale est le code visuel d'une PERSONNE — c'est
+         * exactement ce que `AvatarCircle` dessine pour un contact, deux écrans
+         * plus loin. L'employer pour une liste faisait passer « Famille » pour
+         * quelqu'un qui s'appellerait F.
+         *
+         * Le carré arrondi dit « contenant ». L'icône de dossier le confirme, et
+         * la couleur reste le repère qui distingue les quatre d'un coup d'œil —
+         * c'est elle que l'utilisateur a choisie, et elle sert déjà à teinter
+         * les conversations filtrées.
+         */
+        leading: Container(
+          width: 46,
+          height: 46,
+          decoration: BoxDecoration(
+            color: couleur,
+            borderRadius: BorderRadius.circular(13),
+          ),
+          child: const Icon(Icons.folder_rounded, color: Colors.white, size: 24),
         ),
-      ),
-      title: Text(l.name, style: const TextStyle(fontWeight: FontWeight.w600)),
-      subtitle: Text(
-        nb == 0
-            ? tr(context, 'list_no_members')
-            : nb == 1
-                ? trN(context, 'list_members', 1, {'noms': l.members.first.displayName})
-                : trN(context, 'list_members', nb, {'noms': l.members.take(2).map((m) => m.displayName).join(", ")}),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
-      onTap: () => _editer(existante: l),
-      trailing: PopupMenuButton<String>(
-        onSelected: (v) {
-          if (v == "editer") _editer(existante: l);
-          if (v == "supprimer") _supprimer(l);
-        },
-        itemBuilder: (_) => [
-          PopupMenuItem(value: "editer", child: Text(tr(context, 'edit'))),
-          // Les quatre listes d'origine ne se suppriment pas. Le serveur refuse
-          // de toute façon (409 `LISTE_PAR_DEFAUT`) : cacher l'entrée évite
-          // d'offrir un geste qui ne finirait qu'en message d'erreur.
-          //
-          // ⚠️ SEULE LA SUPPRESSION EST MASQUÉE. « Modifier » reste offert :
-          // ces listes se renomment, se recolorent et changent de sonnerie
-          // comme les autres — c'est la clé, pas le nom, qui les identifie.
-          if (!l.estParDefaut)
-            PopupMenuItem(value: "supprimer", child: Text(tr(context, 'delete'))),
-        ],
+        title: Text(l.name,
+            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: Text(
+            nb == 0
+                ? tr(context, 'list_no_members')
+                : nb == 1
+                    ? trN(context, 'list_members', 1,
+                        {'noms': l.members.first.displayName})
+                    : trN(context, 'list_members', nb, {
+                        'noms': l.members
+                            .take(2)
+                            .map((m) => m.displayName)
+                            .join(", ")
+                      }),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+                fontSize: 13.5, color: mutedOf(context, Colors.black54)),
+          ),
+        ),
+        onTap: () => _editer(existante: l),
+        trailing: PopupMenuButton<String>(
+          icon: Icon(Icons.more_vert, color: mutedOf(context, Colors.black54)),
+          onSelected: (v) {
+            if (v == "editer") _editer(existante: l);
+            if (v == "supprimer") _supprimer(l);
+          },
+          itemBuilder: (_) => [
+            PopupMenuItem(value: "editer", child: Text(tr(context, 'edit'))),
+            // Les quatre listes d'origine ne se suppriment pas. Le serveur refuse
+            // de toute façon (409 `LISTE_PAR_DEFAUT`) : cacher l'entrée évite
+            // d'offrir un geste qui ne finirait qu'en message d'erreur.
+            //
+            // ⚠️ SEULE LA SUPPRESSION EST MASQUÉE. « Modifier » reste offert :
+            // ces listes se renomment, se recolorent et changent de sonnerie
+            // comme les autres — c'est la clé, pas le nom, qui les identifie.
+            if (!l.estParDefaut)
+              PopupMenuItem(
+                  value: "supprimer", child: Text(tr(context, 'delete'))),
+          ],
+        ),
       ),
     );
   }
@@ -272,8 +337,8 @@ class _EditeurListe extends StatefulWidget {
 
 class _EditeurListeState extends State<_EditeurListe> {
   late final TextEditingController _nomCtrl;
-  final _rechercheCtrl = TextEditingController();
-  String _recherche = "";
+  // La recherche a suivi le carnet dans `_SelecteurMembres` : cette feuille-ci
+  // ne cherche plus rien, elle ne fait que montrer combien sont choisis.
   late Set<String> _choisis;
   bool _envoi = false;
 
@@ -362,7 +427,6 @@ class _EditeurListeState extends State<_EditeurListe> {
   @override
   void dispose() {
     _nomCtrl.dispose();
-    _rechercheCtrl.dispose();
     super.dispose();
   }
 
@@ -379,60 +443,6 @@ class _EditeurListeState extends State<_EditeurListe> {
     final connus = widget.contacts.map((c) => c.userId).toSet();
     return membres.where((m) => !connus.contains(m.id)).toList()
       ..sort((a, b) => comparePourTri(a.displayName, b.displayName));
-  }
-
-  /// Ouvre le sélecteur du transfert d'appel — celui qui sait saisir un numéro.
-  ///
-  /// Réutilisé tel quel plutôt que redéveloppé : c'est déjà le pavé que
-  /// l'utilisateur connaît, et en écrire un second aurait fait deux règles de
-  /// validation d'Alanya ID à tenir accordées.
-  Future<void> _ajouterParNumero() async {
-    final dejaLa = <String>[
-      ..._numeros,
-      ...widget.contacts
-          .where((c) => _choisis.contains(c.userId))
-          .map((c) => stripAlanyaId(c.publicNumber)),
-    ];
-    final choisis = await ContactPickerSheet.show(
-      context,
-      title: tr(context, 'list_add_to'),
-      confirmLabel: tr(context, 'add'),
-      excludeNumbers: dejaLa,
-    );
-    if (choisis == null || choisis.isEmpty || !mounted) return;
-    setState(() {
-      for (final brut in choisis) {
-        final propre = stripAlanyaId(brut);
-        if (propre.isEmpty) continue;
-        // Un numéro qui EST déjà un contact rejoint `_choisis` : le serveur
-        // n'aurait pas à le résoudre, et il apparaîtrait alors deux fois —
-        // coché dans la liste, et en pastille juste au-dessus.
-        Contact? connu;
-        for (final c in widget.contacts) {
-          if (stripAlanyaId(c.publicNumber) == propre) {
-            connu = c;
-            break;
-          }
-        }
-        if (connu != null) {
-          _choisis.add(connu.userId);
-        } else {
-          _numeros.add(propre);
-        }
-      }
-    });
-  }
-
-  List<Contact> get _visibles {
-    final filtres = _recherche.trim().isEmpty
-        ? List<Contact>.from(widget.contacts)
-        : widget.contacts
-            .where((c) =>
-                contientRecherche(c.displayName, _recherche) ||
-                c.publicNumber.contains(stripAlanyaId(_recherche)))
-            .toList();
-    filtres.sort((a, b) => comparePourTri(a.displayName, b.displayName));
-    return filtres;
   }
 
   Future<void> _valider() async {
@@ -478,10 +488,90 @@ class _EditeurListeState extends State<_EditeurListe> {
     }
   }
 
+  /// Une ligne cliquable : icône, libellé, valeur à droite, chevron.
+  ///
+  /// C'est la forme que prennent désormais les réglages d'une liste — ce que
+  /// l'on choisit AILLEURS que sur cette feuille. Elle annonce trois choses à la
+  /// fois : ce que c'est, ce qui est actuellement choisi, et qu'un appui ouvre
+  /// autre chose. Un menu déroulant posé à plat ne disait que la première.
+  Widget _ligneAction({
+    required IconData icone,
+    required String libelle,
+    required String valeur,
+    required VoidCallback onTap,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      child: Material(
+        color: surfacesOf(context).surfaceHaute,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+            child: Row(children: [
+              Icon(icone, size: 22, color: accentOf(context)),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Text(libelle,
+                    style: const TextStyle(
+                        fontSize: 15, fontWeight: FontWeight.w500)),
+              ),
+              // La valeur s'efface devant le libellé : elle se lit au besoin,
+              // elle n'attire pas l'œil comme une action.
+              Flexible(
+                child: Text(
+                  valeur,
+                  textAlign: TextAlign.end,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 13.5, color: mutedOf(context, Colors.black54)),
+                ),
+              ),
+              const SizedBox(width: 4),
+              Icon(Icons.chevron_right,
+                  size: 20, color: faintOf(context, Colors.black38)),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Ouvre le carnet, et ne retient que ce qui en revient.
+  ///
+  /// ⚠️ `null` SIGNIFIE « ANNULÉ », et ce n'est pas la même chose qu'une
+  /// sélection vide : fermer la feuille d'un balayage doit laisser les membres
+  /// tels qu'ils étaient, alors que tout décocher puis enregistrer doit bien
+  /// vider la liste. Confondre les deux ferait perdre une sélection au moindre
+  /// geste de sortie.
+  Future<void> _ouvrirSelecteurMembres() async {
+    final resultat = await showModalBottomSheet<_ChoixMembres>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _SelecteurMembres(
+        contacts: widget.contacts,
+        horsRepertoire: _horsRepertoire,
+        choisisInitiaux: Set<String>.from(_choisis),
+        numerosInitiaux: List<String>.from(_numeros),
+      ),
+    );
+    if (resultat == null || !mounted) return;
+    setState(() {
+      _choisis
+        ..clear()
+        ..addAll(resultat.choisis);
+      _numeros
+        ..clear()
+        ..addAll(resultat.numeros);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    final visibles = _visibles;
-    final hors = _horsRepertoire;
     return DraggableScrollableSheet(
       initialChildSize: 0.85,
       minChildSize: 0.5,
@@ -537,7 +627,7 @@ class _EditeurListeState extends State<_EditeurListe> {
                 spacing: 0,
                 runSpacing: 10,
                 children: [
-              Text(tr(context, 'color'),
+              Text(tr(context, 'list_color_chip'),
                   style: TextStyle(
                       fontSize: 13, color: mutedOf(context, Colors.black54))),
               const SizedBox(width: 14),
@@ -630,8 +720,210 @@ class _EditeurListeState extends State<_EditeurListe> {
                 ),
               ]),
             ),
+          /*
+           * LES MEMBRES PASSENT DANS UNE FEUILLE À EUX.
+           *
+           * 🔴 CE N'EST PAS UN CHOIX D'ESTHÉTIQUE. Tout vivait ici : le nom, la
+           * couleur, la sonnerie, la recherche, l'ajout par numéro, le compteur
+           * et le carnet entier à cocher. La feuille occupait 85 % de l'écran, et
+           * le carnet — la partie la plus haute — poussait le bouton « Créer »
+           * hors de vue. Sur un carnet fourni, on ne savait plus si l'on était
+           * en train de créer une liste ou de parcourir ses contacts.
+           *
+           * Une ligne, un chevron, un compte : on voit d'un coup d'œil ce qui est
+           * choisi, et l'on n'ouvre le carnet que si l'on veut y toucher. La
+           * création tient alors dans un écran qu'on lit sans faire défiler.
+           *
+           * ⚠️ LA SÉLECTION RESTE PORTÉE PAR CETTE FEUILLE-CI. La sous-feuille ne
+           * garde rien : elle reçoit ce qui est coché, rend ce qui l'est à sa
+           * fermeture, et l'on ne valide toujours qu'une seule fois, en bas.
+           * Deux états de sélection auraient fini par diverger.
+           */
+          _ligneAction(
+            icone: Icons.person_add_alt_1_outlined,
+            libelle: tr(context, 'list_add_members'),
+            valeur: (() {
+              final n = _choisis.length + _numeros.length;
+              return n == 0
+                  ? tr(context, 'list_no_members')
+                  : trN(context, 'list_selected', n);
+            })(),
+            onTap: _ouvrirSelecteurMembres,
+          ),
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              child: SizedBox(
+                height: 50,
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _envoi ? null : _valider,
+                  icon: _envoi
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Icon(Icons.check),
+                  label: Text(_envoi
+                      ? tr(context, 'saving')
+                      : widget.existante == null
+                          ? tr(context, 'list_create')
+                          : tr(context, 'save')),
+                ),
+              ),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// Ce que la feuille de sélection rapporte : les contacts cochés, et les
+/// numéros saisis pour des gens qui ne sont pas au carnet.
+///
+/// Une classe plutôt qu'un couple anonyme : ces deux ensembles ne se confondent
+/// pas — l'un porte des identifiants de compte, l'autre des numéros — et les
+/// intervertir à l'appel serait resté silencieux.
+class _ChoixMembres {
+  const _ChoixMembres(this.choisis, this.numeros);
+  final Set<String> choisis;
+  final List<String> numeros;
+}
+
+/// LE CARNET, dans sa propre feuille.
+///
+/// Il sortait de l'éditeur de liste, où il occupait toute la hauteur et
+/// repoussait le bouton de validation hors de l'écran. Ici il a la place qu'il
+/// réclame, et un seul travail : choisir qui entre dans la liste.
+///
+/// ⚠️ IL NE GARDE RIEN. Il reçoit la sélection en cours, travaille sur une
+/// copie, et la rend à sa fermeture. L'éditeur reste seul dépositaire de ce qui
+/// sera enregistré — deux états de sélection auraient fini par diverger, et
+/// c'est un défaut que ce dépôt a déjà payé sur les listes de l'accueil.
+class _SelecteurMembres extends StatefulWidget {
+  const _SelecteurMembres({
+    required this.contacts,
+    required this.horsRepertoire,
+    required this.choisisInitiaux,
+    required this.numerosInitiaux,
+  });
+
+  final List<Contact> contacts;
+  final List<MembreDeListe> horsRepertoire;
+  final Set<String> choisisInitiaux;
+  final List<String> numerosInitiaux;
+
+  @override
+  State<_SelecteurMembres> createState() => _SelecteurMembresState();
+}
+
+class _SelecteurMembresState extends State<_SelecteurMembres> {
+  late final Set<String> _choisis = Set<String>.from(widget.choisisInitiaux);
+  late final List<String> _numeros = List<String>.from(widget.numerosInitiaux);
+  final _rechercheCtrl = TextEditingController();
+  String _recherche = "";
+
+  @override
+  void dispose() {
+    _rechercheCtrl.dispose();
+    super.dispose();
+  }
+
+  List<Contact> get _visibles {
+    final filtres = _recherche.trim().isEmpty
+        ? List<Contact>.from(widget.contacts)
+        : widget.contacts
+            .where((c) =>
+                contientRecherche(c.displayName, _recherche) ||
+                c.publicNumber.contains(stripAlanyaId(_recherche)))
+            .toList();
+    filtres.sort((a, b) => comparePourTri(a.displayName, b.displayName));
+    return filtres;
+  }
+
+  /// Le sélecteur du transfert d'appel — celui qui sait saisir un numéro.
+  ///
+  /// Réutilisé tel quel plutôt que redéveloppé : c'est déjà le pavé que
+  /// l'utilisateur connaît, et en écrire un second aurait fait deux règles de
+  /// validation d'Alanya ID à tenir accordées.
+  Future<void> _ajouterParNumero() async {
+    final dejaLa = <String>[
+      ..._numeros,
+      ...widget.contacts
+          .where((c) => _choisis.contains(c.userId))
+          .map((c) => stripAlanyaId(c.publicNumber)),
+    ];
+    final choisis = await ContactPickerSheet.show(
+      context,
+      title: tr(context, 'list_add_to'),
+      confirmLabel: tr(context, 'add'),
+      excludeNumbers: dejaLa,
+    );
+    if (choisis == null || choisis.isEmpty || !mounted) return;
+    setState(() {
+      for (final brut in choisis) {
+        final propre = stripAlanyaId(brut);
+        if (propre.isEmpty) continue;
+        // Un numéro qui EST déjà un contact rejoint `_choisis` : le serveur
+        // n'aurait sinon aucun moyen de savoir qu'il s'agit de la même personne.
+        Contact? connu;
+        for (final c in widget.contacts) {
+          if (stripAlanyaId(c.publicNumber) == propre) {
+            connu = c;
+            break;
+          }
+        }
+        if (connu != null) {
+          _choisis.add(connu.userId);
+        } else {
+          _numeros.add(propre);
+        }
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final visibles = _visibles;
+    final hors = widget.horsRepertoire;
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.9,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      expand: false,
+      builder: (_, controleur) => Container(
+        decoration: BoxDecoration(
+          color: surfacesOf(context).surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(children: [
+          const SizedBox(height: 10),
+          Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: faintOf(context, Colors.black26),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                tr(context, 'list_add_members'),
+                style:
+                    const TextStyle(fontSize: 19, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: TextField(
               controller: _rechercheCtrl,
               onChanged: (v) => setState(() => _recherche = v),
@@ -639,6 +931,17 @@ class _EditeurListeState extends State<_EditeurListe> {
                 isDense: true,
                 hintText: tr(context, 'search_contact'),
                 prefixIcon: const Icon(Icons.search, size: 20),
+                // La croix n'apparaît qu'une fois qu'il y a quelque chose à
+                // effacer : offerte à vide, elle ne fait rien et prend la place.
+                suffixIcon: _recherche.isEmpty
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.close, size: 18),
+                        onPressed: () {
+                          _rechercheCtrl.clear();
+                          setState(() => _recherche = "");
+                        },
+                      ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(24),
                   borderSide: BorderSide.none,
@@ -648,13 +951,11 @@ class _EditeurListeState extends State<_EditeurListe> {
               ),
             ),
           ),
-          // --- Ajout par numéro ---
-          //
           // Le bouton est posé SOUS la recherche et AU-DESSUS de la liste : on
           // cherche d'abord dans son carnet, on saisit un numéro seulement
           // quand la personne n'y est pas.
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+            padding: const EdgeInsets.fromLTRB(12, 0, 16, 0),
             child: Align(
               alignment: Alignment.centerLeft,
               child: TextButton.icon(
@@ -686,26 +987,6 @@ class _EditeurListeState extends State<_EditeurListe> {
                 ),
               ),
             ),
-          // Le compteur est affiché en permanence : sur une longue liste, on
-          // perd sinon le fil de ce qu'on a coché.
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                // Les numéros saisis comptent : ils seront membres eux aussi.
-                // Les omettre ferait lire « 2 membres » sur une liste qui va en
-                // compter quatre.
-                (() {
-                  final n = _choisis.length + _numeros.length;
-                  if (n == 0) return tr(context, 'list_none_selected');
-                  return trN(context, 'list_selected', n);
-                })(),
-                style: TextStyle(
-                    fontSize: 12.5, color: mutedOf(context, Colors.black54)),
-              ),
-            ),
-          ),
           Expanded(
             child: visibles.isEmpty && hors.isEmpty
                 ? Center(
@@ -714,7 +995,8 @@ class _EditeurListeState extends State<_EditeurListe> {
                       child: Text(
                         widget.contacts.isEmpty
                             ? tr(context, 'book_empty')
-                            : tr(context, 'no_contact_matches', {'q': _recherche.trim()}),
+                            : tr(context, 'no_contact_matches',
+                                {'q': _recherche.trim()}),
                         textAlign: TextAlign.center,
                         style:
                             TextStyle(color: mutedOf(context, Colors.black54)),
@@ -741,7 +1023,8 @@ class _EditeurListeState extends State<_EditeurListe> {
                           }),
                           title: Text(m.displayName),
                           subtitle: Text(
-                            tr(context, 'out_of_book', {'id': formatAlanyaId(m.publicNumber)}),
+                            tr(context, 'out_of_book',
+                                {'id': formatAlanyaId(m.publicNumber)}),
                             style: alanyaIdStyleOf(context),
                           ),
                         );
@@ -770,21 +1053,10 @@ class _EditeurListeState extends State<_EditeurListe> {
               child: SizedBox(
                 height: 50,
                 width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: _envoi ? null : _valider,
-                  icon: _envoi
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2, color: Colors.white),
-                        )
-                      : const Icon(Icons.check),
-                  label: Text(_envoi
-                      ? tr(context, 'saving')
-                      : widget.existante == null
-                          ? tr(context, 'list_create')
-                          : tr(context, 'save')),
+                child: ElevatedButton(
+                  onPressed: () => Navigator.of(context)
+                      .pop(_ChoixMembres(_choisis, _numeros)),
+                  child: Text(tr(context, 'save')),
                 ),
               ),
             ),

@@ -13,6 +13,7 @@ import '../../../widgets/call_rating_sheet.dart';
 import '../../../widgets/contact_picker_sheet.dart';
 import '../../chat/screens/chat_screen.dart';
 import '../call_controller.dart';
+import '../disposition_vignettes.dart';
 import '../widgets/call_avatar_waves.dart';
 import '../widgets/ivr_panel.dart';
 import '../widgets/plainte_recorder.dart';
@@ -954,73 +955,165 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     required bool anonymiseLesInvites,
   }) {
     final ids = remotes.keys.toList();
+    if (ids.isEmpty) return const SizedBox.shrink();
+
+    // Beaucoup de monde : on garde une grille qui défile, mais on la laisse
+    // courir jusqu'en bas — les contrôles flottent par-dessus, comme ailleurs.
+    if (ids.length > maxVignettesSansDefilement) {
+      return Positioned.fill(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(4, 4, 4, 96),
+          child: GridView.builder(
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              mainAxisSpacing: 4,
+              crossAxisSpacing: 4,
+              childAspectRatio: 0.75,
+            ),
+            itemCount: ids.length,
+            itemBuilder: (_, i) =>
+                _vignette(cc, ids[i], anonymise: anonymiseLesInvites),
+          ),
+        ),
+      );
+    }
+
+    final rangees = dispositionVignettes(ids.length);
+    var curseur = 0;
+    final lignes = <Widget>[];
+    for (final combien in rangees) {
+      final deLaRangee = ids.sublist(curseur, curseur + combien);
+      curseur += combien;
+      lignes.add(
+        Expanded(
+          child: Row(
+            children: [
+              for (final id in deLaRangee)
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.all(2),
+                    child:
+                        _vignette(cc, id, anonymise: anonymiseLesInvites),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    /*
+     * LES VIGNETTES VONT JUSQU'AUX BORDS, et passent SOUS les contrôles.
+     *
+     * L'ancienne version réservait 160 points en bas pour ne rien cacher. Le
+     * remède coûtait plus cher que le mal : cette bande restait vide en
+     * permanence, y compris quand les contrôles étaient masqués — c'est-à-dire
+     * la plupart du temps, puisqu'ils s'effacent tout seuls.
+     *
+     * Les dégradés de `_scrims` assurent déjà la lisibilité par-dessus l'image,
+     * et l'étiquette de nom est placée assez haut pour rester visible.
+     */
     return Positioned.fill(
       child: Padding(
-        padding: const EdgeInsets.only(top: 8, left: 8, right: 8, bottom: 160),
-        child: GridView.builder(
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: ids.length <= 1 ? 1 : 2,
-            mainAxisSpacing: 8,
-            crossAxisSpacing: 8,
-            childAspectRatio: 0.85,
-          ),
-          itemCount: ids.length,
-          itemBuilder: (_, i) {
-            final id = ids[i];
-            final r = _remoteRenderers[id];
-            final invited = cc.invitedParticipantIds.contains(id);
-            // Même règle que pour le titre de l'écran, et seulement dans le même
-            // cas : un tête-à-tête où un tiers a été amené par le correspondant.
-            // Dans un VRAI groupe, savoir qui a rejoint reste utile — on ne
-            // masque donc rien.
-            final label = anonymiseLesInvites && invited
-                ? tr(context, 'guest')
-                : (cc.participantNames[id] ?? tr(context, 'meet_participant'));
-            return ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  if (r != null)
-                    RTCVideoView(
-                      r,
-                      objectFit:
-                          RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-                    )
-                  else
-                    const ColoredBox(color: AlanyaColors.gold),
-                  Positioned(
-                    left: 8,
-                    bottom: 8,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 3,
-                      ),
-                      decoration: BoxDecoration(
-                        color: invited
-                            ? AlanyaColors.forest.withValues(alpha: 0.9)
-                            : Colors.black.withValues(alpha: 0.45),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        // « Invité (invité) » quand le nom est déjà masqué :
-                        // le libellé anonyme se suffit à lui-même.
-                        invited && label != tr(context, 'guest')
-                            ? tr(context, 'label_guest', {'label': label})
-                            : label,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
+        padding: const EdgeInsets.all(2),
+        child: Column(children: lignes),
+      ),
+    );
+  }
+
+  /// Une vignette de participant : son image, ou son initiale s'il n'a pas
+  /// encore de flux, et son nom en bas à gauche.
+  Widget _vignette(
+    CallController cc,
+    String id, {
+    required bool anonymise,
+  }) {
+    final r = _remoteRenderers[id];
+    final invited = cc.invitedParticipantIds.contains(id);
+    // Même règle que pour le titre de l'écran, et seulement dans le même cas :
+    // un tête-à-tête où un tiers a été amené par le correspondant. Dans un VRAI
+    // groupe, savoir qui a rejoint reste utile — on ne masque donc rien.
+    final label = anonymise && invited
+        ? tr(context, 'guest')
+        : (cc.participantNames[id] ?? tr(context, 'meet_participant'));
+    // « Invité (invité) » quand le nom est déjà masqué : le libellé anonyme se
+    // suffit à lui-même.
+    final texte = invited && label != tr(context, 'guest')
+        ? tr(context, 'label_guest', {'label': label})
+        : label;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (r != null)
+            RTCVideoView(
+              r,
+              objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+            )
+          else
+            // ⚠️ PAS UN APLAT DE COULEUR VIVE. Le fond doré d'avant se lisait
+            // comme une erreur d'affichage ; un fond sombre portant l'initiale
+            // dit « cette personne est là, sans image », ce qui est le cas
+            // pendant toute la négociation WebRTC.
+            _vignetteSansImage(label),
+          Positioned(
+            left: 8,
+            right: 8,
+            bottom: 8,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                decoration: BoxDecoration(
+                  color: invited
+                      ? AlanyaColors.forest.withValues(alpha: 0.92)
+                      : Colors.black.withValues(alpha: 0.55),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Text(
+                  texte,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
                   ),
-                ],
+                ),
               ),
-            );
-          },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Le fond d'une vignette dont le flux vidéo n'est pas encore arrivé.
+  Widget _vignetteSansImage(String label) {
+    final initiale = label.trim().isNotEmpty ? label.trim()[0].toUpperCase() : "?";
+    return ColoredBox(
+      color: AlanyaColors.chocolate,
+      child: Center(
+        child: Container(
+          width: 56,
+          height: 56,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: Colors.white.withValues(alpha: 0.16),
+          ),
+          child: Center(
+            child: Text(
+              initiale,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 22,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
         ),
       ),
     );
