@@ -756,6 +756,29 @@ class CallController extends ChangeNotifier {
       activePeerName =
           result.groupName ?? nomAffiche ?? activePeerName ?? "Appel";
       activeRole = ActiveCallRole.ongoing;
+
+      /*
+       * 🔴 SANS CETTE LIGNE, QUI REJOINT UN APPEL VIDÉO Y ENTRE EN AUDIO.
+       *
+       * Ce chemin-ci n'a JAMAIS vu la trame `incoming_call` : il sert quand
+       * l'application était fermée et qu'on décroche depuis l'écran natif. Il
+       * ne reçoit qu'un identifiant d'appel. `activeType` restait donc sur sa
+       * valeur de naissance — « AUDIO » —, et `_ensureMesh` ouvrait le micro
+       * seul, sans jamais demander la caméra.
+       *
+       * C'est le cas ORDINAIRE d'un invité : on l'ajoute à un appel en cours
+       * pendant qu'il fait autre chose, son application n'est donc pas au
+       * premier plan.
+       *
+       * ⚠️ L'ORDRE COMPTE : `_ensureMesh()` plus bas lit `activeType` pour
+       * décider s'il demande la caméra, et il ne repasse pas — un mesh déjà
+       * créé le fait sortir aussitôt. Poser le type APRÈS n'aurait rien changé.
+       */
+      activeType = result.type ??
+          // Serveur antérieur au champ : l'écran natif, lui, savait. C'est ce
+          // même drapeau qui lui a fait afficher « appel vidéo ».
+          (await _typeSelonEcranNatif() ?? activeType);
+
       incoming = null;
       // Même raison que dans `acceptIncoming` : sans ce signal, l'écran natif
       // reste sur « appel entrant » pendant toute la communication.
@@ -1407,6 +1430,32 @@ class CallController extends ChangeNotifier {
     // Même raison que dans `hangUp` : `activeCallId` vient d'être neutralisé,
     // sans cet identifiant l'écran natif resterait affiché après le transfert.
     _clear(idAppel: callId);
+  }
+
+  /// Le type d'appel tel que l'écran natif le connaît — « VIDEO », « AUDIO »,
+  /// ou `null` s'il ne porte aucun appel.
+  ///
+  /// Sert de SECOURS à [acceptById] quand le serveur ne renvoie pas encore le
+  /// type dans sa réponse d'`/accept`. L'écran natif, lui, l'a toujours su :
+  /// c'est ce drapeau qui lui a fait annoncer « appel vidéo ». La donnée est
+  /// donc déjà sur l'appareil — il suffit de la relire.
+  ///
+  /// ⚠️ ON INTERROGE LES DEUX REGISTRES. Au moment où l'on arrive ici, le
+  /// natif a déjà basculé l'appel de « en sonnerie » à « accepté » : ne lire
+  /// que le premier le manquerait à tous les coups.
+  Future<String?> _typeSelonEcranNatif() async {
+    try {
+      final natif = (await AlanyaTelecom.getAcceptedCall()) ??
+          (await AlanyaTelecom.getRingingCall());
+      final brut = natif?["callType"]?.toString().toLowerCase();
+      if (brut == null) return null;
+      return brut == "video" ? "VIDEO" : "AUDIO";
+    } catch (e) {
+      // Le natif est indisponible sur ce téléphone : on ne sait pas, et on le
+      // dit. L'appelant gardera la valeur qu'il avait.
+      debugPrint("[CallController] type natif illisible: $e");
+      return null;
+    }
   }
 
   Future<void> _ensureMesh() async {
