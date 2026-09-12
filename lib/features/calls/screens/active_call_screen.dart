@@ -311,8 +311,10 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
   String _statusText(CallController cc) {
     if (widget.incoming && cc.incoming != null) {
       final inc = cc.incoming!;
-      if (inc.isGroup) return "Groupe · ${inc.memberCount} membres";
-      return "Appel entrant…";
+      if (inc.isGroup) {
+        return tr(context, 'call_group_members', {'n': '${inc.memberCount}'});
+      }
+      return tr(context, 'incoming_call');
     }
     // Standard : personne ne sonne tant que l'appelant n'a pas choisi. Laisser
     // « Sonnerie… » dirait exactement le contraire de ce qui se passe.
@@ -334,7 +336,9 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
        * Un centre vocal reste un serveur vocal du début à la fin de l'appel :
        * son sous-titre n'a aucune raison de bouger.
        */
-      if (ivr.etape == IvrEtape.menu || ivr.vocal) return "Serveur vocal";
+      if (ivr.etape == IvrEtape.menu || ivr.vocal) {
+        return tr(context, 'company_center_vocal');
+      }
       /*
        * Sous le nom du centre : `nom_service`, et RIEN s'il est vide — demande
        * du user du 12/08/2026, qui remplace « Mise en relation — <libelle> ».
@@ -348,14 +352,16 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
       return ivr.nomServiceChoisi ?? "";
     }
     if (cc.activeRole == ActiveCallRole.outgoing) {
-      if (cc.isGroupCall) return "Sonnerie du groupe…";
-      return cc.remoteRinging ? "En train de sonner…" : "Sonnerie…";
+      if (cc.isGroupCall) return tr(context, 'call_group_ringing');
+      return cc.remoteRinging
+          ? tr(context, 'call_ringing_remote')
+          : tr(context, 'call_ringing');
     }
     if (cc.activeRole == ActiveCallRole.ongoing) {
       if (cc.mediaConnected) return _formatElapsed(cc);
-      return "Connexion en cours…";
+      return tr(context, 'call_connecting');
     }
-    return "Connexion en cours…";
+    return tr(context, 'call_connecting');
   }
 
   /// [afficheCommeGroupe] et non `cc.isGroupCall` : après un transfert, l'appel
@@ -453,9 +459,11 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
           cc.participantNames[primaryId] ??
           cc.activePeerName ??
           cc.incoming?.displayTitle ??
-          "Contact";
+          tr(context, 'call_contact_fallback');
     } else {
-      name = cc.activePeerName ?? cc.incoming?.displayTitle ?? "Contact";
+      name = cc.activePeerName ??
+          cc.incoming?.displayTitle ??
+          tr(context, 'call_contact_fallback');
     }
     // Après acceptation d'un appel entrant, cc.incoming repasse à null alors que
     // widget.incoming reste true : l'ancien code lisait donc cc.incoming?.callType
@@ -1258,7 +1266,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
               label: cc.isTransferring ? tr(context, 'cancel') : tr(context, 'transfer_action'),
               onPressed: cc.isTransferring
                   ? () {
-                      cc.cancelTransfer(reason: "Transfert annulé");
+                      cc.cancelTransfer(reason: tr(context, 'transfer_cancelled'));
                       showAppSnackBar(tr(context, 'transfer_cancelled'));
                     }
                   : () => _transfer(cc),

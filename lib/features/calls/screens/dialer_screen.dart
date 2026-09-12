@@ -134,8 +134,8 @@ class _DialerScreenState extends State<DialerScreen> {
       setState(() {
         _searching = false;
         _lookupError = e.statusCode == 404
-            ? "Aucun compte avec cet Alanya ID"
-            : "Recherche impossible (${e.statusCode})";
+            ? tr(context, 'dial_no_account')
+            : tr(context, 'dial_search_failed_code', {'code': '${e.statusCode}'});
       });
       return null;
     } catch (_) {
@@ -219,7 +219,7 @@ class _DialerScreenState extends State<DialerScreen> {
       backgroundColor: s.fond,
       appBar: backAppBar(
         context,
-        "Clavier",
+        tr(context, 'dialer_title'),
         actions: [
           IconButton(
             icon: const Icon(Icons.search),

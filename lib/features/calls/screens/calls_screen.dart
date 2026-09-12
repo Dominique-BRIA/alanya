@@ -247,7 +247,7 @@ class _CallsScreenState extends State<CallsScreen>
       subtitleText.write(" · $dur");
     }
     if (c.isGroup) {
-      subtitleText.write(" · Groupe");
+      subtitleText.write(" · ${tr(context, 'group_label')}");
     }
 
     return ListTile(

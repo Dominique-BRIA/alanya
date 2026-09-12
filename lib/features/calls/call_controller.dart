@@ -20,6 +20,7 @@ import '../../core/realtime_client.dart';
 import '../../core/enregistreur_appel.dart';
 import '../../core/ringtone_service.dart';
 import '../../core/sonneries_listes.dart';
+import '../../l10n/app_localizations.dart';
 import 'enregistrements_repository.dart';
 import '../../models/call_record.dart';
 import 'calls_repository.dart';
@@ -82,7 +83,7 @@ class IvrOption {
     if (digit == null) return null;
     return IvrOption(
       digit: digit,
-      label: brut["label"] as String? ?? "Service $digit",
+      label: brut["label"] as String? ?? _trAppel('ivr_service_n', "Service $digit", {'n': '$digit'}),
       // Absent = disponible : un serveur plus ancien ne connaît pas ce champ,
       // et griser toutes les options serait pire que de laisser essayer.
       disponible: brut["disponible"] as bool? ?? true,
@@ -396,7 +397,7 @@ class CallController extends ChangeNotifier {
 
   Future<void> startOutgoing(String convId, String type, String title) async {
     if (isBusy) {
-      lastError = "Termine l'appel en cours avant d'en lancer un autre";
+      lastError = _trAppel('call_busy_start', "Termine l'appel en cours avant d'en lancer un autre");
       notifyListeners();
       throw StateError("BUSY");
     }
@@ -428,7 +429,7 @@ class CallController extends ChangeNotifier {
     for (final c in started.callees) {
       participantNames[c.userId] = c.pseudo ??
           (c.publicNumber == null ? null : formatAlanyaId(c.publicNumber!)) ??
-          "Membre";
+          _trAppel('grp_member', "Membre");
       if (c.avatarUrl != null) participantAvatars[c.userId] = c.avatarUrl!;
       _initialMemberIds.add(c.userId); // membres appelés dès le départ
     }
@@ -471,7 +472,7 @@ class CallController extends ChangeNotifier {
   Future<void> startCallback(
       String centerAlanyaID, String customerId, String title) async {
     if (isBusy) {
-      lastError = "Termine l'appel en cours avant d'en lancer un autre";
+      lastError = _trAppel('call_busy_start', "Termine l'appel en cours avant d'en lancer un autre");
       notifyListeners();
       throw StateError("BUSY");
     }
@@ -499,7 +500,7 @@ class CallController extends ChangeNotifier {
     for (final c in started.callees) {
       participantNames[c.userId] = c.pseudo ??
           (c.publicNumber == null ? null : formatAlanyaId(c.publicNumber!)) ??
-          "Membre";
+          _trAppel('grp_member', "Membre");
       if (c.avatarUrl != null) participantAvatars[c.userId] = c.avatarUrl!;
       _initialMemberIds.add(c.userId);
     }
@@ -596,6 +597,21 @@ class CallController extends ChangeNotifier {
     _rt.ivrBack(session.callId);
   }
 
+  /// Traduit une chaîne du module appels depuis n'importe où dans le
+  /// contrôleur, sans BuildContext : pendant un appel, le navigateur de
+  /// l'application est monté (l'écran d'appel en dépend). Repli français
+  /// s'il ne l'est pas — même logique que [CallUiNative._libelle].
+  String _trAppel(String cle, String repliFrancais,
+      [Map<String, String>? params]) {
+    final ctx = PushService.navigatorKey.currentContext;
+    if (ctx == null) return repliFrancais;
+    try {
+      return tr(ctx, cle, params);
+    } catch (_) {
+      return repliFrancais;
+    }
+  }
+
   Future<void> acceptIncoming() async {
     final inc = incoming;
     if (inc == null || myUserId == null) return;
@@ -641,7 +657,7 @@ class CallController extends ChangeNotifier {
         return;
       }
       // Vraie fin : appelant qui a renoncé, délai expiré, appel déjà clos.
-      lastError = "Cet appel n'est plus disponible";
+      lastError = _trAppel('call_no_longer_available', "Cet appel n'est plus disponible");
       _clear();
       notifyListeners();
       return;
@@ -650,7 +666,7 @@ class CallController extends ChangeNotifier {
       // et laissait l'état à mi-chemin : sonnerie coupée, notification retirée,
       // mais ni appel actif ni appel entrant — plus aucun moyen d'en sortir.
       _acceptationEnCours = null;
-      lastError = "Impossible de rejoindre l'appel";
+      lastError = _trAppel('call_join_failed', "Impossible de rejoindre l'appel");
       _clear();
       notifyListeners();
       return;
@@ -754,7 +770,7 @@ class CallController extends ChangeNotifier {
       isCallInitiator = false;
       activeCallId = callId;
       activePeerName =
-          result.groupName ?? nomAffiche ?? activePeerName ?? "Appel";
+          result.groupName ?? nomAffiche ?? activePeerName ?? _trAppel('call_word', "Appel");
       activeRole = ActiveCallRole.ongoing;
       incoming = null;
       // Même raison que dans `acceptIncoming` : sans ce signal, l'écran natif
@@ -839,12 +855,12 @@ class CallController extends ChangeNotifier {
       }
       // Les autres 409 sont de vraies fins : appelant qui a renoncé pendant le
       // démarrage, délai expiré, appel déjà clos.
-      lastError = "Cet appel n'est plus disponible";
+      lastError = _trAppel('call_no_longer_available', "Cet appel n'est plus disponible");
       _clear(idAppel: callId);
       notifyListeners();
       return false;
     } catch (_) {
-      lastError = "Cet appel n'est plus disponible";
+      lastError = _trAppel('call_no_longer_available', "Cet appel n'est plus disponible");
       _clear(idAppel: callId);
       notifyListeners();
       return false;
@@ -1142,7 +1158,7 @@ class CallController extends ChangeNotifier {
       // protéger, et la notification persistante ferait doublon avec celle de
       // l'appel entrant.
       CallForegroundService.demarrer(
-        titre: activePeerName ?? "Appel en cours",
+        titre: activePeerName ?? _trAppel('call_ongoing', "Appel en cours"),
       );
       // Chip vert de la barre d'état, au MÊME endroit et pour la même raison :
       // c'est ici, et nulle part ailleurs, qu'on sait qu'une communication est
@@ -1159,7 +1175,7 @@ class CallController extends ChangeNotifier {
       // Sans risque de doublon : quand Telecom a DÉJÀ posé le chip au décroché,
       // cet appel-ci ne fait que rafraîchir la notification — le natif garde
       // l'instant de départ du chronomètre.
-      AlanyaTelecom.chipDemarrer(nom: activePeerName ?? "Appel en cours");
+      AlanyaTelecom.chipDemarrer(nom: activePeerName ?? _trAppel('call_ongoing', "Appel en cours"));
     }
     // Ce rappel porte AUSSI les changements de caméra : c'est donc le bon
     // endroit pour réévaluer la proximité, qu'il s'agisse de la connexion du
@@ -1320,13 +1336,13 @@ class CallController extends ChangeNotifier {
   String _inviteErrorText(String? reason) {
     switch (reason) {
       case "NOT_FOUND":
-        return "Numéro introuvable";
+        return _trAppel('invite_not_found', "Numéro introuvable");
       case "ALREADY_IN":
-        return "Ce correspondant est déjà dans l'appel";
+        return _trAppel('invite_already_in', "Ce correspondant est déjà dans l'appel");
       case "BLOCKED":
-        return "Ce correspondant vous a bloqué";
+        return _trAppel('invite_blocked', "Ce correspondant vous a bloqué");
       default:
-        return "Invitation impossible";
+        return _trAppel('invite_failed', "Invitation impossible");
     }
   }
 
@@ -1373,7 +1389,7 @@ class CallController extends ChangeNotifier {
     _transferTimeout = Timer(_transfertDelai, () {
       if (!_pendingTransfer) return;
       DebugOverlay.log("CC ⏱ transfert: la cible n'a pas rejoint, annulation");
-      cancelTransfer(reason: "Transfert annulé : la cible n'a pas répondu");
+      cancelTransfer(reason: _trAppel('transfer_no_answer', "Transfert annulé : la cible n'a pas répondu"));
     });
   }
 
@@ -1416,8 +1432,8 @@ class CallController extends ChangeNotifier {
     final perms = await ensureCallPermissions(video: isVideo);
     if (!perms) {
       lastError = isVideo
-          ? "Micro et caméra requis pour l'appel"
-          : "Micro requis pour l'appel";
+          ? _trAppel('call_perms_video', "Micro et caméra requis pour l'appel")
+          : _trAppel('call_perms_audio', "Micro requis pour l'appel")
       notifyListeners();
       throw Exception(
           "PERMISSION_DENIED"); // ← FIX: throw au lieu de return silencieux
@@ -1456,7 +1472,7 @@ class CallController extends ChangeNotifier {
       await _mesh!.ensureLocal();
       notifyListeners();
     } catch (e) {
-      lastError = "Connexion WebRTC impossible : micro/caméra inaccessible";
+      lastError = _trAppel('call_webrtc_failed', "Connexion WebRTC impossible : micro/caméra inaccessible");
       debugPrint("[webrtc] mesh ensureLocal: $e");
       // Nettoie la mesh cassée pour permettre une nouvelle tentative
       await _mesh?.close();
@@ -1555,7 +1571,7 @@ class CallController extends ChangeNotifier {
     _connectingTimeout = Timer(const Duration(seconds: 30), () {
       if (mediaConnected || activeCallId == null) return;
       traceAppel("30 s sans media etabli → echec de connexion");
-      lastError = "Connexion impossible";
+      lastError = _trAppel('call_connect_failed', "Connexion impossible");
       hangUp();
     });
   }
@@ -1576,7 +1592,7 @@ class CallController extends ChangeNotifier {
     final autres = joinedParticipantIds.where((id) => id != myUserId).toSet();
     if (autres.length <= 1) {
       traceAppel("perte du dernier pair ($userId) → raccrochage");
-      lastError = "Connexion perdue";
+      lastError = _trAppel('call_connection_lost', "Connexion perdue");
       await hangUp();
       return;
     }
@@ -1622,7 +1638,7 @@ class CallController extends ChangeNotifier {
         convId: e["convId"] as String?,
         callType: e["callType"] as String? ?? "AUDIO",
         callerId: e["callerId"] as String,
-        callerName: e["callerName"] as String? ?? "Appel",
+        callerName: e["callerName"] as String? ?? _trAppel('call_word', "Appel"),
         callerAvatarUrl: e["callerAvatarUrl"] as String?,
         isGroup: (e["isGroup"] as bool?) ?? false,
         groupName: e["groupName"] as String?,
@@ -1747,7 +1763,7 @@ class CallController extends ChangeNotifier {
       final session = IvrSession(
         callId: callId,
         centerId: e["centerId"] as String? ?? "",
-        centerName: e["centerName"] as String? ?? activePeerName ?? "Standard",
+        centerName: e["centerName"] as String? ?? activePeerName ?? _trAppel('call_standard_fallback', "Standard"),
         centerNumber: e["centerNumber"] as String?,
         promptUrl: e["promptUrl"] as String?,
         holdUrl: e["holdUrl"] as String?,
@@ -1847,7 +1863,7 @@ class CallController extends ChangeNotifier {
       final callId = e["callId"] as String?;
       final retry = e["retry"] == true;
       final message =
-          e["message"] as String? ?? "Le standard n'a pas pu aboutir";
+          e["message"] as String? ?? _trAppel('ivr_standard_failed', "Le standard n'a pas pu aboutir");
       final enCours = ivr;
 
       /*
@@ -2028,8 +2044,8 @@ class CallController extends ChangeNotifier {
         // La réservation ne se périme plus : elle tient jusqu'à ce que le poste
         // qui l'a posée la rende. Inutile de laisser espérer en réessayant.
         if (callId == activeCallId) {
-          lastError =
-              "Cette conversation est réservée par un autre appareil de ce compte";
+          lastError = _trAppel('call_locked_elsewhere',
+              "Cette conversation est réservée par un autre appareil de ce compte");
           notifyListeners();
           await hangUp();
         }
@@ -2059,7 +2075,7 @@ class CallController extends ChangeNotifier {
                 _pendingTransfer &&
                 (_transferTargetId == null || userId == _transferTargetId);
         if (isTransferDecline) {
-          cancelTransfer(reason: "Transfert refusé");
+          cancelTransfer(reason: _trAppel('transfer_refused_word', "Transfert refusé"));
           return;
         }
         // La cible a quitté prématurément après avoir rejoint : on annule.
@@ -2067,7 +2083,7 @@ class CallController extends ChangeNotifier {
             _pendingTransfer &&
             _transferTargetId != null &&
             userId == _transferTargetId) {
-          cancelTransfer(reason: "La cible a quitté l'appel");
+          cancelTransfer(reason: _trAppel('transfer_target_left', "La cible a quitté l'appel"));
           return;
         }
         if (callId == activeCallId && userId != null) {

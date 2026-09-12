@@ -6,7 +6,7 @@
 
 ## 1. Le catalogue
 
-**`lib/l10n/app_localizations.dart`** — **1 040 clés × 9 langues**
+**`lib/l10n/app_localizations.dart`** — **1 085 clés × 9 langues**
 (`fr`, `en`, `es`, `de`, `pt`, `ru`, `zh`, `sv`, `no`), parité vérifiée après
 chaque injection (mêmes clés dans les 9 blocs, `_one`/`_many` appariés).
 
@@ -40,6 +40,21 @@ Toutes les chaînes visibles passent par `tr()` / `trN()` :
   ivr_panel, plainte_recorder, queue_status_sheet, call_rating_sheet,
   in_app_notifier (bouton Refuser), full_screen_permission, contact_bubble,
   document_bubble, image_bubble, location_bubble, cached_media.
+- **Appels — lot « interfaces dynamiques »** (demande user du 12/09/2026) :
+  `call_controller` (26 sites : `lastError`, titres de notification
+  `CallForegroundService.demarrer` et `AlanyaTelecom.chipDemarrer`, replis de
+  noms « Appel »/« Membre »/« Standard »/« Contact », `_inviteErrorText`,
+  raisons `cancelTransfer`, « Service {n} » du menu IVR), `_statusText`
+  d'active_call (« En train de sonner… », « Sonnerie du groupe… »…),
+  lookup 404/erreur du dialer, « Lecture en cours »/« Mise en relation »/
+  « Service plainte » de l'ivr_panel, « · Groupe » et titre « Clavier ».
+  Deux helpers sans `BuildContext` (même logique que
+  `CallUiNative._libelle` : `PushService.navigatorKey.currentContext`, repli
+  FR si non monté) : `_trAppel` (contrôleur) et
+  `CallStatusFormalisme._traduire` (formalisme des statuts).
+  Les libellés `preciseStatus`/`detail` formulés par le serveur en français
+  passent par la table `_clesServeur` (libellé FR → clé l10n, libellé inconnu
+  affiché tel quel) : traduction d'affichage, le formalisme reste au serveur.
 - **Chat** : chat_screen (~60 remplacements : messages éphémères, épinglés,
   sélection, infos, réponses, traduction auto, menu édition…), gallery,
   image/video/pdf viewers, starred, new_group, media_caption,
@@ -85,9 +100,8 @@ helpers : c'est lui qui distingue les cas que le client ne peut pas deviner.
 
 | Fichier | Raison |
 |---|---|
-| `core/call_status.dart` | repli d'affichage serveur — décision initiale : NE PAS toucher |
-| `core/push_service.dart`, `core/call_foreground_service.dart`, `core/geo_service.dart`, `core/geo_background*.dart` | notifications système / service Android, sans `BuildContext` au moment de la construction |
-| `core/realtime_client.dart`, `core/ringtone_service.dart`, `core/enregistreur_appel.dart`, `calls/call_controller.dart` (journaux), `calls/call_listener.dart`, `calls/enregistrements_repository.dart` | journaux de debug et messages techniques internes |
+| `core/push_service.dart`, `core/call_foreground_service.dart`, `core/geo_service.dart`, `core/geo_background*.dart` | notifications système / service Android, sans `BuildContext` au moment de la construction (les titres passés par `call_controller` sont désormais traduits) |
+| `core/realtime_client.dart`, `core/ringtone_service.dart`, `core/enregistreur_appel.dart`, `calls/call_controller.dart` (journaux seuls), `calls/call_listener.dart`, `calls/enregistrements_repository.dart` | journaux de debug et messages techniques internes |
 | `core/biometric_service.dart` | titre d'authentification biométrique exposé par le plugin, hors écran |
 | `core/authed_api.dart` | « Session expirée » : erreur technique, message serveur en pratique |
 | `features/auth/auth_controller.dart` | « Votre compte a été ouvert sur un autre appareil » : signal serveur (déconnexion multi-appareils) |
