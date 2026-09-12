@@ -27,6 +27,22 @@ import 'calls_repository.dart';
 import 'webrtc_group_mesh.dart';
 import 'webrtc_peer_session.dart';
 
+/// Traduit une chaîne du module appels depuis n'importe où dans ce fichier
+/// (parseurs JSON, sessions IVR, contrôleur), sans BuildContext : pendant un
+/// appel, le navigateur de l'application est monté (l'écran d'appel en
+/// dépend). Repli français s'il ne l'est pas — même logique que
+/// `CallUiNative._libelle`.
+String _trAppel(String cle, String repliFrancais,
+    [Map<String, String>? params]) {
+  final ctx = PushService.navigatorKey.currentContext;
+  if (ctx == null) return repliFrancais;
+  try {
+    return tr(ctx, cle, params);
+  } catch (_) {
+    return repliFrancais;
+  }
+}
+
 enum ActiveCallRole { outgoing, incoming, ongoing }
 
 /// Étape d'un appel passé à un standard (centre d'appels).
@@ -595,21 +611,6 @@ class CallController extends ChangeNotifier {
       return;
     }
     _rt.ivrBack(session.callId);
-  }
-
-  /// Traduit une chaîne du module appels depuis n'importe où dans le
-  /// contrôleur, sans BuildContext : pendant un appel, le navigateur de
-  /// l'application est monté (l'écran d'appel en dépend). Repli français
-  /// s'il ne l'est pas — même logique que [CallUiNative._libelle].
-  String _trAppel(String cle, String repliFrancais,
-      [Map<String, String>? params]) {
-    final ctx = PushService.navigatorKey.currentContext;
-    if (ctx == null) return repliFrancais;
-    try {
-      return tr(ctx, cle, params);
-    } catch (_) {
-      return repliFrancais;
-    }
   }
 
   Future<void> acceptIncoming() async {
@@ -1433,7 +1434,7 @@ class CallController extends ChangeNotifier {
     if (!perms) {
       lastError = isVideo
           ? _trAppel('call_perms_video', "Micro et caméra requis pour l'appel")
-          : _trAppel('call_perms_audio', "Micro requis pour l'appel")
+          : _trAppel('call_perms_audio', "Micro requis pour l'appel");
       notifyListeners();
       throw Exception(
           "PERMISSION_DENIED"); // ← FIX: throw au lieu de return silencieux
