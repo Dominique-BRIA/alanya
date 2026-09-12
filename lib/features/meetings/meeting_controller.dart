@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:alanya_telecom/alanya_telecom.dart';
 
 import '../../core/call_foreground_service.dart';
 import '../../core/call_permissions.dart';
@@ -499,6 +500,10 @@ class MeetingController extends ChangeNotifier {
     try {
       await Helper.setSpeakerphoneOn(isSpeakerOn);
     } catch (_) {}
+    // Et Telecom, pour la même raison que dans `toggleSpeaker` : un `Connection`
+    // survivant à l'appel qui précédait posséderait encore la route, et la
+    // réunion démarrerait dans l'écouteur en affichant « haut-parleur ».
+    await AlanyaTelecom.setSpeaker(isSpeakerOn);
 
     // Rejoint via WebSocket. C'est le handler serveur qui inscrit la socket
     // dans la salle et renvoie la liste des participants déjà présents — ou qui
@@ -759,10 +764,24 @@ class MeetingController extends ChangeNotifier {
     if (changed) notifyListeners();
   }
 
-  /// Toggle haut-parleur.
+  /// Bascule le haut-parleur.
+  ///
+  /// ⚠️ `Helper.setSpeakerphoneOn` NE SUFFIT PAS, même en réunion. Si un appel
+  /// est passé par Telecom avant d'entrer ici et que son `Connection` vit encore
+  /// — raccroché côté application mais pas encore détruit côté système —, c'est
+  /// Telecom qui possède la route, et il réécrit ce que `AudioManager` vient de
+  /// poser. Le bouton semble alors sans effet, sans que rien ne le signale.
+  ///
+  /// Sans appel natif en cours, l'appel au module est un no-op : le natif fait
+  /// `current?.setAudioRoute(...)`, et `current` vaut alors `null`.
   Future<void> toggleSpeaker() async {
     isSpeakerOn = !isSpeakerOn;
-    await Helper.setSpeakerphoneOn(isSpeakerOn);
+    try {
+      await Helper.setSpeakerphoneOn(isSpeakerOn);
+    } catch (_) {}
+    // Après `Helper`, jamais avant : quand Telecom est actif, c'est lui qui doit
+    // avoir le dernier mot.
+    await AlanyaTelecom.setSpeaker(isSpeakerOn);
     notifyListeners();
   }
 
