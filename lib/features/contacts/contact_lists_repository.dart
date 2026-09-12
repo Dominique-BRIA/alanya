@@ -39,6 +39,9 @@ class ContactListsRepository {
     List<String>? numeros,
     String? couleur,
     ({String? url})? sonnerie,
+    // Le son des MESSAGES, distinct de la sonnerie d appel. Meme convention :
+    // le record present avec `url: null` retire le son, absent le laisse.
+    ({String? url})? sonnerieMessage,
   }) async {
     final data = await _api.post("/api/contact-lists", {
       "name": nom,
@@ -46,6 +49,8 @@ class ContactListsRepository {
       if (numeros != null) "memberNumbers": numeros,
       if (couleur != null) "color": couleur,
       if (sonnerie != null) "ringtone": sonnerie.url,
+      if (sonnerieMessage != null) "ringtoneMessage": sonnerieMessage.url,
+      if (sonnerieMessage != null) "ringtoneMessage": sonnerieMessage.url,
     });
     return _resultat(data);
   }
@@ -62,6 +67,9 @@ class ContactListsRepository {
     List<String>? numeros,
     String? couleur,
     ({String? url})? sonnerie,
+    // Le son des MESSAGES, distinct de la sonnerie d appel. Meme convention :
+    // le record present avec `url: null` retire le son, absent le laisse.
+    ({String? url})? sonnerieMessage,
   }) async {
     final data = await _api.patch("/api/contact-lists/$id", {
       if (nom != null) "name": nom,
@@ -76,6 +84,27 @@ class ContactListsRepository {
 
   /// Supprime une liste. Le serveur rend 204 sans corps.
   Future<void> supprimer(String id) => _api.delete("/api/contact-lists/$id");
+
+  /// Enregistre l'ORDRE DE PRIORITÉ des listes, et rend la liste réordonnée.
+  ///
+  /// 🔴 CET ORDRE DÉCIDE QUELLE SONNERIE GAGNE quand quelqu'un appartient à
+  /// plusieurs listes. La règle était « la plus anciennement créée » : stable,
+  /// mais le choix de personne.
+  ///
+  /// ⚠️ TOUTES LES LISTES DOIVENT ÊTRE CITÉES, exactement une fois — le serveur
+  /// refuse un sous-ensemble (422 `ORDRE_INCOMPLET`). N'envoyer que celles qu'on
+  /// a bougées obligerait le serveur à inventer une règle pour les autres.
+  ///
+  /// ⚠️ ON REPREND CE QUE LE SERVEUR REND, jamais l'ordre qu'on croit avoir
+  /// envoyé : les deux divergent dès qu'un second appareil écrit en même temps.
+  Future<List<ListeContacts>> reordonner(List<String> ids) async {
+    final data = await _api.put("/api/contact-lists/ordre", {"ids": ids});
+    final brut = data["lists"] as List? ?? const [];
+    return brut
+        .whereType<Map<String, dynamic>>()
+        .map(ListeContacts.fromJson)
+        .toList();
+  }
 
   ({ListeContacts liste, List<String> numerosInconnus}) _resultat(
       Map<String, dynamic> data) {

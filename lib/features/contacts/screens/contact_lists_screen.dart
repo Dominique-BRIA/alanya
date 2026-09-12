@@ -9,16 +9,14 @@ import '../../../core/texte_recherche.dart';
 import '../../../models/contact.dart';
 import '../../../models/contact_list.dart';
 import '../../../core/sonneries_listes.dart';
-import '../../../core/sonneries_livrees.dart';
-import '../../../models/sonnerie.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../../../widgets/contact_picker_sheet.dart';
 import '../../../widgets/motif_background.dart';
 import '../contact_lists_repository.dart';
 import '../contacts_repository.dart';
-import '../../settings/ringtones_repository.dart';
 import '../teintes_listes.dart';
+import 'sonneries_liste_screen.dart';
 
 /// Listes de contacts personnalisées — « Famille », « Équipe », « Clients ».
 ///
@@ -97,6 +95,7 @@ class _ContactListsScreenState extends State<ContactListsScreen> {
       builder: (_) => _EditeurListe(
         existante: existante,
         contacts: _contacts,
+        toutesLesListes: _listes ?? const [],
       ),
     );
     if (resultat == true) _charger();
@@ -326,10 +325,20 @@ class _ContactListsScreenState extends State<ContactListsScreen> {
 
 /// Feuille de création / modification d'une liste.
 class _EditeurListe extends StatefulWidget {
-  const _EditeurListe({required this.existante, required this.contacts});
+  const _EditeurListe({
+    required this.existante,
+    required this.contacts,
+    required this.toutesLesListes,
+  });
 
   final ListeContacts? existante;
   final List<Contact> contacts;
+
+  /// Toutes les listes du compte, dans l ordre rendu par le serveur.
+  ///
+  /// ⚠️ Sert a l ecran des sonneries, qui porte l ordre de priorite : le
+  /// serveur refuse un reordonnancement qui ne les cite pas TOUTES.
+  final List<ListeContacts> toutesLesListes;
 
   @override
   State<_EditeurListe> createState() => _EditeurListeState();
@@ -351,26 +360,13 @@ class _EditeurListeState extends State<_EditeurListe> {
   /// de l'envoyer.
   String? _sonnerie;
 
-  /// La sonnerie retenue si elle figure encore parmi les choix proposés.
-  ///
-  /// 🐛 CE TEST NE REGARDAIT QUE LE CATALOGUE IMPORTÉ. Les quatre listes créées
-  /// d'office portent une sonnerie LIVRÉE, qui n'y est par définition jamais :
-  /// ouvrir « Bureau » affichait donc « par défaut » alors qu'elle a bien une
-  /// sonnerie. Rien n'était perdu — la valeur repartait intacte tant qu'on n'y
-  /// touchait pas — mais l'écran affirmait le contraire de la vérité, et le seul
-  /// moyen de la retrouver après l'avoir changée n'existait pas.
-  String? get _sonnerieProposee {
-    final v = _sonnerie;
-    if (v == null || v.isEmpty) return null;
-    if (libelleDeSonnerie(v) != null) return v;
-    if (_catalogue.any((s) => s.url == v)) return v;
-    // Retirée du catalogue depuis : on retombe sur « par défaut » plutôt que
-    // d'afficher un choix vide, et l'enregistrement la corrigera.
-    return null;
-  }
-
-  /// Le catalogue de l'utilisateur, chargé une fois à l'ouverture.
-  List<Sonnerie> _catalogue = const [];
+  // Le choix de la sonnerie a déménagé dans `SonneriesListeScreen`, avec le
+  // catalogue et le repli « par défaut » qui l'accompagnaient. `_sonnerie` reste
+  // ici pour une seule raison, et elle est essentielle :
+  //
+  // ⚠️ IL PRÉSERVE LA SONNERIE À L'ENREGISTREMENT. Le PATCH envoie
+  // `sonnerie: (url: _sonnerie)` ; si l'on oubliait ce champ, renommer une liste
+  // ou changer sa couleur EFFACERAIT son son au passage.
 
   /// Numéros Alanya saisis à la main, à rattacher par le SERVEUR.
   ///
@@ -405,24 +401,14 @@ class _EditeurListeState extends State<_EditeurListe> {
         ? actuelle
         : paletteListes.first;
     _sonnerie = widget.existante?.ringtone;
-    _chargerCatalogue();
     // Les membres déjà en place, par identifiant de COMPTE — c'est ce que le
     // serveur attend dans `memberIds`.
     _choisis = {...?widget.existante?.members.map((m) => m.id)};
   }
 
-  /// Charge le catalogue de sonneries, en échec silencieux.
-  ///
-  /// ⚠️ Un catalogue vide ou inaccessible ne doit PAS empêcher de créer une
-  /// liste : le choix de sonnerie disparaît, tout le reste fonctionne.
-  Future<void> _chargerCatalogue() async {
-    try {
-      final c = await context.read<RingtonesRepository>().list();
-      if (mounted) setState(() => _catalogue = c);
-    } catch (_) {
-      if (mounted) setState(() => _catalogue = const []);
-    }
-  }
+  // Le catalogue de sonneries n'est plus chargé ici : il a suivi le choix du son
+  // dans `SonneriesListeScreen`. Une requête de moins à chaque ouverture de
+  // l'éditeur, pour une donnée qu'il n'affichait plus.
 
   @override
   void dispose() {
@@ -538,6 +524,30 @@ class _EditeurListeState extends State<_EditeurListe> {
         ),
       ),
     );
+  }
+
+  /// Ouvre « Sonneries — <liste> ».
+  ///
+  /// ⚠️ ON PASSE TOUTES LES LISTES, pas seulement celle-ci : l'écran porte aussi
+  /// l'ordre de priorité, qui les concerne toutes — et le serveur refuse un
+  /// réordonnancement qui ne les cite pas toutes (422 `ORDRE_INCOMPLET`).
+  ///
+  /// ⚠️ ON FERME L'ÉDITEUR EN REVENANT (`pop(true)`), plutôt que de rester
+  /// dessus : les sons viennent d'être écrits en base, et l'éditeur affiche
+  /// encore l'état d'avant. Le laisser ouvert offrirait un « Enregistrer » qui
+  /// réécrirait des valeurs périmées par-dessus les nouvelles.
+  Future<void> _ouvrirSonneries() async {
+    final liste = widget.existante;
+    if (liste == null) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SonneriesListeScreen(
+          liste: liste,
+          toutesLesListes: widget.toutesLesListes,
+        ),
+      ),
+    );
+    if (mounted) Navigator.of(context).pop(true);
   }
 
   /// Ouvre le carnet, et ne retient que ce qui en revient.
@@ -675,50 +685,24 @@ class _EditeurListeState extends State<_EditeurListe> {
               }),
             ]),
           ),
-          // --- Sonnerie de la liste ---
+          // --- Les sons de la liste ---
           //
-          // ⚠️ TOUJOURS VISIBLE DÉSORMAIS. La rangée ne s'affichait que si le
-          // compte avait importé au moins une sonnerie — donc presque jamais, et
-          // surtout pas pour les quatre listes créées d'office, dont la sonnerie
-          // devenait alors invisible et impossible à retrouver. Les sonneries
-          // livrées étant toujours là, il y a toujours quelque chose à proposer.
-          Padding(
-              padding: const EdgeInsets.fromLTRB(20, 2, 20, 6),
-              child: Row(children: [
-                Text(tr(context, 'ringtone'),
-                    style: TextStyle(
-                        fontSize: 13, color: mutedOf(context, Colors.black54))),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String?>(
-                      isExpanded: true,
-                      value: _sonnerieProposee,
-                      items: [
-                        DropdownMenuItem<String?>(
-                          value: null,
-                          child: Text(tr(context, 'default_value')),
-                        ),
-                        // Les livrées d'abord : ce sont celles que tout le monde
-                        // a, et celles des quatre listes créées d'office.
-                        ...sonneriesLivrees
-                            .map((s) => DropdownMenuItem<String?>(
-                                  value: s.fichier,
-                                  child: Text(s.libelle,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis),
-                                )),
-                        ..._catalogue.map((s) => DropdownMenuItem<String?>(
-                              value: s.url,
-                              child: Text(s.label,
-                                  maxLines: 1, overflow: TextOverflow.ellipsis),
-                            )),
-                      ],
-                      onChanged: (v) => setState(() => _sonnerie = v),
-                    ),
-                  ),
-                ),
-              ]),
+          // 🔴 ILS NE SE REGLENT PLUS ICI, et la maquette le dit : la feuille de
+          // creation ne porte que le nom, la couleur et les membres.
+          //
+          // La raison est concrete : une liste qui n existe pas encore n a pas
+          // d identifiant, et l ecran des sonneries en a besoin — pour
+          // enregistrer, et pour afficher l ordre de priorite de TOUTES les
+          // listes, dont celle-ci ne fait pas encore partie. On cree d abord, on
+          // ecoute ensuite.
+          if (widget.existante != null)
+            _ligneAction(
+              icone: Icons.notifications_none,
+              libelle: tr(context, 'ringtones'),
+              // La valeur n'est pas répétée ici : les DEUX sons y sont réglés,
+              // et n'en montrer qu'un laisserait croire qu'il n'y en a qu'un.
+              valeur: "",
+              onTap: _ouvrirSonneries,
             ),
           /*
            * LES MEMBRES PASSENT DANS UNE FEUILLE À EUX.

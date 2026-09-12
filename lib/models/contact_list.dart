@@ -47,6 +47,8 @@ class ListeContacts {
     required this.id,
     required this.name,
     required this.ringtone,
+    required this.ringtoneMessage,
+    required this.ordre,
     required this.color,
     required this.cle,
     required this.createdAt,
@@ -61,6 +63,21 @@ class ListeContacts {
   /// Le serveur n'en vérifie que la FORME, jamais le contenu. Le catalogue qui
   /// alimentera ce champ arrive avec l'import de sonneries.
   final String? ringtone;
+
+  /// Son court joué à l'arrivée d'un MESSAGE venant de cette liste.
+  ///
+  /// ⚠️ `ringtone` reste la sonnerie d'APPEL, sous son nom d'origine : c'est le
+  /// champ que lisent tous les APK déjà installés, et le renommer les aurait
+  /// tous cassés. C'est donc celui-ci, le nouveau, qui porte le qualificatif.
+  final String? ringtoneMessage;
+
+  /// Rang dans l'ordre de priorité du compte, ou `null` si rien n'a été
+  /// ordonné.
+  ///
+  /// ⚠️ `null` N'EST PAS ZÉRO : zéro veut dire « première », `null` veut dire
+  /// « pas de choix ». Le serveur trie déjà correctement — le client n'a donc
+  /// qu'à respecter l'ordre reçu, jamais à retrier lui-même.
+  final int? ordre;
 
   /// Couleur d'accent choisie par l'utilisateur, ou `null`.
   final String? color;
@@ -90,6 +107,10 @@ class ListeContacts {
         id: j["id"] as String,
         name: j["name"] as String? ?? "",
         ringtone: j["ringtone"] as String?,
+        ringtoneMessage: j["ringtoneMessage"] as String?,
+        // `as num?` puis `toInt()` : un entier JSON arrive parfois en double
+        // selon le decodeur, et `as int?` leverait alors une erreur de cast.
+        ordre: (j["ordre"] as num?)?.toInt(),
         color: j["color"] as String?,
         // Repli sur `null` : un serveur antérieur à ce champ laisse tout
         // supprimable, ce qui est son comportement d'alors.
