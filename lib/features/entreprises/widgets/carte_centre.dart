@@ -7,7 +7,7 @@ import '../../../core/app_snackbar.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../calls/call_controller.dart';
-import '../../calls/screens/active_call_screen.dart';
+import '../../calls/ouvrir_appel_en_cours.dart';
 import '../../chat/chat_repository.dart';
 import '../entreprises_repository.dart';
 
@@ -39,21 +39,19 @@ class _CarteCentreState extends State<CarteCentre> {
   Future<void> _appeler() async {
     if (_occupe) return;
     setState(() => _occupe = true);
+    // 🔴 SAISI AVANT LES `await` : cette carte vit dans une liste, et une liste
+    // qui se reconstruit démonte ses cartes. C'est le cas le plus exposé au
+    // défaut « parfois l'écran d'appel ne s'ouvre pas ».
+    final cc = context.read<CallController>();
     try {
       final convId = await context
           .read<ChatRepository>()
           .createDirect(widget.centre.alanyaId);
       if (!mounted) return;
-      await context
-          .read<CallController>()
-          .startOutgoing(convId, "AUDIO", widget.centre.nom);
-      if (!mounted) return;
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          fullscreenDialog: true,
-          builder: (_) => const ActiveCallScreen(),
-        ),
-      );
+      await cc.startOutgoing(convId, "AUDIO", widget.centre.nom);
+      // Plus de `if (!mounted) return;` : l'appel est parti, l'écran doit
+      // suivre même si cette carte n'existe plus.
+      await ouvrirEcranAppelLance(cc);
     } on ApiException catch (e) {
       showAppSnackBar(e.message);
     } catch (_) {

@@ -1246,6 +1246,9 @@ class CallController extends ChangeNotifier {
       try {
         await Helper.setSpeakerphoneOn(vise);
       } catch (_) {}
+      // Telecom aussi : un appel entrant accepté depuis l'écran natif arrive
+      // ici avec un `Connection` déjà ouvert, qui possède la route.
+      await AlanyaTelecom.setSpeaker(vise);
       return;
     }
     await _appliqueHautParleur(vise);
@@ -1256,6 +1259,31 @@ class CallController extends ChangeNotifier {
     try {
       await Helper.setSpeakerphoneOn(actif);
     } catch (_) {}
+
+    /*
+     * 🔴 ET TELECOM AUSSI — sans quoi le bouton ne marche QUE sur les appels
+     * sortants.
+     *
+     * Un appel ENTRANT passe par `reportIncomingCall`, qui crée un `Connection`
+     * self-managed. À partir de là, c'est le système Telecom qui POSSÈDE la
+     * route audio : `Helper.setSpeakerphoneOn` agit sur `AudioManager`, et
+     * Telecom la réécrit au premier changement d'état qu'il observe. Le réglage
+     * partait donc, puis revenait tout seul — ou ne prenait jamais.
+     *
+     * Un appel SORTANT n'ouvre aucun `Connection` : `Helper` seul suffisait, et
+     * le bouton fonctionnait. D'où le « parfois » du symptôme, qui ne suivait
+     * pas le type d'appel mais son SENS.
+     *
+     * ⚠️ APRÈS `Helper`, JAMAIS AVANT : quand Telecom est actif, c'est son
+     * routage qui doit avoir le dernier mot. Dans l'ordre inverse, `Helper`
+     * écraserait ce que Telecom vient de poser.
+     *
+     * ⚠️ SANS EFFET QUAND AUCUN APPEL NATIF N'EXISTE — le natif fait
+     * `current?.setAudioRoute(...)`, et `current` est remis à `null` à la fin de
+     * chaque appel. On peut donc l'appeler sans condition, y compris pendant une
+     * réunion : c'est un no-op qui coûte un aller-retour de plateforme.
+     */
+    await AlanyaTelecom.setSpeaker(actif);
     /*
      * 🔴 LE SON DU STANDARD DOIT SUIVRE, et c'est ce qui manquait.
      *

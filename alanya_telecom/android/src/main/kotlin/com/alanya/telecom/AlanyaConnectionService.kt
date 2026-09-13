@@ -235,10 +235,48 @@ object CallRegistry {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) current?.onReject()
     }
 
+    /**
+     * Force la route audio de l'appel en cours.
+     *
+     * Sans effet s'il n'y a aucun appel natif : `current` vaut alors `null`, et
+     * l'appelant peut donc invoquer cette methode sans condition — y compris
+     * pendant une reunion, ou aucune connexion Telecom n'existe.
+     *
+     * 🔴 « DESACTIVER LE HAUT-PARLEUR » NE VEUT PAS DIRE « ECOUTEUR ».
+     *
+     * Cette methode forcait `ROUTE_EARPIECE`, ce qui COUPE un casque filaire ou
+     * un casque Bluetooth : quelqu'un qui ecoute dans ses ecouteurs et qui
+     * touche le bouton du haut-parleur deux fois se retrouvait avec le son dans
+     * l'appareil, casque branche. Le defaut dormait tant que rien n'appelait
+     * cette methode ; il se serait reveille avec elle.
+     *
+     * On rend donc la main au MEILLEUR peripherique disponible, dans l'ordre ou
+     * l'utilisateur s'attend a l'entendre : casque filaire, puis Bluetooth, puis
+     * l'ecouteur de l'appareil.
+     *
+     * ⚠️ `supportedRouteMask` EST LU A CHAQUE APPEL, jamais mis en cache : un
+     * casque se branche et se debranche pendant la conversation, et une valeur
+     * retenue enverrait le son vers un peripherique absent.
+     */
     fun setSpeaker(speakerOn: Boolean) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val route = if (speakerOn) android.telecom.CallAudioState.ROUTE_SPEAKER else android.telecom.CallAudioState.ROUTE_EARPIECE
-            current?.setAudioRoute(route)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val conn = current ?: return
+
+        val route = if (speakerOn) {
+            android.telecom.CallAudioState.ROUTE_SPEAKER
+        } else {
+            // `callAudioState` peut etre null tant que Telecom n'a pas encore
+            // attache l'appel : on retombe alors sur l'ecouteur, seul choix
+            // toujours present sur un telephone.
+            val dispo = conn.callAudioState?.supportedRouteMask ?: 0
+            when {
+                dispo and android.telecom.CallAudioState.ROUTE_WIRED_HEADSET != 0 ->
+                    android.telecom.CallAudioState.ROUTE_WIRED_HEADSET
+                dispo and android.telecom.CallAudioState.ROUTE_BLUETOOTH != 0 ->
+                    android.telecom.CallAudioState.ROUTE_BLUETOOTH
+                else -> android.telecom.CallAudioState.ROUTE_EARPIECE
+            }
         }
+        conn.setAudioRoute(route)
     }
 }

@@ -52,7 +52,7 @@ import '../../account/screens/avatar_viewer_screen.dart';
 import '../../auth/auth_controller.dart';
 import '../../calls/call_controller.dart';
 import '../../calls/message_erreur_appel.dart';
-import '../../calls/screens/active_call_screen.dart';
+import '../../calls/ouvrir_appel_en_cours.dart';
 import '../../contacts/contacts_repository.dart';
 import '../../contacts/screens/contact_info_screen.dart';
 import '../../group/screens/group_info_screen.dart';
@@ -2652,14 +2652,12 @@ class _ChatScreenState extends State<ChatScreen>
       final convId = await context.read<ChatRepository>().createDirect(id);
       if (!mounted) return;
       await cc.startOutgoing(convId, "AUDIO", contact.displayName);
-      if (!mounted) return;
       // Sans cette ouverture, l'appel démarre sans que rien ne s'affiche —
       // seul le bandeau global le signale (même enchaînement que la fiche
       // contact et le clavier d'appel).
-      await Navigator.of(context).push(MaterialPageRoute(
-        fullscreenDialog: true,
-        builder: (_) => const ActiveCallScreen(),
-      ));
+      //
+      // ⚠️ PAS DE `if (!mounted) return;` : l'appel est déjà parti.
+      await ouvrirEcranAppelLance(cc);
     } catch (e) {
       // `messageErreurAppel` traite déjà l'ApiException : le message du serveur
       // passe tel quel (« Le correspondant est déjà en appel »), et c'est le
@@ -3501,9 +3499,8 @@ class _ChatScreenState extends State<ChatScreen>
     final cc = context.read<CallController>();
     try {
       await cc.startOutgoing(widget.convId, type, widget.title);
-      if (!mounted) return;
-      await Navigator.of(context).push(MaterialPageRoute(
-          fullscreenDialog: true, builder: (_) => const ActiveCallScreen()));
+      // ⚠️ PAS DE `if (!mounted) return;` : l'appel est déjà parti.
+      await ouvrirEcranAppelLance(cc);
     } catch (e) {
       // Le message vient de `messageErreurAppel`, partagé avec le clavier et la
       // fiche de contact. Ici manquait la clause `on ApiException` : appeler

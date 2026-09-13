@@ -15,9 +15,13 @@ library;
 
 /// Au-delà de ce nombre, aucune disposition fixe ne reste lisible : l'écran
 /// bascule sur une grille qui défile.
+///
+/// ⚠️ MA PROPRE VIGNETTE COMPTE DANS CE TOTAL, comme chez WhatsApp : six tuiles
+/// affichées, c'est donc cinq correspondants et moi.
 const int maxVignettesSansDefilement = 6;
 
-/// Combien de vignettes par rangée, pour [n] participants distants.
+/// Combien de vignettes par rangée, pour [n] vignettes AFFICHÉES — les
+/// correspondants plus moi-même, et non les seuls correspondants.
 ///
 /// 🔴 LA SOMME DOIT TOUJOURS VALOIR [n]. L'écran découpe la liste des
 /// participants rangée par rangée avec `sublist` : une somme trop grande sort
