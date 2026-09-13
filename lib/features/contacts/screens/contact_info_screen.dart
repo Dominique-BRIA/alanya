@@ -19,7 +19,7 @@ import '../../../widgets/media/cached_media.dart';
 import '../../account/screens/avatar_viewer_screen.dart';
 import '../../calls/call_controller.dart';
 import '../../calls/message_erreur_appel.dart';
-import '../../calls/screens/active_call_screen.dart';
+import '../../calls/ouvrir_appel_en_cours.dart';
 import '../../chat/chat_repository.dart';
 import '../../chat/screens/shared_content_screen.dart';
 import '../contacts_repository.dart';
@@ -182,16 +182,13 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
           .createDirect(widget.publicNumber);
       if (!mounted) return;
       await cc.startOutgoing(convId, type, widget.name);
-      if (!mounted) return;
-      // Même enchaînement que depuis le fil de discussion : sans cette
-      // ouverture, l'appel démarrait sans que rien ne s'affiche, seul le
-      // bandeau global le signalait.
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          fullscreenDialog: true,
-          builder: (_) => const ActiveCallScreen(),
-        ),
-      );
+      // Sans cette ouverture, l'appel démarrait sans que rien ne s'affiche,
+      // seul le bandeau global le signalait.
+      //
+      // ⚠️ PAS DE `if (!mounted) return;` ICI. L'appel est déjà parti :
+      // renoncer parce que CETTE fiche a disparu laissait sonner le
+      // correspondant devant un appelant qui ne voit rien.
+      await ouvrirEcranAppelLance(cc);
     } catch (e) {
       showAppSnackBar(messageErreurAppel(e));
     } finally {

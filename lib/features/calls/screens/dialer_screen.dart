@@ -15,7 +15,7 @@ import '../../contacts/contacts_repository.dart';
 import '../../contacts/screens/add_contact_screen.dart';
 import '../call_controller.dart';
 import '../message_erreur_appel.dart';
-import 'active_call_screen.dart';
+import '../ouvrir_appel_en_cours.dart';
 
 /// Clavier d'appel : on compose un Alanya ID et on appelle directement.
 ///
@@ -174,14 +174,12 @@ class _DialerScreenState extends State<DialerScreen> {
           await context.read<ChatRepository>().createDirect(user.publicNumber);
       if (!mounted) return;
 
-      await context.read<CallController>().startOutgoing(convId, type, title);
-      if (!mounted) return;
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          fullscreenDialog: true,
-          builder: (_) => const ActiveCallScreen(),
-        ),
-      );
+      final cc = context.read<CallController>();
+      await cc.startOutgoing(convId, type, title);
+      // ⚠️ PAS DE `if (!mounted) return;` AVANT D'OUVRIR. L'appel est parti :
+      // renoncer ici le laissait tourner sans écran. Voir
+      // `ouvrirEcranAppelLance`.
+      await ouvrirEcranAppelLance(cc);
     } catch (e) {
       // Le 404 est propre à cet écran : on y cherche un compte par son Alanya
       // ID, et son absence n'a pas le même sens depuis une conversation.

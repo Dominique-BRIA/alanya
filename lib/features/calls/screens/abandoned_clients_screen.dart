@@ -8,7 +8,7 @@ import '../../../widgets/back_app_bar.dart';
 import '../call_controller.dart';
 import '../calls_repository.dart';
 import '../message_erreur_appel.dart';
-import 'active_call_screen.dart';
+import '../ouvrir_appel_en_cours.dart';
 
 /// « Clients abandonnés » — menu ⋮ de l'accueil (demande user 15/08/2026).
 ///
@@ -74,10 +74,8 @@ class _AbandonedClientsScreenState extends State<AbandonedClientsScreen> {
     try {
       final cc = context.read<CallController>();
       await cc.startCallback(centerAlanyaID, customerId, nom);
-      if (!mounted) return;
-      await Navigator.of(context).push(
-        MaterialPageRoute(fullscreenDialog: true, builder: (_) => const ActiveCallScreen()),
-      );
+      // ⚠️ PAS DE `if (!mounted) return;` : le rappel est déjà parti.
+      await ouvrirEcranAppelLance(cc);
       // Au retour de l'appel : si le client a décroché, le serveur l'a passé
       // en RECONTACTER et il ne fait plus partie de la liste. Sans ce
       // rechargement, l'agent le verrait encore et le rappellerait.

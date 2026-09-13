@@ -7,7 +7,7 @@ import '../../../l10n/app_localizations.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
 import '../../calls/call_controller.dart';
-import '../../calls/screens/active_call_screen.dart';
+import '../../calls/ouvrir_appel_en_cours.dart';
 import '../../chat/chat_repository.dart';
 import '../../chat/screens/chat_screen.dart';
 import '../collegues_repository.dart';
@@ -70,21 +70,19 @@ class _TuileCollegueState extends State<TuileCollegue> {
   Future<void> _appeler() async {
     if (_occupe) return;
     setState(() => _occupe = true);
+    // 🔴 SAISI AVANT LES `await`, et c'est ici que ça compte le plus : une
+    // tuile de liste se démonte dès que sa liste se reconstruit — un simple
+    // événement WebSocket suffit. Relire le contexte après coup échouerait.
+    final cc = context.read<CallController>();
     try {
       final convId = await context
           .read<ChatRepository>()
           .createDirect(widget.collegue.publicNumber);
       if (!mounted) return;
-      await context
-          .read<CallController>()
-          .startOutgoing(convId, "AUDIO", widget.collegue.nom);
-      if (!mounted) return;
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          fullscreenDialog: true,
-          builder: (_) => const ActiveCallScreen(),
-        ),
-      );
+      await cc.startOutgoing(convId, "AUDIO", widget.collegue.nom);
+      // Plus de `if (!mounted) return;` : l'appel est parti, l'écran doit
+      // suivre même si cette tuile n'existe plus.
+      await ouvrirEcranAppelLance(cc);
     } catch (_) {
       showAppSnackBar(tr(context, 'server_unreachable'));
     } finally {
