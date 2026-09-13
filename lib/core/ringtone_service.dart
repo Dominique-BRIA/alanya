@@ -594,7 +594,8 @@ class RingtoneService {
         ),
       );
 
-  Future<void> _play(String asset, {required bool hautParleur}) async {
+  Future<void> _play(String asset,
+      {required bool hautParleur, bool boucle = true}) async {
     // Si on rejoue le même son (ex: 2 events consécutifs), on ne relance pas.
     if (_currentAsset == asset && _player != null) return;
 
@@ -606,7 +607,10 @@ class RingtoneService {
     try {
       final p = AudioPlayer();
       await p.setAudioContext(_contexteSonnerie(hautParleur));
-      await p.setReleaseMode(ReleaseMode.loop);
+      // ⚠️ `ReleaseMode.stop` ET NON `release` pour un apercu : `release`
+      // libere les ressources natives en fin de lecture, et le meme lecteur ne
+      // repartirait pas si l on reappuie sur ecouter.
+      await p.setReleaseMode(boucle ? ReleaseMode.loop : ReleaseMode.stop);
       await p.setVolume(1.0);
       // Un arrêt est-il passé pendant la préparation ? Alors ce lecteur ne doit
       // jamais commencer : c'est ici que se jouait la sonnerie fantôme.
@@ -632,7 +636,8 @@ class RingtoneService {
   /// arrive avant le début de la lecture. Le compteur de génération est vérifié
   /// aux mêmes endroits, et un échec retombe sur l'asset — sans ce repli, une
   /// sonnerie de liste injoignable rendrait l'appel muet.
-  Future<void> _playUrl(String url, {required bool hautParleur}) async {
+  Future<void> _playUrl(String url,
+      {required bool hautParleur, bool boucle = true}) async {
     if (_currentAsset == url && _player != null) return;
 
     await stop();
@@ -641,7 +646,10 @@ class RingtoneService {
     try {
       final p = AudioPlayer();
       await p.setAudioContext(_contexteSonnerie(hautParleur));
-      await p.setReleaseMode(ReleaseMode.loop);
+      // ⚠️ `ReleaseMode.stop` ET NON `release` pour un apercu : `release`
+      // libere les ressources natives en fin de lecture, et le meme lecteur ne
+      // repartirait pas si l on reappuie sur ecouter.
+      await p.setReleaseMode(boucle ? ReleaseMode.loop : ReleaseMode.stop);
       await p.setVolume(1.0);
       if (gen != _generation) return _jeter(p);
       await p.play(UrlSource(url));
@@ -659,6 +667,30 @@ class RingtoneService {
         await _play(_incomingAsset, hautParleur: hautParleur);
       }
     }
+  }
+
+  /// Fait ÉCOUTER une sonnerie, pour qu'on la choisisse en connaissance de
+  /// cause. [asset] pour un son livré, [url] pour un son importé.
+  ///
+  /// 🔴 UNE SEULE FOIS, ET C'EST LA DIFFÉRENCE AVEC `startIncoming`. Une
+  /// sonnerie d'appel BOUCLE, parce que rien d'autre ne dit à l'appelé qu'on le
+  /// demande. Un aperçu, lui, a une fin : il répond à « à quoi ça ressemble ? ».
+  /// Le faire boucler reprendrait le défaut que ce dépôt a déjà payé deux fois —
+  /// la lecture d'un centre vocal et la vidéo d'un statut : une boucle
+  /// n'arrivant jamais à son terme, rien ne vient jamais la refermer.
+  ///
+  /// ⚠️ AU HAUT-PARLEUR, toujours : on écoute un son en tenant le téléphone
+  /// devant soi, pas contre l'oreille.
+  ///
+  /// ⚠️ `stop()` L'ARRÊTE, comme n'importe quelle sonnerie — c'est le même
+  /// lecteur et le même compteur de génération. L'appelant DOIT l'appeler en
+  /// quittant son écran, sans quoi l'aperçu continuerait derrière lui.
+  Future<void> apercu({String? url, String? asset}) {
+    if (asset != null && asset.isNotEmpty) {
+      return _play(asset, hautParleur: true, boucle: false);
+    }
+    if (url == null || url.isEmpty) return stop();
+    return _playUrl(url, hautParleur: true, boucle: false);
   }
 
   /// Abandonne un lecteur qu'un arrêt a rendu caduc pendant sa préparation.

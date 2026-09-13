@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../../core/api_client.dart';
 import '../../../core/app_snackbar.dart';
 import '../../../core/ringtone_service.dart';
+import '../../../core/sonneries_livrees.dart';
 import '../../../core/token_storage.dart';
 import '../../../core/texte_recherche.dart';
 import '../../../models/sonnerie.dart';
@@ -169,13 +170,31 @@ class _RingtonesScreenState extends State<RingtonesScreen> {
     }
   }
 
+  /// Écoute une sonnerie LIVRÉE avec l'application.
+  ///
+  /// ⚠️ CHEMIN SÉPARÉ, ET C'EST OBLIGATOIRE : une sonnerie du paquet n'est sur
+  /// AUCUN serveur. La demander par URL enverrait chercher un 404, jeton
+  /// compris, pour finir sur un silence sans erreur.
+  Future<void> _ecouterLivree(SonnerieLivree s) async {
+    final service = RingtoneService.instance;
+    if (_enEcoute == s.fichier) {
+      await service.stop();
+      if (mounted) setState(() => _enEcoute = null);
+      return;
+    }
+    // Les deux lecteurs sont distincts — celui de l'IVR sert aux importées.
+    // Couper les deux, sinon deux sonneries se superposeraient.
+    await service.stopIvr();
+    setState(() => _enEcoute = s.fichier);
+    await service.apercu(asset: "sounds/${s.fichier}");
+  }
+
   Future<void> _ecouter(Sonnerie s) async {
     if (_enEcoute == s.url) {
       await RingtoneService.instance.stopIvr();
       if (mounted) setState(() => _enEcoute = null);
       return;
     }
-
     /*
      * ⚠️ L'URL DU CATALOGUE EST RELATIVE — `/api/media/<id>` — et la route des
      * médias exige un JETON. Le lecteur audio ne sait pas joindre d'en-tête
@@ -185,8 +204,16 @@ class _RingtonesScreenState extends State<RingtonesScreen> {
      * La donner telle quelle au lecteur donnerait un silence sans erreur — le
      * pire des échecs, et exactement celui qu'on vient de corriger sur l'IVR.
      */
+    // ⚠️ LES DEUX DÉPÔTS SONT SAISIS AVANT TOUT `await`, et l'ordre compte :
+    // l'arrêt de l'autre lecteur, juste en dessous, est un point d'attente
+    // après lequel l'écran peut avoir été quitté — lire le contexte là serait
+    // lire celui d'un widget démonté.
     final base = context.read<ApiClient>().baseUrl;
-    final jeton = await context.read<TokenStorage>().accessToken;
+    final stockage = context.read<TokenStorage>();
+
+    // Une livrée jouait peut-être : elle passe par l'autre lecteur.
+    await RingtoneService.instance.stop();
+    final jeton = await stockage.accessToken;
     if (!mounted) return;
 
     setState(() => _enEcoute = s.url);
@@ -270,57 +297,90 @@ class _RingtonesScreenState extends State<RingtonesScreen> {
       ]);
     }
 
-    final sonneries = List<Sonnerie>.from(_sonneries ?? const <Sonnerie>[])
+    final importees = List<Sonnerie>.from(_sonneries ?? const <Sonnerie>[])
       ..sort((a, b) => comparePourTri(a.label, b.label));
 
-    if (sonneries.isEmpty) {
-      return ListView(children: [
-        const SizedBox(height: 80),
-        Center(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
-            child: Column(children: [
-              Icon(Icons.music_note_outlined,
-                  size: 56, color: faintOf(context, Colors.black26)),
-              const SizedBox(height: 16),
-              Text(tr(context, 'ring_empty'),
-                  style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
-              const SizedBox(height: 8),
-              Text(
-                tr(context, 'ring_empty_hint'),
-                textAlign: TextAlign.center,
-                style: TextStyle(color: mutedOf(context, Colors.black54)),
-              ),
-            ]),
+    /*
+     * LES SONNERIES LIVRÉES FIGURENT ICI AUSSI, et c'est ce qui manquait.
+     *
+     * 🔴 Cet écran ne montrait QUE les sonneries importées. Or ce sont les
+     * livrées que tout le monde possède — ce sont même celles des quatre listes
+     * créées d'office. Un compte qui n'avait jamais rien importé arrivait donc
+     * sur un écran vide intitulé « Mes sonneries », alors qu'il en avait
+     * dix-huit : il ne pouvait ni les entendre, ni savoir qu'elles existaient.
+     *
+     * ⚠️ ELLES NE SE SUPPRIMENT PAS : elles font partie du paquet de
+     * l'application, aucune route ne les retire, et le geste n'aurait aucun
+     * sens. Le bouton de suppression est donc absent — pas grisé : une action
+     * impossible ne doit pas être proposée, c'est la règle déjà appliquée aux
+     * listes créées d'office.
+     */
+    final livrees = List<SonnerieLivree>.from(sonneriesLivrees)
+      ..sort((a, b) => comparePourTri(a.libelle, b.libelle));
+
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 88),
+      children: [
+        _entete(tr(context, 'ring_bundled')),
+        for (final s in livrees) _tuileLivree(s),
+        _entete(tr(context, 'ring_imported')),
+        if (importees.isEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+            child: Text(
+              tr(context, 'ring_empty_hint'),
+              style: TextStyle(
+                  fontSize: 13.5,
+                  height: 1.4,
+                  color: mutedOf(context, Colors.black54)),
+            ),
+          ),
+        for (final s in importees) _tuileImportee(s),
+      ],
+    );
+  }
+
+  Widget _entete(String texte) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
+        child: Text(
+          texte.toUpperCase(),
+          style: TextStyle(
+            fontSize: 11.5,
+            letterSpacing: 0.8,
+            fontWeight: FontWeight.w700,
+            color: mutedOf(context, Colors.black54),
           ),
         ),
-      ]);
-    }
+      );
 
-    return ListView.separated(
-      padding: const EdgeInsets.only(bottom: 88),
-      itemCount: sonneries.length,
-      separatorBuilder: (_, __) => const Divider(height: 1),
-      itemBuilder: (_, i) {
-        final s = sonneries[i];
-        final joue = _enEcoute == s.url;
-        return ListTile(
-          leading: IconButton(
-            icon: Icon(
-                joue ? Icons.stop_circle_outlined : Icons.play_circle_outline),
-            color: accentOf(context),
-            iconSize: 34,
-            onPressed: () => _ecouter(s),
-            tooltip: joue ? tr(context, 'stop') : tr(context, 'listen'),
-          ),
-          title: Text(s.label, maxLines: 1, overflow: TextOverflow.ellipsis),
-          trailing: IconButton(
-            icon: const Icon(Icons.delete_outline),
-            onPressed: () => _supprimer(s),
-            tooltip: tr(context, 'remove'),
-          ),
-        );
-      },
+  Widget _boutonEcoute(bool joue, VoidCallback onPressed) => IconButton(
+        icon:
+            Icon(joue ? Icons.stop_circle_outlined : Icons.play_circle_outline),
+        color: accentOf(context),
+        iconSize: 34,
+        onPressed: onPressed,
+        tooltip: joue ? tr(context, 'stop') : tr(context, 'listen'),
+      );
+
+  Widget _tuileLivree(SonnerieLivree s) {
+    final joue = _enEcoute == s.fichier;
+    return ListTile(
+      leading: _boutonEcoute(joue, () => _ecouterLivree(s)),
+      title: Text(s.libelle, maxLines: 1, overflow: TextOverflow.ellipsis),
+      // Pas de `trailing` : rien à supprimer, donc rien à montrer.
+    );
+  }
+
+  Widget _tuileImportee(Sonnerie s) {
+    final joue = _enEcoute == s.url;
+    return ListTile(
+      leading: _boutonEcoute(joue, () => _ecouter(s)),
+      title: Text(s.label, maxLines: 1, overflow: TextOverflow.ellipsis),
+      trailing: IconButton(
+        icon: const Icon(Icons.delete_outline),
+        onPressed: () => _supprimer(s),
+        tooltip: tr(context, 'remove'),
+      ),
     );
   }
 }

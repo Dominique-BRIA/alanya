@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../l10n/app_localizations.dart';
 import '../../../core/app_snackbar.dart';
+import '../../../core/ringtone_service.dart';
 import '../../../core/sonneries_livrees.dart';
 import '../../../models/contact_list.dart';
 import '../../../models/sonnerie.dart';
@@ -11,6 +14,27 @@ import '../../../widgets/back_app_bar.dart';
 import '../../../widgets/motif_background.dart';
 import '../../settings/ringtones_repository.dart';
 import '../contact_lists_repository.dart';
+
+/// Fait entendre la sonnerie désignée par [valeur], telle que la base la porte.
+///
+/// ⚠️ UNE SONNERIE LIVRÉE PASSE PAR `asset`, UNE IMPORTÉE PAR `url`, et c'est
+/// toute la raison d'être de cette fonction : demander une sonnerie du paquet
+/// en URL partirait chercher un 404 sur le réseau avant de retomber sur le
+/// repli. La règle vit ici, en un seul endroit, parce que DEUX écrans
+/// l'appliquent — les deux champs de l'écran, et la liste du sélecteur. Écrite
+/// deux fois, elle aurait fini par diverger d'un côté.
+///
+/// `null` ou vide — « Par défaut » — ne joue rien : ce n'est pas une sonnerie
+/// d'Alanya mais celle de l'appareil, que nous ne possédons pas.
+Future<void> ecouterSonnerie(String? valeur) {
+  final service = RingtoneService.instance;
+  if (valeur == null || valeur.isEmpty) return service.stop();
+  final estLivree = sonneriesLivrees.any((s) => s.fichier == valeur);
+  return service.apercu(
+    asset: estLivree ? "sounds/$valeur" : null,
+    url: estLivree ? null : valeur,
+  );
+}
 
 /// « Sonneries — <liste> » : les deux sons d'une liste, et l'ordre qui départage.
 ///
@@ -48,6 +72,18 @@ class _SonneriesListeScreenState extends State<SonneriesListeScreen> {
 
   List<Sonnerie> _catalogue = const [];
   bool _envoi = false;
+
+  /// Le son que les DEUX CHAMPS font entendre en ce moment, ou `null`. Sert à
+  /// basculer l'icône et à n'autoriser qu'une écoute à la fois.
+  String? _champEnEcoute;
+
+  @override
+  void dispose() {
+    // Même raison que dans le sélecteur : un aperçu de plusieurs secondes
+    // survivrait à la sortie de l'écran et continuerait par-dessus le suivant.
+    unawaited(RingtoneService.instance.stop());
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -198,6 +234,7 @@ class _SonneriesListeScreenState extends State<SonneriesListeScreen> {
               icone: Icons.chat_bubble_outline,
               etiquette: tr(context, 'ringtone_messages'),
               valeur: _libelleDe(_sonMessage),
+              valeurBrute: _sonMessage,
               onTap: _envoi ? null : () => _choisirSon(pourAppel: false),
             ),
             const SizedBox(height: 10),
@@ -205,6 +242,7 @@ class _SonneriesListeScreenState extends State<SonneriesListeScreen> {
               icone: Icons.phone_in_talk_outlined,
               etiquette: tr(context, 'ringtone_calls'),
               valeur: _libelleDe(_sonAppel),
+              valeurBrute: _sonAppel,
               onTap: _envoi ? null : () => _choisirSon(pourAppel: true),
             ),
             const SizedBox(height: 26),
@@ -259,10 +297,27 @@ class _SonneriesListeScreenState extends State<SonneriesListeScreen> {
     );
   }
 
+  /// Écoute le son ACTUEL d'un des deux champs, sans ouvrir le sélecteur.
+  ///
+  /// 🔴 C'EST LA QUESTION QU'ON SE POSE EN ARRIVANT : « c'est quoi, déjà, la
+  /// sonnerie de Famille ? ». Y répondre obligeait à ouvrir le sélecteur, donc
+  /// à risquer de changer le choix pour simplement le vérifier.
+  Future<void> _ecouterChamp(String? valeur) async {
+    // Réappuyer sur ce qui joue l'arrête : le bouton est une bascule.
+    if (_champEnEcoute == (valeur ?? "")) {
+      await RingtoneService.instance.stop();
+      if (mounted) setState(() => _champEnEcoute = null);
+      return;
+    }
+    setState(() => _champEnEcoute = valeur ?? "");
+    await ecouterSonnerie(valeur);
+  }
+
   Widget _champSon({
     required IconData icone,
     required String etiquette,
     required String valeur,
+    required String? valeurBrute,
     required VoidCallback? onTap,
   }) {
     return Material(
@@ -298,6 +353,26 @@ class _SonneriesListeScreenState extends State<SonneriesListeScreen> {
                 ],
               ),
             ),
+            // Écouter le son ACTUEL, sans ouvrir le sélecteur.
+            //
+            // ⚠️ RIEN À ÉCOUTER SUR « Par défaut » : c'est la sonnerie de
+            // l'appareil, pas une des nôtres — nous n'avons pas le fichier.
+            // Montrer un bouton mort serait pire que ne rien montrer.
+            if (valeurBrute != null && valeurBrute.isNotEmpty)
+              IconButton(
+                icon: Icon(
+                  _champEnEcoute == valeurBrute
+                      ? Icons.stop_circle_outlined
+                      : Icons.play_circle_outline,
+                  color: _champEnEcoute == valeurBrute
+                      ? accentOf(context)
+                      : mutedOf(context, Colors.black54),
+                  size: 26,
+                ),
+                tooltip: tr(
+                    context, _champEnEcoute == valeurBrute ? 'stop' : 'listen'),
+                onPressed: () => _ecouterChamp(valeurBrute),
+              ),
             Icon(Icons.chevron_right,
                 color: faintOf(context, Colors.black38)),
           ]),
@@ -370,7 +445,12 @@ class _SonneriesListeScreenState extends State<SonneriesListeScreen> {
 }
 
 /// Le choix d'un son, livré ou importé.
-class _SelecteurSon extends StatelessWidget {
+///
+/// 🔴 AVEC UN BOUTON POUR ÉCOUTER, et sans lui cet écran ne servait pas à
+/// grand-chose : « Sonnerie 3 » et « Carillon » ne disent rien de ce qu'on va
+/// entendre. On choisissait au nom, puis on découvrait le son au premier appel
+/// — c'est-à-dire au pire moment pour s'apercevoir qu'il ne convient pas.
+class _SelecteurSon extends StatefulWidget {
   const _SelecteurSon({
     required this.titre,
     required this.actuel,
@@ -382,7 +462,46 @@ class _SelecteurSon extends StatelessWidget {
   final List<Sonnerie> catalogue;
 
   @override
+  State<_SelecteurSon> createState() => _SelecteurSonState();
+}
+
+class _SelecteurSonState extends State<_SelecteurSon> {
+  /// Ce qui joue en ce moment, ou `null`. Sert à basculer l'icône ET à
+  /// n'autoriser qu'une écoute à la fois.
+  String? _enEcoute;
+
+  @override
+  void dispose() {
+    // 🔴 INDISPENSABLE. `apercu` ne boucle pas, mais une sonnerie de plusieurs
+    // secondes survivrait à la fermeture de la feuille et continuerait par-dessus
+    // l'écran suivant, sans plus aucun bouton pour l'arrêter.
+    unawaited(RingtoneService.instance.stop());
+    super.dispose();
+  }
+
+  Future<void> _ecouter(String? valeur) async {
+    final service = RingtoneService.instance;
+
+    // Réappuyer sur ce qui joue l'arrête : le bouton est une bascule, et c'est
+    // ce que son icône annonce.
+    if (_enEcoute == (valeur ?? "")) {
+      await service.stop();
+      if (mounted) setState(() => _enEcoute = null);
+      return;
+    }
+
+    setState(() => _enEcoute = valeur ?? "");
+    // La règle « livrée → asset, importée → url » vit dans `ecouterSonnerie`,
+    // partagée avec les deux champs de l'écran. Écrite ici en plus, elle aurait
+    // fini par diverger d'un côté.
+    await ecouterSonnerie(valeur);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final titre = widget.titre;
+    final actuel = widget.actuel;
+    final catalogue = widget.catalogue;
     // `null` en tête : c'est le repli, et le plus souvent choisi.
     final entrees = <({String? valeur, String libelle})>[
       (valeur: null, libelle: tr(context, 'default_value')),
@@ -426,12 +545,33 @@ class _SelecteurSon extends StatelessWidget {
               itemBuilder: (_, i) {
                 final e = entrees[i];
                 final choisi = e.valeur == actuel;
+                final joue = _enEcoute == (e.valeur ?? "");
                 return ListTile(
+                  // ⚠️ LE BOUTON EST EN TÊTE DE LIGNE, pas à la fin : la coche
+                  // du choix occupe déjà la droite, et deux commandes du même
+                  // côté feraient hésiter entre « écouter » et « choisir ».
+                  // Écouter précède choisir, et la lecture se lit de gauche à
+                  // droite.
+                  leading: IconButton(
+                    icon: Icon(
+                      joue
+                          ? Icons.stop_circle_outlined
+                          : Icons.play_circle_outline,
+                      color: joue
+                          ? accentOf(context)
+                          : mutedOf(context, Colors.black54),
+                      size: 28,
+                    ),
+                    tooltip: tr(context, joue ? 'stop' : 'listen'),
+                    onPressed: () => _ecouter(e.valeur),
+                  ),
                   title: Text(e.libelle,
                       maxLines: 1, overflow: TextOverflow.ellipsis),
                   trailing: choisi
                       ? Icon(Icons.check, color: accentOf(context))
                       : null,
+                  // Appuyer sur la LIGNE choisit ; seul le bouton écoute. Un
+                  // seul geste par intention.
                   onTap: () => Navigator.of(context).pop((valeur: e.valeur)),
                 );
               },

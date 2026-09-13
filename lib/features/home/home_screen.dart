@@ -904,9 +904,10 @@ class _ConversationsTabState extends State<_ConversationsTab>
       );
     }
 
-    return DefaultTabController(
-      length: 3,
-      child: MotifBackground(
+    // Plus de `DefaultTabController` : il n'existait que pour le `TabBar` des
+    // trois filtres système, remplacé par la rangée unique de puces. Un
+    // contrôleur sans onglet à piloter est du décor qui survit à son objet.
+    return MotifBackground(
         overlayOpacity: 0.92,
         plainInDark: true,
         child: Column(
@@ -972,22 +973,8 @@ class _ConversationsTabState extends State<_ConversationsTab>
                 style: const TextStyle(fontSize: 14),
               ),
             ),
-            // --- Onglets : Tous / Non lues / Groupes ---
-            TabBar(
-              tabs: [
-                Tab(text: tr(context, 'filter_all')),
-                Tab(text: tr(context, 'filter_unread')),
-                Tab(text: tr(context, 'filter_groups')),
-              ],
-              labelColor: AlanyaColors.terracotta,
-              unselectedLabelColor: AlanyaColors.craie2,
-              indicatorColor: AlanyaColors.terracotta,
-              indicatorWeight: 2.5,
-              onTap: (i) => setState(() => _tabFilter = i),
-            ),
-            // Les listes de contacts, APRÈS les onglets système et jamais
-            // parmi eux — voir `_rangeeListes`.
-            _rangeeListes(),
+            // --- Une SEULE rangée : Tous / Non lues / Groupes / les listes ---
+            _rangeeFiltres(),
             Expanded(
               child: RefreshIndicator(
                 onRefresh: _refresh,
@@ -996,7 +983,6 @@ class _ConversationsTabState extends State<_ConversationsTab>
             ),
           ],
         ),
-      ),
     );
   }
 
@@ -1084,56 +1070,98 @@ class _ConversationsTabState extends State<_ConversationsTab>
         .toList();
   }
 
-  /// La rangée des listes de contacts, SOUS les onglets système.
+  /// UNE SEULE RANGÉE : les trois filtres système, puis les listes de contacts.
   ///
-  /// 🔴 SÉPARÉE DES ONGLETS, ET C'EST VOULU. Un onglet système décrit un ÉTAT de
-  /// la conversation — non lue, groupe — quand une liste désigne un CERCLE DE
-  /// PERSONNES que l'utilisateur a lui-même constitué. Les mélanger ferait
-  /// croire que « Famille » est une notion de l'application. C'est la règle
-  /// posée par le web (`chats.tsx`), et la séparation visuelle la rend ici
-  /// encore plus littérale.
-  Widget _rangeeListes() {
-    final avecDiscussion = _listesAvecDiscussion;
-    if (avecDiscussion.isEmpty) return const SizedBox.shrink();
+  /// 🔴 ELLES ÉTAIENT SUR DEUX LIGNES, et c'était un choix assumé : un filtre
+  /// système décrit un ÉTAT de la conversation — non lue, groupe — quand une
+  /// liste désigne un CERCLE DE PERSONNES que l'utilisateur a constitué. La
+  /// séparation disait cette différence de nature.
+  ///
+  /// Le user a tranché l'inverse le 13/09/2026 : une seule rangée, « Tous, Non
+  /// lues, Groupes, Famille… ». Ce qu'on y gagne est concret — une ligne rendue
+  /// à la liste des conversations, et un seul geste pour passer d'un filtre à
+  /// l'autre au lieu de chercher sur quelle rangée il se trouve.
+  ///
+  /// ⚠️ CE QU'ON Y PERD, ET QU'IL FAUT SAVOIR : les deux filtres se CUMULAIENT.
+  /// On pouvait voir « les non lues de Famille ». Sur une rangée unique, choisir
+  /// c'est remplacer : sélectionner une liste remet le filtre système sur
+  /// « Tous », et inversement. Deux sélections au même niveau visuel qui se
+  /// combineraient en secret seraient plus déroutantes que la perte elle-même.
+  ///
+  /// ⚠️ LES TROIS SYSTÈMES PASSENT DEVANT, toujours, et ne défilent pas hors de
+  /// vue les premiers : « Tous » est le retour à l'état neutre, il doit rester
+  /// la chose la plus facile à atteindre.
+  Widget _rangeeFiltres() {
     final sombre = Theme.of(context).brightness == Brightness.dark;
-    final triees = List<ListeContacts>.from(avecDiscussion)
+    final triees = List<ListeContacts>.from(_listesAvecDiscussion)
       ..sort((a, b) => comparePourTri(a.name, b.name));
 
+    // Une puce système : sélectionnée seulement si AUCUNE liste ne filtre —
+    // sans quoi « Tous » resterait allumé pendant qu'on regarde « Famille ».
+    Widget systeme(int index, String cle) {
+      final actif = _listeActive == null && _tabFilter == index;
+      return FilterChip(
+        selected: actif,
+        // Pas de second appui qui désélectionne : contrairement à une liste,
+        // il faut toujours qu'un filtre système soit choisi. Le retour au
+        // neutre, c'est « Tous ».
+        onSelected: (_) => setState(() {
+          _tabFilter = index;
+          _listeActive = null;
+        }),
+        label: Text(tr(context, cle), style: const TextStyle(fontSize: 13)),
+      );
+    }
+
     return SizedBox(
-      height: 44,
-      child: ListView.separated(
+      height: 46,
+      child: ListView(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        itemCount: triees.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
-        itemBuilder: (_, i) {
-          final l = triees[i];
-          final actif = l.id == _listeActive;
-          final teinte = couleurDeListe(l.color, sombre: sombre);
-          return FilterChip(
-            selected: actif,
-            // Un second appui sur la liste active la RETIRE : c'est le geste
-            // attendu, et il évite d'avoir à chercher un bouton « tout ».
-            onSelected: (_) =>
-                setState(() => _listeActive = actif ? null : l.id),
-            avatar: Container(
-              width: 10,
-              height: 10,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                // Sans couleur choisie, un CONTOUR vide plutôt qu'un point
-                // couleur d'accent — repris du web : un point coloré ferait
-                // croire à une teinte qui n'a pas été choisie.
-                color: teinte,
-                border: teinte == null
-                    ? Border.all(color: faintOf(context, Colors.black38))
-                    : null,
-              ),
-            ),
-            label: Text(l.name, style: const TextStyle(fontSize: 13)),
-          );
-        },
+        children: [
+          systeme(0, 'filter_all'),
+          const SizedBox(width: 8),
+          systeme(1, 'filter_unread'),
+          const SizedBox(width: 8),
+          systeme(2, 'filter_groups'),
+          for (final l in triees) ...[
+            const SizedBox(width: 8),
+            _puceListe(l, sombre),
+          ],
+        ],
       ),
+    );
+  }
+
+  Widget _puceListe(ListeContacts l, bool sombre) {
+    final actif = l.id == _listeActive;
+    final teinte = couleurDeListe(l.color, sombre: sombre);
+    return FilterChip(
+      selected: actif,
+      // Un second appui sur la liste active la RETIRE, et ramène à « Tous ».
+      // C'est le geste attendu, et il évite de chercher un bouton de sortie.
+      onSelected: (_) => setState(() {
+        _listeActive = actif ? null : l.id;
+        // La liste REMPLACE le filtre système, elle ne s'y ajoute pas : deux
+        // sélections visibles au même niveau ne doivent pas se combiner en
+        // secret.
+        if (!actif) _tabFilter = 0;
+      }),
+      avatar: Container(
+        width: 10,
+        height: 10,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          // Sans couleur choisie, un CONTOUR vide plutôt qu'un point couleur
+          // d'accent — repris du web : un point coloré ferait croire à une
+          // teinte qui n'a pas été choisie.
+          color: teinte,
+          border: teinte == null
+              ? Border.all(color: faintOf(context, Colors.black38))
+              : null,
+        ),
+      ),
+      label: Text(l.name, style: const TextStyle(fontSize: 13)),
     );
   }
 
