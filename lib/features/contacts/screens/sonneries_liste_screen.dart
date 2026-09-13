@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../l10n/app_localizations.dart';
 import '../../../core/app_snackbar.dart';
+import '../../../core/ringtone_service.dart';
 import '../../../core/sonneries_livrees.dart';
 import '../../../models/contact_list.dart';
 import '../../../models/sonnerie.dart';
@@ -370,7 +373,12 @@ class _SonneriesListeScreenState extends State<SonneriesListeScreen> {
 }
 
 /// Le choix d'un son, livré ou importé.
-class _SelecteurSon extends StatelessWidget {
+///
+/// 🔴 AVEC UN BOUTON POUR ÉCOUTER, et sans lui cet écran ne servait pas à
+/// grand-chose : « Sonnerie 3 » et « Carillon » ne disent rien de ce qu'on va
+/// entendre. On choisissait au nom, puis on découvrait le son au premier appel
+/// — c'est-à-dire au pire moment pour s'apercevoir qu'il ne convient pas.
+class _SelecteurSon extends StatefulWidget {
   const _SelecteurSon({
     required this.titre,
     required this.actuel,
@@ -382,7 +390,50 @@ class _SelecteurSon extends StatelessWidget {
   final List<Sonnerie> catalogue;
 
   @override
+  State<_SelecteurSon> createState() => _SelecteurSonState();
+}
+
+class _SelecteurSonState extends State<_SelecteurSon> {
+  /// Ce qui joue en ce moment, ou `null`. Sert à basculer l'icône ET à
+  /// n'autoriser qu'une écoute à la fois.
+  String? _enEcoute;
+
+  @override
+  void dispose() {
+    // 🔴 INDISPENSABLE. `apercu` ne boucle pas, mais une sonnerie de plusieurs
+    // secondes survivrait à la fermeture de la feuille et continuerait par-dessus
+    // l'écran suivant, sans plus aucun bouton pour l'arrêter.
+    unawaited(RingtoneService.instance.stop());
+    super.dispose();
+  }
+
+  Future<void> _ecouter(String? valeur) async {
+    final service = RingtoneService.instance;
+
+    // Réappuyer sur ce qui joue l'arrête : le bouton est une bascule, et c'est
+    // ce que son icône annonce.
+    if (_enEcoute == (valeur ?? "")) {
+      await service.stop();
+      if (mounted) setState(() => _enEcoute = null);
+      return;
+    }
+
+    setState(() => _enEcoute = valeur ?? "");
+    // Un nom de fichier livré passe par `asset`, une URL par `url` : une
+    // sonnerie du paquet demandée en URL partirait chercher un 404 sur le
+    // réseau avant de retomber sur le repli.
+    final estLivree = sonneriesLivrees.any((s) => s.fichier == valeur);
+    await service.apercu(
+      asset: estLivree ? "sounds/$valeur" : null,
+      url: estLivree ? null : valeur,
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final titre = widget.titre;
+    final actuel = widget.actuel;
+    final catalogue = widget.catalogue;
     // `null` en tête : c'est le repli, et le plus souvent choisi.
     final entrees = <({String? valeur, String libelle})>[
       (valeur: null, libelle: tr(context, 'default_value')),
@@ -426,12 +477,33 @@ class _SelecteurSon extends StatelessWidget {
               itemBuilder: (_, i) {
                 final e = entrees[i];
                 final choisi = e.valeur == actuel;
+                final joue = _enEcoute == (e.valeur ?? "");
                 return ListTile(
+                  // ⚠️ LE BOUTON EST EN TÊTE DE LIGNE, pas à la fin : la coche
+                  // du choix occupe déjà la droite, et deux commandes du même
+                  // côté feraient hésiter entre « écouter » et « choisir ».
+                  // Écouter précède choisir, et la lecture se lit de gauche à
+                  // droite.
+                  leading: IconButton(
+                    icon: Icon(
+                      joue
+                          ? Icons.stop_circle_outlined
+                          : Icons.play_circle_outline,
+                      color: joue
+                          ? accentOf(context)
+                          : mutedOf(context, Colors.black54),
+                      size: 28,
+                    ),
+                    tooltip: tr(context, joue ? 'stop' : 'listen'),
+                    onPressed: () => _ecouter(e.valeur),
+                  ),
                   title: Text(e.libelle,
                       maxLines: 1, overflow: TextOverflow.ellipsis),
                   trailing: choisi
                       ? Icon(Icons.check, color: accentOf(context))
                       : null,
+                  // Appuyer sur la LIGNE choisit ; seul le bouton écoute. Un
+                  // seul geste par intention.
                   onTap: () => Navigator.of(context).pop((valeur: e.valeur)),
                 );
               },
