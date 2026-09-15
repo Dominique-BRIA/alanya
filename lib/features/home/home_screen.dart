@@ -46,6 +46,7 @@ import '../chat/chat_repository.dart';
 import '../chat/screens/chat_screen.dart';
 import '../calls/screens/dialer_screen.dart';
 import '../contacts/teintes_listes.dart';
+import '../contacts/screens/contact_lists_screen.dart';
 import '../contacts/screens/contacts_screen.dart';
 import '../calls/call_controller.dart';
 import '../calls/ouvrir_appel_en_cours.dart';
@@ -996,47 +997,26 @@ class _ConversationsTabState extends State<_ConversationsTab>
     await context.read<SonneriesDeListes>().rafraichir();
   }
 
-  /// LES LISTES QUI MÉRITENT UN FILTRE — celles avec qui l'on parle vraiment.
+  /// TOUTES LES LISTES DU COMPTE, dans l'ordre de priorité choisi.
   ///
-  /// 🔴 Toutes les listes s'affichaient, y compris vides. Depuis que quatre
-  /// listes existent dès le départ — Bureau, Amis, Confiance, Famille —, la
-  /// rangée s'ouvrait sur quatre boutons qui ne filtraient RIEN : les presser
-  /// rendait une liste vide, et ils poussaient hors de vue les onglets système,
-  /// qui eux servent.
+  /// 🔴 ELLES ÉTAIENT FILTRÉES SUR « a-t-elle une conversation en cours ? »,
+  /// et une liste vide n'apparaissait pas. La raison était défendable — quatre
+  /// listes existent dès la création du compte, et quatre boutons qui ne filtrent
+  /// rien poussaient les filtres système hors de vue.
   ///
-  /// Un filtre n'a de sens que s'il a quelque chose à montrer. Une liste
-  /// apparaît donc quand au moins un de ses membres a une conversation, et
-  /// disparaît si cette conversation s'en va. Même règle que le web
-  /// (`chats.tsx`, `listesAvecDiscussion`).
+  /// Le user a tranché l'inverse le 15/09/2026 : **toutes** les listes se
+  /// montrent, vides comprises, celles créées d'office comprises. Une liste qu'on
+  /// vient de créer est vide par construction : la faire disparaître de la rangée
+  /// au moment même où on la crée est ce qui se comprend le moins.
   ///
-  /// ⚠️ Les correspondants sont rassemblés UNE SEULE FOIS, et non liste par
-  /// liste : la rangée se reconstruit à chaque message reçu, et croiser quatre
-  /// listes avec deux cents conversations à chaque fois se paierait à l'écran.
-  List<ListeContacts> get _listesAvecDiscussion {
-    final convs = _convs ?? const <Conversation>[];
-    if (convs.isEmpty || _listes.isEmpty) return const [];
-
-    final monId = context.read<AuthController>().user?.id;
-    final identifiants = <String>{};
-    final numeros = <String>{};
-    for (final c in convs) {
-      // Un groupe n'a pas de correspondant : une liste rassemble des personnes,
-      // pas des salons. Même règle que `_appliqueListe`.
-      if (c.isGroup) continue;
-      for (final m in c.members) {
-        if (m.id == monId) continue;
-        identifiants.add(m.id.toLowerCase());
-        final n = chiffresSeuls(m.publicNumber);
-        if (n.isNotEmpty) numeros.add(n);
-      }
-    }
-
-    return _listes
-        .where((l) => l.members.any((m) =>
-            identifiants.contains(m.id.toLowerCase()) ||
-            numeros.contains(chiffresSeuls(m.publicNumber))))
-        .toList();
-  }
+  /// ⚠️ L'ORDRE EST CELUI DE LA PRIORITÉ, pas l'alphabétique : c'est celui que
+  /// l'utilisateur a posé lui-même dans l'écran des sonneries, et le même qui
+  /// décide quelle sonnerie gagne. Deux ordres différents pour les mêmes listes
+  /// n'auraient rien voulu dire. Tant que rien n'est ordonné, il se réduit à
+  /// l'ancienneté — l'ordre où les listes ont été créées.
+  List<ListeContacts> get _listesPourFiltres =>
+      List<ListeContacts>.from(_listes)
+        ..sort(SonneriesDeListes.comparePriorite);
 
   /// Restreint les conversations à la liste active, s'il y en a une.
   List<Conversation> _appliqueListe(List<Conversation> convs) {
@@ -1070,35 +1050,40 @@ class _ConversationsTabState extends State<_ConversationsTab>
         .toList();
   }
 
-  /// UNE SEULE RANGÉE : les trois filtres système, puis les listes de contacts.
+  /// UNE SEULE RANGÉE : les filtres système, puis les listes, puis « + ».
   ///
   /// 🔴 ELLES ÉTAIENT SUR DEUX LIGNES, et c'était un choix assumé : un filtre
   /// système décrit un ÉTAT de la conversation — non lue, groupe — quand une
   /// liste désigne un CERCLE DE PERSONNES que l'utilisateur a constitué. La
-  /// séparation disait cette différence de nature.
+  /// séparation disait cette différence de nature. Le user a tranché l'inverse le
+  /// 13/09/2026 : une ligne rendue à la liste des conversations, et un seul geste
+  /// pour passer d'un filtre à l'autre.
   ///
-  /// Le user a tranché l'inverse le 13/09/2026 : une seule rangée, « Tous, Non
-  /// lues, Groupes, Famille… ». Ce qu'on y gagne est concret — une ligne rendue
-  /// à la liste des conversations, et un seul geste pour passer d'un filtre à
-  /// l'autre au lieu de chercher sur quelle rangée il se trouve.
+  /// ⚠️ CE QU'ON Y PERD : les deux filtres se CUMULAIENT. On pouvait voir « les
+  /// non lues de Famille ». Sur une rangée unique, choisir c'est remplacer.
   ///
-  /// ⚠️ CE QU'ON Y PERD, ET QU'IL FAUT SAVOIR : les deux filtres se CUMULAIENT.
-  /// On pouvait voir « les non lues de Famille ». Sur une rangée unique, choisir
-  /// c'est remplacer : sélectionner une liste remet le filtre système sur
-  /// « Tous », et inversement. Deux sélections au même niveau visuel qui se
-  /// combineraient en secret seraient plus déroutantes que la perte elle-même.
+  /// 🔴 CHAQUE PUCE SYSTÈME PORTE UNE ICÔNE (15/09/2026, maquette du user), et
+  /// c'est une ICÔNE MATÉRIELLE, jamais un emoji — règle du dépôt. Un emoji change
+  /// de dessin d'un téléphone à l'autre, ne suit pas la couleur du texte, et ne
+  /// se met pas à l'échelle avec la police.
   ///
-  /// ⚠️ LES TROIS SYSTÈMES PASSENT DEVANT, toujours, et ne défilent pas hors de
-  /// vue les premiers : « Tous » est le retour à l'état neutre, il doit rester
-  /// la chose la plus facile à atteindre.
+  /// ⚠️ LES CINQ SYSTÈMES PASSENT DEVANT, toujours : « Tous » est le retour à
+  /// l'état neutre, il doit rester la chose la plus facile à atteindre.
+  ///
+  /// ⚠️ « + » FERME LA RANGÉE et ne se sélectionne pas : ce n'est pas un filtre
+  /// mais une action. Il est donc dessiné autrement — un cercle bordé, sans
+  /// libellé — pour qu'on ne le prenne pas pour une liste qu'on aurait ratée.
   Widget _rangeeFiltres() {
     final sombre = Theme.of(context).brightness == Brightness.dark;
-    final triees = List<ListeContacts>.from(_listesAvecDiscussion)
-      ..sort((a, b) => comparePourTri(a.name, b.name));
+    final listes = _listesPourFiltres;
+    // Meme grise que le reste de l'accueil : `muted2` y est une variable locale
+    // a chaque methode, pas un champ.
+    final muted2 =
+        themed(context, light: AlanyaColors.grey500, dark: AlanyaColors.craie2);
 
     // Une puce système : sélectionnée seulement si AUCUNE liste ne filtre —
     // sans quoi « Tous » resterait allumé pendant qu'on regarde « Famille ».
-    Widget systeme(int index, String cle) {
+    Widget systeme(int index, String cle, IconData icone) {
       final actif = _listeActive == null && _tabFilter == index;
       return FilterChip(
         selected: actif,
@@ -1109,6 +1094,17 @@ class _ConversationsTabState extends State<_ConversationsTab>
           _tabFilter = index;
           _listeActive = null;
         }),
+        // 🔴 SANS COCHE, ET C'EST INDISPENSABLE ICI : une `FilterChip`
+        // sélectionnée remplace son `avatar` par une coche. L'icône — la seule
+        // chose que ce lot ajoute — aurait donc disparu au moment précis où on
+        // appuie dessus. Le fond teinté dit déjà la sélection.
+        showCheckmark: false,
+        // L'icône prend la place de l'`avatar`, celle qu'occupe le point coloré
+        // d'une liste : les deux familles de puces gardent ainsi le même gabarit.
+        //
+        // ⚠️ Elle SUIT la couleur du libellé — `null` laisse le thème décider —
+        // sans quoi elle resterait sombre sur une puce sélectionnée.
+        avatar: Icon(icone, size: 16, color: actif ? null : muted2),
         label: Text(tr(context, cle), style: const TextStyle(fontSize: 13)),
       );
     }
@@ -1119,16 +1115,47 @@ class _ConversationsTabState extends State<_ConversationsTab>
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         children: [
-          systeme(0, 'filter_all'),
+          systeme(0, 'filter_all', Icons.apps_rounded),
           const SizedBox(width: 8),
-          systeme(1, 'filter_unread'),
+          systeme(1, 'filter_chats', Icons.person_outline_rounded),
           const SizedBox(width: 8),
-          systeme(2, 'filter_groups'),
-          for (final l in triees) ...[
+          systeme(2, 'filter_groups', Icons.groups_outlined),
+          const SizedBox(width: 8),
+          systeme(3, 'filter_unread', Icons.mail_outline_rounded),
+          const SizedBox(width: 8),
+          systeme(4, 'filter_archived', Icons.archive_outlined),
+          for (final l in listes) ...[
             const SizedBox(width: 8),
             _puceListe(l, sombre),
           ],
+          const SizedBox(width: 8),
+          _boutonNouvelleListe(),
         ],
+      ),
+    );
+  }
+
+  /// « + » en fin de rangée : crée une liste sans quitter l'accueil.
+  ///
+  /// ⚠️ La rangée se remet à jour toute seule — `ouvrirCreationListe` rafraîchit
+  /// `SonneriesDeListes`, dont cet écran est un `watch`. Pas de `setState` ici.
+  Widget _boutonNouvelleListe() {
+    final muted2 =
+        themed(context, light: AlanyaColors.grey500, dark: AlanyaColors.craie2);
+    return Tooltip(
+      message: tr(context, 'list_new'),
+      child: InkWell(
+        onTap: () => ouvrirCreationListe(context),
+        customBorder: const CircleBorder(),
+        child: Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: faintOf(context, Colors.black38)),
+          ),
+          child: Icon(Icons.add_rounded, size: 18, color: muted2),
+        ),
       ),
     );
   }
@@ -1138,6 +1165,17 @@ class _ConversationsTabState extends State<_ConversationsTab>
     final teinte = couleurDeListe(l.color, sombre: sombre);
     return FilterChip(
       selected: actif,
+      // Même raison que pour les puces système : la coche mangerait le point
+      // coloré, qui est justement ce qui identifie la liste.
+      showCheckmark: false,
+      // ⚠️ LA SÉLECTION PREND LA COULEUR DE LA LISTE, et retombe sur le ton du
+      // thème quand aucune n'a été choisie. `couleurDeListe` rend déjà la
+      // variante qui convient au mode courant : rien n'est à décider ici, et le
+      // mode clair n'est pas touché.
+      selectedColor: teinte?.withValues(alpha: sombre ? 0.22 : 0.14),
+      side: actif && teinte != null
+          ? BorderSide(color: teinte.withValues(alpha: 0.55))
+          : null,
       // Un second appui sur la liste active la RETIRE, et ramène à « Tous ».
       // C'est le geste attendu, et il évite de chercher un bouton de sortie.
       onSelected: (_) => setState(() {
@@ -1294,11 +1332,35 @@ class _ConversationsTabState extends State<_ConversationsTab>
       ]);
     }
     final allConvs = _convs ?? [];
-    final parOnglet = _tabFilter == 0
-        ? allConvs
-        : (_tabFilter == 1
-            ? allConvs.where((c) => c.unread > 0).toList()
-            : allConvs.where((c) => c.isGroup).toList());
+    // Les cinq filtres système, dans l'ordre de la rangée.
+    //
+    // ⚠️ « Archivés » NE PUISE PAS DANS LA MÊME SOURCE : `_convs` ne porte que
+    // les conversations actives — le serveur les rend séparément
+    // (`?archived=true`), et `_archivedConvs` les tient. Les chercher dans
+    // `allConvs` aurait rendu un écran vide, sans erreur pour l'expliquer.
+    //
+    // ⚠️ Les archivées se chargent EN TÂCHE DE FOND, après le premier rendu :
+    // `null` vaut « pas encore là », et rendre une liste vide est ici la bonne
+    // réponse — le message « aucune conversation » s'affichera une fraction de
+    // seconde plutôt qu'une erreur.
+    final List<Conversation> parOnglet;
+    switch (_tabFilter) {
+      case 1:
+        // « Discussions » : les échanges à deux, par opposition aux groupes.
+        parOnglet = allConvs.where((c) => !c.isGroup).toList();
+        break;
+      case 2:
+        parOnglet = allConvs.where((c) => c.isGroup).toList();
+        break;
+      case 3:
+        parOnglet = allConvs.where((c) => c.unread > 0).toList();
+        break;
+      case 4:
+        parOnglet = _archivedConvs ?? const <Conversation>[];
+        break;
+      default:
+        parOnglet = allConvs;
+    }
     // La liste s'applique APRÈS le filtre système, jamais à sa place : les deux
     // répondent à des questions différentes et se cumulent naturellement.
     final baseConvs = _appliqueListe(parOnglet);
@@ -1363,7 +1425,9 @@ class _ConversationsTabState extends State<_ConversationsTab>
     return ListView(
       children: [
         // Bouton tr(context, 'home_archived') style WhatsApp
-        if (archivedCount > 0 && _searchQuery.isEmpty)
+        // ⚠️ Masquée sous le filtre « Archivés » : proposer d'ouvrir les
+        // archivées alors qu'on les a sous les yeux n'aurait rien voulu dire.
+        if (archivedCount > 0 && _searchQuery.isEmpty && _tabFilter != 4)
           ListTile(
             leading: Icon(Icons.archive_outlined, color: muted2, size: 24),
             title: Text(
@@ -1391,7 +1455,8 @@ class _ConversationsTabState extends State<_ConversationsTab>
             ),
             onTap: _showArchived,
           ),
-        if (archivedCount > 0 && _searchQuery.isEmpty) const Divider(height: 1),
+        if (archivedCount > 0 && _searchQuery.isEmpty && _tabFilter != 4)
+          const Divider(height: 1),
         // Liste des conversations
         ...convs.map((c) => _tile(c)),
       ],

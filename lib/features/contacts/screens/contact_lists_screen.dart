@@ -27,6 +27,55 @@ import 'sonneries_liste_screen.dart';
 ///    envoie donc toujours la liste complète voulue ;
 ///  * un numéro que le serveur n'a pas su rattacher revient dans
 ///    `unknownNumbers`. Le taire ferait croire à un ajout réussi.
+/// Ouvre la feuille de CRÉATION d'une liste, depuis n'importe quel écran.
+///
+/// Sert le bouton « + » de la rangée de filtres de l'accueil, qui doit créer une
+/// liste sans obliger à traverser Réglages ▸ Listes de contacts.
+///
+/// Rend `true` si une liste a été créée — l'appelant n'a alors qu'à se
+/// rafraîchir.
+///
+/// ⚠️ LE RÉPERTOIRE EST CHARGÉ ICI, et son échec n'empêche pas la création : le
+/// sélecteur de membres sera simplement vide. Une liste SANS membre est
+/// parfaitement valide — c'est même le cas normal quand on vient de la créer —
+/// et refuser d'ouvrir la feuille parce que le réseau manque serait un refus
+/// sans raison.
+///
+/// ⚠️ LES LISTES VIENNENT DU CACHE, jamais d'un nouvel appel : `SonneriesDeListes`
+/// les porte déjà pour la rangée de filtres, et l'éditeur n'en a besoin que pour
+/// l'écran des sonneries, qui exige de les citer TOUTES.
+///
+/// ⚠️ Le cache est rafraîchi après une création réussie : c'est lui qui alimente
+/// la rangée de filtres, et sans cela la liste neuve n'y apparaîtrait qu'au
+/// prochain passage par le carnet.
+Future<bool> ouvrirCreationListe(BuildContext context) async {
+  // Saisis AVANT le premier `await` : après, le contexte peut être démonté.
+  final depotContacts = context.read<ContactsRepository>();
+  final sonneries = context.read<SonneriesDeListes>();
+
+  List<Contact> contacts;
+  try {
+    contacts = await depotContacts.list();
+  } catch (_) {
+    contacts = const [];
+  }
+  if (!context.mounted) return false;
+
+  final cree = await showModalBottomSheet<bool>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (_) => _EditeurListe(
+      existante: null,
+      contacts: contacts,
+      toutesLesListes: sonneries.listes,
+    ),
+  );
+  if (cree != true) return false;
+  await sonneries.rafraichir();
+  return true;
+}
+
 class ContactListsScreen extends StatefulWidget {
   const ContactListsScreen({super.key});
 
