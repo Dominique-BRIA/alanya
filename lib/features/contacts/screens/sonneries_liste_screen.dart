@@ -131,6 +131,7 @@ class _SonneriesListeScreenState extends State<SonneriesListeScreen> {
             : tr(context, 'ringtone_messages'),
         actuel: actuel,
         catalogue: _catalogue,
+        genre: pourAppel ? GenreSonnerie.appel : GenreSonnerie.message,
       ),
     );
     if (choix == null || !mounted) return;
@@ -474,11 +475,15 @@ class _SelecteurSon extends StatefulWidget {
     required this.titre,
     required this.actuel,
     required this.catalogue,
+    required this.genre,
   });
 
   final String titre;
   final String? actuel;
   final List<Sonnerie> catalogue;
+
+  /// Le champ qu'on est en train de régler : il décide des sons livrés proposés.
+  final GenreSonnerie genre;
 
   @override
   State<_SelecteurSon> createState() => _SelecteurSonState();
@@ -524,7 +529,14 @@ class _SelecteurSonState extends State<_SelecteurSon> {
     // `null` en tête : c'est le repli, et le plus souvent choisi.
     final entrees = <({String? valeur, String libelle})>[
       (valeur: null, libelle: tr(context, 'default_value')),
-      ...sonneriesLivrees.map((s) => (valeur: s.fichier, libelle: s.libelle)),
+      // 🔴 LES LIVRÉES SONT FILTRÉES PAR GENRE. Ce `sonneriesLivrees` sans
+      // filtre proposait les DEUX familles aux DEUX champs : des sons de
+      // notification comme sonnerie d'appel, et des sonneries de trente secondes
+      // à l'arrivée d'un message.
+      ...sonneriesLivreesPour(widget.genre)
+          .map((s) => (valeur: s.fichier, libelle: s.libelle)),
+      // ⚠️ LES IMPORTÉES NE SONT PAS FILTRÉES : elles n'ont pas de genre, et
+      // l'utilisateur qui téléverse un fichier en fait ce qu'il veut.
       ...catalogue.map((s) => (valeur: s.url, libelle: s.label)),
     ];
 

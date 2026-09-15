@@ -315,14 +315,28 @@ class _RingtonesScreenState extends State<RingtonesScreen> {
      * impossible ne doit pas être proposée, c'est la règle déjà appliquée aux
      * listes créées d'office.
      */
-    final livrees = List<SonnerieLivree>.from(sonneriesLivrees)
-      ..sort((a, b) => comparePourTri(a.libelle, b.libelle));
+    /*
+     * 🔴 SÉPARÉES PAR GENRE, et non plus triées toutes ensemble. Le tri
+     * alphabétique intercalait « Bip » et « Carillon » entre « Amis » et
+     * « Sonnerie 1 » : rien ne disait qu'une moitié de cet écran sonne un appel
+     * et l'autre annonce un message, alors que les deux familles ne durent même
+     * pas le même temps.
+     *
+     * ⚠️ AUCUNE N'EST RETIRÉE : cet écran fait ÉCOUTER, il ne fait pas choisir.
+     * C'est le sélecteur de l'écran des listes qui filtre. Ici, tout ce que
+     * l'application embarque doit rester atteignable.
+     */
+    List<SonnerieLivree> livreesPour(GenreSonnerie genre) =>
+        sonneriesLivreesPour(genre)
+          ..sort((a, b) => comparePourTri(a.libelle, b.libelle));
 
     return ListView(
       padding: const EdgeInsets.only(bottom: 88),
       children: [
-        _entete(tr(context, 'ring_bundled')),
-        for (final s in livrees) _tuileLivree(s),
+        _entete(tr(context, 'ring_bundled_calls')),
+        for (final s in livreesPour(GenreSonnerie.appel)) _tuileLivree(s),
+        _entete(tr(context, 'ring_bundled_messages')),
+        for (final s in livreesPour(GenreSonnerie.message)) _tuileLivree(s),
         _entete(tr(context, 'ring_imported')),
         if (importees.isEmpty)
           Padding(

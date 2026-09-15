@@ -46,4 +46,40 @@ void main() {
     ];
     expect(doublons, isEmpty, reason: "noms de fichiers en double : $doublons");
   });
+
+  group("le genre d'une sonnerie livree", () {
+    test("chaque entree en porte un, et les deux familles sont peuplees", () {
+      final appels = sonneriesLivreesPour(GenreSonnerie.appel);
+      final messages = sonneriesLivreesPour(GenreSonnerie.message);
+      // Rien ne se perd entre les deux : le total doit retomber sur le
+      // catalogue entier, sinon une entree serait devenue inatteignable.
+      expect(appels.length + messages.length, sonneriesLivrees.length);
+      expect(appels, isNotEmpty);
+      expect(messages, isNotEmpty);
+    });
+
+    test("un son de notification n'est jamais propose comme sonnerie d'appel",
+        () {
+      // 🔴 C'EST LE DEFAUT RAPPORTE LE 15/09/2026 : le selecteur puisait dans
+      // le catalogue ENTIER pour les deux champs. Les fichiers disent le genre
+      // sans ambiguite — `notif-*` annonce, `sonnerie-*` sonne.
+      final appels =
+          sonneriesLivreesPour(GenreSonnerie.appel).map((s) => s.fichier);
+      expect(appels.where((f) => f.startsWith("notif-")), isEmpty);
+
+      final messages =
+          sonneriesLivreesPour(GenreSonnerie.message).map((s) => s.fichier);
+      expect(messages.where((f) => f.startsWith("sonnerie-")), isEmpty);
+    });
+
+    test("une valeur deja stockee reste lisible quel que soit son genre", () {
+      // ⚠️ `assetDeSonnerie` balaie le catalogue ENTIER, volontairement : un
+      // choix pose avant ce champ — ou depuis le web — doit rester jouable meme
+      // s'il ne serait plus propose aujourd'hui.
+      for (final s in sonneriesLivrees) {
+        expect(assetDeSonnerie(s.fichier), "sounds/${s.fichier}");
+        expect(libelleDeSonnerie(s.fichier), s.libelle);
+      }
+    });
+  });
 }
