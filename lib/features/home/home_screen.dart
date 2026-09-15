@@ -46,6 +46,7 @@ import '../chat/chat_repository.dart';
 import '../chat/screens/chat_screen.dart';
 import '../calls/screens/dialer_screen.dart';
 import '../contacts/teintes_listes.dart';
+import '../../core/sonneries_livrees.dart';
 import '../contacts/screens/contact_lists_screen.dart';
 import '../contacts/screens/contacts_screen.dart';
 import '../calls/call_controller.dart';
@@ -760,12 +761,33 @@ class _ConversationsTabState extends State<_ConversationsTab>
     // fonctionner application fermée. Elle a reçu en échange ce qui faisait
     // l'intérêt du bandeau : l'avatar de l'expéditeur et le regroupement par
     // conversation (voir `PushService.show`).
+    // Le son de la LISTE de l'expediteur, quand elle en a un.
+    //
+    // ⚠️ ICI ON RESOUT EN LOCAL, la ou le chemin FCM recoit le canal deja
+    // choisi par le serveur : ce chemin-ci ne passe PAS par un push. Il vient du
+    // WebSocket, application ouverte, donc le cache des listes est sous la main
+    // et une requete de plus serait inutile. La regle d'arbitrage est la meme
+    // des deux cotes — elle vit dans `SonneriesDeListes`.
+    //
+    // ⚠️ UN SON IMPORTE RETOMBE SUR LE CANAL PAR DEFAUT : `canalMessagePour`
+    // ne rend un canal que pour un son LIVRE, seul cas ou Android sait lire le
+    // fichier depuis l'interface systeme.
+    final expediteur =
+        (e["message"] as Map<String, dynamic>?)?["senderId"] as String?;
+    final sonDeListe = expediteur == null
+        ? null
+        : context
+            .read<SonneriesDeListes>()
+            .listePourExpediteur(expediteurId: expediteur)
+            ?.ringtoneMessage;
+
     PushService.instance.show(
       title: title,
       body: body,
       convId: convId,
       avatarUrl: conv?.avatarUrl,
       payload: {"type": "message", "convId": convId},
+      canal: canalMessagePour(sonDeListe),
     );
   }
 

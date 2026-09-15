@@ -82,4 +82,57 @@ void main() {
       }
     });
   });
+
+  group("les canaux de notification Android", () {
+    test("chaque son de message a SA RESSOURCE dans res/raw/", () {
+      // 🔴 MEME DEFAUT QUE CI-DESSUS, MAIS COTE ANDROID. Un canal cite une
+      // ressource par son nom : si le fichier n'est pas dans `res/raw/`, la
+      // compilation passe et la notification arrive MUETTE. Et une ressource
+      // Android n'accepte ni tiret ni point dans son nom, d'ou la copie de
+      // `notif-blip.ogg` en `notif_blip.ogg` — deux exemplaires voulus, le
+      // paquet Flutter pour l'application, `res/raw` pour le systeme.
+      final manquants = <String>[];
+      for (final s in sonneriesLivrees) {
+        final res = ressourceAndroidDuSon(s.fichier);
+        if (res == null) continue;
+        if (!File("android/app/src/main/res/raw/$res.ogg").existsSync()) {
+          manquants.add("$res.ogg");
+        }
+      }
+      expect(manquants, isEmpty,
+          reason: "canaux sans ressource — notifications muettes : $manquants");
+    });
+
+    test("un son inconnu ou importe retombe sur le canal historique", () {
+      // ⚠️ LE REPLI EST OBLIGATOIRE : un `channelId` que le telephone ne
+      // connait pas et Android 8+ n'affiche RIEN DU TOUT. Mieux vaut le son
+      // historique qu'une notification invisible.
+      expect(canalMessagePour(null), canalMessageParDefaut);
+      expect(canalMessagePour(""), canalMessageParDefaut);
+      expect(canalMessagePour("/api/media/abc"), canalMessageParDefaut);
+      expect(canalMessagePour("inexistant.ogg"), canalMessageParDefaut);
+      // Une SONNERIE D'APPEL n'a pas de canal de message : lui en donner un
+      // fabriquerait un identifiant que l'application ne cree jamais.
+      expect(canalMessagePour("sonnerie-3.ogg"), canalMessageParDefaut);
+    });
+
+    test("« Notification Alanya » reste sur le canal historique", () {
+      // Un canal dedie aurait joue exactement le meme son sous un second nom,
+      // et fait repartir a zero les reglages qu'Android garde par canal.
+      expect(canalMessagePour("notification.mp3"), canalMessageParDefaut);
+    });
+
+    test("deux sons de message ne partagent jamais un canal", () {
+      final canaux = <String>{};
+      final doublons = <String>[];
+      for (final s in sonneriesLivrees) {
+        if (ressourceAndroidDuSon(s.fichier) == null) continue;
+        final c = canalMessagePour(s.fichier);
+        if (!canaux.add(c)) doublons.add(c);
+      }
+      expect(doublons, isEmpty, reason: "canaux en double : $doublons");
+      // Les dix sons courts du catalogue, et eux seuls.
+      expect(canaux, hasLength(10));
+    });
+  });
 }

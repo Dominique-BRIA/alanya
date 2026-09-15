@@ -148,3 +148,56 @@ String? libelleDeSonnerie(String? valeur) {
 /// serait plus proposé aujourd'hui.
 List<SonnerieLivree> sonneriesLivreesPour(GenreSonnerie genre) =>
     sonneriesLivrees.where((s) => s.genre == genre).toList();
+
+/// LE CANAL DE NOTIFICATION ANDROID qui joue [fichier], pour un MESSAGE.
+///
+/// 🔴 POURQUOI UN CANAL PAR SON, ET NON UN SON PAR NOTIFICATION. Depuis
+/// Android 8, le son d'une notification est porté par son CANAL, et un canal
+/// **ne peut plus changer de son après sa création** — ni par l'application, ni
+/// par une mise à jour. Poser `sound:` sur la notification elle-même n'a aucun
+/// effet une fois le canal créé. La seule façon de faire sonner deux listes
+/// différemment est donc de leur donner deux canaux, et c'est ce que fait
+/// WhatsApp.
+///
+/// ⚠️ LE CANAL HISTORIQUE `messages` RESTE LE DÉFAUT, et il ne doit pas changer
+/// de nom : il existe déjà sur tous les téléphones où l'application est
+/// installée, avec « Notification Alanya » pour son. Lui en donner un autre
+/// créerait un canal neuf et l'utilisateur retrouverait ses réglages remis à
+/// zéro — volume, vibration, importance.
+///
+/// C'est aussi pour cela que `notification.mp3` retombe dessus : son canal
+/// dédié aurait joué exactement le même son sous un second nom.
+///
+/// ⚠️ SEULS LES SONS LIVRÉS ONT UN CANAL. Une sonnerie IMPORTÉE vit derrière
+/// `/api/media/<id>`, protégée par un jeton : Android ne saurait pas la lire
+/// depuis l'interface système, il faudrait la télécharger et l'exposer par un
+/// `FileProvider`. Elle retombe donc sur le canal par défaut hors de
+/// l'application — dans la conversation ouverte, elle se joue bien.
+const canalMessageParDefaut = "messages";
+
+/// Le nom de la ressource Android correspondant à [fichier], ou `null`.
+///
+/// ⚠️ `android/app/src/main/res/raw/` ET NON `assets/` : une ressource Android
+/// n'accepte ni tiret ni point dans son nom, d'où `notif-blip.ogg` copié en
+/// `notif_blip.ogg`. Les deux exemplaires sont voulus — le paquet Flutter joue
+/// l'asset dans l'application, Android joue la ressource hors de l'application.
+String? ressourceAndroidDuSon(String? fichier) {
+  if (fichier == null || !fichier.startsWith("notif-")) return null;
+  // On ne fabrique un nom que pour une entrée RÉELLEMENT au catalogue : une
+  // valeur inconnue produirait un canal sans ressource, donc une notification
+  // muette — ou pas de notification du tout sur Android 8+.
+  final connu = sonneriesLivrees.any(
+    (s) => s.fichier == fichier && s.genre == GenreSonnerie.message,
+  );
+  if (!connu) return null;
+  return fichier.replaceAll("-", "_").replaceAll(".ogg", "");
+}
+
+/// L'identifiant du canal qui doit annoncer un message sonné par [fichier].
+///
+/// Retombe sur [canalMessageParDefaut] pour tout ce qui n'a pas de ressource :
+/// « Par défaut », un son importé, ou une valeur qu'on ne connaît pas.
+String canalMessagePour(String? fichier) {
+  final res = ressourceAndroidDuSon(fichier);
+  return res == null ? canalMessageParDefaut : "msg_$res";
+}
