@@ -8,6 +8,7 @@ import '../../../core/downloader.dart';
 import '../../../core/telechargement_suivi.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/media/cached_media.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Un média (image ou vidéo) d'une conversation, pour la galerie navigable.
 class ConvMediaItem {
@@ -64,8 +65,8 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
     if (!mounted) return;
     setState(() => _downloading = false);
     showAppSnackBar(path != null
-        ? "Enregistré dans Alanya/"
-        : "Échec du téléchargement");
+        ? tr(context, 'saved_to_alanya', {'nom': item.filename})
+        : tr(context, 'download_failed'));
   }
 
   @override

@@ -14,6 +14,7 @@ import '../status_repository.dart';
 import '../widgets/choix_emoji.dart';
 import 'editeur_media_statut_screen.dart';
 import 'status_viewer_screen.dart' show dureeVideoStatutMax;
+import '../../../l10n/app_localizations.dart';
 
 /// Convertit un hex (#RRGGBB) en Color opaque.
 Color colorFromHex(String hex) {
@@ -107,7 +108,7 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
               imageQuality: imageQualite,
             );
     } catch (_) {
-      _snack("Appareil photo indisponible");
+      _snack(tr(context, 'status_camera_unavailable'));
       _refermeSiEntreeMedia();
       return;
     }
@@ -127,7 +128,7 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
      * téléversement complet, sur un 413 que rien n'annonçait.
      */
     if (depassePlafondMedia(octets.length)) {
-      _snack("Cette vidéo dépasse $plafondMediaMo Mo et ne peut pas être publiée");
+      _snack(tr(context, 'status_video_limit', {'n': '$plafondMediaMo'}));
       _refermeSiEntreeMedia();
       return;
     }
@@ -144,7 +145,7 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
   Future<void> _publish() async {
     final text = _textCtrl.text.trim();
     if (text.isEmpty) {
-      _snack("Écris quelque chose");
+      _snack(tr(context, 'status_write_something'));
       return;
     }
     // Même traitement que les médias : l'écran rend la main tout de suite,
@@ -153,7 +154,7 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
       text,
       _palette[_colorIndex],
       statuts: context.read<StatusRepository>(),
-      surEchec: () => showAppSnackBar("Statut non publié. Réessaie."),
+      surEchec: () => showAppSnackBar(tr(context, 'status_publish_failed')),
     );
     Navigator.of(context).pop(true);
   }
@@ -178,7 +179,7 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
     try {
       choisis = await MediaGalleryPickerScreen.open(context);
     } catch (_) {
-      _snack("Sélection de média indisponible sur cette plateforme");
+      _snack(tr(context, 'status_media_unavailable'));
       _refermeSiEntreeMedia();
       return;
     }
@@ -213,8 +214,8 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
     // en entier. On le dit avant l'envoi plutôt que de faire payer la donnée.
     if (choisis.any(
         (m) => (m.durationMs ?? 0) > dureeVideoStatutMax.inMilliseconds)) {
-      _snack("Une vidéo de statut ne peut pas dépasser "
-          "${dureeVideoStatutMax.inSeconds} secondes");
+      _snack(tr(context,
+          'status_video_limit', {'n': '${dureeVideoStatutMax.inSeconds}'}));
       _refermeSiEntreeMedia();
       return;
     }
@@ -294,20 +295,20 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
                 onPressed: () => Navigator.of(context).pop(),
               )
             : null,
-        title: const Text("Nouveau statut"),
+        title: Text(tr(context, 'status_new')),
         actions: [
           IconButton(
-            tooltip: "Emoji",
+            tooltip: tr(context, 'status_emoji'),
             icon: const Icon(Icons.emoji_emotions_outlined),
             onPressed: _insererEmoji,
           ),
           IconButton(
-            tooltip: "Publier une photo ou vidéo",
+            tooltip: tr(context, 'status_add_photo'),
             icon: const Icon(Icons.photo_camera_outlined),
             onPressed: _pickAndPublishMedia,
           ),
           IconButton(
-            tooltip: "Changer la couleur",
+            tooltip: tr(context, 'status_change_color'),
             icon: const Icon(Icons.palette),
             onPressed: () =>
                 setState(() => _colorIndex = (_colorIndex + 1) % _palette.length),
@@ -353,7 +354,7 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
                     filled: true,
                     fillColor: Colors.transparent,
                     counterStyle: const TextStyle(color: Colors.white70),
-                    hintText: "Tape ton statut…",
+                    hintText: tr(context, 'status_type_hint'),
                     hintStyle: const TextStyle(color: Colors.white60, fontSize: 24),
                   ),
                 ),

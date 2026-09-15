@@ -15,6 +15,7 @@ import '../meeting_controller.dart';
 import '../meetings_repository.dart';
 import '../widgets/tuile_demande.dart';
 import 'meeting_room_screen.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Écran de détail d'une réunion — affiche les participants, permet
 /// de rejoindre, quitter ou terminer la réunion.
@@ -163,8 +164,8 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
 
     final numeros = await ContactPickerSheet.show(
       context,
-      title: "Ajouter à la réunion",
-      confirmLabel: "Ajouter",
+      title: tr(context, 'meet_add_to'),
+      confirmLabel: tr(context, 'meet_add_btn'),
       excludeNumbers: dejaLa,
     );
     if (numeros == null || numeros.isEmpty || !mounted) return;
@@ -183,10 +184,10 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
             // ceux qui étaient déjà membres. Le dire évite de laisser croire à
             // une panne devant une liste inchangée.
             ajoutes == 0
-                ? "Personne à ajouter : ces contacts sont déjà dans la réunion"
+                ? tr(context, 'meet_none_to_add')
                 : ajoutes == 1
-                    ? "1 participant ajouté et prévenu"
-                    : "$ajoutes participants ajoutés et prévenus",
+                    ? tr(context, 'meet_added_one')
+                    : tr(context, 'meet_added_many', {'n': '$ajoutes'}),
           ),
         ),
       );
@@ -213,8 +214,8 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
 
     final numeros = await ContactPickerSheet.show(
       context,
-      title: "Proposer à l'organisateur",
-      confirmLabel: "Proposer",
+      title: tr(context, 'meet_propose_to_org'),
+      confirmLabel: tr(context, 'meet_propose'),
       excludeNumbers: dejaLa,
     );
     if (numeros == null || numeros.isEmpty || !mounted) return;
@@ -233,8 +234,8 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(entreeDirecte
-              ? "Cette réunion accepte les invitations sans approbation : la personne a été ajoutée."
-              : "Demande envoyée à l'organisateur. La personne n'est pas prévenue tant qu'il n'a pas accepté."),
+              ? tr(context, 'meet_auto_added')
+              : tr(context, 'meet_request_sent_detail')),
           duration: const Duration(seconds: 6),
         ),
       );
@@ -289,10 +290,10 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(accepter
-              ? "${d.invite.displayName} a été ajouté et prévenu"
+              ? tr(context, 'meet_invite_added', {'nom': d.invite.displayName})
               // On rappelle ici la portée du refus : il vaut pour tout le monde
               // et pour toujours, ce n'est pas un simple « pas maintenant ».
-              : "Demande refusée. ${d.invite.displayName} n'en saura rien, et ne pourra plus être proposé."),
+              : tr(context, 'meet_request_refused_detail', {'nom': d.invite.displayName})),
           duration: const Duration(seconds: 6),
         ),
       );
@@ -310,16 +311,16 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text("Terminer la réunion ?"),
-        content: const Text("Tous les participants seront déconnectés."),
+        title: Text(tr(context, 'meet_end_q')),
+        content: Text(tr(context, 'meet_end_body')),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text("Annuler")),
+              child: Text(tr(context, 'cancel'))),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
               child:
-                  Text("Terminer", style: TextStyle(color: dangerOf(context)))),
+                  Text(tr(context, 'finish'), style: TextStyle(color: dangerOf(context)))),
         ],
       ),
     );
@@ -331,7 +332,7 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
       await _refresh();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Réunion terminée")),
+          SnackBar(content: Text(tr(context, 'meet_ended'))),
         );
       }
     } on ApiException catch (e) {
@@ -349,16 +350,16 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text("Décliner l'invitation ?"),
-        content: const Text("Tu ne rejoindras pas cette réunion."),
+        title: Text(tr(context, 'meet_decline_q')),
+        content: Text(tr(context, 'meet_decline_body')),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text("Annuler")),
+              child: Text(tr(context, 'cancel'))),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
               child:
-                  Text("Décliner", style: TextStyle(color: dangerOf(context)))),
+                  Text(tr(context, 'meet_decline_btn'), style: TextStyle(color: dangerOf(context)))),
         ],
       ),
     );
@@ -371,7 +372,7 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
           .declineMeeting(_meeting.idMeeting);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Invitation déclinée")),
+          SnackBar(content: Text(tr(context, 'meet_invite_declined'))),
         );
         Navigator.of(context).pop(true);
       }
@@ -389,11 +390,11 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final m = _meeting;
-    final typeLabel = m.isVideo ? "Vidéo" : "Audio";
-    final statusLabel = m.isFinished ? "Terminée" : "En cours";
+    final typeLabel = m.isVideo ? tr(context, 'video') : tr(context, 'meet_audio');
+    final statusLabel = m.isFinished ? tr(context, 'meet_finished') : tr(context, 'meet_ongoing');
 
     return Scaffold(
-      appBar: backAppBar(context, "Réunion"),
+      appBar: backAppBar(context, tr(context, 'meet_page_title')),
       body: MotifBackground(
         overlayOpacity: 0.92,
         child: RefreshIndicator(
@@ -438,12 +439,12 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
                       ],
                     ),
                     const SizedBox(height: 12),
-                    _infoRow("Type", typeLabel),
-                    _infoRow("Statut", statusLabel),
-                    _infoRow("Salle", m.room),
-                    _infoRow("Durée prévue", _formatDuration(m.duree)),
-                    _infoRow("Début", _formatDateTime(m.startTime)),
-                    _infoRow("Organisateur", m.organiser.displayName),
+                    _infoRow(tr(context, 'meet_type_label'), typeLabel),
+                    _infoRow(tr(context, 'meet_status_label'), statusLabel),
+                    _infoRow(tr(context, 'meet_room_label'), m.room),
+                    _infoRow(tr(context, 'meet_duration'), _formatDuration(m.duree)),
+                    _infoRow(tr(context, 'meet_start_label'), _formatDateTime(m.startTime)),
+                    _infoRow(tr(context, 'meet_organizer_label'), m.organiser.displayName),
                   ],
                 ),
               ),
@@ -454,7 +455,7 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
                 ElevatedButton.icon(
                   onPressed: _loading ? null : _joinMeeting,
                   icon: const Icon(Icons.login),
-                  label: const Text("Rejoindre la réunion"),
+                  label: Text(tr(context, 'meet_join')),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: positiveOf(context),
                     foregroundColor: Colors.white,
@@ -469,7 +470,7 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
                 OutlinedButton.icon(
                   onPressed: _loading ? null : _proposerParticipant,
                   icon: const Icon(Icons.person_add_alt_outlined),
-                  label: const Text("Proposer un participant"),
+                  label: Text(tr(context, 'meet_suggest')),
                   style: OutlinedButton.styleFrom(
                     minimumSize: const Size(double.infinity, 48),
                   ),
@@ -479,7 +480,7 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
                   onPressed: _loading ? null : _decline,
                   icon:
                       Icon(Icons.event_busy_outlined, color: dangerOf(context)),
-                  label: Text("Décliner l'invitation",
+                  label: Text(tr(context, 'meet_decline_invite'),
                       style: TextStyle(color: dangerOf(context))),
                   style: OutlinedButton.styleFrom(
                     minimumSize: const Size(double.infinity, 48),
@@ -491,7 +492,7 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
                 OutlinedButton.icon(
                   onPressed: _loading ? null : _ajouterParticipants,
                   icon: const Icon(Icons.person_add_alt_1_outlined),
-                  label: const Text("Ajouter des participants"),
+                  label: Text(tr(context, 'meet_add_participants')),
                   style: OutlinedButton.styleFrom(
                     minimumSize: const Size(double.infinity, 48),
                   ),
@@ -501,7 +502,7 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
                   onPressed: _loading ? null : _end,
                   icon: Icon(Icons.stop_circle_outlined,
                       color: dangerOf(context)),
-                  label: Text("Terminer la réunion",
+                  label: Text(tr(context, 'meet_end_action'),
                       style: TextStyle(color: dangerOf(context))),
                   style: OutlinedButton.styleFrom(
                     minimumSize: const Size(double.infinity, 48),
@@ -517,8 +518,8 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
               if (_demandes.isNotEmpty) ...[
                 Text(
                   _isOrganiser
-                      ? "Demandes en attente (${_demandes.length})"
-                      : "Tes demandes (${_demandes.length})",
+                      ? tr(context, 'meet_pending_requests', {'n': '${_demandes.length}'})
+                      : tr(context, 'meet_your_requests', {'n': '${_demandes.length}'}),
                   style: const TextStyle(
                       fontWeight: FontWeight.bold, fontSize: 16),
                 ),
@@ -529,7 +530,7 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
 
               // --- Participants ---
               Text(
-                "Participants (${m.participants.length})",
+                tr(context, 'meet_participants_count', {'n': '${m.participants.length}'}),
                 style:
                     const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
               ),
@@ -609,7 +610,7 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Serveur injoignable")),
+          SnackBar(content: Text(tr(context, 'meet_server_unreachable'))),
         );
       }
     } finally {
@@ -630,18 +631,17 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text("Refuser cette demande ?"),
+        title: Text(tr(context, 'meet_decline_request_q')),
         content: Text(
-            "${d.invite.displayName} ne sera pas ajouté et n'en saura rien. "
-            "Personne ne pourra plus le proposer pour cette réunion."),
+            tr(context, 'meet_refuse_body', {'nom': d.invite.displayName})),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text("Annuler")),
+              child: Text(tr(context, 'cancel'))),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
               child:
-                  Text("Refuser", style: TextStyle(color: dangerOf(context)))),
+                  Text(tr(context, 'decline'), style: TextStyle(color: dangerOf(context)))),
         ],
       ),
     );
@@ -650,12 +650,12 @@ class _MeetingDetailScreenState extends State<MeetingDetailScreen> {
 
   Widget _participantTile(MeetingParticipant p) {
     final statusText = p.isConnected
-        ? "Connecté"
+        ? tr(context, 'meet_stat_connected')
         : p.status == 1
-            ? "Accepté"
+            ? tr(context, 'meet_stat_accepted')
             : p.status == 2
-                ? "Décliné"
-                : "Invité";
+                ? tr(context, 'meet_stat_declined')
+                : tr(context, 'meet_stat_invited');
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),

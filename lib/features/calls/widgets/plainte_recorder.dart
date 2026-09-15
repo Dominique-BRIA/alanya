@@ -15,6 +15,7 @@ import '../../media/media_repository.dart';
 import '../call_controller.dart';
 import 'ivr_panel.dart';
 import '../plaintes_repository.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Les états visibles d'une plainte vocale, du bip à l'envoi.
 enum _EtatPlainte {
@@ -152,7 +153,7 @@ class _PlainteRecorderState extends State<PlainteRecorder> {
       // qui reste à zéro sans rien expliquer se lit comme une panne.
       setState(() {
         _etat = _EtatPlainte.echec;
-        _erreur = "Micro indisponible. Autorise l'accès dans les réglages.";
+        _erreur = tr(context, 'complaint_mic_unavailable');
       });
       return;
     }
@@ -198,7 +199,7 @@ class _PlainteRecorderState extends State<PlainteRecorder> {
     if (resultat == null || resultat.bytes.isEmpty) {
       setState(() {
         _etat = _EtatPlainte.echec;
-        _erreur = "Enregistrement vide. Réessaie.";
+        _erreur = tr(context, 'complaint_empty');
       });
       return;
     }
@@ -315,7 +316,7 @@ class _PlainteRecorderState extends State<PlainteRecorder> {
           // ⚠️ On garde la clé : « Réessayer » réutilisera la MÊME, et le
           // serveur ne créera pas de doublon même si la première tentative
           // avait en fait abouti et que seule la réponse s'est perdue.
-          _erreur = "Envoi impossible. Réessaie.";
+          _erreur = tr(context, 'complaint_send_failed');
         });
       }
     }
@@ -393,19 +394,19 @@ class _PlainteRecorderState extends State<PlainteRecorder> {
   Widget _texteEtat() {
     if (_etat == _EtatPlainte.echec) {
       return Text(
-        _erreur ?? "Échec",
+        _erreur ?? tr(context, 'failed_word'),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: const TextStyle(color: Colors.orangeAccent, fontSize: 12),
       );
     }
     final libelle = switch (_etat) {
-      _EtatPlainte.bip => "Annonce…",
+      _EtatPlainte.bip => tr(context, 'complaint_announce'),
       _EtatPlainte.enregistrement => "",
-      _EtatPlainte.pause => "Pause",
-      _EtatPlainte.relecture => "Écoutez",
-      _EtatPlainte.envoi => "Envoi…",
-      _EtatPlainte.envoye => "Envoyée",
+      _EtatPlainte.pause => tr(context, 'pause_word'),
+      _EtatPlainte.relecture => tr(context, 'complaint_listen'),
+      _EtatPlainte.envoi => tr(context, 'sending'),
+      _EtatPlainte.envoye => tr(context, 'complaint_sent'),
       _EtatPlainte.echec => "",
     };
     return Row(
@@ -468,24 +469,24 @@ class _PlainteRecorderState extends State<PlainteRecorder> {
             infobulle: _etat == _EtatPlainte.pause ? "Reprendre" : "Pause",
             onTap: _basculerPause,
           ),
-          _bouton(icone: Icons.stop, infobulle: "Terminer", onTap: _arreter),
+          _bouton(icone: Icons.stop, infobulle: tr(context, 'finish'), onTap: _arreter),
         ];
       case _EtatPlainte.relecture:
         final joue = _relecture.state == PlayerState.playing;
         return [
           _bouton(
             icone: joue ? Icons.pause : Icons.play_arrow,
-            infobulle: joue ? "Pause" : "Écouter",
+            infobulle: joue ? tr(context, 'pause_word') : tr(context, 'complaint_listen_play'),
             onTap: _cheminRelecture == null ? null : _basculerRelecture,
           ),
           _bouton(
             icone: Icons.refresh,
-            infobulle: "Refaire",
+            infobulle: tr(context, 'redo'),
             onTap: _recommencer,
           ),
           _bouton(
             icone: Icons.send,
-            infobulle: "Envoyer",
+            infobulle: tr(context, 'send'),
             accent: true,
             onTap: _envoyer,
           ),
@@ -494,7 +495,7 @@ class _PlainteRecorderState extends State<PlainteRecorder> {
         return [
           _bouton(
             icone: Icons.refresh,
-            infobulle: "Refaire",
+            infobulle: tr(context, 'redo'),
             onTap: _recommencer,
           ),
           // « Réessayer » n'apparaît que s'il y a quelque chose à renvoyer : un
@@ -502,7 +503,7 @@ class _PlainteRecorderState extends State<PlainteRecorder> {
           if (_octets != null)
             _bouton(
               icone: Icons.send,
-              infobulle: "Réessayer",
+              infobulle: tr(context, 'retry'),
               accent: true,
               onTap: _envoyer,
             ),

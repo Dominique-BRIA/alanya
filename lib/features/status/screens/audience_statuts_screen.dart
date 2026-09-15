@@ -8,6 +8,7 @@ import '../../../widgets/avatar_circle.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../../contacts/contacts_repository.dart';
 import '../status_repository.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// « Qui peut voir mes statuts » — les trois audiences de WhatsApp.
 ///
@@ -54,7 +55,7 @@ class _AudienceStatutsScreenState extends State<AudienceStatutsScreen> {
     } catch (_) {
       if (!mounted) return;
       setState(() => _chargement = false);
-      showAppSnackBar("Chargement impossible. Réessaie.");
+      showAppSnackBar(tr(context, 'status_load_failed'));
     }
   }
 
@@ -82,15 +83,15 @@ class _AudienceStatutsScreenState extends State<AudienceStatutsScreen> {
         _mode = ancienMode;
         _choisis = anciensChoisis;
       });
-      showAppSnackBar("Échec de l'enregistrement. Rien n'a été modifié.");
+      showAppSnackBar(tr(context, 'status_save_failed'));
     } finally {
       if (mounted) setState(() => _enregistrement = false);
     }
   }
 
   String get _libelleListe => switch (_mode) {
-    ModeAudience.mesContactsSauf => "Exclure des contacts",
-    ModeAudience.partagerAvec => "Partager avec…",
+    ModeAudience.mesContactsSauf => tr(context, 'audience_exclude'),
+    ModeAudience.partagerAvec => tr(context, 'audience_share'),
     _ => "",
   };
 
@@ -100,10 +101,10 @@ class _AudienceStatutsScreenState extends State<AudienceStatutsScreen> {
       return _mode == ModeAudience.partagerAvec
           // Une liste vide en mode « Partager avec… » veut dire PERSONNE. Le
           // dire franchement : c'est le seul réglage qui coupe tout.
-          ? "Personne pour l'instant — tes statuts ne sont visibles par personne"
-          : "Aucune exclusion";
+          ? tr(context, 'audience_nobody_yet')
+          : tr(context, 'status_no_exclusion');
     }
-    return "$n personne${n > 1 ? 's' : ''}";
+    return trN(context, 'audience_n_people', n);
   }
 
   Future<void> _choisirPersonnes() async {
@@ -128,7 +129,7 @@ class _AudienceStatutsScreenState extends State<AudienceStatutsScreen> {
       dark: AlanyaColors.craie2,
     );
     return Scaffold(
-      appBar: backAppBar(context, "Statut"),
+      appBar: backAppBar(context, tr(context, 'status_page_title')),
       body: _chargement
           ? const Center(child: CircularProgressIndicator())
           : ListView(
@@ -136,24 +137,24 @@ class _AudienceStatutsScreenState extends State<AudienceStatutsScreen> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                   child: Text(
-                    "Qui peut voir mes statuts",
+                    tr(context, 'status_who_sees'),
                     style: TextStyle(color: muted, fontWeight: FontWeight.bold),
                   ),
                 ),
                 _choix(
                   ModeAudience.mesContacts,
-                  "Mes contacts",
-                  "Toutes les personnes qui t'ont dans leurs contacts.",
+                  tr(context, 'audience_contacts'),
+                  tr(context, 'audience_contacts_detail'),
                 ),
                 _choix(
                   ModeAudience.mesContactsSauf,
-                  "Mes contacts sauf…",
-                  "Tes contacts, moins ceux que tu exclus.",
+                  tr(context, 'audience_except'),
+                  tr(context, 'audience_except_detail'),
                 ),
                 _choix(
                   ModeAudience.partagerAvec,
-                  "Partager avec…",
-                  "Uniquement les personnes que tu désignes.",
+                  tr(context, 'audience_share'),
+                  tr(context, 'status_only_designated'),
                 ),
                 if (_mode != ModeAudience.mesContacts) ...[
                   const Divider(height: 1),
@@ -177,9 +178,7 @@ class _AudienceStatutsScreenState extends State<AudienceStatutsScreen> {
                 Padding(
                   padding: const EdgeInsets.all(16),
                   child: Text(
-                    "Ce réglage s'applique aussi à tes statuts déjà publiés. "
-                    "Une personne bloquée ne voit jamais tes statuts, quel que "
-                    "soit le mode choisi.",
+                    tr(context, 'status_note_published'),
                     style: TextStyle(fontSize: 12, color: muted),
                   ),
                 ),
@@ -256,7 +255,7 @@ class _ChoixPersonnesState extends State<_ChoixPersonnes> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(_coches),
-            child: const Text("OK"),
+            child: Text(tr(context, 'ok')),
           ),
         ],
       ),
@@ -265,10 +264,10 @@ class _ChoixPersonnesState extends State<_ChoixPersonnes> {
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
             child: TextField(
-              decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.search),
-                hintText: "Rechercher",
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                prefixIcon: const Icon(Icons.search),
+                hintText: tr(context, 'search_word'),
+                border: const OutlineInputBorder(),
                 isDense: true,
               ),
               onChanged: (v) => setState(() => _recherche = v),
@@ -276,7 +275,7 @@ class _ChoixPersonnesState extends State<_ChoixPersonnes> {
           ),
           Expanded(
             child: visibles.isEmpty
-                ? const Center(child: Text("Aucun contact"))
+                ? Center(child: Text(tr(context, 'no_contacts')))
                 : ListView.builder(
                     itemCount: visibles.length,
                     itemBuilder: (_, i) {

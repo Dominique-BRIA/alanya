@@ -15,6 +15,7 @@ import '../../core/push_service.dart';
 import 'call_controller.dart';
 import 'calls_repository.dart';
 import 'screens/active_call_screen.dart';
+import '../../l10n/app_localizations.dart';
 
 /// Écoute les appels entrants et, quand l'app est **ouverte** (premier plan),
 /// affiche un heads-up in-app glassmorphism (Refuser / Répondre) au lieu
@@ -279,7 +280,7 @@ class _CallListenerState extends State<CallListener> {
       // L'appel s'est terminé pendant le démarrage de l'application. On le dit,
       // plutôt que de laisser l'utilisateur devant un accueil muet après avoir
       // appuyé sur Répondre.
-      showAppSnackBar("Cet appel n'est plus disponible");
+      showAppSnackBar(tr(context, 'call_no_longer_available'));
     }
   }
 

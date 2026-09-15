@@ -9,6 +9,7 @@ import '../../../widgets/back_app_bar.dart';
 import '../../../models/contact.dart';
 import '../../contacts/contacts_repository.dart';
 import '../meetings_repository.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Écran de création d'une réunion audio ou vidéo.
 ///
@@ -49,7 +50,7 @@ class _CreateMeetingScreenState extends State<CreateMeetingScreen> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Impossible de charger les contacts")),
+          SnackBar(content: Text(tr(context, 'contacts_load_failed_short'))),
         );
       }
       return;
@@ -58,7 +59,7 @@ class _CreateMeetingScreenState extends State<CreateMeetingScreen> {
     if (contacts.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Aucun contact. Ajoute des contacts d'abord.")),
+          SnackBar(content: Text(tr(context, 'meet_no_contacts_snack'))),
         );
       }
       return;
@@ -99,14 +100,14 @@ class _CreateMeetingScreenState extends State<CreateMeetingScreen> {
       initialDate: initial,
       firstDate: DateTime(now.year, now.month, now.day),
       lastDate: now.add(const Duration(days: 366)),
-      helpText: "Date de la réunion",
+      helpText: tr(context, 'meet_date_label'),
     );
     if (date == null || !mounted) return;
 
     final time = await showTimePicker(
       context: context,
       initialTime: TimeOfDay.fromDateTime(initial),
-      helpText: "Heure de début",
+      helpText: tr(context, 'meet_time_label'),
     );
     if (time == null || !mounted) return;
 
@@ -154,7 +155,7 @@ class _CreateMeetingScreenState extends State<CreateMeetingScreen> {
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Réunion créée !")),
+        SnackBar(content: Text(tr(context, 'meet_created'))),
       );
       Navigator.of(context).pop(true);
     } on ApiException catch (e) {
@@ -166,7 +167,7 @@ class _CreateMeetingScreenState extends State<CreateMeetingScreen> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Erreur serveur")),
+          SnackBar(content: Text(tr(context, 'server_error'))),
         );
       }
     } finally {
@@ -186,20 +187,20 @@ class _CreateMeetingScreenState extends State<CreateMeetingScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               // --- Type de réunion ---
-              const Text("Type de réunion",
-                  style: TextStyle(fontWeight: FontWeight.w600)),
+              Text(tr(context, 'meet_type'),
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
               SegmentedButton<int>(
-                segments: const [
+                segments: [
                   ButtonSegment(
                     value: 1,
-                    label: Text("Audio"),
-                    icon: Icon(Icons.call),
+                    label: Text(tr(context, 'meet_audio')),
+                    icon: const Icon(Icons.call),
                   ),
                   ButtonSegment(
                     value: 2,
-                    label: Text("Vidéo"),
-                    icon: Icon(Icons.videocam),
+                    label: Text(tr(context, 'video')),
+                    icon: const Icon(Icons.videocam),
                   ),
                 ],
                 selected: {_typeMedia},
@@ -211,18 +212,18 @@ class _CreateMeetingScreenState extends State<CreateMeetingScreen> {
               // --- Objet ---
               TextFormField(
                 controller: _objetCtrl,
-                decoration: const InputDecoration(
-                  labelText: "Objet de la réunion",
-                  prefixIcon: Icon(Icons.subject),
+                decoration: InputDecoration(
+                  labelText: tr(context, 'meet_subject'),
+                  prefixIcon: const Icon(Icons.subject),
                 ),
                 validator: (v) =>
-                    (v ?? "").trim().isEmpty ? "L'objet est requis" : null,
+                    (v ?? "").trim().isEmpty ? tr(context, 'meet_subject_required') : null,
               ),
               const SizedBox(height: 20),
 
               // --- Date / heure de début ---
-              const Text("Début",
-                  style: TextStyle(fontWeight: FontWeight.w600)),
+              Text(tr(context, 'meet_start_label'),
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
               InkWell(
                 onTap: _pickStartTime,
@@ -264,7 +265,7 @@ class _CreateMeetingScreenState extends State<CreateMeetingScreen> {
                         IconButton(
                           icon: const Icon(Icons.close, size: 18),
                           onPressed: () => setState(() => _startTime = null),
-                          tooltip: "Démarrer maintenant",
+                          tooltip: tr(context, 'meet_start_now'),
                         ),
                       Icon(Icons.chevron_right,
                           color: mutedOf(context, AlanyaColors.grey400)),
@@ -282,8 +283,8 @@ class _CreateMeetingScreenState extends State<CreateMeetingScreen> {
               const SizedBox(height: 20),
 
               // --- Participants ---
-              const Text("Participants",
-                  style: TextStyle(fontWeight: FontWeight.w600)),
+              Text(tr(context, 'meet_participants'),
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
 
               // Bouton pour ouvrir le sélecteur de contacts
@@ -350,26 +351,26 @@ class _CreateMeetingScreenState extends State<CreateMeetingScreen> {
               ],
               const SizedBox(height: 8),
               Text(
-                "Sélectionne tes contacts. Laisse vide pour une réunion solo.",
+                tr(context, 'meet_select_hint'),
                 style: TextStyle(fontSize: 12, color: mutedOf(context, AlanyaColors.grey500)),
               ),
               const SizedBox(height: 20),
 
               // --- Durée ---
-              const Text("Durée prévue",
-                  style: TextStyle(fontWeight: FontWeight.w600)),
+              Text(tr(context, 'meet_duration'),
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
               DropdownButtonFormField<int>(
                 value: _duree,
                 decoration: const InputDecoration(
                   prefixIcon: Icon(Icons.timer_outlined),
                 ),
-                items: const [
-                  DropdownMenuItem(value: 900, child: Text("15 minutes")),
-                  DropdownMenuItem(value: 1800, child: Text("30 minutes")),
-                  DropdownMenuItem(value: 3600, child: Text("1 heure")),
-                  DropdownMenuItem(value: 5400, child: Text("1h30")),
-                  DropdownMenuItem(value: 7200, child: Text("2 heures")),
+                items: [
+                  DropdownMenuItem(value: 900, child: Text(tr(context, 'meet_duration_15'))),
+                  DropdownMenuItem(value: 1800, child: Text(tr(context, 'meet_duration_30'))),
+                  DropdownMenuItem(value: 3600, child: Text(tr(context, 'meet_duration_60'))),
+                  DropdownMenuItem(value: 5400, child: Text(tr(context, 'meet_duration_90'))),
+                  DropdownMenuItem(value: 7200, child: Text(tr(context, 'meet_duration_120'))),
                 ],
                 onChanged: (v) {
                   if (v != null) setState(() => _duree = v);
@@ -388,7 +389,7 @@ class _CreateMeetingScreenState extends State<CreateMeetingScreen> {
                             strokeWidth: 2, color: Colors.white),
                       )
                     : const Icon(Icons.add),
-                label: const Text("Créer la réunion"),
+                label: Text(tr(context, 'meet_create')),
               ),
             ],
           ),
@@ -455,9 +456,9 @@ class _ContactPickerSheetState extends State<_ContactPickerSheet> {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Row(
                 children: [
-                  const Text("Sélectionner des participants",
-                      style:
-                          TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  Text(tr(context, 'meet_select_participants'),
+                      style: const TextStyle(
+                          fontSize: 16, fontWeight: FontWeight.bold)),
                   const Spacer(),
                   TextButton(
                     onPressed: () {
@@ -468,8 +469,8 @@ class _ContactPickerSheetState extends State<_ContactPickerSheet> {
                     },
                     child: Text(
                       _selected.isEmpty
-                          ? "Valider"
-                          : "Valider (${_selected.length})",
+                          ? tr(context, 'validate')
+                          : '${tr(context, 'validate')} (${_selected.length})',
                       style: TextStyle(
                         color: accentOf(context),
                         fontWeight: FontWeight.bold,
@@ -486,7 +487,7 @@ class _ContactPickerSheetState extends State<_ContactPickerSheet> {
               child: TextField(
                 onChanged: (v) => setState(() => _search = v.trim()),
                 decoration: InputDecoration(
-                  hintText: "Rechercher un contact…",
+                  hintText: tr(context, 'search_contact_dots'),
                   prefixIcon:
                       Icon(Icons.search, size: 20, color: mutedOf(context, AlanyaColors.grey400)),
                   contentPadding:
@@ -508,7 +509,7 @@ class _ContactPickerSheetState extends State<_ContactPickerSheet> {
               child: filtered.isEmpty
                   ? Center(
                       child: Text(
-                        "Aucun contact trouvé",
+                        tr(context, 'meet_no_contacts'),
                         style: TextStyle(color: mutedOf(context, AlanyaColors.grey400)),
                       ),
                     )

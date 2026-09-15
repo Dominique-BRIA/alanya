@@ -190,7 +190,7 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
       // correspondant devant un appelant qui ne voit rien.
       await ouvrirEcranAppelLance(cc);
     } catch (e) {
-      showAppSnackBar(messageErreurAppel(e));
+      showAppSnackBar(messageErreurAppel(e, context: context));
     } finally {
       if (mounted) setState(() => _callStarting = false);
     }

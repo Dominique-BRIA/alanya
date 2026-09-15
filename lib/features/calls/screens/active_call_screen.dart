@@ -19,6 +19,7 @@ import '../widgets/call_avatar_waves.dart';
 import '../widgets/ivr_panel.dart';
 import '../widgets/plainte_recorder.dart';
 import '../widgets/queue_status_sheet.dart';
+import '../../../l10n/app_localizations.dart';
 
 class ActiveCallScreen extends StatefulWidget {
   const ActiveCallScreen({super.key, this.incoming = false});
@@ -84,7 +85,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
         setState(() => _elapsed++);
       } else if (DateTime.now().difference(_ongoingSince!).inSeconds >= 35) {
         // Le média ne s'est pas connecté 35s après le décrochage → on abandonne.
-        showAppSnackBar("Connexion impossible. Vérifie ta connexion réseau.");
+        showAppSnackBar(tr(context, 'call_connect_failed'));
         _hangUp(cc);
       }
     });
@@ -208,7 +209,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     try {
       await cc.rejectIncoming();
     } catch (_) {
-      showAppSnackBar("Impossible de refuser l'appel");
+      showAppSnackBar(tr(context, 'call_decline_failed'));
     } finally {
       _popScreen();
     }
@@ -221,7 +222,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
       await cc.acceptIncoming();
       if (mounted) setState(() {});
     } on Object catch (e) {
-      showAppSnackBar("Impossible d'accepter l'appel");
+      showAppSnackBar(tr(context, 'call_accept_failed'));
       debugPrint("[call] accept: $e");
     } finally {
       if (mounted) _actionBusy = false;
@@ -234,7 +235,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     try {
       await cc.hangUp();
     } catch (_) {
-      showAppSnackBar("Erreur lors du raccrochage");
+      showAppSnackBar(tr(context, 'call_end_failed'));
     } finally {
       _popScreen();
     }
@@ -312,8 +313,10 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
   String _statusText(CallController cc) {
     if (widget.incoming && cc.incoming != null) {
       final inc = cc.incoming!;
-      if (inc.isGroup) return "Groupe · ${inc.memberCount} membres";
-      return "Appel entrant…";
+      if (inc.isGroup) {
+        return tr(context, 'call_group_members', {'n': '${inc.memberCount}'});
+      }
+      return tr(context, 'incoming_call');
     }
     // Standard : personne ne sonne tant que l'appelant n'a pas choisi. Laisser
     // « Sonnerie… » dirait exactement le contraire de ce qui se passe.
@@ -335,7 +338,9 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
        * Un centre vocal reste un serveur vocal du début à la fin de l'appel :
        * son sous-titre n'a aucune raison de bouger.
        */
-      if (ivr.etape == IvrEtape.menu || ivr.vocal) return "Serveur vocal";
+      if (ivr.etape == IvrEtape.menu || ivr.vocal) {
+        return tr(context, 'company_center_vocal');
+      }
       /*
        * Sous le nom du centre : `nom_service`, et RIEN s'il est vide — demande
        * du user du 12/08/2026, qui remplace « Mise en relation — <libelle> ».
@@ -349,14 +354,16 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
       return ivr.nomServiceChoisi ?? "";
     }
     if (cc.activeRole == ActiveCallRole.outgoing) {
-      if (cc.isGroupCall) return "Sonnerie du groupe…";
-      return cc.remoteRinging ? "En train de sonner…" : "Sonnerie…";
+      if (cc.isGroupCall) return tr(context, 'call_group_ringing');
+      return cc.remoteRinging
+          ? tr(context, 'call_ringing_remote')
+          : tr(context, 'call_ringing');
     }
     if (cc.activeRole == ActiveCallRole.ongoing) {
       if (cc.mediaConnected) return _formatElapsed(cc);
-      return "Connexion en cours…";
+      return tr(context, 'call_connecting');
     }
-    return "Connexion en cours…";
+    return tr(context, 'call_connecting');
   }
 
   /// [afficheCommeGroupe] et non `cc.isGroupCall` : après un transfert, l'appel
@@ -367,11 +374,11 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
   String _mediaHint(CallController cc, bool afficheCommeGroupe) {
     if (cc.activeRole != ActiveCallRole.ongoing) return "";
     if (afficheCommeGroupe) {
-      return "${cc.connectedPeerCount} connecté(s) · ${cc.joinedParticipantIds.length} dans l'appel";
+      return tr(context, 'call_connected_in_call', {'a': '${cc.connectedPeerCount}', 'b': '${cc.joinedParticipantIds.length}'});
     }
     if (cc.mediaConnected) {
       // return cc.activeType == "VIDEO" ? "Vidéo connectée" : "Audio connectée";
-      return "Appel en cours…";
+      return tr(context, 'call_ongoing_dots');
     }
     return "";
   }
@@ -454,9 +461,11 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
           cc.participantNames[primaryId] ??
           cc.activePeerName ??
           cc.incoming?.displayTitle ??
-          "Contact";
+          tr(context, 'call_contact_fallback');
     } else {
-      name = cc.activePeerName ?? cc.incoming?.displayTitle ?? "Contact";
+      name = cc.activePeerName ??
+          cc.incoming?.displayTitle ??
+          tr(context, 'call_contact_fallback');
     }
     // Après acceptation d'un appel entrant, cc.incoming repasse à null alors que
     // widget.incoming reste true : l'ancien code lisait donc cc.incoming?.callType
@@ -585,7 +594,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                                   : Icons.keyboard_arrow_down,
                               color: Colors.white70,
                             ),
-                            tooltip: showIncoming ? "Refuser" : "Réduire",
+                            tooltip: showIncoming ? tr(context, 'decline') : tr(context, 'call_minimize'),
                             onPressed: () async {
                               if (showIncoming) {
                                 await _reject(cc);
@@ -604,7 +613,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                                 Icons.groups_outlined,
                                 color: Colors.white70,
                               ),
-                              tooltip: "Liste d'attente",
+                              tooltip: tr(context, 'queue'),
                               onPressed: () {
                                 QueueStatusSheet.show(
                                   context,
@@ -806,7 +815,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                         _roundBtn(
                           icon: Icons.close,
                           color: Colors.grey,
-                          label: "Fermer",
+                          label: tr(context, 'close'),
                           onPressed: () => _popScreen(),
                         ),
                       const SizedBox(height: 40),
@@ -1057,11 +1066,13 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     // un tête-à-tête où un tiers a été amené par le correspondant. Dans un VRAI
     // groupe, savoir qui a rejoint reste utile — on ne masque donc rien.
     final label = anonymise && invited
-        ? "Invité"
-        : (cc.participantNames[id] ?? "Participant");
+        ? tr(context, 'guest')
+        : (cc.participantNames[id] ?? tr(context, 'meet_participant'));
     // « Invité (invité) » quand le nom est déjà masqué : le libellé anonyme se
     // suffit à lui-même.
-    final texte = invited && label != "Invité" ? "$label (invité)" : label;
+    final texte = invited && label != tr(context, 'guest')
+        ? tr(context, 'label_guest', {'label': label})
+        : label;
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(14),
@@ -1205,13 +1216,13 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
           ),
         ],
       ),
-      child: const Row(
+      child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.person_add_alt_1_rounded, color: Colors.white, size: 15),
-          SizedBox(width: 6),
+          const Icon(Icons.person_add_alt_1_rounded, color: Colors.white, size: 15),
+          const SizedBox(width: 6),
           Text(
-            "Invité",
+            tr(context, 'guest'),
             style: TextStyle(
               color: Colors.white,
               fontWeight: FontWeight.w700,
@@ -1234,7 +1245,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
         runSpacing: 8,
         alignment: WrapAlignment.center,
         children: ids.map((id) {
-          final label = cc.participantNames[id] ?? "Invité";
+          final label = cc.participantNames[id] ?? tr(context, 'guest');
           final connected = cc.remoteStreams.containsKey(id);
           return Container(
             padding: const EdgeInsets.fromLTRB(6, 4, 12, 4),
@@ -1259,7 +1270,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                 ),
                 const SizedBox(width: 7),
                 Text(
-                  "$label (invité)",
+                  tr(context, 'label_guest', {'label': label}),
                   style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.w600,
@@ -1292,13 +1303,13 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
         _roundBtn(
           icon: Icons.call_end,
           color: Colors.red,
-          label: "Refuser",
+          label: tr(context, 'decline'),
           onPressed: () => _reject(cc),
         ),
         _roundBtn(
           icon: Icons.call,
           color: AlanyaColors.forest,
-          label: "Accepter",
+          label: tr(context, 'accept'),
           onPressed: () => _accept(cc),
         ),
       ],
@@ -1343,7 +1354,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
             _controlBtn(
               icon: cc.isMuted ? Icons.mic_off : Icons.mic,
               active: cc.isMuted,
-              label: cc.isMuted ? "Muet" : "Micro",
+              label: cc.isMuted ? tr(context, 'muted') : tr(context, 'microphone'),
               onPressed: cc.toggleMute,
               taille: 52,
             ),
@@ -1351,7 +1362,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
             _roundBtn(
               icon: Icons.call_end,
               color: Colors.red,
-              label: "Raccrocher",
+              label: tr(context, 'end_call'),
               onPressed: () => _hangUp(cc),
               taille: 64,
             ),
@@ -1359,7 +1370,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
             _controlBtn(
               icon: cc.isSpeakerOn ? Icons.volume_up : Icons.hearing,
               active: cc.isSpeakerOn,
-              label: "Haut-parleur",
+              label: tr(context, 'speaker'),
               onPressed: () => cc.toggleSpeaker(),
               taille: 52,
             ),
@@ -1371,7 +1382,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
       return _roundBtn(
         icon: Icons.call_end,
         color: Colors.red,
-        label: "Raccrocher",
+        label: tr(context, 'end_call'),
         onPressed: () => _hangUp(cc),
       );
     }
@@ -1388,49 +1399,49 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
             _controlBtn(
               icon: cc.isMuted ? Icons.mic_off : Icons.mic,
               active: cc.isMuted,
-              label: cc.isMuted ? "Muet" : "Micro",
+              label: cc.isMuted ? tr(context, 'muted') : tr(context, 'microphone'),
               onPressed: cc.toggleMute,
             ),
             _controlBtn(
               icon: cc.isSpeakerOn ? Icons.volume_up : Icons.hearing,
               active: cc.isSpeakerOn,
-              label: "Haut-parleur",
+              label: tr(context, 'speaker'),
               onPressed: () => cc.toggleSpeaker(),
             ),
             if (isVideo)
               _controlBtn(
                 icon: cc.isVideoEnabled ? Icons.videocam : Icons.videocam_off,
                 active: !cc.isVideoEnabled,
-                label: "Vidéo",
+                label: tr(context, 'video'),
                 onPressed: cc.toggleVideo,
               ),
             if (isVideo)
               _controlBtn(
                 icon: Icons.cameraswitch,
                 active: false,
-                label: "Caméra",
+                label: tr(context, 'camera_short'),
                 onPressed: () => cc.switchCamera(),
               ),
             _controlBtn(
               icon: Icons.chat_bubble_outline,
               active: false,
-              label: "Message",
+              label: tr(context, 'message'),
               onPressed: () => _openChatDuringCall(cc),
             ),
             _controlBtn(
               icon: Icons.person_add_alt_1,
               active: false,
-              label: "Inviter",
+              label: tr(context, 'invite'),
               onPressed: () => _invite(cc),
             ),
             _controlBtn(
               icon: cc.isTransferring ? Icons.close : Icons.phone_forwarded,
               active: cc.isTransferring,
-              label: cc.isTransferring ? "Annuler" : "Transférer",
+              label: cc.isTransferring ? tr(context, 'cancel') : tr(context, 'transfer_action'),
               onPressed: cc.isTransferring
                   ? () {
-                      cc.cancelTransfer(reason: "Transfert annulé");
-                      showAppSnackBar("Transfert annulé");
+                      cc.cancelTransfer(reason: tr(context, 'transfer_cancelled'));
+                      showAppSnackBar(tr(context, 'transfer_cancelled'));
                     }
                   : () => _transfer(cc),
             ),
@@ -1441,8 +1452,8 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
           icon: Icons.call_end,
           color: Colors.red,
           label: cc.isGroupCall && !cc.isCallInitiator
-              ? "Quitter"
-              : "Raccrocher",
+              ? tr(context, 'leave_action')
+              : tr(context, 'end_call'),
           onPressed: () => _hangUp(cc),
         ),
       ],
@@ -1454,8 +1465,8 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
   Future<void> _invite(CallController cc) async {
     final numbers = await ContactPickerSheet.show(
       context,
-      title: "Inviter dans l'appel",
-      confirmLabel: "Inviter",
+      title: tr(context, 'invite_to_call'),
+      confirmLabel: tr(context, 'invite'),
     );
     if (numbers == null || numbers.isEmpty || !mounted) return;
     for (final n in numbers) {
@@ -1463,8 +1474,8 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     }
     showAppSnackBar(
       numbers.length == 1
-          ? "Invitation envoyée"
-          : "${numbers.length} invitations envoyées",
+          ? tr(context, 'invite_sent_one')
+          : tr(context, 'invite_sent_many', {'n': '${numbers.length}'}),
     );
   }
 
@@ -1473,13 +1484,13 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
   Future<void> _transfer(CallController cc) async {
     final numbers = await ContactPickerSheet.show(
       context,
-      title: "Transférer l'appel à…",
-      confirmLabel: "Transférer",
+      title: tr(context, 'transfer_call_to'),
+      confirmLabel: tr(context, 'transfer_action'),
     );
     if (numbers == null || numbers.isEmpty || !mounted) return;
     cc.transferCall(numbers.first);
     showAppSnackBar(
-      "Transfert en cours… l'appel basculera quand le contact décroche.",
+      tr(context, 'transfer_pending'),
     );
   }
 
@@ -1489,11 +1500,11 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
   void _openChatDuringCall(CallController cc) {
     final convId = cc.activeConvId;
     if (convId == null) {
-      showAppSnackBar("Conversation indisponible");
+      showAppSnackBar(tr(context, 'conversation_unavailable'));
       return;
     }
     final title =
-        cc.activePeerName ?? cc.incoming?.displayTitle ?? "Conversation";
+        cc.activePeerName ?? cc.incoming?.displayTitle ?? tr(context, 'conversation');
     final isGroup = cc.isGroupCall;
     final nav = Navigator.of(context, rootNavigator: true);
     if (nav.canPop()) nav.pop();

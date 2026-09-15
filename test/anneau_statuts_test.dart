@@ -1,7 +1,11 @@
 import 'dart:math' as math;
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:alanya/core/locale_controller.dart';
 import 'package:alanya/features/status/gestes_visionneuse.dart';
 import 'package:alanya/features/status/horodatage_statut.dart';
 import 'package:alanya/features/status/widgets/anneau_statuts.dart';
@@ -107,54 +111,91 @@ void main() {
   });
 
   group('horodatageStatut', () {
+    // 🔴 CETTE FONCTION PREND UN `BuildContext` DEPUIS LE LOT i18n : son texte
+    // sort desormais du catalogue (`tr`), il n'est plus ecrit en dur. Les
+    // attentes restent les memes — le catalogue rend le FRANCAIS par defaut —
+    // mais il faut un arbre pour que `AppLocalizations.of` trouve la langue.
     final maintenant = DateTime.now();
+    late LocaleController langue;
 
-    test('moins d\'une minute', () {
+    setUp(() {
+      // `LocaleController` ecrit dans les preferences : sans ce bouchon, il
+      // leve faute de canal natif sous `flutter test`.
+      SharedPreferences.setMockInitialValues({});
+      langue = LocaleController();
+    });
+
+    /// Le texte rendu pour [creeLe], mesure dans un arbre qui sait traduire.
+    ///
+    /// 🔴 L'APPEL SE FAIT PENDANT LE BUILD, ET C'EST OBLIGATOIRE.
+    /// `AppLocalizations.of` passe par `context.watch<LocaleController>()`, que
+    /// provider REFUSE hors de l'arbre : capturer un contexte pour s'en servir
+    /// apres le `pump` leve « Tried to listen to a value exposed with provider,
+    /// from outside of the widget tree ». C'est le piege de ce petit harnais.
+    Future<String> rendu(WidgetTester tester, DateTime creeLe) async {
+      late String texte;
+      await tester.pumpWidget(
+        ChangeNotifierProvider<LocaleController>.value(
+          value: langue,
+          child: MaterialApp(
+            home: Builder(
+              builder: (ctx) {
+                texte = horodatageStatut(creeLe, ctx);
+                return const SizedBox.shrink();
+              },
+            ),
+          ),
+        ),
+      );
+      return texte;
+    }
+
+    testWidgets("moins d'une minute", (tester) async {
       expect(
-        horodatageStatut(maintenant.subtract(const Duration(seconds: 20))),
+        await rendu(tester, maintenant.subtract(const Duration(seconds: 20))),
         "à l'instant",
       );
     });
 
-    test('minutes', () {
+    testWidgets('minutes', (tester) async {
       expect(
-        horodatageStatut(maintenant.subtract(const Duration(minutes: 12))),
+        await rendu(tester, maintenant.subtract(const Duration(minutes: 12))),
         'il y a 12 min',
       );
       expect(
-        horodatageStatut(maintenant.subtract(const Duration(minutes: 59))),
+        await rendu(tester, maintenant.subtract(const Duration(minutes: 59))),
         'il y a 59 min',
       );
     });
 
-    test('heures', () {
+    testWidgets('heures', (tester) async {
       expect(
-        horodatageStatut(maintenant.subtract(const Duration(minutes: 60))),
+        await rendu(tester, maintenant.subtract(const Duration(minutes: 60))),
         'il y a 1 h',
       );
       expect(
-        horodatageStatut(maintenant.subtract(const Duration(hours: 23))),
+        await rendu(tester, maintenant.subtract(const Duration(hours: 23))),
         'il y a 23 h',
       );
     });
 
-    test('au-delà de la durée de vie d\'un statut', () {
+    testWidgets("au-dela de la duree de vie d'un statut", (tester) async {
       expect(
-        horodatageStatut(maintenant.subtract(const Duration(hours: 25))),
+        await rendu(tester, maintenant.subtract(const Duration(hours: 25))),
         'il y a 1 j',
       );
     });
 
-    test(
+    testWidgets(
       'un horodatage UTC est compris comme un instant, pas comme une heure',
-      () {
+      (tester) async {
         // `createdAt` arrive du serveur en UTC (`DateTime.parse` d'un « …Z »).
-        // La différence de deux instants ne dépend pas du fuseau : sans cette
-        // propriété, l'écart afficherait le décalage horaire du téléphone.
+        // La difference de deux instants ne depend pas du fuseau : sans cette
+        // propriete, l'ecart afficherait le decalage horaire du telephone.
         final ilYaDixMinutes = DateTime.now().toUtc().subtract(
           const Duration(minutes: 10),
         );
-        expect(horodatageStatut(ilYaDixMinutes), 'il y a 10 min');
+        expect(await rendu(tester, ilYaDixMinutes), 'il y a 10 min');
       },
     );
   });

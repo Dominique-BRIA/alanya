@@ -5,6 +5,7 @@ import '../../../core/app_snackbar.dart';
 import '../../../core/downloader.dart';
 import '../../../core/telechargement_suivi.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Visionneuse PDF plein écran (style WhatsApp).
 ///
@@ -68,8 +69,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
           idTransfert: "dl-pdf-${widget.filename}");
       if (!mounted) return;
       showAppSnackBar(path != null
-          ? "Enregistré dans Alanya/"
-          : "Échec du téléchargement");
+          ? tr(context, 'saved_to_alanya', {'nom': widget.filename})
+          : tr(context, 'download_failed'));
     } finally {
       if (mounted) setState(() => _downloading = false);
     }
@@ -100,7 +101,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
               ),
             ),
           IconButton(
-            tooltip: "Télécharger",
+            tooltip: tr(context, 'download'),
             icon: _downloading
                 ? const SizedBox(
                     width: 20,
@@ -129,7 +130,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                     ),
                     onPressed: _saveToPublic,
                     icon: const Icon(Icons.download),
-                    label: const Text("Télécharger quand même"),
+                    label: Text(tr(context, 'download_anyway')),
                   ),
                 ],
               ),

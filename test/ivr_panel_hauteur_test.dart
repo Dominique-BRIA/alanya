@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:alanya/core/locale_controller.dart';
 import 'package:alanya/features/calls/call_controller.dart';
 import 'package:alanya/features/calls/widgets/ivr_panel.dart';
 
@@ -34,20 +37,33 @@ void main() {
   /// rend la taille du pavé.
   Future<Size> mesure(WidgetTester tester, IvrSession s,
       {double hauteur = 600}) async {
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(
-        body: SizedBox(
-          height: hauteur,
-          child: Column(
-            children: [
-              Expanded(
-                child: IvrPanel(
-                  session: s,
-                  onTouche: (_) async {},
-                  onRetourAccueil: () async {},
+    // 🔴 LE PROVIDER N'EST PAS UN DETAIL DE MONTAGE. Depuis le lot i18n, le
+    // panneau passe par `tr(context, ...)`, et `AppLocalizations.of` lit la
+    // langue courante avec `context.watch<LocaleController>()`. Monte seul, il
+    // leve `ProviderNotFoundException` avant d'afficher quoi que ce soit — et
+    // l'echec se lit « Bad state: No element » sur `getSize`, ce qui ressemble a
+    // un pave disparu alors que c'est l'arbre qui manquait.
+    //
+    // ⚠️ Les preferences sont bouchonnees pour la meme raison qu'ailleurs :
+    // `LocaleController` y ecrit, et le canal natif n'existe pas en test.
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(ChangeNotifierProvider<LocaleController>.value(
+      value: LocaleController(),
+      child: MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            height: hauteur,
+            child: Column(
+              children: [
+                Expanded(
+                  child: IvrPanel(
+                    session: s,
+                    onTouche: (_) async {},
+                    onRetourAccueil: () async {},
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

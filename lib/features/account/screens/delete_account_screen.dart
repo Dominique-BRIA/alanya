@@ -6,6 +6,7 @@ import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../../auth/auth_controller.dart';
 import '../account_repository.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Suppression définitive du compte : avertissement + vérification du mot de
 /// passe. Action irréversible → double garde (mot de passe + confirmation).
@@ -36,17 +37,17 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
     final sure = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text("Supprimer définitivement ?"),
-        content: const Text(
-            "Cette action est irréversible. Ton compte et toutes tes données seront supprimés."),
+        title: Text(tr(context, 'delete_permanently_q')),
+        content: Text(
+            tr(context, 'account_delete_body')),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text("Annuler")),
+              child: Text(tr(context, 'cancel'))),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text("Supprimer",
-                style: TextStyle(color: AlanyaColors.error)),
+            child: Text(tr(context, 'delete'),
+                style: const TextStyle(color: AlanyaColors.error)),
           ),
         ],
       ),
@@ -69,7 +70,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
-      if (mounted) setState(() => _error = "Une erreur est survenue. Réessaie.");
+      if (mounted) setState(() => _error = tr(context, 'error_occurred_retry'));
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -78,7 +79,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: backAppBar(context, "Supprimer mon compte"),
+      appBar: backAppBar(context, tr(context, 'account_delete_action')),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
@@ -89,26 +90,26 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
               borderRadius: BorderRadius.circular(14),
               border: Border.all(color: AlanyaColors.error.withValues(alpha: 0.3)),
             ),
-            child: const Row(children: [
-              Icon(Icons.warning_amber_rounded, color: AlanyaColors.error),
-              SizedBox(width: 12),
+            child: Row(children: [
+              const Icon(Icons.warning_amber_rounded, color: AlanyaColors.error),
+              const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  "Action irréversible. Toutes tes conversations, messages, statuts et données seront définitivement supprimés.",
-                  style: TextStyle(fontSize: 13),
+                  tr(context, 'account_delete_warning'),
+                  style: const TextStyle(fontSize: 13),
                 ),
               ),
             ]),
           ),
           const SizedBox(height: 24),
-          const Text("Confirme avec ton mot de passe :",
-              style: TextStyle(fontWeight: FontWeight.w600)),
+          Text(tr(context, 'account_delete_password'),
+              style: const TextStyle(fontWeight: FontWeight.w600)),
           const SizedBox(height: 10),
           TextField(
             controller: _password,
             obscureText: _obscure,
             decoration: InputDecoration(
-              labelText: "Mot de passe",
+              labelText: tr(context, 'password'),
               suffixIcon: IconButton(
                 icon: Icon(_obscure ? Icons.visibility_off : Icons.visibility),
                 onPressed: () => setState(() => _obscure = !_obscure),
@@ -132,7 +133,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
                         strokeWidth: 2,
                         valueColor: AlwaysStoppedAnimation<Color>(Colors.white)),
                   )
-                : const Text("Supprimer définitivement"),
+                : Text(tr(context, 'delete_permanently')),
           ),
         ],
       ),

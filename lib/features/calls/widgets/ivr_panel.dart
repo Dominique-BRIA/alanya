@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../../../theme/alanya_theme.dart';
 import '../call_controller.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Pavé numérique d'un standard téléphonique, affiché DANS l'écran d'appel.
 ///
@@ -132,9 +133,6 @@ class _IvrPanelState extends State<IvrPanel> {
     return "${m.toString().padLeft(2, '0')}:${(s % 60).toString().padLeft(2, '0')}";
   }
 
-  /// Libellé de la touche 0 d'un centre vocal, révélé à l'appui long.
-  static const libellePlainte = "Service plainte";
-
   /// L'option d'une touche, `null` si elle ne mène nulle part.
   ///
   /// 🔴 **LA TOUCHE 0 D'UN CENTRE VOCAL EST UNE OPTION IMPLICITE**, et elle ne
@@ -152,9 +150,10 @@ class _IvrPanelState extends State<IvrPanel> {
       if (o.digit == digit) return o;
     }
     if (widget.session.vocal && digit == 0) {
-      return const IvrOption(
+      // Libellé de la touche 0 d'un centre vocal, révélé à l'appui long.
+      return IvrOption(
         digit: 0,
-        label: libellePlainte,
+        label: tr(context, 'ivr_complaint_service'),
         // Toujours joignable : il n'y a aucun agent à trouver derrière, c'est
         // le téléphone lui-même qui enregistre.
         disponible: true,
@@ -210,13 +209,13 @@ class _IvrPanelState extends State<IvrPanel> {
     String? sous;
     if (digit != null) {
       if (option == null) {
-        titre = "Aucun service sur cette touche";
+        titre = tr(context, 'ivr_no_service');
       } else {
         // `nom_service` d'abord, `libelle` en repli — demande du user du
         // 12/08/2026. Les deux viennent de la table `center` : le premier est le
         // nom montré au public, le second le nom interne de la ligne.
         titre = option.nomAffiche;
-        if (!option.disponible) sous = "Bientôt disponible";
+        if (!option.disponible) sous = tr(context, 'coming_soon');
       }
     }
 
@@ -305,7 +304,7 @@ class _IvrPanelState extends State<IvrPanel> {
                   // pavé.
                   Flexible(
                     child: Text(
-                      s.titreEnLecture ?? "Lecture en cours",
+                      s.titreEnLecture ?? tr(context, 'ivr_playing'),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -319,7 +318,7 @@ class _IvrPanelState extends State<IvrPanel> {
                   TextButton.icon(
                     onPressed: () => widget.onRetourAccueil(),
                     icon: const Icon(Icons.home_outlined, size: 16),
-                    label: const Text("Accueil"),
+                    label: Text(tr(context, 'ivr_home')),
                     style: TextButton.styleFrom(
                       foregroundColor: Colors.white,
                       backgroundColor: Colors.white.withValues(alpha: 0.16),
@@ -514,7 +513,7 @@ class _IvrPanelState extends State<IvrPanel> {
         ),
         const SizedBox(height: 18),
         Text(
-          widget.session.serviceChoisi ?? "Mise en relation",
+          widget.session.serviceChoisi ?? tr(context, 'ivr_connecting_short'),
           textAlign: TextAlign.center,
           style: const TextStyle(
             color: Colors.white,
@@ -554,10 +553,10 @@ class _IvrPanelState extends State<IvrPanel> {
             ]),
           ),
         const SizedBox(height: 10),
-        const Text(
-          "Nous vous mettons en relation.\nMerci de patienter.",
+        Text(
+          tr(context, 'ivr_connecting'),
           textAlign: TextAlign.center,
-          style: TextStyle(color: Colors.white54, fontSize: 13),
+          style: const TextStyle(color: Colors.white54, fontSize: 13),
         ),
       ],
     );

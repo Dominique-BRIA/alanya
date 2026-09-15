@@ -8,6 +8,7 @@ import '../../../widgets/avatar_circle.dart';
 import '../../../widgets/motif_background.dart';
 import '../../../models/blocked_user.dart';
 import '../blocked_repository.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Écran de gestion des utilisateurs bloqués.
 ///
@@ -47,16 +48,16 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text("Débloquer ?"),
+        title: Text(tr(context, 'unblock_q')),
         content:
-            Text("${user.displayName} pourra de nouveau vous contacter."),
+            Text(tr(context, 'unblock_body', {'nom': user.displayName})),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text("Annuler")),
+              child: Text(tr(context, 'cancel'))),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text("Débloquer")),
+              child: Text(tr(context, 'unblock'))),
         ],
       ),
     );
@@ -69,7 +70,7 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
           _blocked = _blocked?.where((b) => b.idBlock != user.idBlock).toList();
         });
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("${user.displayName} débloqué")),
+          SnackBar(content: Text(tr(context, 'unblocked_name', {'nom': user.displayName}))),
         );
       }
     } on ApiException catch (e) {
@@ -81,7 +82,7 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Action impossible")),
+          SnackBar(content: Text(tr(context, 'action_failed'))),
         );
       }
     }
@@ -90,7 +91,7 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: backAppBar(context, "Utilisateurs bloqués"),
+      appBar: backAppBar(context, tr(context, 'blocked_title')),
       body: MotifBackground(
         overlayOpacity: 0.92,
         child: RefreshIndicator(
@@ -108,9 +109,9 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
       );
     }
     if (_error) {
-      return ListView(children: const [
-        SizedBox(height: 80),
-        Center(child: Text("Erreur de chargement. Tire pour réessayer.")),
+      return ListView(children: [
+        const SizedBox(height: 80),
+        Center(child: Text(tr(context, 'home_load_error'))),
       ]);
     }
 
@@ -127,7 +128,7 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
                 const Icon(Icons.block, size: 64, color: AlanyaColors.gold),
                 const SizedBox(height: 12),
                 Text(
-                  "Aucun utilisateur bloqué.\nLes personnes bloquées ne pourront plus vous envoyer de messages ni vous appeler.",
+                  tr(context, 'blocked_empty'),
                   textAlign: TextAlign.center,
                   style: TextStyle(
                       color: themed(context,
@@ -159,7 +160,10 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
       title: Text(b.displayName,
           style: const TextStyle(fontWeight: FontWeight.w600)),
       subtitle: Text(
-        "Bloqué le ${b.dateBlock.day.toString().padLeft(2, '0')}/${b.dateBlock.month.toString().padLeft(2, '0')}/${b.dateBlock.year}",
+        tr(context, 'blocked_on', {
+          'date':
+              "${b.dateBlock.day.toString().padLeft(2, '0')}/${b.dateBlock.month.toString().padLeft(2, '0')}/${b.dateBlock.year}",
+        }),
         style: TextStyle(
             fontSize: 12,
             color: themed(context,
@@ -167,7 +171,7 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
       ),
       trailing: TextButton(
         onPressed: () => _unblock(b),
-        child: Text("Débloquer",
+        child: Text(tr(context, 'unblock'),
             style: TextStyle(
                 color: themed(context,
                     light: Colors.red, dark: AlanyaColors.erreurNuit))),

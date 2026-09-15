@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../features/chat/envoi_media.dart';
 import '../../theme/alanya_theme.dart';
+import '../../l10n/app_localizations.dart';
 
 /// Bulle d'un envoi de médias EN COURS ou ÉCHOUÉ.
 ///
@@ -100,8 +101,14 @@ class SendingMediaBubble extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               envoi.echoue
-                  ? "${envoi.mediaIdsObtenus.length}/${envoi.total} envoyé${envoi.mediaIdsObtenus.length > 1 ? "s" : ""}"
-                  : "Envoi ${envoi.indexCourant + 1}/${envoi.total}",
+                  ? trN(context, 'sending_progress', envoi.mediaIdsObtenus.length, {
+                      'obtenus': '${envoi.mediaIdsObtenus.length}',
+                      'total': '${envoi.total}',
+                    })
+                  : tr(context, 'sending_step', {
+                      'index': '${envoi.indexCourant + 1}',
+                      'total': '${envoi.total}',
+                    }),
               style: TextStyle(fontSize: 11.5, color: onSub),
             ),
           ],
@@ -112,7 +119,7 @@ class SendingMediaBubble extends StatelessWidget {
             // Un bouton laisserait croire que rien ne se passera sans lui.
             // « Supprimer » reste, pour qui change d'avis.
             Text(
-              "En attente de connexion",
+              tr(context, 'waiting_for_connection'),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 12, color: onSub),
@@ -121,13 +128,13 @@ class SendingMediaBubble extends StatelessWidget {
             Row(children: [
               _action(context,
                   icone: Icons.delete_outline,
-                  label: "Supprimer",
+                  label: tr(context, 'delete'),
                   onTap: onAbandonner),
             ]),
           ] else if (envoi.echoue) ...[
             const SizedBox(height: 2),
             Text(
-              envoi.erreur ?? "Échec de l'envoi",
+              envoi.erreur ?? tr(context, 'send_failed_media'),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
@@ -136,18 +143,18 @@ class SendingMediaBubble extends StatelessWidget {
             const SizedBox(height: 2),
             Row(children: [
               _action(context,
-                  icone: Icons.refresh, label: "Réessayer", onTap: onReessayer),
+                  icone: Icons.refresh, label: tr(context, 'retry'), onTap: onReessayer),
               const SizedBox(width: 4),
               _action(context,
                   icone: Icons.delete_outline,
-                  label: "Supprimer",
+                  label: tr(context, 'delete'),
                   onTap: onAbandonner),
             ]),
           ] else if (envoi.progression >= 1) ...[
             const SizedBox(height: 3),
             // Les octets sont partis, la réponse du serveur ne l'est pas : on
             // n'écrit donc PAS « terminé », qui serait un mensonge.
-            Text("Envoi…", style: TextStyle(fontSize: 11.5, color: onSub)),
+            Text(tr(context, 'sending'), style: TextStyle(fontSize: 11.5, color: onSub)),
           ],
           if ((legende ?? '').isNotEmpty) ...[
             const SizedBox(height: 4),

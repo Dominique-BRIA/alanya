@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'image_octets.dart';
 import 'media/cached_media.dart';
+import '../l10n/app_localizations.dart';
 
 /// Charge une image protégée par JWT (Bearer) puis l'affiche en mémoire.
 /// Évite d'exposer le token dans l'URL et gère mieux les erreurs 401.
@@ -135,7 +136,7 @@ class _AuthNetworkImageState extends State<AuthNetworkImage> {
       height: widget.height ?? 120,
       color: Colors.black12,
       alignment: Alignment.center,
-      child: const Text("Image indisponible", style: TextStyle(fontSize: 12)),
+      child: Text(tr(context, 'image_unavailable'), style: const TextStyle(fontSize: 12)),
     );
   }
 

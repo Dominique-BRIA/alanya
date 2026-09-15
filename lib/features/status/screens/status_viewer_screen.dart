@@ -17,6 +17,7 @@ import '../gestes_visionneuse.dart';
 import '../horodatage_statut.dart';
 import '../status_repository.dart';
 import 'create_status_screen.dart' show colorFromHex;
+import '../../../l10n/app_localizations.dart';
 
 /// Durée d'affichage d'un statut qui n'a pas de durée propre (texte, image).
 const Duration _dureeFixe = Duration(seconds: 5);
@@ -394,14 +395,14 @@ class _VueGroupeState extends State<_VueGroupe>
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("Supprimer ce statut ?"),
+        title: Text(tr(ctx, 'status_delete_q')),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text("Annuler")),
+              child: Text(tr(ctx, 'cancel'))),
           TextButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text("Supprimer")),
+              child: Text(tr(ctx, 'delete'))),
         ],
       ),
     );
@@ -513,7 +514,7 @@ class _VueGroupeState extends State<_VueGroupe>
                 Text(widget.groupe.displayName,
                     style: const TextStyle(
                         color: Colors.white, fontWeight: FontWeight.bold)),
-                Text(horodatageStatut(s.createdAt),
+                Text(horodatageStatut(s.createdAt, context),
                     style:
                         const TextStyle(color: Colors.white70, fontSize: 12)),
               ],
@@ -578,9 +579,9 @@ class _VueGroupeState extends State<_VueGroupe>
         onEchec: _mediaEchoue,
       );
     }
-    return const Text(
-      "[Média non pris en charge]",
-      style: TextStyle(color: Colors.white70),
+    return Text(
+      tr(context, 'media_unsupported'),
+      style: const TextStyle(color: Colors.white70),
     );
   }
 
@@ -622,11 +623,11 @@ class _VueGroupeState extends State<_VueGroupe>
       await chat.sendText(convId, t, statutCite: statutId);
       _reponseCtrl.clear();
       messenger.showSnackBar(
-        SnackBar(content: Text("Envoyé à ${widget.groupe.displayName}")),
+        SnackBar(content: Text(tr(context, 'status_sent_to', {'nom': widget.groupe.displayName}))),
       );
     } catch (_) {
       messenger.showSnackBar(
-        const SnackBar(content: Text("Envoi impossible")),
+        SnackBar(content: Text(tr(context, 'status_reply_failed'))),
       );
     } finally {
       if (mounted) {
@@ -681,10 +682,10 @@ class _VueGroupeState extends State<_VueGroupe>
                   onTap: () => _ajoutePause(_RaisonPause.dialogue),
                   onSubmitted: _repondre,
                   textInputAction: TextInputAction.send,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     counterText: "",
-                    hintText: "Répondre…",
-                    hintStyle: TextStyle(color: Colors.white54),
+                    hintText: tr(context, 'status_reply_hint'),
+                    hintStyle: const TextStyle(color: Colors.white54),
                     filled: true,
                     fillColor: Colors.white10,
                     // Les quatre états : `border` seul ne remplace pas ceux du
@@ -793,16 +794,16 @@ class _VueGroupeState extends State<_VueGroupe>
                 child: Row(children: [
                   const Icon(Icons.visibility, size: 18),
                   const SizedBox(width: 8),
-                  Text("Vu par ${views.length}",
+                  Text(tr(context, 'status_seen_by', {'n': '${views.length}'}),
                       style: const TextStyle(
                           fontWeight: FontWeight.bold, fontSize: 16)),
                 ]),
               ),
               const Divider(height: 1),
               if (views.isEmpty)
-                const Padding(
-                    padding: EdgeInsets.all(20),
-                    child: Text("Personne n'a encore vu ce statut.")),
+                Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Text(tr(context, 'status_no_viewers'))),
               ...views.map((v) {
                 final viewedStr = v["viewedAt"] as String?;
                 final when = viewedStr != null
@@ -834,17 +835,17 @@ class _VueGroupeState extends State<_VueGroupe>
     final local = d.toLocal();
     final now = DateTime.now();
     final diff = now.difference(local);
-    if (diff.inSeconds < 60) return "maintenant";
-    if (diff.inMinutes < 60) return "il y a ${diff.inMinutes} min";
+    if (diff.inSeconds < 60) return tr(context, 'now_word');
+    if (diff.inMinutes < 60) return tr(context, 'time_min_ago', {'n': '${diff.inMinutes}'});
     final hh = local.hour.toString().padLeft(2, '0');
     final mm = local.minute.toString().padLeft(2, '0');
     final sameDay = now.year == local.year &&
         now.month == local.month &&
         now.day == local.day;
-    if (sameDay) return "à ${hh}h$mm";
+    if (sameDay) return tr(context, 'time_at', {'heure': '${hh}h$mm'});
     final dd = local.day.toString().padLeft(2, '0');
     final mo = local.month.toString().padLeft(2, '0');
-    return "le $dd/$mo à ${hh}h$mm";
+    return tr(context, 'date_on_at', {'date': '$dd/$mo', 'heure': '${hh}h$mm'});
   }
 }
 
@@ -945,8 +946,8 @@ class _StatusVideoPlayerState extends State<_StatusVideoPlayer> {
   @override
   Widget build(BuildContext context) {
     if (_error) {
-      return const Text("Vidéo indisponible",
-          style: TextStyle(color: Colors.white70));
+      return Text(tr(context, 'status_video_unavailable'),
+          style: const TextStyle(color: Colors.white70));
     }
     final c = _ctrl;
     if (c == null || !c.value.isInitialized) {

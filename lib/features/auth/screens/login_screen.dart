@@ -176,7 +176,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       );
                     },
                     child: Text(
-                      "Mot de passe oublié ?",
+                      tr(context, 'forgot_password'),
                       style: TextStyle(color: accentOf(context)),
                     ),
                   ),
