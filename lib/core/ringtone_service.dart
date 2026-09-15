@@ -112,13 +112,32 @@ class RingtoneService {
   /// d'écrire » : le destinataire l'entendait pendant que l'expéditeur tapait,
   /// donc avant que le message existe, et n'entendait rien à sa réception.
   /// Il ne marque désormais que la réception.
-  Future<void> playMessageReceived() async {
+  /// [url] et [asset] portent le son propre à la LISTE DE CONTACTS de
+  /// l'expéditeur, déjà rendu jouable par `SonneriesDeListes`. Même convention
+  /// que [startIncoming] : [asset] pour un son LIVRÉ avec l'application, [url]
+  /// pour un son importé, et [asset] l'emporte si les deux sont fournis — le
+  /// local est toujours plus sûr et plus rapide que le distant.
+  ///
+  /// ⚠️ TOUT ÉCHEC RETOMBE SUR LE SON EMBARQUÉ, jamais sur le silence : un son
+  /// personnalisé qui ne se télécharge pas ne doit pas faire disparaître le
+  /// signal d'arrivée d'un message.
+  ///
+  /// ⚠️ NE COUVRE QUE L'APPLICATION AU PREMIER PLAN. Message reçu écran éteint
+  /// ou application fermée, c'est Android qui sonne, d'après le canal de
+  /// notification — un canal ne peut PAS changer de son après sa création, il
+  /// faut en créer un par sonnerie. Ce n'est pas fait, et cela reste à faire.
+  Future<void> playMessageReceived({String? url, String? asset}) async {
     final now = DateTime.now();
     if (_lastMessageCueAt != null &&
         now.difference(_lastMessageCueAt!) < _messageCueGap) {
       return;
     }
     _lastMessageCueAt = now;
+    final personnalise = (asset != null && asset.isNotEmpty)
+        ? AssetSource(asset)
+        : (url != null && url.isNotEmpty)
+            ? UrlSource(url)
+            : null;
     try {
       final p = _cuePlayer ??= AudioPlayer();
       await p.setReleaseMode(ReleaseMode.release);
@@ -127,8 +146,23 @@ class RingtoneService {
       // événement que l'utilisateur doit remarquer.
       await p.setVolume(1.0);
       await p.stop();
-      await p.play(AssetSource(_cueAsset));
-    } catch (_) {}
+      await p.play(personnalise ?? AssetSource(_cueAsset));
+    } catch (e) {
+      if (personnalise == null) return;
+      debugPrint("[RingtoneService] ❌ son de message personnalisé: $e");
+      // Le lecteur a pu rester dans un état bancal après l'échec : on le jette
+      // plutôt que de le réutiliser pour le repli.
+      try {
+        await _cuePlayer?.release();
+      } catch (_) {}
+      _cuePlayer = null;
+      try {
+        final p = _cuePlayer = AudioPlayer();
+        await p.setReleaseMode(ReleaseMode.release);
+        await p.setVolume(1.0);
+        await p.play(AssetSource(_cueAsset));
+      } catch (_) {}
+    }
   }
 
   /// Ton bref joué quand un participant **rejoint** une réunion (style Google

@@ -50,7 +50,6 @@ class ContactListsRepository {
       if (couleur != null) "color": couleur,
       if (sonnerie != null) "ringtone": sonnerie.url,
       if (sonnerieMessage != null) "ringtoneMessage": sonnerieMessage.url,
-      if (sonnerieMessage != null) "ringtoneMessage": sonnerieMessage.url,
     });
     return _resultat(data);
   }
@@ -78,6 +77,14 @@ class ContactListsRepository {
       if (couleur != null) "color": couleur,
       // Voir `creer` : le record présent avec `url: null` retire la sonnerie.
       if (sonnerie != null) "ringtone": sonnerie.url,
+      // 🔴 CE CHAMP MANQUAIT, et c'est par ici que passe TOUT changement de son
+      // d'une liste existante — l'écran des sonneries n'appelle jamais `creer`.
+      // Le paramètre était déclaré et documenté, le corps de la requête ne le
+      // portait pas : le serveur ne recevait rien, gardait `NULL`, et le son
+      // par défaut continuait de sonner sans qu'aucune erreur ne s'affiche.
+      // L'écran, lui, réaffichait le choix depuis son propre état : tout avait
+      // l'air enregistré jusqu'au rechargement de l'application.
+      if (sonnerieMessage != null) "ringtoneMessage": sonnerieMessage.url,
     });
     return _resultat(data);
   }

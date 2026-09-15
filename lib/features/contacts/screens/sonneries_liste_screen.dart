@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../core/app_snackbar.dart';
 import '../../../core/ringtone_service.dart';
+import '../../../core/sonneries_listes.dart';
 import '../../../core/sonneries_livrees.dart';
 import '../../../models/contact_list.dart';
 import '../../../models/sonnerie.dart';
@@ -145,6 +146,7 @@ class _SonneriesListeScreenState extends State<SonneriesListeScreen> {
 
   Future<void> _enregistrerSons() async {
     final depot = context.read<ContactListsRepository>();
+    final sonneries = context.read<SonneriesDeListes>();
     setState(() => _envoi = true);
     try {
       await depot.modifier(
@@ -155,6 +157,16 @@ class _SonneriesListeScreenState extends State<SonneriesListeScreen> {
         sonnerie: (url: _sonAppel),
         sonnerieMessage: (url: _sonMessage),
       );
+      // 🔴 SANS CECI, LE SON ENREGISTRÉ NE SE FAIT PAS ENTENDRE AVANT UN
+      // REDÉMARRAGE. C'est `SonneriesDeListes` — un cache EN MÉMOIRE — qui
+      // décide du son à l'arrivée d'un appel ou d'un message, et cet écran ne
+      // l'avertissait de rien : il gardait la liste telle qu'elle était à
+      // l'ouverture. Tout paraissait enregistré, et l'ancien son continuait de
+      // sonner.
+      //
+      // ⚠️ UN RECHARGEMENT COMPLET, et non la seule liste rendue par le PATCH :
+      // le cache porte TOUTES les listes, et c'est leur ensemble qui arbitre.
+      await sonneries.rafraichir();
     } catch (_) {
       if (!mounted) return;
       showAppSnackBar(tr(context, 'save_failed_short'));
@@ -165,12 +177,19 @@ class _SonneriesListeScreenState extends State<SonneriesListeScreen> {
 
   Future<void> _enregistrerOrdre() async {
     final depot = context.read<ContactListsRepository>();
+    final sonneries = context.read<SonneriesDeListes>();
     // Photo de l'ordre affiché AVANT l'appel : si le serveur refuse, c'est à
     // lui qu'on revient, et non à un état intermédiaire.
     final avant = List.of(_ordre);
     setState(() => _envoi = true);
     try {
       final rendu = await depot.reordonner(_ordre.map((l) => l.id).toList());
+      // Le nouveau rang décide de la sonnerie quand quelqu'un appartient à
+      // plusieurs listes : le cache qui arbitre doit l'apprendre tout de suite.
+      //
+      // ⚠️ Aucune requête de plus : `reordonner` rend DÉJÀ toutes les listes,
+      // réordonnées par le serveur. C'est exactement ce que `alimenter` attend.
+      sonneries.alimenter(rendu);
       if (!mounted) return;
       // On adopte ce que le SERVEUR rend, jamais ce qu'on croit avoir envoyé :
       // les deux divergent dès qu'un second appareil réordonne en même temps.

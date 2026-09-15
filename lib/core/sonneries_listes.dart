@@ -4,7 +4,6 @@ import '../features/contacts/contact_lists_repository.dart';
 import '../models/contact_list.dart';
 import 'api_client.dart';
 import 'sonneries_livrees.dart';
-import 'texte_recherche.dart';
 import 'token_storage.dart';
 
 /// Ne garde que les chiffres — un numéro se compare sans ses espaces.
@@ -79,19 +78,63 @@ class SonneriesDeListes extends ChangeNotifier {
     }
   }
 
-  /// La liste qui décide de la sonnerie pour cet appelant, ou `null`.
+  /// L'ORDRE DE PRIORITÉ DU COMPTE — transposition exacte d'`ORDRE_LISTES`
+  /// côté serveur : `ordre ASC NULLS LAST, createdAt ASC, id ASC`.
+  ///
+  /// 🔴 CE TRI REMPLACE UN TRI ALPHABÉTIQUE, et c'était toute la panne de
+  /// l'écran de réordonnancement : on pouvait glisser les listes dans l'ordre
+  /// voulu, le rang partait bien au serveur et revenait bien dans le modèle,
+  /// mais l'arbitrage retriait tout par NOM et redésignait donc toujours la
+  /// même gagnante. Rien à l'écran ne pouvait l'expliquer. Le web a reçu
+  /// exactement ce correctif le 12/09 (`74dc35d`, `parPriorite`).
+  ///
+  /// ⚠️ LES NON-ORDONNÉES TOMBENT EN DERNIER, jamais en tête — même piège que
+  /// `NULLS LAST` en SQL. Une liste sans rang doit céder le pas à celles que
+  /// l'utilisateur a explicitement placées, pas les devancer.
+  ///
+  /// ⚠️ Tant que personne n'a rien ordonné, `ordre` vaut `null` partout et ce
+  /// tri se réduit EXACTEMENT à l'ancienneté d'avant : le changement est
+  /// invisible jusqu'au premier réordonnancement.
+  ///
+  /// ⚠️ Le départage final se fait sur `id` et NON sur le nom : renommer une
+  /// liste ne doit pas déplacer la sonnerie de quelqu'un.
+  static int comparePriorite(ListeContacts a, ListeContacts b) {
+    final ra = a.ordre;
+    final rb = b.ordre;
+    if (ra != rb) {
+      if (ra == null) return 1;
+      if (rb == null) return -1;
+      return ra.compareTo(rb);
+    }
+    final parAge = a.createdAt.compareTo(b.createdAt);
+    return parAge != 0 ? parAge : a.id.compareTo(b.id);
+  }
+
+  /// La liste qui décide pour cette personne, parmi celles qui portent un son.
   ///
   /// ⚠️ **Une personne peut appartenir à PLUSIEURS listes.** Il faut donc une
-  /// règle, et elle doit être stable : sans elle, la sonnerie changerait d'un
-  /// appel à l'autre au gré de l'ordre rendu par le serveur. On retient la
-  /// **première par ordre alphabétique** parmi celles qui portent une sonnerie —
-  /// arbitraire, mais prévisible, et l'utilisateur peut la deviner.
-  ListeContacts? listePourAppelant({String? callerId, String? numero}) {
-    final id = callerId?.toLowerCase();
+  /// règle, et elle doit être stable : sans elle, la sonnerie changerait d'une
+  /// fois à l'autre au gré de l'ordre rendu par le serveur. C'est l'ordre de
+  /// priorité choisi par l'utilisateur qui tranche — voir [comparePriorite].
+  ///
+  /// [son] désigne le champ à consulter : la sonnerie d'APPEL ou celle des
+  /// MESSAGES. Les deux partagent tout le reste — l'appartenance, le
+  /// rapprochement par numéro, l'arbitrage — et c'est pour cela qu'ils vivent
+  /// dans la même fonction : deux copies auraient fini par diverger, et le
+  /// dépôt paie déjà régulièrement ce défaut.
+  ListeContacts? _listePour(
+    String? Function(ListeContacts) son, {
+    String? personneId,
+    String? numero,
+  }) {
+    final id = personneId?.toLowerCase();
     final num = numero == null ? "" : _chiffres(numero);
     final candidates =
         _cache
-            .where((l) => l.ringtone != null && l.ringtone!.isNotEmpty)
+            .where((l) {
+              final v = son(l);
+              return v != null && v.isNotEmpty;
+            })
             .where(
               (l) => l.members.any((m) {
                 if (id != null && m.id.toLowerCase() == id) return true;
@@ -99,33 +142,73 @@ class SonneriesDeListes extends ChangeNotifier {
               }),
             )
             .toList()
-          ..sort((a, b) => comparePourTri(a.name, b.name));
+          ..sort(comparePriorite);
     return candidates.isEmpty ? null : candidates.first;
   }
 
+  /// La liste qui décide de la sonnerie d'APPEL pour cet appelant, ou `null`.
+  ListeContacts? listePourAppelant({String? callerId, String? numero}) =>
+      _listePour((l) => l.ringtone, personneId: callerId, numero: numero);
+
+  /// La liste qui décide du son des MESSAGES pour cet expéditeur, ou `null`.
+  ListeContacts? listePourExpediteur({String? expediteurId, String? numero}) =>
+      _listePour(
+        (l) => l.ringtoneMessage,
+        personneId: expediteurId,
+        numero: numero,
+      );
+
   /// Ce qu'il faut jouer pour cet appelant, ou `null` pour la sonnerie défaut.
   ///
-  /// 🔴 DEUX FORMES, ET C'EST TOUT LE SUJET. Le champ `ringtone` d'une liste
-  /// porte soit une URL de média importé, soit le NOM D'UN FICHIER LIVRÉ avec
-  /// l'application — ce qu'utilisent les quatre listes créées d'office.
+  /// La mise en forme de la valeur — fichier livré, URL importée — vit dans
+  /// [_resoudre], partagée avec le son des messages.
+  Future<SonnerieAJouer?> sonneriePourAppelant({
+    String? callerId,
+    String? numero,
+  }) => _resoudre(
+    listePourAppelant(callerId: callerId, numero: numero)?.ringtone,
+  );
+
+  /// Ce qu'il faut jouer à l'arrivée d'un MESSAGE de cette personne, ou `null`
+  /// pour le son par défaut.
   ///
-  /// Cette méthode ne connaissait que la première : elle collait l'adresse de
-  /// l'API devant la valeur, quelle qu'elle soit. « liste-bureau.mp3 » devenait
-  /// `https://…comliste-bureau.mp3`, sans même la barre oblique. Les quatre
+  /// 🔴 CE MAILLON MANQUAIT AUSSI — exactement le défaut déjà corrigé pour les
+  /// appels, et décrit en tête de ce fichier. La colonne existait, l'écran
+  /// laissait choisir, le serveur rendait la valeur : **personne ne la lisait à
+  /// l'arrivée d'un message.** `playMessageReceived()` jouait l'asset embarqué,
+  /// sans condition.
+  ///
+  /// ⚠️ Même règle de repli que pour un appel : une forme inconnue ou un jeton
+  /// absent rendent `null`, et le son par défaut se fait entendre. Un message
+  /// silencieux serait pire qu'un message au mauvais son.
+  Future<SonnerieAJouer?> sonneriePourExpediteur({
+    String? expediteurId,
+    String? numero,
+  }) => _resoudre(
+    listePourExpediteur(
+      expediteurId: expediteurId,
+      numero: numero,
+    )?.ringtoneMessage,
+  );
+
+  /// Rend jouable la valeur brute d'un champ de sonnerie, ou `null`.
+  ///
+  /// 🔴 DEUX FORMES, ET C'EST TOUT LE SUJET. Le champ porte soit une URL de
+  /// média importé, soit le NOM D'UN FICHIER LIVRÉ avec l'application — ce
+  /// qu'utilisent les quatre listes créées d'office.
+  ///
+  /// Cette résolution ne connaissait que la première : elle collait l'adresse
+  /// de l'API devant la valeur, quelle qu'elle soit. « liste-bureau.mp3 »
+  /// devenait `https://…comliste-bureau.mp3`, sans même la barre oblique. Les
   /// sonneries livrées ne pouvaient donc pas sonner sur Android.
   ///
   /// ⚠️ Une forme INCONNUE rend `null` plutôt qu'une URL construite au hasard :
-  /// mieux vaut la sonnerie par défaut, qui s'entend, qu'un appel muet.
+  /// mieux vaut le son par défaut, qui s'entend, qu'un silence.
   ///
   /// ⚠️ Le catalogue importé rend une URL RELATIVE (`/api/media/<id>`) et la
   /// route des médias exige un jeton, que le lecteur audio ne sait pas joindre
   /// en en-tête. Il passe donc en paramètre, comme partout ailleurs.
-  Future<SonnerieAJouer?> sonneriePourAppelant({
-    String? callerId,
-    String? numero,
-  }) async {
-    final liste = listePourAppelant(callerId: callerId, numero: numero);
-    final brut = liste?.ringtone;
+  Future<SonnerieAJouer?> _resoudre(String? brut) async {
     if (brut == null || brut.isEmpty) return null;
 
     // Sonnerie livrée : aucun réseau, aucun jeton, elle est dans le paquet.

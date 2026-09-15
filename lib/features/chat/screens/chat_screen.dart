@@ -32,6 +32,7 @@ import '../../../core/notification_settings.dart';
 import '../../../core/presence_store.dart';
 import '../../../core/realtime_client.dart';
 import '../../../core/ringtone_service.dart';
+import '../../../core/sonneries_listes.dart';
 import '../../../core/token_storage.dart';
 import '../../../core/voice_recorder.dart';
 import '../../../core/locale_controller.dart';
@@ -939,7 +940,7 @@ class _ChatScreenState extends State<ChatScreen>
         // le son est donc le seul signal d'arrivée. Respecte le réglage
         // « Notifications de messages ».
         if (NotificationSettings.instance.messagesOn) {
-          RingtoneService.instance.playMessageReceived();
+          _sonnerMessageRecu(msg.senderId);
         }
       }
       _scrollToBottom();
@@ -1160,6 +1161,32 @@ class _ChatScreenState extends State<ChatScreen>
     // Faire sonner le destinataire pendant que l'autre tape le prévenait d'un
     // message qui n'existait pas encore. Le son est déclenché à la réception
     // du message, dans _onRealtimeEvent.
+  }
+
+  /// Joue le son d'arrivée d'un message — celui de la LISTE DE CONTACTS de
+  /// l'expéditeur s'il en porte un, l'embarqué sinon.
+  ///
+  /// ⚠️ LE SERVICE EST LU AVANT LE MOINDRE `await` : on ne consulte pas
+  /// `context` après une coupure asynchrone, l'écran pouvant avoir été démonté
+  /// entre-temps.
+  ///
+  /// ⚠️ LE DÉLAI EST BORNÉ et l'échec vaut « pas de son personnalisé », comme à
+  /// l'arrivée d'un appel : un message ne doit pas attendre le réseau pour
+  /// s'annoncer. Le cache des listes est en mémoire, donc la réponse est
+  /// immédiate dans le cas normal ; la borne ne couvre que la lecture du jeton.
+  ///
+  /// L'anti-rafale vit dans `playMessageReceived`, pas ici.
+  Future<void> _sonnerMessageRecu(String expediteurId) async {
+    final sonneries = context.read<SonneriesDeListes>();
+    final son = await sonneries
+        .sonneriePourExpediteur(expediteurId: expediteurId)
+        .timeout(const Duration(milliseconds: 400), onTimeout: () => null)
+        .catchError((_) => null);
+    // Livré : se joue depuis le paquet, sans réseau ni jeton.
+    RingtoneService.instance.playMessageReceived(
+      asset: son != null && son.estLivree ? son.valeur : null,
+      url: son != null && !son.estLivree ? son.valeur : null,
+    );
   }
 
   void _markReadRemote() {
