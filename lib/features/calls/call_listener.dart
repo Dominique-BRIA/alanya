@@ -13,6 +13,7 @@ import '../../core/diagnostic_chip.dart';
 import '../../core/in_app_notifier.dart';
 import '../../core/push_service.dart';
 import 'call_controller.dart';
+import 'widgets/feuille_repondeur.dart';
 import 'calls_repository.dart';
 import 'screens/active_call_screen.dart';
 import '../../l10n/app_localizations.dart';
@@ -39,6 +40,9 @@ class CallListener extends StatefulWidget {
 }
 
 class _CallListenerState extends State<CallListener> {
+  /// L'appel dont la feuille de repondeur est deja ouverte, ou `null`.
+  String? _repondeurAffiche;
+
   String? _shownCallId;
   bool _pendingAccept = false;
   StreamSubscription<CallEvent?>? _natifSub;
@@ -388,7 +392,45 @@ class _CallListenerState extends State<CallListener> {
               avatarUrl: inc.callerAvatarUrl);
         }
       });
-    } else if (inc == null && _shownCallId != null) {
+    }
+
+    /*
+     * LE REPONDEUR DU CORRESPONDANT.
+     *
+     * 🔴 ICI, ET NON DANS L'ECRAN D'APPEL. L'appel est deja clos quand le
+     * serveur envoie `repondeur_direct` — il n'a jamais sonne — et l'ecran
+     * d'appel se referme aussitot. Une feuille montee dedans disparaitrait a
+     * l'instant meme ou elle devrait s'ouvrir. `CallListener` enveloppe
+     * l'application entiere : il survit a cette fermeture.
+     *
+     * ⚠️ `_repondeurAffiche` GARDE L'IDENTIFIANT DE L'APPEL, et non un
+     * booleen : le `build` se rejoue a chaque notification du controleur, et un
+     * drapeau remis a zero a la fermeture rouvrirait la feuille en boucle tant
+     * que la session vit.
+     */
+    final rep = cc.repondeur;
+    if (rep != null && rep.callId != _repondeurAffiche) {
+      _repondeurAffiche = rep.callId;
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted) return;
+        await showModalBottomSheet<void>(
+          context: context,
+          isScrollControlled: true,
+          backgroundColor: Theme.of(context).colorScheme.surface,
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          builder: (_) => const FeuilleRepondeur(),
+        );
+        // Ferme par le bas plutot que par le bouton : la session doit partir
+        // quand meme, sinon elle rouvrirait la feuille au prochain `build`.
+        if (mounted) context.read<CallController>().fermerRepondeur();
+      });
+    } else if (rep == null && _repondeurAffiche != null) {
+      _repondeurAffiche = null;
+    }
+
+    if (inc == null && _shownCallId != null) {
       // L'appel n'est plus entrant (accepté/rejeté/annulé) → on retire le heads-up.
       _shownCallId = null;
       WidgetsBinding.instance.addPostFrameCallback((_) {

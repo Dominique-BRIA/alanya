@@ -24,6 +24,9 @@ import '../../l10n/app_localizations.dart';
 import 'enregistrements_repository.dart';
 import '../../models/call_record.dart';
 import 'calls_repository.dart';
+import 'repondeur_repository.dart';
+import '../../core/server_config.dart';
+import '../../core/token_storage.dart';
 import 'webrtc_group_mesh.dart';
 import 'webrtc_peer_session.dart';
 
@@ -214,6 +217,40 @@ class IvrSession {
   bool envoiEnCours = false;
 }
 
+/// LE REPONDEUR DU CORRESPONDANT, vu par l'appelant.
+///
+/// 🔴 CE CHEMIN N'EXISTAIT PAS SUR MOBILE. Quand quelqu'un posait une
+/// absence, le serveur cloturait l'appel et envoyait `repondeur_direct` — que
+/// l'application ne connaissait pas. Aucun `call_ended` ne suivait (l'appel
+/// etait deja `NO_ANSWER`, le balayage ne ramasse que les `RINGING`) : l'ecran
+/// sonnait donc SOIXANTE SECONDES dans le vide, jusqu'a son propre minuteur,
+/// sans accueil et sans pouvoir laisser de message.
+class SessionRepondeur {
+  SessionRepondeur({
+    required this.callId,
+    required this.nomCorrespondant,
+    required this.accueilUrl,
+    required this.absence,
+  });
+
+  final String callId;
+  final String nomCorrespondant;
+
+  /// L'accueil, DEJA JOUABLE : adresse absolue et jeton joints. Nul quand le
+  /// correspondant n'a pas d'accueil enregistre — on peut alors encore laisser
+  /// un message, il n'y a simplement rien a ecouter d'abord.
+  final String? accueilUrl;
+
+  /// Vrai : le correspondant a pose une ABSENCE. Faux : il n'a pas repondu.
+  /// La nuance se dit a l'ecran, elle ne change aucun comportement.
+  final bool absence;
+
+  /// Un message a-t-il deja ete depose ? Le serveur n'en accepte qu'un par
+  /// appel (index unique partiel sur `callID`), autant ne pas le proposer deux
+  /// fois.
+  bool depose = false;
+}
+
 /// Appels directs et de groupe — mesh WebRTC (une connexion par participant).
 class CallController extends ChangeNotifier {
   CallController(
@@ -221,6 +258,7 @@ class CallController extends ChangeNotifier {
     this._rt,
     this._sonneriesListes,
     this._enregistrements,
+    this._repondeurDepot,
   ) {
     _sub = _rt.events.listen(_onEvent);
     // Sans préchargement, le PREMIER appel de la session sonnerait toujours par
@@ -233,6 +271,16 @@ class CallController extends ChangeNotifier {
 
   final CallsRepository _calls;
   final RealtimeClient _rt;
+  final RepondeurRepository _repondeurDepot;
+
+  /// Le repondeur en cours de consultation, ou `null`.
+  ///
+  /// ⚠️ SURVIT VOLONTAIREMENT A `_clear()`. L'appel est termine — c'est meme
+  /// la condition pour qu'un repondeur ait un sens — et l'ecran d'appel se
+  /// referme : si cet etat partait avec lui, la feuille disparaitrait a
+  /// l'instant meme ou elle devrait s'ouvrir. Il se ferme par
+  /// [fermerRepondeur], et par lui seul.
+  SessionRepondeur? repondeur;
   final SonneriesDeListes _sonneriesListes;
   final EnregistrementsRepository _enregistrements;
   StreamSubscription<Map<String, dynamic>>? _sub;
@@ -1821,6 +1869,46 @@ class CallController extends ChangeNotifier {
       } else {
         _bufferSignal(callId, from, signal);
       }
+    } else if (type == "repondeur_direct") {
+      /*
+       * ABSENCE : le serveur repond a la place de la sonnerie.
+       *
+       * JUMEAU EXACT D'`ivr_menu` juste en dessous — meme forme, meme raison
+       * d'etre : le serveur repond quelque chose au lieu de faire sonner. Le
+       * serveur le dit lui-meme dans `ws-server.mjs`.
+       *
+       * 🔴 IL N'Y A RIEN A ATTENDRE ET RIEN A RACCROCHER : l'appel est deja
+       * cloture en base (`NO_ANSWER`) et n'a jamais sonne chez personne. C'est
+       * pour cela qu'aucun `call_ended` ne viendra, et donc que ce message DOIT
+       * etre traite ici — sans lui, l'ecran sonne dans le vide jusqu'a son
+       * propre minuteur.
+       */
+      final callId = e["callId"] as String?;
+      if (callId == null || callId != activeCallId) return;
+
+      // ⚠️ COUPER LE MINUTEUR DE SONNERIE, comme pour un standard : arme
+      // pour soixante secondes d'attente qui n'auront pas lieu, il raccrocherait
+      // en plein milieu de l'accueil.
+      _ringTimeout?.cancel();
+      _ringTimeout = null;
+      // Le bip d'attente n'a plus lieu d'etre : personne ne sonne.
+      await RingtoneService.instance.stop();
+
+      repondeur = SessionRepondeur(
+        callId: callId,
+        nomCorrespondant: (e["peerName"] as String?)?.trim().isNotEmpty == true
+            ? e["peerName"] as String
+            : activePeerName ?? "",
+        accueilUrl: await _accueilJouable(e["accueil"]),
+        absence: true,
+      );
+      traceAppel("repondeur direct — accueil ${repondeur?.accueilUrl ?? "absent"}");
+
+      // L'appel est fini : on rend l'ecran d'appel, mais PAS la session de
+      // repondeur, que `_clear` ne touche pas.
+      await _stopMesh();
+      _clear(idAppel: callId);
+      notifyListeners();
     } else if (type == "ivr_menu") {
       // Le serveur répond « voici le menu » au lieu de faire sonner : ce numéro
       // était un centre d'appels. Le client ne l'avait pas demandé et n'avait
@@ -2178,14 +2266,112 @@ class CallController extends ChangeNotifier {
             callId == incoming?.callId ||
             (activeCallId == null && activeRole != null);
         if (isOurCall) {
+          // Retenus AVANT `_clear`, qui les efface : le repondeur se demande
+          // apres, avec l'identifiant et le nom de celui qu'on appelait.
+          final etaitSortant = activeRole == ActiveCallRole.outgoing;
+          final nomAppele = activePeerName;
           await _stopMesh();
           _signalBuffer.remove(callId);
           // L'identifiant vient de l'événement : le troisième cas de
           // `isOurCall` couvre justement un `activeCallId` déjà nul.
           _clear(idAppel: callId);
+          // Personne n'a decroche : son repondeur a peut-etre quelque chose a
+          // dire. Non attendu — l'ecran d'appel doit se refermer tout de suite,
+          // la feuille s'ouvrira quand la reponse arrivera.
+          //
+          // ⚠️ `rejected` EST EXCLU : un refus expres n'est pas une absence,
+          // et proposer de laisser un message a quelqu'un qui vient de decliner
+          // serait deplace. Le serveur le refuserait d'ailleurs — l'appel est
+          // alors `DECLINED`, pas `NO_ANSWER`.
+          if (etaitSortant && state == "ended") {
+            unawaited(_proposerRepondeurApresEchec(callId, nomAppele));
+          }
         }
       }
     }
+  }
+
+  /// Rend jouable l'accueil que le serveur envoie dans `repondeur_direct`.
+  ///
+  /// ⚠️ L'URL EST RELATIVE ET LA ROUTE DES MEDIAS EXIGE UN JETON, que le
+  /// lecteur audio ne sait pas joindre en en-tete : il passe en parametre,
+  /// comme partout ailleurs (sonneries de liste, invites de standard).
+  ///
+  /// Rend `null` plutot qu'une adresse batie au hasard : sans accueil, la
+  /// feuille propose quand meme de laisser un message, ce qui vaut mieux qu'un
+  /// lecteur qui tourne dans le vide.
+  Future<String?> _accueilJouable(dynamic media) async {
+    if (media is! Map) return null;
+    final url = media["url"]?.toString();
+    if (url == null || url.isEmpty || !url.startsWith("/")) return null;
+    final jeton = await TokenStorage().accessToken;
+    if (jeton == null || jeton.isEmpty) return null;
+    return "${ServerConfig.apiBase}$url?token=$jeton";
+  }
+
+  /// Referme la feuille du repondeur.
+  ///
+  /// C'est le SEUL chemin qui l'efface : `_clear()` ne la touche pas, l'appel
+  /// etant deja termine quand elle s'ouvre.
+  void fermerRepondeur() {
+    if (repondeur == null) return;
+    repondeur = null;
+    unawaited(RingtoneService.instance.stop());
+    notifyListeners();
+  }
+
+  /// Depose un message vocal sur l'appel manque.
+  ///
+  /// [mediaId] designe un media DEJA TELEVERSE : le serveur ne recoit pas
+  /// d'octets ici, il rattache un media existant a l'appel.
+  ///
+  /// ⚠️ LEVE SI LE SERVEUR REFUSE, et l'appelant doit le dire : la personne
+  /// a parle, elle ne doit pas croire son message parti. Les refus attendus
+  /// portent un code lisible (`CALL_ANSWERED`, `ALREADY_LEFT`, `CALL_TOO_OLD`).
+  Future<void> deposerMessage(String mediaId) async {
+    final session = repondeur;
+    if (session == null) return;
+    await _repondeurDepot.deposerMessagerie(
+      callId: session.callId,
+      mediaId: mediaId,
+    );
+    session.depose = true;
+    notifyListeners();
+  }
+
+  /// Apres un appel SANS REPONSE, propose le repondeur s'il y en a un.
+  ///
+  /// 🔴 CE CHEMIN EST DISTINCT DE `repondeur_direct`, et les deux sont
+  /// necessaires. L'absence est decidee AVANT que ca sonne, et le serveur
+  /// l'annonce. Le simple « personne n'a decroche » n'est annonce par rien :
+  /// au bout de trente secondes le serveur cloture et diffuse `call_state
+  /// ended`, sans un mot du repondeur. C'est donc a l'appelant de demander.
+  ///
+  /// ⚠️ LE SERVEUR SEUL JUGE. On ne verifie ici NI que l'appel etait
+  /// sortant, NI qu'il n'a pas ete decroche : la route repond 404 des que l'une
+  /// des quatre conditions manque — appel initie par moi, jamais decroche,
+  /// recent, et a deux. Refaire ce controle ici en donnerait une seconde
+  /// version, qui finirait par diverger.
+  ///
+  /// ⚠️ NE LEVE JAMAIS : ne pas proposer le repondeur est un repli
+  /// acceptable, faire remonter une exception a la fin d'un appel ne l'est pas.
+  Future<void> _proposerRepondeurApresEchec(String callId, String? nom) async {
+    if (repondeur != null) return;
+    final accueil = await _repondeurDepot.accueilDeLAppel(callId);
+    if (accueil == null) return;
+    // L'ecran a pu repartir dans un autre appel entre-temps : on ne s'y
+    // superpose pas.
+    if (activeCallId != null || repondeur != null) return;
+    final jeton = await TokenStorage().accessToken;
+    repondeur = SessionRepondeur(
+      callId: callId,
+      nomCorrespondant: nom ?? "",
+      accueilUrl: (jeton == null || jeton.isEmpty)
+          ? null
+          : "${ServerConfig.apiBase}${accueil.url}?token=$jeton",
+      absence: accueil.absence,
+    );
+    notifyListeners();
   }
 
   @override

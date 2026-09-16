@@ -32,6 +32,7 @@ import 'features/calls/call_banner.dart';
 import 'features/calls/call_controller.dart';
 import 'features/calls/call_listener.dart';
 import 'features/calls/calls_repository.dart';
+import 'features/calls/repondeur_repository.dart';
 import 'features/calls/enregistrements_repository.dart';
 import 'features/calls/plaintes_repository.dart';
 import 'features/chat/chat_repository.dart';
@@ -155,6 +156,10 @@ void main() async {
         Provider<EnregistrementsRepository>.value(
             value: EnregistrementsRepository(
                 authedApi, MediaRepository(authedApi))),
+        // Le repondeur, vu par l'APPELANT : lire l'accueil de celui qu'on
+        // vient d'appeler, et lui laisser un message.
+        Provider<RepondeurRepository>.value(
+            value: RepondeurRepository(authedApi)),
         Provider<MeetingsRepository>.value(
             value: MeetingsRepository(authedApi)),
         Provider<BlockedRepository>.value(value: BlockedRepository(authedApi)),
@@ -214,6 +219,7 @@ void main() async {
             ctx.read<RealtimeClient>(),
             ctx.read<SonneriesDeListes>(),
             ctx.read<EnregistrementsRepository>(),
+            ctx.read<RepondeurRepository>(),
           ),
         ),
         ChangeNotifierProvider<MeetingController>(

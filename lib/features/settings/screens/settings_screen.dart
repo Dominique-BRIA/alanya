@@ -17,6 +17,7 @@ import '../../account/screens/delete_account_screen.dart';
 import '../../account/screens/profile_screen.dart';
 import 'notification_settings_screen.dart';
 import 'ringtones_screen.dart';
+import 'repondeur_screen.dart';
 import 'translation_screen.dart';
 import 'privacy_settings_screen.dart';
 import 'login_history_screen.dart';
@@ -284,6 +285,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
             trailing: _chevron(),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const RingtonesScreen()),
+            ),
+          ),
+          _settingsTile(
+            icon: Icons.voicemail_outlined,
+            iconColor: _accent,
+            title: tr(context, 'vm_title'),
+            subtitle: tr(context, 'vm_set_enable_hint'),
+            trailing: _chevron(),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const RepondeurScreen()),
             ),
           ),
           _settingsTile(
