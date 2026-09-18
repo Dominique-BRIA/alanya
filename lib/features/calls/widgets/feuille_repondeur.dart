@@ -43,6 +43,33 @@ class _FeuilleRepondeurState extends State<FeuilleRepondeur> {
   Timer? _tic;
 
   @override
+  void initState() {
+    super.initState();
+    /*
+     * 🔴 L'ACCUEIL PART TOUT SEUL — sans quoi « tomber sur le répondeur » n'a
+     * pas lieu. Tomber sur un répondeur, c'est l'ENTENDRE ; ce n'est pas
+     * trouver un bouton qui propose de l'entendre. La feuille s'ouvrait muette
+     * derrière un triangle « lecture » que rien ne distinguait d'un appel
+     * manqué ordinaire, et l'appelant repartait sans avoir rien écouté : le
+     * serveur envoyait bien l'accueil, le mobile l'affichait bien, et personne
+     * ne l'entendait jamais.
+     *
+     * ⚠️ APRÈS LA PREMIÈRE IMAGE, et non pendant `initState` : l'URL se lit sur
+     * le contrôleur, et `dispose` doit pouvoir couper un son déjà parti.
+     *
+     * ⚠️ UNE SEULE FOIS. `_ecouterAccueil` BASCULE lecture/arrêt : l'appeler
+     * une seconde fois couperait ce qu'on vient de lancer. D'où le contrôle sur
+     * `_ecoute`, et non un simple `if (url != null)`.
+     */
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _ecoute) return;
+      final url = context.read<CallController>().repondeur?.accueilUrl;
+      if (url == null || url.isEmpty) return;
+      unawaited(_ecouterAccueil(url));
+    });
+  }
+
+  @override
   void dispose() {
     _tic?.cancel();
     // 🔴 INDISPENSABLE. L'accueil ne boucle pas, mais il dure jusqu'à trente
