@@ -1900,7 +1900,12 @@ class CallController extends ChangeNotifier {
             ? e["peerName"] as String
             : activePeerName ?? "",
         accueilUrl: await _accueilJouable(e["accueil"]),
-        absence: true,
+        // ⚠️ LE MODE VIENT DU SERVEUR, on ne le suppose plus. `true` en dur
+        // etait juste tant que cette trame ne partait QUE pour une absence ;
+        // un simple interrupteur la declenche desormais aussi, et annoncer
+        // « absent » pour quelqu'un qui ne l'est pas serait faux. Absent du
+        // message = pas une absence : c'est le cas le plus frequent.
+        absence: e["absence"] == true,
       );
       traceAppel("repondeur direct — accueil ${repondeur?.accueilUrl ?? "absent"}");
 
