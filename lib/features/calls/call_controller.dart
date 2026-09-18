@@ -1900,7 +1900,11 @@ class CallController extends ChangeNotifier {
             ? e["peerName"] as String
             : activePeerName ?? "",
         accueilUrl: await _accueilJouable(e["accueil"]),
-        absence: true,
+        // Le serveur connaît le chemin qui a déclenché le répondeur : absence,
+        // plage programmée ou simple interrupteur. Le supposer ici annonçait
+        // « absent » pour un correspondant qui avait seulement activé son
+        // répondeur. Un ancien serveur sans ce champ signifie « pas absent ».
+        absence: e["absence"] == true,
       );
       traceAppel("repondeur direct — accueil ${repondeur?.accueilUrl ?? "absent"}");
 
