@@ -114,7 +114,7 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
     if (!mounted) return;
     setState(() => _enEcoute = a.id);
     // `apercu` : un accueil a une fin, il ne boucle pas.
-    await RingtoneService.instance.apercu(
+    await RingtoneService.instance.apercuRepondeur(
       url: "${ServerConfig.apiBase}${a.url}?token=$jeton",
     );
   }

@@ -92,7 +92,7 @@ class _FeuilleRepondeurState extends State<FeuilleRepondeur> {
     // boucler reprendrait le défaut déjà payé deux fois par ce dépôt — la
     // lecture d'un centre vocal et la vidéo d'un statut : une boucle
     // n'arrivant jamais à son terme, rien ne vient jamais la refermer.
-    await RingtoneService.instance.apercu(url: url);
+    await RingtoneService.instance.apercuRepondeur(url: url);
   }
 
   Future<void> _basculerEnregistrement() async {

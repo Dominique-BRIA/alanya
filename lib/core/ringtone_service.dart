@@ -315,9 +315,135 @@ class RingtoneService {
 
   /// La fin d'une URL, pour que la trace tienne sur une ligne de l'overlay.
   /// Le nom de fichier suffit à identifier le vocal ou la musique en cause.
+  ///
+  /// ⚠️ On passe par [Uri] pour ne jamais écrire le JWT de `?token=...` dans
+  /// les journaux. Les accueils du répondeur utilisent précisément ce mode
+  /// d'authentification, car le lecteur natif ne sait pas poser le Bearer.
   static String _finDe(String url) {
-    final morceaux = url.split('/');
-    return morceaux.isEmpty ? url : morceaux.last;
+    try {
+      final morceaux = Uri.parse(url).pathSegments;
+      if (morceaux.isNotEmpty && morceaux.last.isNotEmpty) {
+        return morceaux.last;
+      }
+    } catch (_) {}
+    final sansRequete = url.split('?').first;
+    final morceaux = sansRequete.split('/');
+    return morceaux.isEmpty ? sansRequete : morceaux.last;
+  }
+
+  // Un même accueil peut être préchargé par le contrôleur puis demandé, quelques
+  // millisecondes plus tard, par la feuille du répondeur. Les deux doivent
+  // attendre LE MÊME téléchargement, pas consommer deux fois le fichier.
+  final Map<String, Future<File?>> _telechargementsRepondeur = {};
+
+  /// Commence à rapatrier un accueil sans lancer sa lecture.
+  ///
+  /// Le contrôleur l'appelle dès la trame `repondeur_direct`, pendant qu'il
+  /// termine le nettoyage de l'appel. La feuille réutilise ensuite le même
+  /// Future : chaque milliseconde de démontage WebRTC devient ainsi du temps de
+  /// téléchargement utile au lieu d'un silence supplémentaire.
+  Future<void> prechargerRepondeur(String url) async {
+    await _fichierRepondeur(url);
+  }
+
+  /// Clé stable SANS le jeton : un refresh du JWT ne doit pas faire télécharger
+  /// une seconde fois le même média. L'identifiant du média est le dernier
+  /// segment de `/api/media/<id>`.
+  static String _cleRepondeur(String url) {
+    try {
+      final segments = Uri.parse(url).pathSegments;
+      if (segments.isNotEmpty && segments.last.isNotEmpty) {
+        return segments.last.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
+      }
+    } catch (_) {}
+    return url.split('?').first.hashCode.toUnsigned(32).toRadixString(16);
+  }
+
+  Future<File?> _fichierRepondeur(String url) {
+    final cle = _cleRepondeur(url);
+    final enCours = _telechargementsRepondeur[cle];
+    if (enCours != null) return enCours;
+
+    final chargement = _telechargerRepondeur(url, cle);
+    _telechargementsRepondeur[cle] = chargement;
+    // `_telechargerRepondeur` absorbe toutes ses erreurs : ce nettoyage ne
+    // crée donc pas de Future en erreur laissé sans écoute.
+    unawaited(chargement.then<void>((_) {
+      if (identical(_telechargementsRepondeur[cle], chargement)) {
+        _telechargementsRepondeur.remove(cle);
+      }
+    }));
+    return chargement;
+  }
+
+  /// Télécharge l'accueil à la vitesse HTTP normale puis le lit comme un fichier
+  /// local. Ce détour est volontaire pour les `.m4a` produits par Android :
+  /// leur index MP4 (`moov`) se trouve généralement en FIN de fichier. Le
+  /// `MediaPlayer` natif utilisé par audioplayers attend alors cet index avant
+  /// de commencer et, sur notre route qui ne sert pas de plages d'octets, peut
+  /// mettre presque la DURÉE ENTIÈRE du vocal à se préparer.
+  ///
+  /// `http.get` rapatrie le petit accueil sans ce débit de prélecture bridé ; le
+  /// fichier local donne ensuite immédiatement accès à son début et à sa fin.
+  /// L'écriture est atomique (`.part` puis rename), afin qu'une application tuée
+  /// pendant le transfert ne laisse jamais un faux cache tronqué.
+  Future<File?> _telechargerRepondeur(String url, String cle) async {
+    final chrono = Stopwatch()..start();
+    try {
+      final tempDir = await getTemporaryDirectory();
+      // L'accueil mobile est encodé en AAC dans un conteneur M4A. Conserver
+      // cette extension aide aussi AVPlayer à choisir son démultiplexeur quand
+      // le fichier est rejoué localement sur iOS.
+      final destination = File('${tempDir.path}/repondeur_$cle.m4a');
+      if (await destination.exists()) {
+        final stat = await destination.stat();
+        if (stat.size > 0) {
+          traceAppel("Répondeur audio ⚡ cache ${_finDe(url)} (${stat.size} o)");
+          return destination;
+        }
+        try {
+          await destination.delete();
+        } catch (_) {}
+      }
+
+      traceAppel("Répondeur audio ⬇️ téléchargement ${_finDe(url)}");
+      final reponse = await http
+          .get(Uri.parse(url))
+          .timeout(const Duration(seconds: 30));
+      if (reponse.statusCode != 200 || reponse.bodyBytes.isEmpty) {
+        traceAppel(
+            "Répondeur audio ❌ HTTP ${reponse.statusCode} après ${chrono.elapsedMilliseconds} ms");
+        return null;
+      }
+
+      final partiel = File('${destination.path}.part');
+      try {
+        if (await partiel.exists()) await partiel.delete();
+        await partiel.writeAsBytes(reponse.bodyBytes, flush: true);
+        if (await destination.exists()) await destination.delete();
+        await partiel.rename(destination.path);
+      } catch (_) {
+        try {
+          if (await partiel.exists()) await partiel.delete();
+        } catch (_) {}
+        rethrow;
+      }
+
+      traceAppel(
+          "Répondeur audio ✅ ${reponse.bodyBytes.length} o en ${chrono.elapsedMilliseconds} ms");
+      return destination;
+    } catch (e) {
+      // Certaines exceptions HTTP réimpriment l'URI complète. N'en journaliser
+      // que le type évite d'y divulguer le JWT passé dans `?token=`.
+      traceAppel(
+          "Répondeur audio ⚠️ cache abandonné après ${chrono.elapsedMilliseconds} ms (${e.runtimeType})");
+      return null;
+    }
+  }
+
+  Future<Source> _resoudreSourceRepondeur(String url) async {
+    final fichier = await _fichierRepondeur(url);
+    return fichier == null ? UrlSource(url) : DeviceFileSource(fichier.path);
   }
 
   /// Télécharge et met en cache localement le fichier audio si c'est une URL HTTP.
@@ -366,7 +492,8 @@ class RingtoneService {
        */
       unawaited(_remplirCache(url, file));
     } catch (e) {
-      debugPrint("[RingtoneService] cache indisponible pour $url : $e");
+      debugPrint(
+          "[RingtoneService] cache indisponible pour ${_finDe(url)} (${e.runtimeType})");
     }
     return UrlSource(url);
   }
@@ -597,7 +724,9 @@ class RingtoneService {
       });
       traceAppel("IVR audio ▶️ ${_finDe(url)} (loop=$loop)");
     } catch (e) {
-      traceAppel("IVR audio ❌ ${_finDe(url)} : $e");
+      // L'exception d'audioplayers peut contenir la source complète, donc le
+      // jeton de l'URL. Le type suffit dans l'overlay de diagnostic.
+      traceAppel("IVR audio ❌ ${_finDe(url)} (${e.runtimeType})");
       _ivrPlayer = null;
     }
   }
@@ -671,7 +800,10 @@ class RingtoneService {
   /// aux mêmes endroits, et un échec retombe sur l'asset — sans ce repli, une
   /// sonnerie de liste injoignable rendrait l'appel muet.
   Future<void> _playUrl(String url,
-      {required bool hautParleur, bool boucle = true}) async {
+      {required bool hautParleur,
+      bool boucle = true,
+      bool localAvantLecture = false,
+      bool repliSonnerie = true}) async {
     if (_currentAsset == url && _player != null) return;
 
     await stop();
@@ -686,18 +818,27 @@ class RingtoneService {
       await p.setReleaseMode(boucle ? ReleaseMode.loop : ReleaseMode.stop);
       await p.setVolume(1.0);
       if (gen != _generation) return _jeter(p);
-      await p.play(UrlSource(url));
+      final source = localAvantLecture
+          ? await _resoudreSourceRepondeur(url)
+          : UrlSource(url);
+      if (gen != _generation) return _jeter(p);
+      await p.play(source);
       if (gen != _generation) return _jeter(p);
       _player = p;
       _currentAsset = url;
       debugPrint("[RingtoneService] ▶️ ${_finDe(url)} (liste, loop)");
     } catch (e) {
-      debugPrint("[RingtoneService] ❌ sonnerie de liste ${_finDe(url)}: $e");
+      // Ne pas imprimer l'exception : AudioPlayerException réinclut parfois
+      // l'UrlSource et son `?token=`.
+      debugPrint(
+          "[RingtoneService] ❌ sonnerie de liste ${_finDe(url)} (${e.runtimeType})");
       _player = null;
       _currentAsset = null;
       // L'arrêt qui a pu survenir pendant l'échec doit rester prioritaire :
       // sans ce contrôle, le repli relancerait une sonnerie déjà annulée.
-      if (gen == _generation) {
+      // Un ACCUEIL de répondeur, lui, ne doit jamais être remplacé par une
+      // sonnerie en boucle : son appelant attend une voix, pas un « dring ».
+      if (repliSonnerie && gen == _generation) {
         await _play(_incomingAsset, hautParleur: hautParleur);
       }
     }
@@ -725,6 +866,21 @@ class RingtoneService {
     }
     if (url == null || url.isEmpty) return stop();
     return _playUrl(url, hautParleur: true, boucle: false);
+  }
+
+  /// Joue l'accueil du répondeur UNE fois, après l'avoir rendu localement
+  /// seekable. Contrairement à [apercu], cette voie sait qu'elle reçoit souvent
+  /// un M4A enregistré sur téléphone, dont l'index final bloque la préparation
+  /// du MediaPlayer distant (voir [_telechargerRepondeur]).
+  Future<void> apercuRepondeur({required String url}) {
+    if (url.isEmpty) return stop();
+    return _playUrl(
+      url,
+      hautParleur: true,
+      boucle: false,
+      localAvantLecture: true,
+      repliSonnerie: false,
+    );
   }
 
   /// Abandonne un lecteur qu'un arrêt a rendu caduc pendant sa préparation.

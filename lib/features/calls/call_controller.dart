@@ -1894,19 +1894,29 @@ class CallController extends ChangeNotifier {
       // Le bip d'attente n'a plus lieu d'etre : personne ne sonne.
       await RingtoneService.instance.stop();
 
+      final accueilUrl = await _accueilJouable(e["accueil"]);
+      if (accueilUrl != null) {
+        // Le M4A enregistré sur téléphone doit être rendu localement seekable
+        // avant sa lecture (son index MP4 est généralement en fin de fichier).
+        // On commence dès la trame serveur, en parallèle du démontage WebRTC :
+        // la feuille attendra CE MÊME téléchargement au lieu d'en lancer un
+        // nouveau après son ouverture.
+        unawaited(RingtoneService.instance.prechargerRepondeur(accueilUrl));
+      }
       repondeur = SessionRepondeur(
         callId: callId,
         nomCorrespondant: (e["peerName"] as String?)?.trim().isNotEmpty == true
             ? e["peerName"] as String
             : activePeerName ?? "",
-        accueilUrl: await _accueilJouable(e["accueil"]),
+        accueilUrl: accueilUrl,
         // Le serveur connaît le chemin qui a déclenché le répondeur : absence,
         // plage programmée ou simple interrupteur. Le supposer ici annonçait
         // « absent » pour un correspondant qui avait seulement activé son
         // répondeur. Un ancien serveur sans ce champ signifie « pas absent ».
         absence: e["absence"] == true,
       );
-      traceAppel("repondeur direct — accueil ${repondeur?.accueilUrl ?? "absent"}");
+      // Ne jamais tracer l'URL : elle contient le JWT dans `?token=`.
+      traceAppel("repondeur direct — accueil ${accueilUrl == null ? "absent" : "présent"}");
 
       // L'appel est fini : on rend l'ecran d'appel, mais PAS la session de
       // repondeur, que `_clear` ne touche pas.
