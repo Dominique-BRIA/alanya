@@ -164,6 +164,11 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
     // `apercu` : un accueil a une fin, il ne boucle pas.
     await RingtoneService.instance.apercu(
       url: "${ServerConfig.apiBase}${a.url}?token=$jeton",
+      // Même raison que dans la feuille de l'appelant : un aperçu qui se termine
+      // doit rendre son bouton, sans quoi il faut deux appuis pour le relancer.
+      onFin: () {
+        if (mounted) setState(() => _enEcoute = null);
+      },
     );
   }
 

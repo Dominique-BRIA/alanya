@@ -66,7 +66,15 @@ class _FeuilleRepondeurState extends State<FeuilleRepondeur> {
     // boucler reprendrait le défaut déjà payé deux fois par ce dépôt — la
     // lecture d'un centre vocal et la vidéo d'un statut : une boucle
     // n'arrivant jamais à son terme, rien ne vient jamais la refermer.
-    await RingtoneService.instance.apercu(url: url);
+    await RingtoneService.instance.apercu(
+      url: url,
+      // ⚠️ L'ACCUEIL S'ARRÊTE TOUT SEUL : sans ce retour, le bouton resterait
+      // sur « stop » devant un lecteur arrêté, et le geste suivant servirait à
+      // défaire un état qui n'existe plus au lieu de relancer.
+      onFin: () {
+        if (mounted) setState(() => _ecoute = false);
+      },
+    );
   }
 
   Future<void> _basculerEnregistrement() async {

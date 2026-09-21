@@ -31,6 +31,16 @@ class RingtoneService {
   AudioPlayer? _player;
   String? _currentAsset;
 
+  /// Abonnement à la FIN d'un aperçu, pour prévenir l'écran qui l'a lancé.
+  ///
+  /// 🔴 SANS LUI, LE BOUTON MENT. Un aperçu s'arrête tout seul en arrivant au
+  /// bout, mais rien ne le disait à l'écran : son icône restait sur « stop »,
+  /// sur un lecteur pourtant arrêté. Le geste suivant servait alors à défaire un
+  /// état qui n'existait plus, et il fallait un SECOND appui pour entendre
+  /// quelque chose — le « pause puis play » que les utilisateurs avaient trouvé
+  /// tout seuls.
+  StreamSubscription<void>? _finApercuSub;
+
   /// Génération de la sonnerie en cours.
   ///
   /// ⚠️ CE COMPTEUR CORRIGE UNE SONNERIE QUI NE S'ARRÊTAIT PLUS APRÈS LE
@@ -629,9 +639,26 @@ class RingtoneService {
       );
 
   Future<void> _play(String asset,
-      {required bool hautParleur, bool boucle = true}) async {
-    // Si on rejoue le même son (ex: 2 events consécutifs), on ne relance pas.
-    if (_currentAsset == asset && _player != null) return;
+      {required bool hautParleur, bool boucle = true, VoidCallback? onFin}) async {
+  /*
+   * 🐛 « RIEN NE SE JOUE TANT QU'ON N'A PAS APPUYÉ SUR STOP PUIS SUR ÉCOUTER. »
+   *
+   * Cette garde évite de relancer un son DÉJÀ EN TRAIN DE JOUER — deux
+   * événements qui se suivent ne doivent pas redémarrer la sonnerie. Mais elle
+   * se contentait de vérifier qu'un lecteur EXISTE.
+   *
+   * Or un aperçu est en `ReleaseMode.stop` : quand il arrive au bout, le lecteur
+   * reste en place, arrêté. `_currentAsset` désigne donc toujours l'accueil, et
+   * le rappui sur « écouter » repartait ici sans rien jouer. L'écran, lui,
+   * passait bien son icône sur « stop » — d'où un bouton qui prétend jouer
+   * pendant qu'il ne sort aucun son. Appuyer sur stop puis sur écouter remettait
+   * tout à zéro, ce que les utilisateurs avaient trouvé tout seuls.
+   *
+   * ⚠️ C'EST L'ÉTAT QUI DÉCIDE, PAS L'EXISTENCE. Un lecteur arrêté ou terminé
+   * doit se relancer ; seul un lecteur qui joue vraiment n'a rien à faire de
+   * plus.
+   */
+    if (_currentAsset == asset && _player?.state == PlayerState.playing) return;
 
     await stop();
     // Retenu APRÈS l'arrêt, qui vient lui-même d'incrémenter le compteur : tout
@@ -654,6 +681,15 @@ class RingtoneService {
       if (gen != _generation) return _jeter(p);
       _player = p;
       _currentAsset = asset;
+      // ⚠️ APRÈS le contrôle de génération : un lecteur abandonné ne doit
+      // prévenir personne. La garde sur la génération au moment de l'appel
+      // évite aussi qu'un aperçu périmé remette un bouton à zéro sous le nez
+      // d'un écran qui en a relancé un autre.
+      if (onFin != null) {
+        _finApercuSub = p.onPlayerComplete.listen((_) {
+          if (gen == _generation) onFin();
+        });
+      }
       debugPrint("[RingtoneService] ▶️ $asset (loop)");
     } catch (e) {
       debugPrint("[RingtoneService] ❌ échec play $asset: $e");
@@ -671,8 +707,8 @@ class RingtoneService {
   /// aux mêmes endroits, et un échec retombe sur l'asset — sans ce repli, une
   /// sonnerie de liste injoignable rendrait l'appel muet.
   Future<void> _playUrl(String url,
-      {required bool hautParleur, bool boucle = true}) async {
-    if (_currentAsset == url && _player != null) return;
+      {required bool hautParleur, bool boucle = true, VoidCallback? onFin}) async {
+    if (_currentAsset == url && _player?.state == PlayerState.playing) return;
 
     await stop();
     final gen = _generation;
@@ -690,6 +726,15 @@ class RingtoneService {
       if (gen != _generation) return _jeter(p);
       _player = p;
       _currentAsset = url;
+      // ⚠️ APRÈS le contrôle de génération : un lecteur abandonné ne doit
+      // prévenir personne. La garde sur la génération au moment de l'appel
+      // évite aussi qu'un aperçu périmé remette un bouton à zéro sous le nez
+      // d'un écran qui en a relancé un autre.
+      if (onFin != null) {
+        _finApercuSub = p.onPlayerComplete.listen((_) {
+          if (gen == _generation) onFin();
+        });
+      }
       debugPrint("[RingtoneService] ▶️ ${_finDe(url)} (liste, loop)");
     } catch (e) {
       debugPrint("[RingtoneService] ❌ sonnerie de liste ${_finDe(url)}: $e");
@@ -719,16 +764,21 @@ class RingtoneService {
   /// ⚠️ `stop()` L'ARRÊTE, comme n'importe quelle sonnerie — c'est le même
   /// lecteur et le même compteur de génération. L'appelant DOIT l'appeler en
   /// quittant son écran, sans quoi l'aperçu continuerait derrière lui.
-  Future<void> apercu({String? url, String? asset}) {
+  /// [onFin] est appelé quand l'aperçu arrive AU BOUT de lui-même — jamais
+  /// quand c'est [stop] qui l'interrompt, l'appelant sachant déjà ce qu'il a
+  /// demandé. Il sert à remettre un bouton « stop » sur « écouter ».
+  Future<void> apercu({String? url, String? asset, VoidCallback? onFin}) {
     if (asset != null && asset.isNotEmpty) {
-      return _play(asset, hautParleur: true, boucle: false);
+      return _play(asset, hautParleur: true, boucle: false, onFin: onFin);
     }
     if (url == null || url.isEmpty) return stop();
-    return _playUrl(url, hautParleur: true, boucle: false);
+    return _playUrl(url, hautParleur: true, boucle: false, onFin: onFin);
   }
 
   /// Abandonne un lecteur qu'un arrêt a rendu caduc pendant sa préparation.
   Future<void> _jeter(AudioPlayer p) async {
+    unawaited(_finApercuSub?.cancel());
+    _finApercuSub = null;
     try {
       await p.stop();
       await p.release();
@@ -744,6 +794,9 @@ class RingtoneService {
     // qui est en train de se préparer. C'est exactement le cas du décrochage
     // qui arrive plus vite que le démarrage de la sonnerie.
     _generation++;
+    // L'écran n'a pas à être prévenu d'une fin qu'il vient lui-même de causer.
+    unawaited(_finApercuSub?.cancel());
+    _finApercuSub = null;
     final p = _player;
     if (p == null) return;
     _player = null;
