@@ -33,6 +33,19 @@ class FeuilleRepondeur extends StatefulWidget {
 class _FeuilleRepondeurState extends State<FeuilleRepondeur> {
   final VoiceRecorder _enregistreur = VoiceRecorder();
 
+  /// L'accueil a-t-il déjà été lancé pour cette feuille ?
+  ///
+  /// 🔴 LA LECTURE EST AUTOMATIQUE, COMME SUR UN VRAI RÉPONDEUR — et comme le
+  /// fait le web depuis le début. Le mobile attendait un appui : quelqu'un qui
+  /// tombe pour la PREMIÈRE fois sur le répondeur de quelqu'un voyait une
+  /// feuille muette, sans rien qui dise qu'un message l'attendait derrière un
+  /// bouton (signalé par le user le 21/09/2026).
+  ///
+  /// ⚠️ UNE SEULE FOIS, ET C'EST TOUT L'OBJET DE CE DRAPEAU. `build` se rejoue
+  /// à chaque `setState` — le minuteur d'enregistrement le fait quatre fois par
+  /// seconde. Sans lui, l'accueil repartirait du début sans arrêt.
+  bool _demarre = false;
+
   /// Ce qui joue en ce moment, pour basculer l'icône du bouton d'écoute.
   bool _ecoute = false;
   bool _enregistre = false;
@@ -164,6 +177,23 @@ class _FeuilleRepondeurState extends State<FeuilleRepondeur> {
         : tr(context, 'vm_no_answer', {'nom': nom});
     final accueil = session.accueilUrl;
 
+    /*
+     * ⚠️ APRÈS LA FRAME, JAMAIS PENDANT. Lancer la lecture ici même
+     * appellerait `setState` au milieu d'un `build`, ce que Flutter refuse.
+     * Le report d'une frame ne se voit pas à l'œil et rend le geste légal.
+     *
+     * ⚠️ PAS DANS `initState` : l'accueil vient de la session du contrôleur,
+     * qui peut arriver APRÈS la première construction — la feuille s'ouvre
+     * dès la fin de l'appel, la réponse du serveur la suit. On déclenche donc
+     * au premier `build` qui en tient un, et le drapeau garantit l'unicité.
+     */
+    if (accueil != null && !_demarre) {
+      _demarre = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _ecouterAccueil(accueil);
+      });
+    }
+
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
@@ -210,7 +240,11 @@ class _FeuilleRepondeurState extends State<FeuilleRepondeur> {
                 icon: Icon(
                   _ecoute ? Icons.stop_rounded : Icons.play_arrow_rounded,
                 ),
-                label: Text(tr(context, 'vm_listen')),
+                // Le libellé suit l'icône : pendant la lecture, un bouton
+                // « stop » qui dit encore « écouter » se lit comme une erreur.
+                label: Text(
+                  tr(context, _ecoute ? 'stop' : 'vm_listen'),
+                ),
               ),
             if (accueil != null) const SizedBox(height: 10),
 
