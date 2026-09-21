@@ -47,8 +47,22 @@ jobs:
       # SDK Platform 31 / 33 » et « Install CMake 3.22.1 » du journal, qui se
       # payent en minutes à chaque fois. La clé suit les fichiers de build : ils
       # ne changent pas, le cache resservira.
-      - name: Cache Gradle
-        uses: actions/cache@v4
+      #
+      # 🔴 RESTORE ET SAVE SÉPARÉS, ET CE N'EST PAS DE LA COQUETTERIE.
+      #
+      # `actions/cache` ne sauvegarde pas quand le job échoue. Or l'échec le
+      # plus fréquent ici est justement un incident de TÉLÉCHARGEMENT : Maven
+      # Central répond 429 au bout de quelques artefacts. Tout ce qui avait été
+      # récupéré avant le refus était donc jeté, et la tentative suivante
+      # repartait d'un cache froid — donc retéléchargeait tout, donc se faisait
+      # limiter à nouveau. Le système s'enfermait dans son propre échec.
+      #
+      # Avec `save` en `if: always()`, chaque tentative CONSERVE ce qu'elle a
+      # réussi à prendre. Deux exécutions suffisent alors à reconstituer le
+      # cache, même en pleine période de limitation.
+      - name: Restaure le cache Gradle
+        id: cache-gradle
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/.gradle/caches
@@ -145,7 +159,71 @@ jobs:
           # La bulle retombe alors sur une vignette sobre (repère +
           # coordonnées) : c'est visible, mais ça ne casse rien.
           MAPTILER_KEY: ${{ secrets.MAPTILER_KEY }}
-        run: flutter build apk --release --dart-define=MAPTILER_KEY=$MAPTILER_KEY
+        #
+        # ━━ TROIS TENTATIVES, MAIS SEULEMENT POUR LE RÉSEAU ━━
+        #
+        # 🔴 L'INCIDENT EST RÉEL ET RÉCURRENT : Maven Central répond
+        # « 429 Too Many Requests » aux runners GitHub, dont l'adresse est
+        # partagée par des milliers de projets. Le build échoue alors en vingt
+        # secondes sur `Could not resolve org.jetbrains.kotlin:…`, sans que rien
+        # du code ne soit en cause. C'est déjà arrivé : `501aa8b` note « build
+        # passait après retry », et la configuration avait été rendue à
+        # l'identique faute d'avoir identifié la cause.
+        #
+        # ⚠️ ON NE REJOUE PAS UNE ERREUR DE COMPILATION, et c'est tout l'enjeu
+        # du filtre. Un build complet dure une quinzaine de minutes : trois
+        # tentatives dépasseraient le délai de 45 min du job et transformeraient
+        # une vraie régression en « job annulé », le pire des diagnostics. Un
+        # échec réseau, lui, tombe en quelques secondes — le rejouer est presque
+        # gratuit.
+        #
+        # On n'insiste donc QUE si le journal porte une signature de panne
+        # réseau. Tout le reste s'arrête au premier échec.
+        run: |
+          set -uo pipefail
+
+          tenter() {
+            flutter build apk --release --dart-define=MAPTILER_KEY="$MAPTILER_KEY" 2>&1 \
+              | tee journal-build.txt
+            return "${PIPESTATUS[0]}"
+          }
+
+          for essai in 1 2 3; do
+            if tenter; then
+              echo "Build réussi (tentative $essai)."
+              exit 0
+            fi
+
+            if ! grep -qE "Too Many Requests|Could not GET|Could not resolve all artifacts|Connection reset|Read timed out" journal-build.txt; then
+              echo "::error::Échec de compilation — ce n'est pas un incident réseau, on n'insiste pas."
+              exit 1
+            fi
+
+            if [ "$essai" -eq 3 ]; then
+              echo "::error::Trois refus de téléchargement d'affilée. Maven Central limite toujours ; relancer le job plus tard."
+              exit 1
+            fi
+
+            # Attente croissante : une limitation ne se lève pas dans la seconde.
+            attente=$((essai * 45))
+            echo "::warning::Artefacts refusés par le dépôt distant (tentative $essai/3). Nouvelle tentative dans ${attente} s."
+            sleep "$attente"
+          done
+
+      # ⚠️ `if: always()` — voir le commentaire du restore. Une tentative qui
+      # échoue a malgré tout téléchargé des artefacts : les garder évite que la
+      # suivante reparte à froid et se fasse limiter de la même façon.
+      #
+      # Sans effet quand la clé est déjà en cache : `cache/save` ne réécrit pas
+      # une entrée existante.
+      - name: Sauvegarde le cache Gradle
+        if: always() && steps.cache-gradle.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ steps.cache-gradle.outputs.cache-primary-key }}
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
