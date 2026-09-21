@@ -36,6 +36,7 @@ import 'features/calls/repondeur_repository.dart';
 import 'features/calls/enregistrements_repository.dart';
 import 'features/calls/plaintes_repository.dart';
 import 'features/chat/chat_repository.dart';
+import 'features/settings/export_medias_repository.dart';
 import 'features/chat/envoi_media_store.dart';
 import 'features/status/publication_statuts.dart';
 import 'core/pays_repository.dart';
@@ -139,6 +140,8 @@ void main() async {
             value: SonneriesDeListes(
                 ContactListsRepository(authedApi), api, storage)),
         Provider<ChatRepository>.value(value: ChatRepository(authedApi)),
+        Provider<ExportMediasRepository>.value(
+            value: ExportMediasRepository(authedApi)),
         Provider<AccountRepository>.value(value: AccountRepository(authedApi)),
         Provider<StatusRepository>.value(value: StatusRepository(authedApi)),
         Provider<AiRepository>.value(value: AiRepository(authedApi)),

@@ -18,6 +18,7 @@ import '../../account/screens/profile_screen.dart';
 import 'notification_settings_screen.dart';
 import 'ringtones_screen.dart';
 import 'repondeur_screen.dart';
+import 'export_medias_screen.dart';
 import 'translation_screen.dart';
 import 'privacy_settings_screen.dart';
 import 'login_history_screen.dart';
@@ -305,6 +306,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
             trailing: _chevron(),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const TranslationScreen()),
+            ),
+          ),
+          // L'export a sa place APRES la traduction et AVANT l'apparence :
+          // c'est un outil de donnees, comme les sonneries et la traduction,
+          // et non un reglage de presentation.
+          _settingsTile(
+            icon: Icons.download_for_offline_outlined,
+            iconColor: _accent,
+            title: tr(context, 'exp_titre'),
+            subtitle: tr(context, 'exp_sub'),
+            trailing: _chevron(),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const ExportMediasScreen()),
             ),
           ),
           _settingsTile(
