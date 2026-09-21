@@ -26,22 +26,72 @@ import 'package:alanya/features/auth/auth_controller.dart';
 ///
 /// Lancer avec : flutter test test/session_expiration_test.dart
 void main() {
-  group("Le serveur a JUGÉ le jeton — la session est morte", () {
-    test("401 : jeton expiré ou invalide", () {
-      expect(sessionMorteApresEchec(ApiException(401, "Non autorisé")), isTrue);
+  group("Le serveur a NOMMÉ sa décision — la session est morte", () {
+    test("SESSION_EVINCEE : compte ouvert sur un autre appareil", () {
+      expect(
+        sessionMorteApresEchec(
+            ApiException(401, "Session fermée", "SESSION_EVINCEE")),
+        isTrue,
+      );
     });
 
-    test("403 : session évincée par une connexion ailleurs", () {
+    test("JETON_REJOUE : un jeton copié a circulé", () {
+      expect(
+        sessionMorteApresEchec(
+            ApiException(401, "Fermée par sécurité", "JETON_REJOUE")),
+        isTrue,
+      );
+    });
+
+    test("SESSION_REVOQUEE : fermée depuis « Appareils connectés »", () {
+      expect(
+        sessionMorteApresEchec(
+            ApiException(401, "Session révoquée", "SESSION_REVOQUEE")),
+        isTrue,
+      );
+    });
+
+    test("le code décide, pas le statut HTTP", () {
+      // Le même code sur un 403 ferme tout autant : c'est la DÉCISION du
+      // serveur qui compte, et elle s'écrit dans le code.
       expect(
         sessionMorteApresEchec(
             ApiException(403, "Session fermée", "SESSION_EVINCEE")),
         isTrue,
       );
     });
+  });
 
-    test("400 : le serveur refuse la demande de rafraîchissement", () {
+  group("🔴 Le 4xx ANONYME ne ferme plus rien — la régression corrigée", () {
+    // C'est LE défaut : « déconnecté alors que mon jeton n'était pas expiré ».
+    // La rotation révoque l'ancien jeton à CHAQUE rafraîchissement, donc tout
+    // réessai tombait sur un 401 `BAD_REFRESH` — et l'ancienne règle, qui
+    // fermait sur n'importe quel 4xx, détruisait la session.
+    test("401 BAD_REFRESH : un jeton déjà tourné, donc un simple réessai", () {
+      expect(
+        sessionMorteApresEchec(
+            ApiException(401, "Refresh token invalide", "BAD_REFRESH")),
+        isFalse,
+      );
+    });
+
+    test("401 sans code : le serveur n'a rien nommé, on garde", () {
+      expect(sessionMorteApresEchec(ApiException(401, "Non autorisé")), isFalse);
+    });
+
+    test("400 : une requête mal formée ne dit rien du jeton", () {
       expect(sessionMorteApresEchec(ApiException(400, "Requête invalide")),
-          isTrue);
+          isFalse);
+    });
+
+    test("un code inconnu d'un serveur plus récent ne ferme pas", () {
+      // ⚠️ LES CLIENTS NE SE METTENT PAS À JOUR EN MÊME TEMPS. Un APK ancien
+      // face à un code qu'il ne connaît pas doit GARDER la session : au pire
+      // il réessaiera, au lieu de déconnecter sur un mot qu'il ne comprend pas.
+      expect(
+        sessionMorteApresEchec(ApiException(401, "?", "QUELQUE_CHOSE_DE_NEUF")),
+        isFalse,
+      );
     });
   });
 
@@ -81,15 +131,24 @@ void main() {
     });
   });
 
-  group("La frontière est bien à 400 et à 500", () {
-    test("399 ne tue pas", () {
-      expect(sessionMorteApresEchec(ApiException(399, "?")), isFalse);
-    });
-    test("499 tue encore", () {
-      expect(sessionMorteApresEchec(ApiException(499, "?")), isTrue);
-    });
-    test("0 — statut des pannes réseau côté web — ne tue pas", () {
-      expect(sessionMorteApresEchec(ApiException(0, "injoignable")), isFalse);
+  group("🔴 IL N'Y A PLUS DE FRONTIÈRE PAR STATUT", () {
+    // L'ancienne règle disait « tout 4xx tue » : 499 fermait la session, 399
+    // non. Cette frontière était le défaut lui-même — elle rangeait le réessai
+    // le plus banal (401 `BAD_REFRESH`) du côté des condamnations.
+    //
+    // Le statut ne décide plus de rien. Seul le CODE nommé par le serveur
+    // décide, et il n'y en a que quatre.
+    for (final statut in [399, 400, 401, 403, 409, 499, 500, 502, 0]) {
+      test("$statut sans code nommé ne ferme rien", () {
+        expect(sessionMorteApresEchec(ApiException(statut, "?")), isFalse);
+      });
+    }
+
+    test("la liste des verdicts fait exactement quatre entrées", () {
+      // ⚠️ GARDE-FOU : élargir cette liste, c'est réintroduire des
+      // déconnexions. Toute entrée nouvelle doit être une décision que le
+      // serveur prend et NOMME — jamais une commodité.
+      expect(codesSessionFermee, hasLength(4));
     });
   });
 }

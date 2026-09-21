@@ -7,6 +7,7 @@ import '../../core/api_client.dart';
 import '../../core/call_cache.dart';
 import '../../core/call_ui_native.dart';
 import '../../core/contact_cache.dart';
+import '../../core/verrou_rafraichissement.dart';
 import '../../core/memoire_langues.dart';
 import '../../core/conversation_cache.dart';
 import '../../core/message_cache.dart';
@@ -20,31 +21,62 @@ import 'auth_repository.dart';
 
 enum AuthStatus { unknown, unauthenticated, authenticated }
 
-/// État global d'authentification (exposé via Provider).
+/// Les seuls verdicts qui ferment une session.
+///
+/// 🔴 UNE LISTE EXPLICITE, ET NON « UN 4xx QUELCONQUE ». C'est le changement de
+/// fond : la règle précédente détruisait la session sur n'importe quelle
+/// réponse 4xx du rafraîchissement, `BAD_REFRESH` compris. Or `BAD_REFRESH`
+/// tombait sur le cas le plus banal qui soit — un jeton déjà tourné, donc un
+/// simple réessai. L'utilisateur se retrouvait devant l'écran de connexion
+/// alors que RIEN n'avait expiré.
+///
+/// Chacun de ces trois codes est une décision que le serveur a prise SUR CETTE
+/// SESSION, et qu'il nomme :
+const codesSessionFermee = {
+  /// Le compte a été ouvert sur un autre appareil de la même famille.
+  "SESSION_EVINCEE",
+
+  /// Un jeton copié a circulé : la chaîne de cet appareil a été coupée.
+  "JETON_REJOUE",
+
+  /// L'utilisateur a fermé cette session depuis « Appareils connectés ».
+  "SESSION_REVOQUEE",
+
+  /// Jeton inconnu du serveur, ou validité de sept jours écoulée.
+  ///
+  /// ⚠️ SANS CE CODE, UNE SESSION VRAIMENT PÉRIMÉE NE SE FERMERAIT JAMAIS :
+  /// l'application réessaierait indéfiniment avec un jeton mort. C'est le
+  /// revers de la nouvelle règle — ne plus se fier au statut HTTP oblige le
+  /// serveur à nommer AUSSI les fins normales, pas seulement les incidents.
+  "SESSION_EXPIREE",
+};
+
 /// Ce rafraîchissement raté doit-il DÉTRUIRE la session ?
 ///
-/// 🔴 LA RÈGLE QUI A REGRESSÉ, ET LA RAISON DE CETTE FONCTION. Elle vivait
-/// dispersée dans les `catch` de [AuthController.bootstrap], qui ne peut pas se
-/// tester — ses dépendances sont des classes concrètes adossées aux canaux de
-/// plateforme. Isolée ici, elle se prouve (`test/session_expiration_test.dart`).
+/// 🔴 LA RÈGLE QUI A RÉGRESSÉ DEUX FOIS, ET LA RAISON DE CETTE FONCTION.
 ///
-/// SEUL UN 4xx DIT QUELQUE CHOSE DU JETON : expiré, révoqué, session évincée.
-/// C'est le serveur qui l'a jugé, et effacer est alors la bonne conduite.
+/// Premier temps (26/08/2026) : les clients confondaient « le serveur a REFUSÉ
+/// mon jeton » avec « je n'ai pas pu joindre le serveur ». Une coupure réseau,
+/// un 502 pendant un redéploiement, un lancement hors ligne : la session était
+/// perdue. Corrigé en n'agissant que sur un 4xx.
 ///
-/// TOUT LE RESTE PARLE DU SERVEUR OU DU RÉSEAU, et le jeton n'y est pour rien :
-///   - 5xx : le serveur redémarre, Nginx répond 502 ;
-///   - `SocketException`, `ClientException`, délai dépassé : aucune réponse.
+/// Second temps, corrigé ici : « un 4xx » était encore beaucoup trop large.
+/// La rotation révoque l'ancien jeton à CHAQUE rafraîchissement ; tout réessai
+/// — réponse perdue, application tuée avant l'écriture du nouveau jeton, deux
+/// chemins qui se rafraîchissent ensemble — recevait 401 `BAD_REFRESH` et
+/// déclenchait une déconnexion. C'est la cause des « déconnexions alors que le
+/// jeton n'est pas expiré ».
 ///
-/// Les confondre détruisait la session sur une simple coupure — c'est la cause
-/// des « déconnexions intempestives » signalées par le user le 26/08/2026, et
-/// le pendant exact existait côté web (`src/lib/api-client.ts`).
-///
-/// ⚠️ EN CAS DE DOUTE, ON GARDE. Une session gardée à tort se corrige au
+/// ⚠️ EN CAS DE DOUTE, ON GARDE — la règle n'a pas changé, seule la liste des
+/// certitudes s'est resserrée. Une session gardée à tort se corrige au
 /// rafraîchissement suivant ; une session détruite à tort oblige à retaper son
-/// mot de passe, et fait perdre le cache hors ligne.
+/// mot de passe et fait perdre le cache hors ligne.
+///
+/// ⚠️ LE SERVEUR DÉCIDE, PAS LE CODE HTTP. Un 401 sans code nommé n'est plus
+/// qu'un échec de plus : on réessaiera.
 bool sessionMorteApresEchec(Object erreur) {
   if (erreur is! ApiException) return false;
-  return erreur.statusCode >= 400 && erreur.statusCode < 500;
+  return codesSessionFermee.contains(erreur.code);
 }
 
 class AuthController extends ChangeNotifier {
@@ -162,10 +194,48 @@ class AuthController extends ChangeNotifier {
       // 3. Access expiré ou manquant → tente refresh
       if (refresh != null) {
         try {
-          final tokens = await _repo.refresh(refresh);
-          await _storage.saveTokens(
-              access: tokens.accessToken, refresh: tokens.refreshToken);
-          final u = await _repo.me(tokens.accessToken);
+          /*
+           * ⚠️ PAR LE VERROU PARTAGÉ, et non plus en direct.
+           *
+           * 🔴 C'ÉTAIT LA COURSE LA PLUS FRÉQUENTE. Ce chemin s'exécute au
+           * démarrage — exactement quand tout part en même temps : restauration
+           * de session, notifications en attente, premiers écrans qui
+           * interrogent l'API. `AuthedApi` avait bien un verrou ; celui-ci
+           * l'ignorait. Les deux se rafraîchissaient donc avec le MÊME jeton,
+           * la rotation serveur en condamnait un, et la session tombait alors
+           * que rien n'avait expiré.
+           */
+          final access = await VerrouRafraichissement.partage(() async {
+            final tokens = await _repo.refresh(refresh);
+            await _storage.saveTokens(
+                access: tokens.accessToken, refresh: tokens.refreshToken);
+            return tokens.accessToken;
+          });
+          /*
+           * 🔴 `null` NE VEUT PAS DIRE « SESSION MORTE ».
+           *
+           * Le verrou rend `null` quand le rafraîchissement n'a pas abouti sans
+           * que le serveur ait rien condamné — ou quand c'est un AUTRE appelant
+           * qui tenait le verrou et que son travail n'a rien rendu. Basculer en
+           * « non authentifié » ici afficherait l'écran de connexion à quelqu'un
+           * dont la session est parfaitement valide : c'est exactement le
+           * symptôme « on me redemande mes identifiants alors que je suis en
+           * règle ».
+           *
+           * On retombe donc sur le profil en cache, comme partout ailleurs dans
+           * cette méthode.
+           */
+          if (access == null) {
+            if (user != null) {
+              _set(AuthStatus.authenticated, user);
+              return;
+            }
+            // Rien en cache : on ne sait pas. On montre la connexion SANS
+            // effacer les jetons — le prochain démarrage pourra restaurer.
+            _set(AuthStatus.unauthenticated, null);
+            return;
+          }
+          final u = await _repo.me(access);
           await _saveUserCache(u);
           _set(AuthStatus.authenticated, u);
           return;
@@ -178,6 +248,13 @@ class AuthController extends ChangeNotifier {
             messageDeconnexion =
                 "Votre compte a été ouvert sur un autre appareil.";
           }
+          // Un jeton copié a circulé. On ne dit PAS « ouvert sur un autre
+          // appareil » : ce n'est pas ce qui s'est passé, et laisser croire à
+          // une simple seconde connexion masquerait un incident de sécurité.
+          if (e.code == "JETON_REJOUE") {
+            messageDeconnexion =
+                "Session fermée par sécurité. Reconnecte-toi.";
+          }
 
           // Le serveur en panne n'est pas un refus — voir
           // [sessionMorteApresEchec], qui porte la règle et ses raisons.
@@ -186,7 +263,17 @@ class AuthController extends ChangeNotifier {
               _set(AuthStatus.authenticated, user);
               return;
             }
-            rethrow;
+            /*
+             * ⚠️ PAS DE `rethrow` : il tombait dans le `catch` final, qui
+             * EFFACE le stockage. Un démarrage sans profil en cache — première
+             * ouverture après installation, cache vidé — pendant une panne
+             * passagère détruisait donc des jetons parfaitement valides.
+             *
+             * On montre la connexion, mais on GARDE les jetons : le prochain
+             * démarrage, réseau revenu, restaurera la session tout seul.
+             */
+            _set(AuthStatus.unauthenticated, null);
+            return;
           }
         } catch (e) {
           /*
@@ -200,23 +287,44 @@ class AuthController extends ChangeNotifier {
            * On garde la session : le profil en cache suffit à travailler, et le
            * rafraîchissement réussira au prochain réseau.
            */
-          if (!sessionMorteApresEchec(e) && user != null) {
-            _set(AuthStatus.authenticated, user);
+          if (!sessionMorteApresEchec(e)) {
+            if (user != null) {
+              _set(AuthStatus.authenticated, user);
+              return;
+            }
+            // Même raison que ci-dessus : on n'efface pas ce qu'on n'a pas pu
+            // vérifier.
+            _set(AuthStatus.unauthenticated, null);
             return;
           }
         }
       }
 
-      // 4. Échec total — le serveur a REFUSÉ, ou il n'y avait rien à restaurer.
+      /*
+       * 4. Le serveur a NOMMÉ son refus — session évincée, jeton rejoué,
+       *    révoquée, expirée — ou il n'y avait rien à restaurer.
+       *
+       * ⚠️ C'EST LE SEUL ENDROIT QUI A LE DROIT D'EFFACER. Tous les autres
+       * chemins montrent la connexion en gardant les jetons : ils n'ont pas de
+       * certitude, et effacer par précaution est précisément ce qui obligeait
+       * des gens en règle à retaper leur mot de passe.
+       */
       await _storage.clear();
       _set(AuthStatus.unauthenticated, null);
     } catch (_) {
-      // Erreur de lecture du secure storage, ou réseau : si on a un cache user, reste authentifié
+      // Erreur de lecture du stockage sécurisé, ou réseau : si on a un profil
+      // en cache, on reste authentifié.
       if (user != null) {
         _set(AuthStatus.authenticated, user);
         return;
       }
-      await _storage.clear();
+      /*
+       * ⚠️ ON N'EFFACE PLUS ICI. On arrive dans ce `catch` pour des pannes qui
+       * ne disent RIEN du jeton — le stockage sécurisé illisible au démarrage
+       * en est le cas typique, et il est transitoire : le trousseau Android
+       * n'est pas toujours prêt à la première milliseconde. Effacer alors
+       * détruisait une session valide sur un incident de lecture.
+       */
       _set(AuthStatus.unauthenticated, null);
     }
   }
