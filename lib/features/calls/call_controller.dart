@@ -24,6 +24,7 @@ import '../../l10n/app_localizations.dart';
 import 'enregistrements_repository.dart';
 import '../../models/call_record.dart';
 import 'calls_repository.dart';
+import 'prechargement_accueil.dart';
 import 'repondeur_repository.dart';
 import '../../core/server_config.dart';
 import '../../core/token_storage.dart';
@@ -273,6 +274,25 @@ class CallController extends ChangeNotifier {
   final RealtimeClient _rt;
   final RepondeurRepository _repondeurDepot;
 
+  /// Combien de temps on accepte d'attendre l'accueil préchargé.
+  ///
+  /// ⚠️ DEUX VALEURS, POUR DEUX SITUATIONS QUI N'ONT RIEN À VOIR. Après trente
+  /// secondes de sonnerie, le fichier est arrivé depuis longtemps : le court
+  /// délai ne couvre qu'un serveur qui a répondu au ralenti. En mode absence on
+  /// vient de lancer l'appel, le téléchargement commence à l'instant, et c'est
+  /// la tonalité qui fait patienter — on accepte d'attendre plus, mais pas
+  /// indéfiniment, sinon un réseau lent ferait sonner une minute dans le vide.
+  static const Duration _attenteAccueilCourte = Duration(milliseconds: 1500);
+  static const Duration _attenteAccueilLongue = Duration(seconds: 9);
+
+  /// Le temps minimal de tonalité avant que le répondeur ne prenne, en absence.
+  ///
+  /// 🔴 SANS LUI, L'APPEL PARAÎT CASSÉ : le serveur répond instantanément, la
+  /// feuille surgissait sans qu'aucune sonnerie n'ait eu lieu, et l'on croyait
+  /// à un défaut de l'application. Une seconde et demie suffit à dire « on a
+  /// essayé de joindre quelqu'un ».
+  static const Duration _tonaliteMinimale = Duration(milliseconds: 1500);
+
   /// Le repondeur en cours de consultation, ou `null`.
   ///
   /// ⚠️ SURVIT VOLONTAIREMENT A `_clear()`. L'appel est termine — c'est meme
@@ -509,6 +529,21 @@ class CallController extends ChangeNotifier {
       if (c.avatarUrl != null) participantAvatars[c.userId] = c.avatarUrl!;
       _initialMemberIds.add(c.userId); // membres appelés dès le départ
     }
+    /*
+     * 🔴 L'ACCUEIL SE TÉLÉCHARGE PENDANT QUE ÇA SONNE.
+     *
+     * Trente secondes d'attente qu'on ne peut pas raccourcir, et un fichier
+     * qu'il faudra jouer au bout : les faire l'un APRÈS l'autre était du temps
+     * perdu, et c'est ce qui laissait la feuille muette le temps d'une requête.
+     * Menés ensemble, le fichier est là AVANT qu'on en ait besoin.
+     *
+     * ⚠️ IL S'ANNULE DÈS QUE L'APPEL ABOUTIT OU QU'ON RACCROCHE — voir `_clear`.
+     * Sans cela on paierait les données d'un accueil que personne n'entendra, à
+     * chaque appel décroché.
+     */
+    PrechargementAccueil.instance
+        .demarrer(started.id, depot: _repondeurDepot);
+
     _ringTimeout?.cancel();
     _ringTimeout = Timer(_dureeSonnerie, () async {
       if (activeRole != ActiveCallRole.outgoing || activeCallId == null) {
@@ -607,6 +642,21 @@ class CallController extends ChangeNotifier {
       if (c.avatarUrl != null) participantAvatars[c.userId] = c.avatarUrl!;
       _initialMemberIds.add(c.userId);
     }
+    /*
+     * 🔴 L'ACCUEIL SE TÉLÉCHARGE PENDANT QUE ÇA SONNE.
+     *
+     * Trente secondes d'attente qu'on ne peut pas raccourcir, et un fichier
+     * qu'il faudra jouer au bout : les faire l'un APRÈS l'autre était du temps
+     * perdu, et c'est ce qui laissait la feuille muette le temps d'une requête.
+     * Menés ensemble, le fichier est là AVANT qu'on en ait besoin.
+     *
+     * ⚠️ IL S'ANNULE DÈS QUE L'APPEL ABOUTIT OU QU'ON RACCROCHE — voir `_clear`.
+     * Sans cela on paierait les données d'un accueil que personne n'entendra, à
+     * chaque appel décroché.
+     */
+    PrechargementAccueil.instance
+        .demarrer(started.id, depot: _repondeurDepot);
+
     _ringTimeout?.cancel();
     _ringTimeout = Timer(_dureeSonnerie, () async {
       if (activeRole != ActiveCallRole.outgoing || activeCallId == null) {
@@ -1198,6 +1248,14 @@ class CallController extends ChangeNotifier {
   }
 
   void _clear({String? idAppel}) {
+    /*
+     * ⚠️ LE PRÉCHARGEMENT S'ARRÊTE ICI, et c'est sans danger pour la feuille :
+     * `attendre` lui a déjà transféré le fichier, qui ne dépend plus de ce
+     * téléchargement. Ce qu'on annule, c'est un accueil que plus personne
+     * n'entendra — on décroche, on raccroche — et qu'on paierait pour rien sur
+     * un forfait mobile.
+     */
+    PrechargementAccueil.instance.annuler();
     _ringTimeout?.cancel();
     _ringTimeout = null;
     _finIvr?.cancel();
@@ -1957,7 +2015,40 @@ class CallController extends ChangeNotifier {
       // en plein milieu de l'accueil.
       _ringTimeout?.cancel();
       _ringTimeout = null;
-      // Le bip d'attente n'a plus lieu d'etre : personne ne sonne.
+      /*
+       * 🔴 LA TONALITÉ CONTINUE, ET LE RÉPONDEUR PREND ENSUITE.
+       *
+       * En mode absence — durée fixe ou plage programmée — le serveur répond
+       * INSTANTANÉMENT. La tonalité était coupée ici, et la feuille surgissait
+       * dans la seconde : on appuyait sur « appeler » et il ne s'était rien
+       * passé d'audible. On ne comprenait pas qu'un appel avait été lancé.
+       *
+       * Le téléphone d'en face reste silencieux — c'est ce que la personne a
+       * demandé — mais l'APPELANT entend ce qu'il entend toujours. Et pendant
+       * qu'il l'entend, L'ACCUEIL SE TÉLÉCHARGE : quand la tonalité s'arrête,
+       * le fichier est là et part sans latence.
+       *
+       * ⚠️ DEUX BORNES, CHACUNE SA RAISON. Un plancher, sinon la tonalité
+       * clignote et l'on n'a rien entendu. Un plafond, sinon un réseau lent
+       * ferait sonner une minute dans le vide pour un appel sans issue.
+       */
+      final urlDirecte = (e["accueil"] is Map)
+          ? (e["accueil"] as Map)["url"] as String?
+          : null;
+      PrechargementAccueil.instance.demarrer(callId, urlDirecte: urlDirecte);
+
+      final debut = DateTime.now();
+      final localAbsence = await PrechargementAccueil.instance
+          .attendre(callId, _attenteAccueilLongue);
+      final reste = _tonaliteMinimale - DateTime.now().difference(debut);
+      if (reste > Duration.zero) await Future<void>.delayed(reste);
+
+      // L'appel a pu etre raccroche pendant la tonalite : on ne pose pas une
+      // feuille de repondeur sur un ecran qu'on vient de quitter.
+      if (activeCallId != null && activeCallId != callId) {
+        return;
+      }
+
       await RingtoneService.instance.stop();
 
       repondeur = SessionRepondeur(
@@ -1965,7 +2056,7 @@ class CallController extends ChangeNotifier {
         nomCorrespondant: (e["peerName"] as String?)?.trim().isNotEmpty == true
             ? e["peerName"] as String
             : activePeerName ?? "",
-        accueilUrl: await _accueilJouable(e["accueil"]),
+        accueilUrl: localAbsence ?? await _accueilJouable(e["accueil"]),
         absence: true,
       );
       traceAppel("repondeur direct — accueil ${repondeur?.accueilUrl ?? "absent"}");
@@ -2381,6 +2472,9 @@ class CallController extends ChangeNotifier {
   /// etant deja termine quand elle s'ouvre.
   void fermerRepondeur() {
     if (repondeur == null) return;
+    // Le fichier d'accueil n'a plus de raison d'occuper le cache : sans cela,
+    // chaque appel manqué y laisserait le sien, que rien ne reprendrait jamais.
+    unawaited(PrechargementAccueil.instance.libererAdopte());
     repondeur = null;
     unawaited(RingtoneService.instance.stop());
     notifyListeners();
@@ -2428,13 +2522,27 @@ class CallController extends ChangeNotifier {
     // L'ecran a pu repartir dans un autre appel entre-temps : on ne s'y
     // superpose pas.
     if (activeCallId != null || repondeur != null) return;
+    /*
+     * 🔴 L'ACCUEIL EST DÉJÀ LÀ — il s'est téléchargé pendant les trente
+     * secondes de sonnerie. On obtient un FICHIER LOCAL, ce qui change tout au
+     * moment de jouer : aucune requête, aucune latence, aucun jeton, donc aucun
+     * refus possible. C'est ce qui permet à l'accueil de démarrer sans le
+     * silence qu'on prenait pour un bouton en panne.
+     *
+     * ⚠️ ON N'ATTEND QUE TRÈS PEU ICI : le fichier est normalement arrivé
+     * depuis longtemps. Ce court délai ne couvre que le cas d'un serveur qui a
+     * répondu au ralenti — au-delà, on retombe sur l'adresse réseau.
+     */
+    final local = await PrechargementAccueil.instance
+        .attendre(callId, _attenteAccueilCourte);
     final jeton = await TokenStorage().accessToken;
     repondeur = SessionRepondeur(
       callId: callId,
       nomCorrespondant: nom ?? "",
-      accueilUrl: (jeton == null || jeton.isEmpty)
-          ? null
-          : "${ServerConfig.apiBase}${accueil.url}?token=$jeton",
+      accueilUrl: local ??
+          ((jeton == null || jeton.isEmpty)
+              ? null
+              : "${ServerConfig.apiBase}${accueil.url}?token=$jeton"),
       absence: accueil.absence,
     );
     notifyListeners();

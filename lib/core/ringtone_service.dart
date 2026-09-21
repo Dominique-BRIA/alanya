@@ -722,7 +722,17 @@ class RingtoneService {
       await p.setReleaseMode(boucle ? ReleaseMode.loop : ReleaseMode.stop);
       await p.setVolume(1.0);
       if (gen != _generation) return _jeter(p);
-      await p.play(UrlSource(url));
+      /*
+       * ⚠️ UN CHEMIN LOCAL N'EST PAS UNE URL, et `UrlSource` ne sait pas le
+       * lire : il en ferait une adresse réseau, qui échouerait en silence.
+       * L'accueil du répondeur arrive désormais PRÉCHARGÉ sous forme de fichier
+       * — c'est ce qui lui permet de démarrer sans latence — donc ce cas doit
+       * être reconnu ici, et nulle part ailleurs.
+       */
+      final estLocal = url.startsWith("/") || url.startsWith("file://");
+      await p.play(estLocal
+          ? DeviceFileSource(url.replaceFirst("file://", ""))
+          : UrlSource(url));
       if (gen != _generation) return _jeter(p);
       _player = p;
       _currentAsset = url;
