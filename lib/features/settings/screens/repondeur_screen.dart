@@ -283,6 +283,35 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
                   if (_envoi) const LinearProgressIndicator(minHeight: 2),
 
                   /*
+                   * ⚠️ L'INTERRUPTEUR EN PREMIER, AVANT MÊME L'EXPLICATION DES
+                   * TROIS CAS (demande user 21/09/2026).
+                   *
+                   * C'est le geste le plus fréquent et de loin : on vient ici
+                   * pour allumer ou éteindre, rarement pour comprendre. Le
+                   * placer après trois paragraphes obligeait à les traverser à
+                   * chaque fois pour atteindre la seule chose qu'on venait
+                   * faire.
+                   *
+                   * Les trois cas viennent ensuite : ils RÉPONDENT à
+                   * l'interrupteur — « voilà ce qui se passe maintenant que
+                   * c'est allumé » — au lieu de le précéder.
+                   */
+                  SwitchListTile(
+                    value: etat?.actif ?? false,
+                    onChanged: _envoi
+                        ? null
+                        : (v) => _ecrire(
+                            () =>
+                                context.read<RepondeurRepository>().activer(v),
+                          ),
+                    title: Text(tr(context, 'vm_set_enable')),
+                    subtitle: Text(
+                      tr(context, 'vm_set_enable_hint'),
+                      style: TextStyle(fontSize: 12.5, color: muted),
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  /*
                    * 🔴 LES TROIS CAS SE LISENT, ILS NE SE DÉDUISENT PLUS.
                    *
                    * L'écran laissait deviner : un interrupteur, des durées, et
@@ -330,21 +359,6 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
                   ),
                   const Divider(height: 1),
 
-                  SwitchListTile(
-                    value: etat?.actif ?? false,
-                    onChanged: _envoi
-                        ? null
-                        : (v) => _ecrire(
-                            () =>
-                                context.read<RepondeurRepository>().activer(v),
-                          ),
-                    title: Text(tr(context, 'vm_set_enable')),
-                    subtitle: Text(
-                      tr(context, 'vm_set_enable_hint'),
-                      style: TextStyle(fontSize: 12.5, color: muted),
-                    ),
-                  ),
-                  const Divider(height: 1),
 
                   _entete(tr(context, 'vm_set_absence')),
                   if (etat?.enAbsence == true)
