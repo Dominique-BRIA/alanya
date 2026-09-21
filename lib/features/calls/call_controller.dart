@@ -498,10 +498,37 @@ class CallController extends ChangeNotifier {
       _initialMemberIds.add(c.userId); // membres appelés dès le départ
     }
     _ringTimeout?.cancel();
-    _ringTimeout = Timer(const Duration(seconds: 60), () {
-      if (activeRole == ActiveCallRole.outgoing && activeCallId != null) {
-        hangUp();
+    _ringTimeout = Timer(const Duration(seconds: 60), () async {
+      if (activeRole != ActiveCallRole.outgoing || activeCallId == null) {
+        return;
       }
+      /*
+       * 🐛 LE REPONDEUR NE S'OUVRAIT JAMAIS SUR UN SIMPLE « PERSONNE NE
+       * DECROCHE » (signale par le user le 21/09/2026).
+       *
+       * `_proposerRepondeurApresEchec` n'etait appele que depuis la reception
+       * d'un `call_state ended`. Or cet evenement-la est ECARTE quand il vient
+       * de nous : `fromUserId == myUserId` le traite comme l'echo de notre
+       * propre raccrochage et sort aussitot.
+       *
+       * Et c'est bien NOUS qui raccrochons : le serveur ne balaie les appels
+       * restes en sonnerie qu'a la CREATION d'un autre appel, sans rien
+       * diffuser. Passe le delai, ce minuteur est donc le seul a agir — et il
+       * se contentait de couper.
+       *
+       * Resultat : repondeur allume, sans absence ni plage, l'appel sonnait
+       * puis retombait dans le vide. Le web, lui, demande l'accueil depuis SON
+       * propre minuteur de sonnerie ; le mobile ne le faisait pas.
+       *
+       * ⚠️ RETENUS AVANT `hangUp`, qui les efface : c'est exactement la raison
+       * pour laquelle l'autre appelant de cette fonction les capture aussi.
+       */
+      final id = activeCallId!;
+      final nom = activePeerName;
+      await hangUp();
+      // ⚠️ APRES `hangUp`, jamais avant : la fonction refuse de se poser
+      // par-dessus un appel encore actif, et se retirerait d'elle-meme.
+      await _proposerRepondeurApresEchec(id, nom);
     });
     // Sonnerie sortante (bip d'attente) tant que le destinataire n'a pas
     // décroché. Arrêtée dans _onPeerJoined / _clear / hangUp.
@@ -569,10 +596,37 @@ class CallController extends ChangeNotifier {
       _initialMemberIds.add(c.userId);
     }
     _ringTimeout?.cancel();
-    _ringTimeout = Timer(const Duration(seconds: 60), () {
-      if (activeRole == ActiveCallRole.outgoing && activeCallId != null) {
-        hangUp();
+    _ringTimeout = Timer(const Duration(seconds: 60), () async {
+      if (activeRole != ActiveCallRole.outgoing || activeCallId == null) {
+        return;
       }
+      /*
+       * 🐛 LE REPONDEUR NE S'OUVRAIT JAMAIS SUR UN SIMPLE « PERSONNE NE
+       * DECROCHE » (signale par le user le 21/09/2026).
+       *
+       * `_proposerRepondeurApresEchec` n'etait appele que depuis la reception
+       * d'un `call_state ended`. Or cet evenement-la est ECARTE quand il vient
+       * de nous : `fromUserId == myUserId` le traite comme l'echo de notre
+       * propre raccrochage et sort aussitot.
+       *
+       * Et c'est bien NOUS qui raccrochons : le serveur ne balaie les appels
+       * restes en sonnerie qu'a la CREATION d'un autre appel, sans rien
+       * diffuser. Passe le delai, ce minuteur est donc le seul a agir — et il
+       * se contentait de couper.
+       *
+       * Resultat : repondeur allume, sans absence ni plage, l'appel sonnait
+       * puis retombait dans le vide. Le web, lui, demande l'accueil depuis SON
+       * propre minuteur de sonnerie ; le mobile ne le faisait pas.
+       *
+       * ⚠️ RETENUS AVANT `hangUp`, qui les efface : c'est exactement la raison
+       * pour laquelle l'autre appelant de cette fonction les capture aussi.
+       */
+      final id = activeCallId!;
+      final nom = activePeerName;
+      await hangUp();
+      // ⚠️ APRES `hangUp`, jamais avant : la fonction refuse de se poser
+      // par-dessus un appel encore actif, et se retirerait d'elle-meme.
+      await _proposerRepondeurApresEchec(id, nom);
     });
     // Même règle que sur un départ ordinaire : la route d'abord, la tonalité
     // ensuite, et elle la suit.
