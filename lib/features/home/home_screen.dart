@@ -38,6 +38,7 @@ import '../../widgets/avatar_circle.dart';
 import '../../widgets/motif_background.dart';
 import '../../widgets/multi_select_mixin.dart';
 import '../account/screens/avatar_viewer_screen.dart';
+import '../settings/screens/repondeur_screen.dart';
 import '../settings/screens/settings_screen.dart';
 import '../settings/screens/devices_screen.dart';
 import '../ai/ai_repository.dart';
@@ -314,6 +315,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const DevicesScreen()),
                 );
+              } else if (v == "repondeur") {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const RepondeurScreen()),
+                );
               } else if (v == "abandoned") {
                 Navigator.of(context).push(
                   MaterialPageRoute(
@@ -329,6 +334,18 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: ListTile(
                     leading: const Icon(Icons.devices_outlined),
                     title: Text(tr(context, 'home_devices')),
+                    contentPadding: EdgeInsets.zero,
+                  )),
+              // Le répondeur reste dans les Réglages — c'est là qu'on va le
+              // chercher quand on sait ce qu'on veut. Il est AUSSI ici parce
+              // qu'on l'allume et on l'éteint en partant, sans intention de
+              // régler quoi que ce soit : trois écrans pour cocher une case,
+              // c'est deux de trop (demande user 21/09/2026).
+              PopupMenuItem(
+                  value: "repondeur",
+                  child: ListTile(
+                    leading: const Icon(Icons.voicemail_outlined),
+                    title: Text(tr(context, 'vm_title')),
                     contentPadding: EdgeInsets.zero,
                   )),
               // Un non-agent ne doit RIEN voir (demande user 15/08/2026) —
