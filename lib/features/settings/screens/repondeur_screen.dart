@@ -465,6 +465,12 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
                     ),
                   ),
 
+                  // Les plages sont une section a part entiere, pas la suite
+                  // des accueils : le bouton d'enregistrement ci-dessus ferme
+                  // la precedente, et sans separateur les deux se lisaient
+                  // comme un seul bloc.
+                  const SizedBox(height: 20),
+                  const Divider(height: 1),
                   _entete(tr(context, 'vm_prog_title')),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
