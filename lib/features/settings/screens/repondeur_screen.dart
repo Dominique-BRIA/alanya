@@ -44,6 +44,19 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
   Timer? _tic;
   List<PlageRepondeur> _plages = const [];
 
+  /// Redessine quand l'heure fait entrer ou sortir d'une plage.
+  ///
+  /// 🐛 LE REPÈRE « EN COURS » N'APPARAISSAIT JAMAIS SUR LES PLAGES. Le calcul
+  /// était juste, mais RIEN ne le relançait : un écran ouvert à 9 h 59 devant
+  /// une plage de 10 h à 12 h restait sur son affichage de 9 h 59. Flutter ne
+  /// redessine que sur `setState`, et le temps qui passe n'en est pas un.
+  ///
+  /// ⚠️ ON NE REDESSINE QUE SI LA RÉPONSE A CHANGÉ. Un `setState` toutes les
+  /// vingt secondes pour un écran identique userait la batterie pour rien —
+  /// et cet écran-ci reste ouvert le temps qu'on enregistre un message.
+  Timer? _horloge;
+  bool _plageEtaitEnCours = false;
+
   /// Les durées proposées, en minutes. La dernière est la borne du serveur :
   /// au-delà, ce n'est plus une absence mais un compte injoignable.
   static const _durees = <int>[30, 60, 120, 240, 480, absenceMaxMinutes];
@@ -51,12 +64,19 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
   @override
   void initState() {
     super.initState();
+    _horloge = Timer.periodic(const Duration(seconds: 20), (_) {
+      final ici = _plageEnCours;
+      if (ici != _plageEtaitEnCours && mounted) {
+        setState(() => _plageEtaitEnCours = ici);
+      }
+    });
     _charger();
   }
 
   @override
   void dispose() {
     _tic?.cancel();
+    _horloge?.cancel();
     unawaited(RingtoneService.instance.stop());
     if (_enregistreur.enCours) unawaited(_enregistreur.stop());
     super.dispose();
@@ -272,28 +292,27 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
     final etat = _etat;
     final muted = mutedOf(context, Colors.black54);
 
-    /*
-     * FOND UNI PLUTÔT QUE LE MOTIF (demande user 21/09/2026).
-     *
-     * ⚠️ EN THÈME CLAIR SEULEMENT. Les trois autres — Blanc, Nuit, Noir —
-     * gardent le fond que leur extension a choisi : le sable y jurerait, et le
-     * mode clair reste par ailleurs figé, on n'y touche que sur demande
-     * explicite comme celle-ci.
-     */
-    final fond =
-        Theme.of(context).brightness == Brightness.dark || estBlanc(context)
-        ? surfacesOf(context).fond
-        : AlanyaColors.sand;
 
     final enAbsence = etat?.enAbsence == true;
     final plageActive = _plageEnCours;
 
+    /*
+     * ⚠️ LE MÊME FOND QUE L'ÉCRAN RÉUNIONS (demande user 21/09/2026).
+     *
+     * Une couleur unie avait été posée ici, décidée en thème Clair seulement.
+     * Deux défauts : l'écran ne ressemblait plus au reste de l'application, et
+     * en thème BLANC la condition retombait sur le fond de ce thème — d'où un
+     * écran franchement blanc là où on attendait une teinte.
+     *
+     * `MotifBackground` règle les deux d'un coup : c'est lui que portent les
+     * autres écrans, et il sait déjà quoi faire dans les quatre thèmes.
+     */
     return Scaffold(
-      backgroundColor: fond,
       appBar: backAppBar(context, tr(context, 'vm_title')),
-      body: _chargement
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
+      body: MotifBackground(
+        child: _chargement
+            ? const Center(child: CircularProgressIndicator())
+            : ListView(
               padding: const EdgeInsets.only(bottom: 32),
               children: [
                 if (_envoi) const LinearProgressIndicator(minHeight: 2),
@@ -442,8 +461,9 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
                     ),
                   ),
                 ),
-              ],
-            ),
+                ],
+              ),
+      ),
     );
   }
 
