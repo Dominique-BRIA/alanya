@@ -286,6 +286,18 @@ class CallController extends ChangeNotifier {
   StreamSubscription<Map<String, dynamic>>? _sub;
   Timer? _ringTimeout;
 
+  /// Combien de temps on laisse sonner avant de passer au répondeur.
+  ///
+  /// ⚠️ MÊME VALEUR QUE `RING_TIMEOUT_MS` CÔTÉ WEB, et c'est tout l'objet de
+  /// cette constante. Le mobile attendait 60 s quand le web en attendait 30 :
+  /// appeler la même personne depuis l'un ou l'autre ne donnait pas la même
+  /// attente avant d'entendre son accueil (aligné sur demande du user le
+  /// 21/09/2026).
+  ///
+  /// ⚠️ ELLE EST NOMMÉE PARCE QUE DEUX MINUTEURS L'UTILISENT — départ ordinaire
+  /// et reprise. Écrite deux fois en clair, elle avait déjà tout pour diverger.
+  static const _dureeSonnerie = Duration(seconds: 30);
+
   /// Délai de lecture d'un message de fin du standard, avant de raccrocher.
   ///
   /// Le serveur n'envoie jamais `ivr_error` ET `call_ended` : le second
@@ -498,7 +510,7 @@ class CallController extends ChangeNotifier {
       _initialMemberIds.add(c.userId); // membres appelés dès le départ
     }
     _ringTimeout?.cancel();
-    _ringTimeout = Timer(const Duration(seconds: 60), () async {
+    _ringTimeout = Timer(_dureeSonnerie, () async {
       if (activeRole != ActiveCallRole.outgoing || activeCallId == null) {
         return;
       }
@@ -596,7 +608,7 @@ class CallController extends ChangeNotifier {
       _initialMemberIds.add(c.userId);
     }
     _ringTimeout?.cancel();
-    _ringTimeout = Timer(const Duration(seconds: 60), () async {
+    _ringTimeout = Timer(_dureeSonnerie, () async {
       if (activeRole != ActiveCallRole.outgoing || activeCallId == null) {
         return;
       }
