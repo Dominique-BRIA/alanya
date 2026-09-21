@@ -12,7 +12,6 @@ import '../../../core/texte_recherche.dart';
 import '../../../models/sonnerie.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
-import '../../../widgets/motif_background.dart';
 import '../ringtones_repository.dart';
 
 /// Catalogue de sonneries importées.
@@ -260,19 +259,16 @@ class _RingtonesScreenState extends State<RingtonesScreen> {
         icon: const Icon(Icons.library_music_outlined),
         label: Text(_progression == null ? tr(context, 'import_action') : tr(context, 'sending')),
       ),
-      body: MotifBackground(
-        overlayOpacity: 0.92,
-        child: Column(children: [
-          if (_progression != null)
-            LinearProgressIndicator(
-              value: _progression,
-              color: accentOf(context),
-            ),
-          Expanded(
-            child: RefreshIndicator(onRefresh: _charger, child: _corps()),
+      body: Column(children: [
+        if (_progression != null)
+          LinearProgressIndicator(
+            value: _progression,
+            color: accentOf(context),
           ),
-        ]),
-      ),
+        Expanded(
+          child: RefreshIndicator(onRefresh: _charger, child: _corps()),
+        ),
+      ]),
     );
   }
 

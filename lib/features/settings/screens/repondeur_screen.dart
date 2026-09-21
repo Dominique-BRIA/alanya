@@ -12,7 +12,6 @@ import '../../../core/voice_recorder.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
-import '../../../widgets/motif_background.dart';
 import '../../calls/repondeur_repository.dart';
 import '../../media/media_repository.dart';
 
@@ -297,173 +296,172 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
     final plageActive = _plageEnCours;
 
     /*
-     * ⚠️ LE MÊME FOND QUE L'ÉCRAN RÉUNIONS (demande user 21/09/2026).
+     * ⚠️ LE MÊME FOND QUE L'ÉCRAN CONFIDENTIALITÉ (demande user 21/09/2026).
      *
-     * Une couleur unie avait été posée ici, décidée en thème Clair seulement.
-     * Deux défauts : l'écran ne ressemblait plus au reste de l'application, et
-     * en thème BLANC la condition retombait sur le fond de ce thème — d'où un
-     * écran franchement blanc là où on attendait une teinte.
+     * Cet écran a porté successivement une couleur unie décidée en Clair
+     * seulement, puis `MotifBackground` pour suivre l'écran Réunions. La
+     * référence est désormais Confidentialité, qui n'enveloppe rien : son
+     * `Scaffold` laisse paraître le `scaffoldBackgroundColor` du thème.
      *
-     * `MotifBackground` règle les deux d'un coup : c'est lui que portent les
-     * autres écrans, et il sait déjà quoi faire dans les quatre thèmes.
+     * Ne rien poser est donc la bonne réponse, et c'est aussi celle qui tient
+     * dans les quatre thèmes : chacun déclare son propre fond de page (crème,
+     * nuit, noir, blanc). Reposer une couleur ici les contredirait tous.
      */
     return Scaffold(
       appBar: backAppBar(context, tr(context, 'vm_title')),
-      body: MotifBackground(
-        child: _chargement
-            ? const Center(child: CircularProgressIndicator())
-            : ListView(
-              padding: const EdgeInsets.only(bottom: 32),
-              children: [
-                if (_envoi) const LinearProgressIndicator(minHeight: 2),
+      body: _chargement
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
+            padding: const EdgeInsets.only(bottom: 32),
+            children: [
+              if (_envoi) const LinearProgressIndicator(minHeight: 2),
 
-                SwitchListTile(
-                  value: etat?.actif ?? false,
-                  onChanged: _envoi
-                      ? null
-                      : (v) => _ecrire(
-                          () => context.read<RepondeurRepository>().activer(v),
-                        ),
-                  title: Text(tr(context, 'vm_set_enable')),
-                  subtitle: Text(
-                    tr(context, 'vm_set_enable_hint'),
-                    style: TextStyle(fontSize: 12.5, color: muted),
+              SwitchListTile(
+                value: etat?.actif ?? false,
+                onChanged: _envoi
+                    ? null
+                    : (v) => _ecrire(
+                        () => context.read<RepondeurRepository>().activer(v),
+                      ),
+                title: Text(tr(context, 'vm_set_enable')),
+                subtitle: Text(
+                  tr(context, 'vm_set_enable_hint'),
+                  style: TextStyle(fontSize: 12.5, color: muted),
+                ),
+              ),
+              const Divider(height: 1),
+
+              /*
+               * 🔴 LES TROIS CAS SONT DES ENTRÉES, PAS DES PARAGRAPHES.
+               *
+               * Ils s'affichaient en trois lignes alignées dont une portait
+               * un repère « en cours » : on y lisait trois choix exclusifs,
+               * ce qu'ils ne sont pas, et surtout trois boutons — alors que
+               * rien n'était cliquable. Pour poser une absence il fallait
+               * descendre vers une SECONDE section du même nom, plus bas.
+               *
+               * Chaque entrée ouvre maintenant ses propres réglages, et le
+               * mot « Absence » n'apparaît plus qu'une seule fois à l'écran.
+               *
+               * ⚠️ « SONNERIE D'ABORD » N'OUVRE RIEN, et c'est voulu : ce
+               * n'est pas un réglage, c'est ce qui se passe quand aucune
+               * exception ne court. Elle devient cliquable UNIQUEMENT quand
+               * une absence peut être levée — un appui qui ne fait rien vaut
+               * moins qu'une ligne qui n'invite pas à appuyer.
+               */
+              _option(
+                icone: Icons.notifications_active_outlined,
+                titre: tr(context, 'vm_mode_ring'),
+                detail: enAbsence
+                    ? tr(context, 'vm_mode_ring_back')
+                    : tr(context, 'vm_mode_ring_d'),
+                enCours: (etat?.actif ?? false) && !enAbsence && !plageActive,
+                muted: muted,
+                onTap: enAbsence && !_envoi
+                    ? () => _ecrire(
+                        () => context
+                            .read<RepondeurRepository>()
+                            .poserAbsence(0),
+                      )
+                    : null,
+              ),
+              _option(
+                icone: Icons.schedule_rounded,
+                titre: tr(context, 'vm_set_absence'),
+                detail: enAbsence
+                    ? tr(context, 'vm_set_absence_until', {
+                        'heure': _horodatageCourt(etat!.jusquA!.toLocal()),
+                      })
+                    : tr(context, 'vm_mode_absence_d'),
+                enCours: enAbsence,
+                muted: muted,
+                onTap: _envoi ? null : _ouvrirAbsence,
+              ),
+              _option(
+                icone: Icons.event_repeat_rounded,
+                titre: tr(context, 'vm_prog_title'),
+                detail: _plages.isEmpty
+                    ? tr(context, 'vm_mode_prog_d')
+                    : tr(context, 'vm_prog_count')
+                          .replaceAll('{n}', '${_plages.length}'),
+                enCours: !enAbsence && plageActive,
+                muted: muted,
+                onTap: _envoi ? null : _ouvrirPlages,
+              ),
+              const Divider(height: 1),
+
+              _entete(tr(context, 'vm_set_greetings')),
+              if (etat == null || etat.accueils.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+                  child: Text(
+                    tr(context, 'vm_set_none'),
+                    style: TextStyle(fontSize: 13.5, height: 1.4, color: muted),
                   ),
                 ),
-                const Divider(height: 1),
-
-                /*
-                 * 🔴 LES TROIS CAS SONT DES ENTRÉES, PAS DES PARAGRAPHES.
-                 *
-                 * Ils s'affichaient en trois lignes alignées dont une portait
-                 * un repère « en cours » : on y lisait trois choix exclusifs,
-                 * ce qu'ils ne sont pas, et surtout trois boutons — alors que
-                 * rien n'était cliquable. Pour poser une absence il fallait
-                 * descendre vers une SECONDE section du même nom, plus bas.
-                 *
-                 * Chaque entrée ouvre maintenant ses propres réglages, et le
-                 * mot « Absence » n'apparaît plus qu'une seule fois à l'écran.
-                 *
-                 * ⚠️ « SONNERIE D'ABORD » N'OUVRE RIEN, et c'est voulu : ce
-                 * n'est pas un réglage, c'est ce qui se passe quand aucune
-                 * exception ne court. Elle devient cliquable UNIQUEMENT quand
-                 * une absence peut être levée — un appui qui ne fait rien vaut
-                 * moins qu'une ligne qui n'invite pas à appuyer.
-                 */
-                _option(
-                  icone: Icons.notifications_active_outlined,
-                  titre: tr(context, 'vm_mode_ring'),
-                  detail: enAbsence
-                      ? tr(context, 'vm_mode_ring_back')
-                      : tr(context, 'vm_mode_ring_d'),
-                  enCours: (etat?.actif ?? false) && !enAbsence && !plageActive,
-                  muted: muted,
-                  onTap: enAbsence && !_envoi
-                      ? () => _ecrire(
-                          () => context
-                              .read<RepondeurRepository>()
-                              .poserAbsence(0),
+              for (final a in etat?.accueils ?? const <Accueil>[])
+                ListTile(
+                  leading: IconButton(
+                    icon: Icon(
+                      _enEcoute == a.id
+                          ? Icons.stop_rounded
+                          : Icons.play_arrow_rounded,
+                    ),
+                    onPressed: () => _ecouter(a),
+                  ),
+                  title: Text(a.libelle.isEmpty ? a.id : a.libelle),
+                  subtitle: a.actif
+                      ? Text(
+                          tr(context, 'vm_set_used'),
+                          style: const TextStyle(fontSize: 12.5),
                         )
                       : null,
-                ),
-                _option(
-                  icone: Icons.schedule_rounded,
-                  titre: tr(context, 'vm_set_absence'),
-                  detail: enAbsence
-                      ? tr(context, 'vm_set_absence_until', {
-                          'heure': _horodatageCourt(etat!.jusquA!.toLocal()),
-                        })
-                      : tr(context, 'vm_mode_absence_d'),
-                  enCours: enAbsence,
-                  muted: muted,
-                  onTap: _envoi ? null : _ouvrirAbsence,
-                ),
-                _option(
-                  icone: Icons.event_repeat_rounded,
-                  titre: tr(context, 'vm_prog_title'),
-                  detail: _plages.isEmpty
-                      ? tr(context, 'vm_mode_prog_d')
-                      : tr(context, 'vm_prog_count')
-                            .replaceAll('{n}', '${_plages.length}'),
-                  enCours: !enAbsence && plageActive,
-                  muted: muted,
-                  onTap: _envoi ? null : _ouvrirPlages,
-                ),
-                const Divider(height: 1),
-
-                _entete(tr(context, 'vm_set_greetings')),
-                if (etat == null || etat.accueils.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
-                    child: Text(
-                      tr(context, 'vm_set_none'),
-                      style: TextStyle(fontSize: 13.5, height: 1.4, color: muted),
-                    ),
-                  ),
-                for (final a in etat?.accueils ?? const <Accueil>[])
-                  ListTile(
-                    leading: IconButton(
-                      icon: Icon(
-                        _enEcoute == a.id
-                            ? Icons.stop_rounded
-                            : Icons.play_arrow_rounded,
-                      ),
-                      onPressed: () => _ecouter(a),
-                    ),
-                    title: Text(a.libelle.isEmpty ? a.id : a.libelle),
-                    subtitle: a.actif
-                        ? Text(
-                            tr(context, 'vm_set_used'),
-                            style: const TextStyle(fontSize: 12.5),
-                          )
-                        : null,
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        // Choisir celui qu'on entend — absent s'il l'est déjà :
-                        // une action sans effet ne doit pas être proposée.
-                        if (!a.actif)
-                          IconButton(
-                            icon: const Icon(Icons.check_circle_outline),
-                            onPressed: _envoi
-                                ? null
-                                : () => _ecrire(
-                                    () => context
-                                        .read<RepondeurRepository>()
-                                        .choisirAccueil(a.id),
-                                  ),
-                          ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Choisir celui qu'on entend — absent s'il l'est déjà :
+                      // une action sans effet ne doit pas être proposée.
+                      if (!a.actif)
                         IconButton(
-                          icon: const Icon(Icons.delete_outline),
+                          icon: const Icon(Icons.check_circle_outline),
                           onPressed: _envoi
                               ? null
                               : () => _ecrire(
                                   () => context
                                       .read<RepondeurRepository>()
-                                      .retirerAccueil(a.id),
+                                      .choisirAccueil(a.id),
                                 ),
                         ),
-                      ],
-                    ),
-                  ),
-
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                  child: FilledButton.icon(
-                    onPressed: _envoi ? null : _basculerEnregistrement,
-                    icon: Icon(
-                      _enregistre ? Icons.stop_rounded : Icons.mic_rounded,
-                    ),
-                    label: Text(
-                      _enregistre
-                          ? "${tr(context, 'vm_set_recording')}  ·  $_duree"
-                          : tr(context, 'vm_set_new'),
-                    ),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline),
+                        onPressed: _envoi
+                            ? null
+                            : () => _ecrire(
+                                () => context
+                                    .read<RepondeurRepository>()
+                                    .retirerAccueil(a.id),
+                              ),
+                      ),
+                    ],
                   ),
                 ),
-                ],
+
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: FilledButton.icon(
+                  onPressed: _envoi ? null : _basculerEnregistrement,
+                  icon: Icon(
+                    _enregistre ? Icons.stop_rounded : Icons.mic_rounded,
+                  ),
+                  label: Text(
+                    _enregistre
+                        ? "${tr(context, 'vm_set_recording')}  ·  $_duree"
+                        : tr(context, 'vm_set_new'),
+                  ),
+                ),
               ),
-      ),
+              ],
+            ),
     );
   }
 

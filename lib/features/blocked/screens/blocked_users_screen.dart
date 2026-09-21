@@ -5,7 +5,6 @@ import '../../../core/api_client.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../../../widgets/avatar_circle.dart';
-import '../../../widgets/motif_background.dart';
 import '../../../models/blocked_user.dart';
 import '../blocked_repository.dart';
 import '../../../l10n/app_localizations.dart';
@@ -92,12 +91,9 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: backAppBar(context, tr(context, 'blocked_title')),
-      body: MotifBackground(
-        overlayOpacity: 0.92,
-        child: RefreshIndicator(
-          onRefresh: _load,
-          child: _buildList(),
-        ),
+      body: RefreshIndicator(
+        onRefresh: _load,
+        child: _buildList(),
       ),
     );
   }

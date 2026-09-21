@@ -10,7 +10,6 @@ import '../../../core/traduction_auto.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../../../widgets/dialogues_traduction.dart';
-import '../../../widgets/motif_background.dart';
 
 /// Réglages ▸ Traduction : installer et retirer les langues hors ligne.
 ///
@@ -122,18 +121,15 @@ class _TranslationScreenState extends State<TranslationScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: backAppBar(context, tr(context, 'translated')),
-      body: MotifBackground(
-        overlayOpacity: 0.92,
-        child: Column(
-          children: [
-            _interrupteurAuto(),
-            _entete(),
-            _champRecherche(),
-            Expanded(
-              child: RefreshIndicator(onRefresh: _charger, child: _corps()),
-            ),
-          ],
-        ),
+      body: Column(
+        children: [
+          _interrupteurAuto(),
+          _entete(),
+          _champRecherche(),
+          Expanded(
+            child: RefreshIndicator(onRefresh: _charger, child: _corps()),
+          ),
+        ],
       ),
     );
   }
