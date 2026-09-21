@@ -1,4 +1,6 @@
 import '../../core/api_client.dart';
+import 'package:flutter_timezone/flutter_timezone.dart';
+
 import '../../core/authed_api.dart';
 
 /// L'accueil d'un correspondant, tel que l'appelant a le droit de l'entendre.
@@ -169,6 +171,18 @@ class MonRepondeur {
 /// seul chemin vers une API.
 const absenceMaxMinutes = 24 * 60;
 
+/// Durée maximale d'un message d'accueil — MIROIR d'`ACCUEIL_MAX_MS` côté web.
+///
+/// 🔴 LE MOBILE N'AVAIT AUCUNE BORNE, et le serveur n'en pose pas : il ne
+/// vérifie que le type du fichier, jamais sa durée. On pouvait donc enregistrer
+/// dix minutes, les téléverser — la donnée est payée — et les faire subir à
+/// chaque appelant, y compris sur le web où la même limite existe pourtant
+/// depuis le début.
+///
+/// Trente secondes : au-delà, l'appelant raccroche avant le bip. Ce n'est pas
+/// une limite technique mais une limite d'usage.
+const accueilMaxMs = 30 * 1000;
+
 /// MON répondeur — la partie « réglages », par opposition à l'appelant.
 extension MonRepondeurApi on RepondeurRepository {
   Future<MonRepondeur> lire() async =>
@@ -216,4 +230,136 @@ extension MonRepondeurApi on RepondeurRepository {
           "/api/repondeur?accueil=${Uri.encodeQueryComponent(id)}",
         ),
       );
+}
+
+/* ══════════════════ LES PLAGES PROGRAMMÉES ══════════════════ */
+
+/// Une plage : un jour, une heure de début, une heure de fin.
+///
+/// 🔴 CE N'EST PAS UNE VARIANTE DE L'ABSENCE, c'est un troisième mode.
+/// L'absence dit « à partir de maintenant, et pendant trois heures ». Une plage
+/// dit « tous les lundis, de 10 h à 12 h » — elle revient, et n'a pas de fin
+/// tant qu'on ne la retire pas. C'est ce qui la rend dangereuse : d'où sa
+/// péremption automatique au bout de deux semaines, décidée par le serveur.
+///
+/// ⚠️ LES HEURES SONT DES MINUTES DEPUIS MINUIT, et non « 10:00 ». Une chaîne
+/// se compare par ordre alphabétique — « 9:30 » y passe APRÈS « 10:00 ».
+class PlageRepondeur {
+  const PlageRepondeur({
+    required this.id,
+    required this.jour,
+    required this.debutMin,
+    required this.finMin,
+    required this.accueilId,
+    required this.expireLe,
+  });
+
+  final String id;
+
+  /// 0 = dimanche … 6 = samedi — la convention de `Date.getDay()` côté serveur.
+  ///
+  /// ⚠️ CE N'EST PAS CELLE DE DART, où `DateTime.weekday` fait 1 = lundi …
+  /// 7 = dimanche. Les deux se ressemblent assez pour qu'on les confonde, et
+  /// assez peu pour que tout se décale d'un jour. La conversion se fait à
+  /// l'écran, une seule fois.
+  final int jour;
+
+  final int debutMin;
+  final int finMin;
+
+  /// L'accueil propre à cette plage, ou `null` pour celui de tous les jours.
+  final String? accueilId;
+
+  /// Fin de validité — deux semaines après la pose.
+  final DateTime? expireLe;
+
+  /// Cette plage a-t-elle cessé de s'appliquer ?
+  ///
+  /// ⚠️ LE SERVEUR REND AUSSI LES PÉRIMÉES, avec leur date, et c'est voulu : les
+  /// cacher ferait disparaître de l'écran une programmation qu'on cherche
+  /// justement à retrouver pour la relancer. C'est à l'écran de dire
+  /// « expirée », pas à la base de l'effacer.
+  bool get expiree =>
+      expireLe != null && !expireLe!.isAfter(DateTime.now());
+
+  static PlageRepondeur? depuisJson(Map<String, dynamic> j) {
+    final id = j["id"]?.toString();
+    if (id == null || id.isEmpty) return null;
+    final jour = int.tryParse(j["jour"]?.toString() ?? "");
+    final debut = int.tryParse(j["debutMin"]?.toString() ?? "");
+    final fin = int.tryParse(j["finMin"]?.toString() ?? "");
+    if (jour == null || debut == null || fin == null) return null;
+    return PlageRepondeur(
+      id: id,
+      jour: jour,
+      debutMin: debut,
+      finMin: fin,
+      accueilId: j["accueilId"]?.toString(),
+      expireLe: DateTime.tryParse(j["expireLe"]?.toString() ?? ""),
+    );
+  }
+}
+
+/// Nombre maximal de plages par compte — MIROIR de `PLAGES_MAX` côté serveur.
+const plagesMax = 40;
+
+/// Les plages programmées de mon compte.
+extension PlagesRepondeurApi on RepondeurRepository {
+  Future<List<PlageRepondeur>> listerPlages() async =>
+      _lirePlages(await _api.get("/api/repondeur/plages"));
+
+  /// Pose une ou plusieurs plages d'un coup.
+  ///
+  /// 🔴 LE FUSEAU PART D'ICI, ET C'EST LE SEUL ENDROIT QUI LE CONNAISSE. Le
+  /// serveur ne peut que deviner le sien, qui n'est presque jamais celui de
+  /// l'utilisateur : une plage « lundi 10 h » posée depuis Douala s'ouvrirait
+  /// à 11 h locale si on laissait le serveur trancher.
+  ///
+  /// ⚠️ EN CAS D'ÉCHEC, ON N'ENVOIE RIEN PLUTÔT QU'UN FUSEAU FAUX : le serveur
+  /// retombe alors sur UTC, ce qu'il documente, au lieu de se voir imposer une
+  /// zone inventée. Mieux vaut un repli connu qu'une valeur plausible.
+  Future<List<PlageRepondeur>> ajouterPlages(
+    List<Map<String, Object?>> plages,
+  ) async {
+    final fuseau = await fuseauLocal();
+    return _lirePlages(
+      await _api.post("/api/repondeur/plages", {
+        "plages": [
+          for (final p in plages)
+            if (fuseau == null) p else {...p, "fuseau": fuseau},
+        ],
+      }),
+    );
+  }
+
+  Future<List<PlageRepondeur>> retirerPlage(String id) async => _lirePlages(
+    await _api.delete(
+      "/api/repondeur/plages?id=${Uri.encodeQueryComponent(id)}",
+    ),
+  );
+
+  List<PlageRepondeur> _lirePlages(Map<String, dynamic> data) =>
+      (data["plages"] as List?)
+          ?.whereType<Map<String, dynamic>>()
+          .map(PlageRepondeur.depuisJson)
+          .whereType<PlageRepondeur>()
+          .toList() ??
+      const [];
+}
+
+/// Le nom IANA du fuseau de cet appareil (« Africa/Douala »), ou `null`.
+///
+/// ⚠️ NE JAMAIS REMPLACER PAR `DateTime.now().timeZoneName`, qui rend une
+/// ABRÉVIATION (« WAT », « CEST »). Le serveur la passe à `Intl`, qui ne la
+/// reconnaît pas, et retombe silencieusement sur UTC : les plages s'ouvriraient
+/// à côté sans que rien ne le signale.
+Future<String?> fuseauLocal() async {
+  try {
+    final nom = await FlutterTimezone.getLocalTimezone();
+    return nom.isEmpty ? null : nom;
+  } catch (_) {
+    // Greffon absent, plateforme muette : le serveur retombera sur UTC, ce
+    // qu'il documente. Lever ici empêcherait de poser la moindre plage.
+    return null;
+  }
 }

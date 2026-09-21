@@ -134,6 +134,23 @@ dependencies:
   # simplement sans compression, jamais en erreur.
   video_compress: ^3.1.4
 
+  # LE NOM DU FUSEAU, ET NON SON DÉCALAGE.
+  #
+  # 🔴 DART NE SAIT PAS LE DONNER. `DateTime.now().timeZoneName` rend une
+  # ABRÉVIATION — « CEST », « WAT » — que `Intl` côté serveur refuse : il lui
+  # faut un nom de zone IANA (« Africa/Douala »). Une abréviation passerait le
+  # contrôle en se faisant remplacer par UTC, et les plages programmées
+  # s'ouvriraient une heure à côté sans que rien ne le signale.
+  #
+  # ⚠️ ET SURTOUT PAS UN DÉCALAGE EN MINUTES : il fige l'heure d'été du jour où
+  # la plage a été posée. Une programmation faite en janvier se décalerait d'une
+  # heure en avril, deux fois par an, dans un sens que personne ne relie à sa
+  # cause.
+  #
+  # Le module Android de la 4.x déclare son `namespace` — sans lui, AGP 8.11
+  # refuse de bâtir, comme pour les autres greffons de ce fichier.
+  flutter_timezone: ^4.1.1
+
 
 dev_dependencies:
   flutter_test:

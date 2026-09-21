@@ -42,6 +42,7 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
   bool _enregistre = false;
   String? _enEcoute;
   Timer? _tic;
+  List<PlageRepondeur> _plages = const [];
 
   /// Les durées proposées, en minutes. La dernière est la borne du serveur :
   /// au-delà, ce n'est plus une absence mais un compte injoignable.
@@ -64,10 +65,16 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
   Future<void> _charger() async {
     final depot = context.read<RepondeurRepository>();
     try {
-      final etat = await depot.lire();
+      /*
+       * ⚠️ LES DEUX LECTURES EN PARALLÈLE, ET NON L'UNE APRÈS L'AUTRE : elles
+       * ne dépendent pas l'une de l'autre, et les enchaîner doublerait l'attente
+       * sur un réseau mobile pour rien.
+       */
+      final (etat, plages) = await (depot.lire(), depot.listerPlages()).wait;
       if (!mounted) return;
       setState(() {
         _etat = etat;
+        _plages = plages;
         _chargement = false;
       });
     } catch (_) {
@@ -103,6 +110,47 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
     }
   }
 
+
+  /// Exécute une écriture de plages et adopte la liste rendue par le serveur.
+  ///
+  /// 🔴 UN REFUS NE VEUT PAS DIRE QUE RIEN N'A ÉTÉ ENREGISTRÉ. Le serveur range
+  /// les plages D'ABORD, puis refuse d'allumer le répondeur s'il n'y a aucun
+  /// message d'accueil (`NO_GREETING`) : la programmation est bien là, seul
+  /// l'allumage manque. Repartir sans relire laisserait l'écran prétendre que la
+  /// plage n'existe pas, et la personne la saisirait une seconde fois.
+  Future<void> _ecrirePlages(
+    Future<List<PlageRepondeur>> Function() action,
+  ) async {
+    setState(() => _envoi = true);
+    try {
+      final plages = await action();
+      if (!mounted) return;
+      setState(() {
+        _plages = plages;
+        _envoi = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _envoi = false);
+      showAppSnackBar(e.message);
+      // Voir ci-dessus : on relit, le refus ne dit rien de ce qui a été rangé.
+      await _relirePlages();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _envoi = false);
+      showAppSnackBar(tr(context, 'save_failed_short'));
+    }
+  }
+
+  Future<void> _relirePlages() async {
+    try {
+      final plages = await context.read<RepondeurRepository>().listerPlages();
+      if (mounted) setState(() => _plages = plages);
+    } catch (_) {
+      // Relecture de confort : son échec ne doit rien casser.
+    }
+  }
+
   Future<void> _ecouter(Accueil a) async {
     if (_enEcoute == a.id) {
       await RingtoneService.instance.stop();
@@ -133,7 +181,24 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
     }
     setState(() => _enregistre = true);
     _tic = Timer.periodic(const Duration(milliseconds: 250), (_) {
-      if (mounted) setState(() {});
+      if (!mounted) return;
+      /*
+       * ⚠️ ON S'ARRÊTE SEUL À [accueilMaxMs], comme le fait le web.
+       *
+       * Sans cette coupure, rien n'arrêtait l'enregistrement : ni l'écran, ni
+       * le serveur, qui ne contrôle que le type du fichier. Un accueil de dix
+       * minutes partait donc en entier — la donnée est payée — et se jouait
+       * ensuite à chaque appelant.
+       *
+       * On termine plutôt que d'annuler : la personne a parlé, sa voix est
+       * enregistrée, et jeter les trente secondes obtenues pour la punir d'avoir
+       * continué serait le contraire d'un service.
+       */
+      if (_enregistreur.duree.inMilliseconds >= accueilMaxMs) {
+        _terminerAccueil();
+        return;
+      }
+      setState(() {});
     });
   }
 
@@ -332,12 +397,240 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
                       ),
                     ),
                   ),
+
+                  _entete(tr(context, 'vm_prog_title')),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+                    child: Text(
+                      tr(context, 'vm_prog_sub'),
+                      style: TextStyle(fontSize: 12, color: muted),
+                    ),
+                  ),
+
+                  if (_plages.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+                      child: Text(
+                        tr(context, 'vm_prog_none'),
+                        style: TextStyle(fontSize: 13, color: muted),
+                      ),
+                    )
+                  else
+                    for (final plage in _plages)
+                      ListTile(
+                        dense: true,
+                        leading: Icon(
+                          Icons.event_repeat_rounded,
+                          // Une plage périmée ne s'applique plus : elle reste
+                          // lisible, mais ne doit pas se présenter comme active.
+                          color: plage.expiree ? muted : null,
+                        ),
+                        title: Text(_libellePlage(plage)),
+                        subtitle: Text(
+                          plage.expiree
+                              ? tr(context, 'vm_prog_expired')
+                              : tr(context, 'vm_prog_expires').replaceAll(
+                                  '{date}',
+                                  _dateCourte(plage.expireLe),
+                                ),
+                          style: TextStyle(fontSize: 12, color: muted),
+                        ),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.delete_outline_rounded),
+                          onPressed: _envoi
+                              ? null
+                              : () => _ecrirePlages(
+                                  () => context
+                                      .read<RepondeurRepository>()
+                                      .retirerPlage(plage.id),
+                                ),
+                        ),
+                      ),
+
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                    child: OutlinedButton.icon(
+                      // La borne du serveur est ici aussi : atteindre 40 plages
+                      // et se voir refuser la 41e après l'avoir saisie serait un
+                      // aller-retour pour rien.
+                      onPressed: _envoi || _plages.length >= plagesMax
+                          ? null
+                          : _ajouterPlage,
+                      icon: const Icon(Icons.add_rounded),
+                      label: Text(tr(context, 'vm_prog_add')),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                    child: Text(
+                      tr(context, 'vm_prog_validity'),
+                      style: TextStyle(fontSize: 11, color: muted),
+                    ),
+                  ),
                 ],
               ),
       ),
     );
   }
 
+  /// « Lundi · 10:00 – 12:00 », dans la langue et le format de l'appareil.
+  String _libellePlage(PlageRepondeur plage) {
+    final loc = MaterialLocalizations.of(context);
+    /*
+     * ⚠️ `narrowWeekdays` COMMENCE À DIMANCHE — c'est écrit dans son contrat —
+     * et c'est exactement la convention du serveur (`jour` : 0 = dimanche).
+     * Les deux coïncident, il n'y a donc RIEN à décaler ici.
+     *
+     * ⚠️ NE PAS PASSER PAR `DateTime.weekday`, qui compte 1 = lundi … 7 =
+     * dimanche. Les deux conventions se ressemblent assez pour qu'on les
+     * confonde, et assez peu pour que tout se décale d'un jour.
+     */
+    final jour = loc.narrowWeekdays[plage.jour % 7];
+    return '$jour · ${_heure(plage.debutMin)} – ${_heure(plage.finMin)}';
+  }
+
+  /// Des minutes depuis minuit vers l'heure telle que l'appareil l'écrit.
+  String _heure(int minutes) => MaterialLocalizations.of(context).formatTimeOfDay(
+    TimeOfDay(hour: (minutes ~/ 60) % 24, minute: minutes % 60),
+    // Le format 24 h suit le réglage du téléphone, et non une préférence à nous.
+    alwaysUse24HourFormat: MediaQuery.of(context).alwaysUse24HourFormat,
+  );
+
+  String _dateCourte(DateTime? d) => d == null
+      ? ''
+      : MaterialLocalizations.of(context).formatShortDate(d.toLocal());
+
+  /// La feuille de saisie : des jours, une heure de début, une heure de fin.
+  ///
+  /// ⚠️ PLUSIEURS JOURS D'UN COUP, et c'est ce que la route attend : elle
+  /// accepte un tableau. « Du lundi au vendredi, 12 h-14 h » se pose donc en une
+  /// fois, au lieu de cinq saisies identiques dont la quatrième se trompe.
+  Future<void> _ajouterPlage() async {
+    final loc = MaterialLocalizations.of(context);
+    final jours = <int>{};
+    var debut = const TimeOfDay(hour: 9, minute: 0);
+    var fin = const TimeOfDay(hour: 12, minute: 0);
+
+    final valide = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (feuille) => StatefulBuilder(
+        builder: (feuille, redessine) => Padding(
+          padding: EdgeInsets.fromLTRB(
+            20,
+            20,
+            20,
+            20 + MediaQuery.of(feuille).viewInsets.bottom,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                tr(feuille, 'vm_prog_days'),
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                children: [
+                  /*
+                   * L'ordre d'AFFICHAGE suit la locale — lundi d'abord en
+                   * France, dimanche aux États-Unis — pendant que la VALEUR
+                   * envoyée reste celle du serveur. `firstDayOfWeekIndex` existe
+                   * pour ça, et se lit dans `narrowWeekdays`.
+                   */
+                  for (var d = 0; d < 7; d++)
+                    () {
+                      final jour = (loc.firstDayOfWeekIndex + d) % 7;
+                      return FilterChip(
+                        label: Text(loc.narrowWeekdays[jour]),
+                        selected: jours.contains(jour),
+                        onSelected: (pris) => redessine(
+                          () => pris ? jours.add(jour) : jours.remove(jour),
+                        ),
+                      );
+                    }(),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () async {
+                        final choix = await showTimePicker(
+                          context: feuille,
+                          initialTime: debut,
+                        );
+                        if (choix != null) redessine(() => debut = choix);
+                      },
+                      child: Text(
+                        '${tr(feuille, 'vm_prog_from')} ${loc.formatTimeOfDay(debut)}',
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () async {
+                        final choix = await showTimePicker(
+                          context: feuille,
+                          initialTime: fin,
+                        );
+                        if (choix != null) redessine(() => fin = choix);
+                      },
+                      child: Text(
+                        '${tr(feuille, 'vm_prog_to')} ${loc.formatTimeOfDay(fin)}',
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () => Navigator.of(feuille).pop(true),
+                  child: Text(tr(feuille, 'ok')),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (valide != true || !mounted) return;
+    if (jours.isEmpty) {
+      showAppSnackBar(tr(context, 'vm_prog_day_required'));
+      return;
+    }
+
+    final debutMin = debut.hour * 60 + debut.minute;
+    final finMin = fin.hour * 60 + fin.minute;
+    /*
+     * ⚠️ REFUSÉ ICI AUSSI, et pas seulement par la route. Une plage qui finit
+     * avant de commencer ne s'ouvrirait jamais ; le serveur la refuse, mais son
+     * refus arriverait après l'aller-retour, alors que l'écran sait déjà.
+     *
+     * ⚠️ ET AVEC SON PROPRE MESSAGE. Réutiliser « choisissez au moins un jour »
+     * aurait coûté une clé de moins et envoyé la personne vérifier ses jours,
+     * qui n'ont rien à voir avec le problème.
+     */
+    if (finMin <= debutMin) {
+      showAppSnackBar(tr(context, 'vm_prog_order'));
+      return;
+    }
+
+    await _ecrirePlages(
+      () => context.read<RepondeurRepository>().ajouterPlages([
+        for (final j in jours)
+          {'jour': j, 'debutMin': debutMin, 'finMin': finMin},
+      ]),
+    );
+    if (mounted) showAppSnackBar(tr(context, 'vm_prog_saved'));
+  }
   Widget _entete(String texte) => Padding(
     padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
     child: Text(
