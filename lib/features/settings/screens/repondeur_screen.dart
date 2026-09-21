@@ -217,6 +217,20 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
     final capture = await _enregistreur.stop();
     if (capture == null || !mounted) return;
 
+    /*
+     * ⚠️ LE POIDS EST CONTRÔLÉ AVANT L'ENVOI, pas après. Un fichier trop lourd
+     * partirait sinon EN ENTIER pour se faire refuser à l'arrivée — et la donnée
+     * est payée, sur mobile plus qu'ailleurs.
+     *
+     * La borne de 30 s rend ce cas rare, mais elle ne le rend pas impossible :
+     * elle arrête le MINUTEUR, pas l'encodeur, et un appareil qui capture en
+     * haute qualité peut dépasser. Deux gardes valent mieux qu'une supposition.
+     */
+    if (capture.bytes.length > accueilMaxOctets) {
+      showAppSnackBar(tr(context, 'vm_too_heavy'));
+      return;
+    }
+
     // Deux temps, comme pour un message vocal : on téléverse le média, on
     // déclare ensuite son identifiant au répondeur. La route ne reçoit pas
     // d'octets.
@@ -267,6 +281,54 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
                 padding: const EdgeInsets.only(bottom: 32),
                 children: [
                   if (_envoi) const LinearProgressIndicator(minHeight: 2),
+
+                  /*
+                   * 🔴 LES TROIS CAS SE LISENT, ILS NE SE DÉDUISENT PLUS.
+                   *
+                   * L'écran laissait deviner : un interrupteur, des durées, et
+                   * maintenant des plages, sans que rien ne dise en quoi ils
+                   * diffèrent. Or ils diffèrent sur LA seule chose qui compte
+                   * pour celui qui appelle — est-ce que ça sonne d'abord ?
+                   *
+                   *   • interrupteur seul : ça SONNE 30 s, puis le répondeur
+                   *     prend le relais. C'est la seule chance de décrocher, et
+                   *     c'est le mode par défaut ;
+                   *   • absence : ça ne sonne PAS, jusqu'à l'heure fixée ;
+                   *   • plage : ça ne sonne PAS, mais seulement pendant la plage.
+                   *
+                   * ⚠️ L'ORDRE DE PRIORITÉ EST CELUI DU SERVEUR, et il est
+                   * montré plutôt qu'expliqué : le badge « en cours » ne se pose
+                   * que sur UN seul des trois. Absence d'abord — c'est le geste
+                   * le plus récent et le plus délibéré — puis la plage, puis le
+                   * mode par défaut.
+                   */
+                  _entete(tr(context, 'vm_mode_title')),
+                  _cas(
+                    icone: Icons.notifications_active_outlined,
+                    titre: tr(context, 'vm_mode_ring'),
+                    detail: tr(context, 'vm_mode_ring_d'),
+                    // Le mode par défaut ne s'applique que si le répondeur est
+                    // allumé ET qu'aucun réglage horaire ne le court-circuite.
+                    enCours: (etat?.actif ?? false) &&
+                        etat?.enAbsence != true &&
+                        !_plageEnCours,
+                    muted: muted,
+                  ),
+                  _cas(
+                    icone: Icons.schedule_rounded,
+                    titre: tr(context, 'vm_set_absence'),
+                    detail: tr(context, 'vm_mode_absence_d'),
+                    enCours: etat?.enAbsence == true,
+                    muted: muted,
+                  ),
+                  _cas(
+                    icone: Icons.event_repeat_rounded,
+                    titre: tr(context, 'vm_prog_title'),
+                    detail: tr(context, 'vm_mode_prog_d'),
+                    enCours: etat?.enAbsence != true && _plageEnCours,
+                    muted: muted,
+                  ),
+                  const Divider(height: 1),
 
                   SwitchListTile(
                     value: etat?.actif ?? false,
@@ -491,7 +553,24 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
      * confonde, et assez peu pour que tout se décale d'un jour.
      */
     final jour = loc.narrowWeekdays[plage.jour % 7];
-    return '$jour · ${_heure(plage.debutMin)} – ${_heure(plage.finMin)}';
+    final base = '$jour · ${_heure(plage.debutMin)} – ${_heure(plage.finMin)}';
+    /*
+     * ⚠️ L'ACCUEIL PROPRE À LA PLAGE SE VOIT, sans quoi on ne saurait plus
+     * lequel on a choisi — et le choix, fait une fois dans une feuille qui se
+     * referme, ne serait plus vérifiable nulle part.
+     *
+     * Rien n'est ajouté quand la plage suit l'accueil actif : c'est le cas
+     * courant, et l'annoncer à chaque ligne ferait du bruit pour rien.
+     */
+    final id = plage.accueilId;
+    if (id == null || id.isEmpty) return base;
+    // L'accueil a pu être supprimé depuis : on ne montre que ce qu'on retrouve.
+    for (final a in _etat?.accueils ?? const <Accueil>[]) {
+      if (a.id == id) {
+        return a.libelle.isEmpty ? base : '$base · ${a.libelle}';
+      }
+    }
+    return base;
   }
 
   /// Des minutes depuis minuit vers l'heure telle que l'appareil l'écrit.
@@ -515,6 +594,17 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
     final jours = <int>{};
     var debut = const TimeOfDay(hour: 9, minute: 0);
     var fin = const TimeOfDay(hour: 12, minute: 0);
+    /*
+     * L'accueil PROPRE à cette plage. `null` = celui qui sera actif ce jour-là,
+     * et c'est le cas courant : on ne veut pas choisir à chaque fois.
+     *
+     * ⚠️ LE CHOIX N'APPARAÎT QU'À PARTIR DE DEUX ACCUEILS. Proposer de choisir
+     * quand il n'y en a qu'un donnerait une liste à une entrée, dont l'effet
+     * serait strictement nul — et un réglage dont on ne peut rien faire se lit
+     * comme un réglage cassé.
+     */
+    String? accueilPlage;
+    final accueils = _etat?.accueils ?? const <Accueil>[];
 
     final valide = await showModalBottomSheet<bool>(
       context: context,
@@ -592,6 +682,35 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
                   ),
                 ],
               ),
+              if (accueils.length > 1) ...[
+                const SizedBox(height: 16),
+                Text(
+                  tr(feuille, 'vm_prog_greeting'),
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 6),
+                DropdownButton<String?>(
+                  isExpanded: true,
+                  value: accueilPlage,
+                  items: [
+                    DropdownMenuItem<String?>(
+                      value: null,
+                      child: Text(tr(feuille, 'vm_prog_greeting_default')),
+                    ),
+                    for (final a in accueils)
+                      DropdownMenuItem<String?>(
+                        value: a.id,
+                        child: Text(
+                          a.libelle.isEmpty
+                              ? tr(feuille, 'vm_set_none')
+                              : a.libelle,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                  ],
+                  onChanged: (v) => redessine(() => accueilPlage = v),
+                ),
+              ],
               const SizedBox(height: 16),
               SizedBox(
                 width: double.infinity,
@@ -631,11 +750,84 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
     await _ecrirePlages(
       () => context.read<RepondeurRepository>().ajouterPlages([
         for (final j in jours)
-          {'jour': j, 'debutMin': debutMin, 'finMin': finMin},
+          {
+            'jour': j,
+            'debutMin': debutMin,
+            'finMin': finMin,
+            // Omis quand il est nul : la route lit `accueilId` comme facultatif,
+            // et une clé à `null` n'apporte rien de plus qu'une clé absente.
+            if (accueilPlage != null) 'accueilId': accueilPlage,
+          },
       ]),
     );
     if (mounted) showAppSnackBar(tr(context, 'vm_prog_saved'));
   }
+  /// Une plage couvre-t-elle CET instant ?
+  ///
+  /// ⚠️ C'EST UN REFLET D'AFFICHAGE, PAS LA RÈGLE. La règle vit dans
+  /// `lib/repondeur.mjs` côté serveur, qui la pose dans le fuseau de la plage —
+  /// et c'est lui qui décide pour de bon. Ici on se contente de l'heure locale :
+  /// l'écran montre à son propriétaire ce qui s'applique chez LUI, et le fuseau
+  /// d'une plage qu'il vient de poser est justement le sien.
+  ///
+  /// ⚠️ UNE PLAGE PÉRIMÉE NE COMPTE PAS, comme côté serveur : elle cesse de
+  /// répondre « oui » au bout de deux semaines, sans qu'aucune tâche n'ait eu à
+  /// tourner.
+  bool get _plageEnCours {
+    final maintenant = DateTime.now();
+    // `DateTime.weekday` compte 1 = lundi … 7 = dimanche ; le serveur compte
+    // 0 = dimanche. `% 7` fait exactement la conversion.
+    final jour = maintenant.weekday % 7;
+    final minutes = maintenant.hour * 60 + maintenant.minute;
+    return _plages.any(
+      (p) =>
+          !p.expiree &&
+          p.jour == jour &&
+          // Début inclus, fin EXCLUE — sans quoi deux plages qui se touchent
+          // se disputeraient la minute de bascule.
+          minutes >= p.debutMin &&
+          minutes < p.finMin,
+    );
+  }
+
+  /// Une ligne « mode », avec son nom, ce qu'elle fait, et un repère quand
+  /// c'est elle qui s'applique en ce moment.
+  Widget _cas({
+    required IconData icone,
+    required String titre,
+    required String detail,
+    required bool enCours,
+    required Color muted,
+  }) => ListTile(
+    dense: true,
+    leading: Icon(icone, color: enCours ? null : muted),
+    title: Row(
+      children: [
+        Flexible(child: Text(titre)),
+        if (enCours) ...[
+          const SizedBox(width: 8),
+          // Un repère discret plutôt qu'une couleur d'alerte : ce n'est pas un
+          // avertissement, c'est une réponse à « lequel s'applique ? ».
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.primaryContainer,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              tr(context, 'vm_mode_now'),
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Theme.of(context).colorScheme.onPrimaryContainer,
+              ),
+            ),
+          ),
+        ],
+      ],
+    ),
+    subtitle: Text(detail, style: TextStyle(fontSize: 12, color: muted)),
+  );
   Widget _entete(String texte) => Padding(
     padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
     child: Text(

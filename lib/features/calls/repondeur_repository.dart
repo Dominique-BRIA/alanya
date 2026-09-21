@@ -183,6 +183,13 @@ const absenceMaxMinutes = 24 * 60;
 /// une limite technique mais une limite d'usage.
 const accueilMaxMs = 30 * 1000;
 
+/// Poids maximal d'un message d'accueil — MIROIR d'`ACCUEIL_MAX_OCTETS` côté web.
+///
+/// ⚠️ LE SERVEUR NE LE CONTRÔLE PAS ICI : il ne vérifie que le type du fichier.
+/// Cette borne évite qu'un enregistrement anormalement lourd parte en entier
+/// pour rien.
+const accueilMaxOctets = 5 * 1024 * 1024;
+
 /// MON répondeur — la partie « réglages », par opposition à l'appelant.
 extension MonRepondeurApi on RepondeurRepository {
   Future<MonRepondeur> lire() async =>
