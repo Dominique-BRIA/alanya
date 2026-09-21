@@ -272,291 +272,178 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
     final etat = _etat;
     final muted = mutedOf(context, Colors.black54);
 
+    /*
+     * FOND UNI PLUTÔT QUE LE MOTIF (demande user 21/09/2026).
+     *
+     * ⚠️ EN THÈME CLAIR SEULEMENT. Les trois autres — Blanc, Nuit, Noir —
+     * gardent le fond que leur extension a choisi : le sable y jurerait, et le
+     * mode clair reste par ailleurs figé, on n'y touche que sur demande
+     * explicite comme celle-ci.
+     */
+    final fond =
+        Theme.of(context).brightness == Brightness.dark || estBlanc(context)
+        ? surfacesOf(context).fond
+        : AlanyaColors.sand;
+
+    final enAbsence = etat?.enAbsence == true;
+    final plageActive = _plageEnCours;
+
     return Scaffold(
+      backgroundColor: fond,
       appBar: backAppBar(context, tr(context, 'vm_title')),
-      body: MotifBackground(
-        child: _chargement
-            ? const Center(child: CircularProgressIndicator())
-            : ListView(
-                padding: const EdgeInsets.only(bottom: 32),
-                children: [
-                  if (_envoi) const LinearProgressIndicator(minHeight: 2),
+      body: _chargement
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
+              padding: const EdgeInsets.only(bottom: 32),
+              children: [
+                if (_envoi) const LinearProgressIndicator(minHeight: 2),
 
-                  /*
-                   * ⚠️ L'INTERRUPTEUR EN PREMIER, AVANT MÊME L'EXPLICATION DES
-                   * TROIS CAS (demande user 21/09/2026).
-                   *
-                   * C'est le geste le plus fréquent et de loin : on vient ici
-                   * pour allumer ou éteindre, rarement pour comprendre. Le
-                   * placer après trois paragraphes obligeait à les traverser à
-                   * chaque fois pour atteindre la seule chose qu'on venait
-                   * faire.
-                   *
-                   * Les trois cas viennent ensuite : ils RÉPONDENT à
-                   * l'interrupteur — « voilà ce qui se passe maintenant que
-                   * c'est allumé » — au lieu de le précéder.
-                   */
-                  SwitchListTile(
-                    value: etat?.actif ?? false,
-                    onChanged: _envoi
-                        ? null
-                        : (v) => _ecrire(
-                            () =>
-                                context.read<RepondeurRepository>().activer(v),
-                          ),
-                    title: Text(tr(context, 'vm_set_enable')),
-                    subtitle: Text(
-                      tr(context, 'vm_set_enable_hint'),
-                      style: TextStyle(fontSize: 12.5, color: muted),
-                    ),
+                SwitchListTile(
+                  value: etat?.actif ?? false,
+                  onChanged: _envoi
+                      ? null
+                      : (v) => _ecrire(
+                          () => context.read<RepondeurRepository>().activer(v),
+                        ),
+                  title: Text(tr(context, 'vm_set_enable')),
+                  subtitle: Text(
+                    tr(context, 'vm_set_enable_hint'),
+                    style: TextStyle(fontSize: 12.5, color: muted),
                   ),
-                  const Divider(height: 1),
-                  /*
-                   * 🔴 LES TROIS CAS SE LISENT, ILS NE SE DÉDUISENT PLUS.
-                   *
-                   * L'écran laissait deviner : un interrupteur, des durées, et
-                   * maintenant des plages, sans que rien ne dise en quoi ils
-                   * diffèrent. Or ils diffèrent sur LA seule chose qui compte
-                   * pour celui qui appelle — est-ce que ça sonne d'abord ?
-                   *
-                   *   • interrupteur seul : ça SONNE 30 s, puis le répondeur
-                   *     prend le relais. C'est la seule chance de décrocher, et
-                   *     c'est le mode par défaut ;
-                   *   • absence : ça ne sonne PAS, jusqu'à l'heure fixée ;
-                   *   • plage : ça ne sonne PAS, mais seulement pendant la plage.
-                   *
-                   * ⚠️ L'ORDRE DE PRIORITÉ EST CELUI DU SERVEUR, et il est
-                   * montré plutôt qu'expliqué : le badge « en cours » ne se pose
-                   * que sur UN seul des trois. Absence d'abord — c'est le geste
-                   * le plus récent et le plus délibéré — puis la plage, puis le
-                   * mode par défaut.
-                   */
-                  _entete(tr(context, 'vm_mode_title')),
-                  _cas(
-                    icone: Icons.notifications_active_outlined,
-                    titre: tr(context, 'vm_mode_ring'),
-                    detail: tr(context, 'vm_mode_ring_d'),
-                    // Le mode par défaut ne s'applique que si le répondeur est
-                    // allumé ET qu'aucun réglage horaire ne le court-circuite.
-                    enCours: (etat?.actif ?? false) &&
-                        etat?.enAbsence != true &&
-                        !_plageEnCours,
-                    muted: muted,
-                  ),
-                  _cas(
-                    icone: Icons.schedule_rounded,
-                    titre: tr(context, 'vm_set_absence'),
-                    detail: tr(context, 'vm_mode_absence_d'),
-                    enCours: etat?.enAbsence == true,
-                    muted: muted,
-                  ),
-                  _cas(
-                    icone: Icons.event_repeat_rounded,
-                    titre: tr(context, 'vm_prog_title'),
-                    detail: tr(context, 'vm_mode_prog_d'),
-                    enCours: etat?.enAbsence != true && _plageEnCours,
-                    muted: muted,
-                  ),
-                  const Divider(height: 1),
+                ),
+                const Divider(height: 1),
 
-
-                  _entete(tr(context, 'vm_set_absence')),
-                  if (etat?.enAbsence == true)
-                    ListTile(
-                      leading: const Icon(Icons.schedule_rounded),
-                      title: Text(
-                        tr(context, 'vm_set_absence_until', {
+                /*
+                 * 🔴 LES TROIS CAS SONT DES ENTRÉES, PAS DES PARAGRAPHES.
+                 *
+                 * Ils s'affichaient en trois lignes alignées dont une portait
+                 * un repère « en cours » : on y lisait trois choix exclusifs,
+                 * ce qu'ils ne sont pas, et surtout trois boutons — alors que
+                 * rien n'était cliquable. Pour poser une absence il fallait
+                 * descendre vers une SECONDE section du même nom, plus bas.
+                 *
+                 * Chaque entrée ouvre maintenant ses propres réglages, et le
+                 * mot « Absence » n'apparaît plus qu'une seule fois à l'écran.
+                 *
+                 * ⚠️ « SONNERIE D'ABORD » N'OUVRE RIEN, et c'est voulu : ce
+                 * n'est pas un réglage, c'est ce qui se passe quand aucune
+                 * exception ne court. Elle devient cliquable UNIQUEMENT quand
+                 * une absence peut être levée — un appui qui ne fait rien vaut
+                 * moins qu'une ligne qui n'invite pas à appuyer.
+                 */
+                _option(
+                  icone: Icons.notifications_active_outlined,
+                  titre: tr(context, 'vm_mode_ring'),
+                  detail: enAbsence
+                      ? tr(context, 'vm_mode_ring_back')
+                      : tr(context, 'vm_mode_ring_d'),
+                  enCours: (etat?.actif ?? false) && !enAbsence && !plageActive,
+                  muted: muted,
+                  onTap: enAbsence && !_envoi
+                      ? () => _ecrire(
+                          () => context
+                              .read<RepondeurRepository>()
+                              .poserAbsence(0),
+                        )
+                      : null,
+                ),
+                _option(
+                  icone: Icons.schedule_rounded,
+                  titre: tr(context, 'vm_set_absence'),
+                  detail: enAbsence
+                      ? tr(context, 'vm_set_absence_until', {
                           'heure': _horodatageCourt(etat!.jusquA!.toLocal()),
-                        }),
-                      ),
-                      trailing: TextButton(
-                        onPressed: _envoi
-                            ? null
-                            : () => _ecrire(
-                                () => context
-                                    .read<RepondeurRepository>()
-                                    .poserAbsence(0),
-                              ),
-                        child: Text(tr(context, 'vm_set_absence_end')),
-                      ),
-                    )
-                  else
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-                      child: Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          for (final m in _durees)
-                            ActionChip(
-                              label: Text(_libelleDuree(m)),
-                              onPressed: _envoi
-                                  ? null
-                                  : () => _ecrire(
-                                      () => context
-                                          .read<RepondeurRepository>()
-                                          .poserAbsence(m),
-                                    ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  const Divider(height: 1),
+                        })
+                      : tr(context, 'vm_mode_absence_d'),
+                  enCours: enAbsence,
+                  muted: muted,
+                  onTap: _envoi ? null : _ouvrirAbsence,
+                ),
+                _option(
+                  icone: Icons.event_repeat_rounded,
+                  titre: tr(context, 'vm_prog_title'),
+                  detail: _plages.isEmpty
+                      ? tr(context, 'vm_mode_prog_d')
+                      : tr(context, 'vm_prog_count')
+                            .replaceAll('{n}', '${_plages.length}'),
+                  enCours: !enAbsence && plageActive,
+                  muted: muted,
+                  onTap: _envoi ? null : _ouvrirPlages,
+                ),
+                const Divider(height: 1),
 
-                  _entete(tr(context, 'vm_set_greetings')),
-                  if (etat == null || etat.accueils.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
-                      child: Text(
-                        tr(context, 'vm_set_none'),
-                        style: TextStyle(
-                          fontSize: 13.5,
-                          height: 1.4,
-                          color: muted,
-                        ),
-                      ),
+                _entete(tr(context, 'vm_set_greetings')),
+                if (etat == null || etat.accueils.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+                    child: Text(
+                      tr(context, 'vm_set_none'),
+                      style: TextStyle(fontSize: 13.5, height: 1.4, color: muted),
                     ),
-                  for (final a in etat?.accueils ?? const <Accueil>[])
-                    ListTile(
-                      leading: IconButton(
-                        icon: Icon(
-                          _enEcoute == a.id
-                              ? Icons.stop_rounded
-                              : Icons.play_arrow_rounded,
-                        ),
-                        onPressed: () => _ecouter(a),
+                  ),
+                for (final a in etat?.accueils ?? const <Accueil>[])
+                  ListTile(
+                    leading: IconButton(
+                      icon: Icon(
+                        _enEcoute == a.id
+                            ? Icons.stop_rounded
+                            : Icons.play_arrow_rounded,
                       ),
-                      title: Text(a.libelle.isEmpty ? a.id : a.libelle),
-                      subtitle: a.actif
-                          ? Text(
-                              tr(context, 'vm_set_used'),
-                              style: const TextStyle(fontSize: 12.5),
-                            )
-                          : null,
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          // Choisir celui qu'on entend — absent s'il l'est
-                          // déjà : une action sans effet ne doit pas être
-                          // proposée.
-                          if (!a.actif)
-                            IconButton(
-                              icon: const Icon(Icons.check_circle_outline),
-                              onPressed: _envoi
-                                  ? null
-                                  : () => _ecrire(
-                                      () => context
-                                          .read<RepondeurRepository>()
-                                          .choisirAccueil(a.id),
-                                    ),
-                            ),
+                      onPressed: () => _ecouter(a),
+                    ),
+                    title: Text(a.libelle.isEmpty ? a.id : a.libelle),
+                    subtitle: a.actif
+                        ? Text(
+                            tr(context, 'vm_set_used'),
+                            style: const TextStyle(fontSize: 12.5),
+                          )
+                        : null,
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Choisir celui qu'on entend — absent s'il l'est déjà :
+                        // une action sans effet ne doit pas être proposée.
+                        if (!a.actif)
                           IconButton(
-                            icon: const Icon(Icons.delete_outline),
+                            icon: const Icon(Icons.check_circle_outline),
                             onPressed: _envoi
                                 ? null
                                 : () => _ecrire(
                                     () => context
                                         .read<RepondeurRepository>()
-                                        .retirerAccueil(a.id),
+                                        .choisirAccueil(a.id),
                                   ),
                           ),
-                        ],
-                      ),
-                    ),
-
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                    child: FilledButton.icon(
-                      onPressed: _envoi ? null : _basculerEnregistrement,
-                      icon: Icon(
-                        _enregistre ? Icons.stop_rounded : Icons.mic_rounded,
-                      ),
-                      label: Text(
-                        _enregistre
-                            ? "${tr(context, 'vm_set_recording')}  ·  $_duree"
-                            : tr(context, 'vm_set_new'),
-                      ),
-                    ),
-                  ),
-
-                  // Les plages sont une section a part entiere, pas la suite
-                  // des accueils : le bouton d'enregistrement ci-dessus ferme
-                  // la precedente, et sans separateur les deux se lisaient
-                  // comme un seul bloc.
-                  const SizedBox(height: 20),
-                  const Divider(height: 1),
-                  _entete(tr(context, 'vm_prog_title')),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
-                    child: Text(
-                      tr(context, 'vm_prog_sub'),
-                      style: TextStyle(fontSize: 12, color: muted),
-                    ),
-                  ),
-
-                  if (_plages.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
-                      child: Text(
-                        tr(context, 'vm_prog_none'),
-                        style: TextStyle(fontSize: 13, color: muted),
-                      ),
-                    )
-                  else
-                    for (final plage in _plages)
-                      ListTile(
-                        dense: true,
-                        leading: Icon(
-                          Icons.event_repeat_rounded,
-                          // Une plage périmée ne s'applique plus : elle reste
-                          // lisible, mais ne doit pas se présenter comme active.
-                          color: plage.expiree ? muted : null,
-                        ),
-                        title: Text(_libellePlage(plage)),
-                        subtitle: Text(
-                          plage.expiree
-                              ? tr(context, 'vm_prog_expired')
-                              : tr(context, 'vm_prog_expires').replaceAll(
-                                  '{date}',
-                                  _dateCourte(plage.expireLe),
-                                ),
-                          style: TextStyle(fontSize: 12, color: muted),
-                        ),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.delete_outline_rounded),
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline),
                           onPressed: _envoi
                               ? null
-                              : () => _ecrirePlages(
+                              : () => _ecrire(
                                   () => context
                                       .read<RepondeurRepository>()
-                                      .retirerPlage(plage.id),
+                                      .retirerAccueil(a.id),
                                 ),
                         ),
-                      ),
+                      ],
+                    ),
+                  ),
 
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                    child: OutlinedButton.icon(
-                      // La borne du serveur est ici aussi : atteindre 40 plages
-                      // et se voir refuser la 41e après l'avoir saisie serait un
-                      // aller-retour pour rien.
-                      onPressed: _envoi || _plages.length >= plagesMax
-                          ? null
-                          : _ajouterPlage,
-                      icon: const Icon(Icons.add_rounded),
-                      label: Text(tr(context, 'vm_prog_add')),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  child: FilledButton.icon(
+                    onPressed: _envoi ? null : _basculerEnregistrement,
+                    icon: Icon(
+                      _enregistre ? Icons.stop_rounded : Icons.mic_rounded,
+                    ),
+                    label: Text(
+                      _enregistre
+                          ? "${tr(context, 'vm_set_recording')}  ·  $_duree"
+                          : tr(context, 'vm_set_new'),
                     ),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
-                    child: Text(
-                      tr(context, 'vm_prog_validity'),
-                      style: TextStyle(fontSize: 11, color: muted),
-                    ),
-                  ),
-                ],
-              ),
-      ),
+                ),
+              ],
+            ),
     );
   }
 
@@ -810,16 +697,23 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
     );
   }
 
-  /// Une ligne « mode », avec son nom, ce qu'elle fait, et un repère quand
-  /// c'est elle qui s'applique en ce moment.
-  Widget _cas({
+  /// Une entrée de la liste des trois cas.
+  ///
+  /// [enCours] pose le repère : il ne se met que sur UN seul des trois, dans
+  /// l'ordre de priorité du serveur — absence, puis plage, puis sonnerie.
+  ///
+  /// [onTap] nul = la ligne informe sans inviter à appuyer. C'est le cas de
+  /// « Sonnerie d'abord » quand il n'y a pas d'absence à lever : elle n'a rien
+  /// à régler, et un chevron qui ne mène nulle part est pire qu'une ligne sobre.
+  Widget _option({
     required IconData icone,
     required String titre,
     required String detail,
     required bool enCours,
     required Color muted,
+    VoidCallback? onTap,
   }) => ListTile(
-    dense: true,
+    onTap: onTap,
     leading: Icon(icone, color: enCours ? null : muted),
     title: Row(
       children: [
@@ -827,7 +721,7 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
         if (enCours) ...[
           const SizedBox(width: 8),
           // Un repère discret plutôt qu'une couleur d'alerte : ce n'est pas un
-          // avertissement, c'est une réponse à « lequel s'applique ? ».
+          // avertissement, c'est la réponse à « lequel s'applique ? ».
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
             decoration: BoxDecoration(
@@ -847,7 +741,190 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
       ],
     ),
     subtitle: Text(detail, style: TextStyle(fontSize: 12, color: muted)),
+    trailing: onTap == null
+        ? null
+        : Icon(Icons.chevron_right_rounded, color: muted),
   );
+
+  /// Les réglages de l'absence, là où on appuie sur « Absence ».
+  ///
+  /// ⚠️ LA FEUILLE SE FERME AVANT D'ÉCRIRE, et non après : `_ecrire` pose
+  /// `_envoi`, qui grise l'écran DERRIÈRE la feuille. Attendre la réponse la
+  /// laisserait ouverte au-dessus d'un écran inerte, sans rien indiquer.
+  Future<void> _ouvrirAbsence() async {
+    final enCours = _etat?.enAbsence == true;
+    final choix = await showModalBottomSheet<int>(
+      context: context,
+      builder: (feuille) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 4),
+              child: Text(
+                tr(feuille, 'vm_set_absence'),
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+              child: Text(
+                tr(feuille, 'vm_mode_absence_d'),
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: mutedOf(feuille, Colors.black54),
+                ),
+              ),
+            ),
+            if (enCours)
+              ListTile(
+                leading: const Icon(Icons.schedule_rounded),
+                title: Text(
+                  tr(feuille, 'vm_set_absence_until', {
+                    'heure': _horodatageCourt(_etat!.jusquA!.toLocal()),
+                  }),
+                ),
+                trailing: TextButton(
+                  // 0 lève l'absence — c'est le serveur qui en décide, on ne
+                  // fait que transmettre la durée.
+                  onPressed: () => Navigator.of(feuille).pop(0),
+                  child: Text(tr(feuille, 'vm_set_absence_end')),
+                ),
+              )
+            else
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final m in _durees)
+                      ActionChip(
+                        label: Text(_libelleDuree(m)),
+                        onPressed: () => Navigator.of(feuille).pop(m),
+                      ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (choix == null || !mounted) return;
+    await _ecrire(
+      () => context.read<RepondeurRepository>().poserAbsence(choix),
+    );
+  }
+
+  /// Les plages programmées, là où on appuie sur « Plages programmées ».
+  ///
+  /// ⚠️ LA FEUILLE SE REDESSINE SUR `_plages`, qui vit dans l'écran : ajouter
+  /// ou retirer une plage doit se voir SANS refermer. D'où le `StatefulBuilder`
+  /// et le `redessine` posé après chaque écriture.
+  Future<void> _ouvrirPlages() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (feuille) => StatefulBuilder(
+        builder: (feuille, redessine) {
+          final muted = mutedOf(feuille, Colors.black54);
+          return SafeArea(
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 18, 20, 4),
+                    child: Text(
+                      tr(feuille, 'vm_prog_title'),
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                    child: Text(
+                      tr(feuille, 'vm_prog_sub'),
+                      style: TextStyle(fontSize: 12.5, color: muted),
+                    ),
+                  ),
+                  if (_plages.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 4, 20, 4),
+                      child: Text(
+                        tr(feuille, 'vm_prog_none'),
+                        style: TextStyle(fontSize: 13, color: muted),
+                      ),
+                    )
+                  else
+                    for (final plage in _plages)
+                      ListTile(
+                        dense: true,
+                        leading: Icon(
+                          Icons.event_repeat_rounded,
+                          // Une plage périmée ne s'applique plus : elle reste
+                          // lisible, sans se présenter comme active.
+                          color: plage.expiree ? muted : null,
+                        ),
+                        title: Text(_libellePlage(plage)),
+                        subtitle: Text(
+                          plage.expiree
+                              ? tr(feuille, 'vm_prog_expired')
+                              : tr(feuille, 'vm_prog_expires').replaceAll(
+                                  '{date}',
+                                  _dateCourte(plage.expireLe),
+                                ),
+                          style: TextStyle(fontSize: 12, color: muted),
+                        ),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.delete_outline_rounded),
+                          onPressed: _envoi
+                              ? null
+                              : () async {
+                                  await _ecrirePlages(
+                                    () => context
+                                        .read<RepondeurRepository>()
+                                        .retirerPlage(plage.id),
+                                  );
+                                  redessine(() {});
+                                },
+                        ),
+                      ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                    child: OutlinedButton.icon(
+                      // La borne du serveur est ici aussi : atteindre 40 plages
+                      // et se voir refuser la 41e après l'avoir saisie serait un
+                      // aller-retour pour rien.
+                      onPressed: _envoi || _plages.length >= plagesMax
+                          ? null
+                          : () async {
+                              await _ajouterPlage();
+                              redessine(() {});
+                            },
+                      icon: const Icon(Icons.add_rounded),
+                      label: Text(tr(feuille, 'vm_prog_add')),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 10, 20, 18),
+                    child: Text(
+                      tr(feuille, 'vm_prog_validity'),
+                      style: TextStyle(fontSize: 11, color: muted),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
   Widget _entete(String texte) => Padding(
     padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
     child: Text(
