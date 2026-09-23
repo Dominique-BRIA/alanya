@@ -14,6 +14,8 @@ class WebrtcGroupMesh {
     required this.onSendSignal,
     required this.onUpdated,
     this.onPeerLost,
+    this.onPeerReconnecting,
+    this.onPeerReconnected,
   });
 
   final String myUserId;
@@ -22,8 +24,15 @@ class WebrtcGroupMesh {
   final void Function(String peerId, Map<String, dynamic> signal) onSendSignal;
   final VoidCallback onUpdated;
 
-  /// Connexion média définitivement perdue avec ce pair.
+  /// Connexion média définitivement perdue avec ce pair — après que la
+  /// session a épuisé ses tentatives de reprise.
   final void Function(String peerId)? onPeerLost;
+
+  /// Le chemin vers ce pair vacille, la reprise est en cours.
+  final void Function(String peerId)? onPeerReconnecting;
+
+  /// Le média est revenu avec ce pair.
+  final void Function(String peerId)? onPeerReconnected;
 
   MediaStream? _local;
   final Map<String, WebrtcPeerSession> _peers = {};
@@ -114,6 +123,8 @@ class WebrtcGroupMesh {
       onSendSignal: (sig) => onSendSignal(peerId, sig),
       onUpdated: onUpdated,
       onConnectionLost: () => onPeerLost?.call(peerId),
+      onReconnecting: () => onPeerReconnecting?.call(peerId),
+      onReconnected: () => onPeerReconnected?.call(peerId),
     );
     _peers[peerId] = session;
 

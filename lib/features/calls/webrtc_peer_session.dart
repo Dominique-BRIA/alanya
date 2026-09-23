@@ -16,6 +16,8 @@ class WebrtcPeerSession {
     required this.onSendSignal,
     required this.onUpdated,
     this.onConnectionLost,
+    this.onReconnecting,
+    this.onReconnected,
   });
 
   final String peerId;
@@ -28,14 +30,58 @@ class WebrtcPeerSession {
 
   /// Connexion avec ce pair définitivement perdue. Au contrôleur de décider :
   /// dernier pair → fin d'appel ; sinon simple retrait du participant.
+  ///
+  /// ⚠️ N'EST PLUS APPELÉ À LA PREMIÈRE SECOUSSE : la session tente d'abord de
+  /// rerétablir le chemin réseau, et ne déclare la perte qu'après avoir épuisé
+  /// ses tentatives.
   final VoidCallback? onConnectionLost;
 
-  /// Sursis accordé à un `disconnected` avant de le déclarer perdu.
+  /// La connexion vacille et la reprise commence — de quoi afficher
+  /// « Reconnexion… » sans rien couper.
+  final VoidCallback? onReconnecting;
+
+  /// Le média est repassé : l'appel reprend son cours ordinaire.
+  final VoidCallback? onReconnected;
+
+  /// Sursis accordé à un `disconnected` avant de tenter quoi que ce soit.
   ///
   /// Un réseau mobile qui change de cellule passe régulièrement par cet état
-  /// puis revient de lui-même. Raccrocher aussitôt couperait des appels qui
-  /// allaient se rétablir ; `failed`, lui, est définitif et n'attend pas.
+  /// puis revient de lui-même. Rerétablir aussitôt coûterait une négociation
+  /// pour rien ; `failed`, lui, ne revient jamais seul et n'attend pas.
   Timer? _graceTimer;
+
+  /*
+   * 🔴 ON RÉPARE LE CHEMIN, ON NE RACCROCHE PLUS (chantier du 23/09/2026).
+   *
+   * Avant : `disconnected` laissait six secondes, puis la connexion était
+   * déclarée perdue et l'appel tombait ; `failed` tombait sur-le-champ. Aucune
+   * tentative de réparation nulle part — or c'est précisément ce que WebRTC
+   * sait faire : une offre marquée `iceRestart` refait la collecte de
+   * candidats et retrouve un chemin, sans toucher aux pistes ni au son déjà
+   * négociés.
+   *
+   * ⚠️ UNE SEULE REPRISE EN VOL, ET C'EST L'OFFREUR QUI LA MÈNE. Si les deux
+   * côtés relançaient une offre en même temps, chacun recevrait l'offre de
+   * l'autre alors qu'il attend une réponse à la sienne — c'est le « glare »,
+   * et la négociation échoue des deux côtés. Celui qui n'est pas offreur
+   * demande donc la reprise à l'autre, au lieu de la faire.
+   *
+   * ⚠️ LE PLAFOND EST CELUI DU SERVEUR. Il tient l'appel ouvert 45 s ; au-delà
+   * il le clôt de son côté. S'acharner plus longtemps ne ferait que laisser un
+   * écran d'appel devant quelqu'un dont l'appel n'existe plus.
+   */
+  static const _essaisReprise = [
+    Duration(seconds: 2),
+    Duration(seconds: 4),
+    Duration(seconds: 8),
+  ];
+  static const _plafondReprise = Duration(seconds: 45);
+
+  Timer? _repriseTimer;
+  int _tentativesReprise = 0;
+  bool _enReprise = false;
+  bool _offreRepriseEnVol = false;
+  DateTime? _repriseDepuis;
 
   RTCPeerConnection? _pc;
   MediaStream? _remote;
@@ -89,22 +135,25 @@ class WebrtcPeerSession {
       debugPrint("[webrtc/$peerId] ICE state: $state");
       switch (state) {
         case RTCIceConnectionState.RTCIceConnectionStateDisconnected:
-          // Peut se rétablir seul : on laisse un sursis avant de conclure.
+          // Peut se rétablir seul : on laisse un court sursis avant de payer
+          // une négociation. Trois secondes, et non plus six : au-delà, une
+          // coupure réelle a déjà coûté la moitié du plafond du serveur.
           _graceTimer?.cancel();
-          _graceTimer = Timer(const Duration(seconds: 6), () {
-            traceAppel("$peerId : sursis expire → connexion perdue");
-            onConnectionLost?.call();
+          _graceTimer = Timer(const Duration(seconds: 3), () {
+            traceAppel("$peerId : toujours disconnected → reprise");
+            _demarreLaReprise();
           });
           break;
         case RTCIceConnectionState.RTCIceConnectionStateFailed:
-          // Échec définitif : inutile d'attendre.
+          // `failed` ne revient jamais tout seul : on tente sans attendre.
           _graceTimer?.cancel();
-          traceAppel("$peerId : ICE failed → connexion perdue");
-          onConnectionLost?.call();
+          traceAppel("$peerId : ICE failed → reprise immédiate");
+          _demarreLaReprise(immediat: true);
           break;
         case RTCIceConnectionState.RTCIceConnectionStateConnected:
         case RTCIceConnectionState.RTCIceConnectionStateCompleted:
           _graceTimer?.cancel();
+          _finDeReprise();
           break;
         default:
           break;
@@ -199,6 +248,106 @@ class WebrtcPeerSession {
     return out;
   }
 
+  /// Ouvre la procédure de reprise, et prévient une seule fois.
+  ///
+  /// [immediat] saute l'attente du premier essai : sur `failed`, patienter ne
+  /// sert à rien puisque l'état ne se répare pas de lui-même.
+  void _demarreLaReprise({bool immediat = false}) {
+    if (_pc == null) return;
+    if (!_enReprise) {
+      _enReprise = true;
+      _tentativesReprise = 0;
+      _repriseDepuis = DateTime.now();
+      onReconnecting?.call();
+    }
+    _planifieUnEssai(immediat: immediat);
+  }
+
+  void _planifieUnEssai({bool immediat = false}) {
+    _repriseTimer?.cancel();
+    final depuis = _repriseDepuis;
+    if (depuis != null && DateTime.now().difference(depuis) >= _plafondReprise) {
+      traceAppel("$peerId : plafond de reprise atteint → connexion perdue");
+      _abandonneLaReprise();
+      return;
+    }
+    if (_tentativesReprise >= _essaisReprise.length) {
+      traceAppel("$peerId : ${_essaisReprise.length} reprises sans succès → connexion perdue");
+      _abandonneLaReprise();
+      return;
+    }
+    final attente = immediat ? Duration.zero : _essaisReprise[_tentativesReprise];
+    _tentativesReprise++;
+    _repriseTimer = Timer(attente, _tenteUneReprise);
+  }
+
+  Future<void> _tenteUneReprise() async {
+    final pc = _pc;
+    if (pc == null || !_enReprise) return;
+
+    // Celui qui n'offre pas ne relance pas : il le DEMANDE. Deux offres
+    // croisées échouent toutes les deux.
+    if (!isOfferer) {
+      traceAppel("$peerId : demande de reprise envoyée à l'offreur");
+      onSendSignal({"kind": "ice_restart_request"});
+      _planifieUnEssai();
+      return;
+    }
+
+    // Une offre part déjà, ou la connexion n'est pas au repos : relancer
+    // maintenant lèverait `InvalidStateError` et casserait la session au lieu
+    // de la réparer.
+    if (_offreRepriseEnVol ||
+        pc.signalingState != RTCSignalingState.RTCSignalingStateStable) {
+      traceAppel("$peerId : reprise différée (négociation en cours)");
+      _planifieUnEssai();
+      return;
+    }
+
+    try {
+      _offreRepriseEnVol = true;
+      final offre = await pc.createOffer({
+        "mandatory": {
+          "OfferToReceiveAudio": true,
+          "OfferToReceiveVideo": isVideo,
+          // C'est TOUT le mécanisme : de nouveaux `ice-ufrag`/`ice-pwd`, donc
+          // une collecte de candidats neuve, sur des pistes déjà négociées.
+          "IceRestart": true,
+        },
+        "optional": [],
+      });
+      await pc.setLocalDescription(offre);
+      traceAppel("$peerId : OFFRE DE REPRISE envoyée (essai $_tentativesReprise)");
+      onSendSignal({"kind": "offer", "sdp": offre.sdp, "type": offre.type});
+    } catch (e) {
+      _offreRepriseEnVol = false;
+      traceAppel("$peerId : reprise impossible — $e");
+    }
+    _planifieUnEssai();
+  }
+
+  /// Le média est revenu : on efface tout et on le dit.
+  void _finDeReprise() {
+    _repriseTimer?.cancel();
+    _repriseTimer = null;
+    _offreRepriseEnVol = false;
+    if (!_enReprise) return;
+    _enReprise = false;
+    _tentativesReprise = 0;
+    _repriseDepuis = null;
+    traceAppel("$peerId : connexion rétablie");
+    onReconnected?.call();
+  }
+
+  void _abandonneLaReprise() {
+    _repriseTimer?.cancel();
+    _repriseTimer = null;
+    _enReprise = false;
+    _offreRepriseEnVol = false;
+    _repriseDepuis = null;
+    onConnectionLost?.call();
+  }
+
   Future<void> handleSignal(Map<String, dynamic> signal) async {
     if (!_ready) {
       _pendingSignals.add(signal);
@@ -250,8 +399,20 @@ class WebrtcPeerSession {
       final type = signal["type"] as String? ?? "answer";
       await pc.setRemoteDescription(RTCSessionDescription(sdp, type));
       _remoteReady = true;
+      // La réponse à notre offre de reprise est arrivée : la voie est libre
+      // pour un éventuel essai suivant. Ce n'est PAS encore un succès — seul
+      // `RTCIceConnectionStateConnected` le dira.
+      _offreRepriseEnVol = false;
       traceAppel("ANSWER recue de $peerId → negociation complete");
       await _flushIceQueue();
+    } else if (kind == "ice_restart_request") {
+      // Le pair ne peut pas relancer lui-même — il n'est pas offreur. On le
+      // fait pour lui, même si de notre côté l'état ICE n'a rien signalé :
+      // une coupure n'est pas toujours vue des deux bouts en même temps.
+      if (isOfferer) {
+        traceAppel("$peerId : demande de reprise reçue");
+        _demarreLaReprise(immediat: true);
+      }
     } else if (kind == "ice") {
       final raw = signal["candidate"];
       if (raw is! Map) return;
@@ -288,6 +449,11 @@ class WebrtcPeerSession {
   Future<void> close() async {
     _graceTimer?.cancel();
     _graceTimer = null;
+    _repriseTimer?.cancel();
+    _repriseTimer = null;
+    _enReprise = false;
+    _offreRepriseEnVol = false;
+    _repriseDepuis = null;
     _remote = null;
     await _pc?.close();
     _pc = null;
