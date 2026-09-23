@@ -342,6 +342,17 @@ class RealtimeClient extends ChangeNotifier {
   /// [raison] `"eviction"` quand c'est une connexion ailleurs qui ferme cette
   /// session, absente quand l'utilisateur déconnecte lui-même un poste depuis
   /// « Appareils connectés ». L'appareil visé s'en sert pour dire la vérité.
+  /// « Je suis toujours dans cet appel », envoyé dès que la socket se rouvre.
+  ///
+  /// ⚠️ IDEMPOTENT CÔTÉ SERVEUR, comme `meeting_join` : l'envoyer alors que
+  /// rien n'était tombé ne fait rien. On ne cherche donc pas à distinguer une
+  /// première ouverture d'une reprise, ce qui demanderait un état de plus pour
+  /// aucun gain.
+  void sendCallRejoin(String callId) => _send({
+        "type": "call_rejoin",
+        "callId": callId,
+      });
+
   void sendSessionRevoked(String deviceId, {String? raison}) => _send({
         "type": "session_revoked",
         "deviceId": deviceId,

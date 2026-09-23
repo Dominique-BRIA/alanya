@@ -286,6 +286,35 @@ class CallController extends ChangeNotifier {
   // Passe à true quand l'écran d'appel s'affiche chez le correspondant (Lot 2).
   bool remoteRinging = false;
 
+  /*
+   * 🔴 QUI VACILLE, ET POURQUOI ON LE GARDE PAR PAIR.
+   *
+   * Deux sources alimentent cet ensemble, et elles ne voient pas la même chose :
+   * le MÉDIA (la session WebRTC a perdu son chemin et le rerétablit) et le
+   * SERVEUR (`call_state: "reconnecting"`, quand c'est la socket du pair qui
+   * est tombée). L'une peut survenir sans l'autre — un téléphone qui change de
+   * cellule garde souvent sa socket — et l'appel n'est redevenu normal que
+   * lorsque les DEUX se sont tues.
+   *
+   * Un ensemble et non un booléen : en groupe, un pair qui vacille ne doit pas
+   * effacer l'état d'un autre qui vacille encore.
+   */
+  final Set<String> _pairsEnReconnexion = {};
+
+  /// Vrai tant qu'au moins un correspondant est en cours de reprise.
+  bool get reconnexionEnCours => _pairsEnReconnexion.isNotEmpty;
+
+  void _marqueEnReconnexion(String? peerId, bool actif) {
+    if (peerId == null || peerId.isEmpty) return;
+    final avant = _pairsEnReconnexion.length;
+    if (actif) {
+      _pairsEnReconnexion.add(peerId);
+    } else {
+      _pairsEnReconnexion.remove(peerId);
+    }
+    if (_pairsEnReconnexion.length != avant) notifyListeners();
+  }
+
   /// Vrai quand l'appel entrant est porté par l'ÉCRAN NATIF plein écran.
   ///
   /// L'interface s'en sert pour ne pas superposer son bandeau interne : celui-ci
@@ -919,6 +948,7 @@ class CallController extends ChangeNotifier {
     _initialMemberIds.clear();
     _inviteParUserId.clear();
     remoteRinging = false;
+    _pairsEnReconnexion.clear();
     /*
      * ⚠️ LA ROUTE AUDIO SE REMET AUSSI, PAS SEULEMENT LE DRAPEAU.
      *
@@ -1169,6 +1199,8 @@ class CallController extends ChangeNotifier {
         onSendSignal: (peerId, sig) => _rt.callSignal(callId, peerId, sig),
         onUpdated: _onMeshUpdated,
         onPeerLost: _onPeerConnectionLost,
+        onPeerReconnecting: (peerId) => _marqueEnReconnexion(peerId, true),
+        onPeerReconnected: (peerId) => _marqueEnReconnexion(peerId, false),
       );
     }
 
@@ -1292,6 +1324,9 @@ class CallController extends ChangeNotifier {
   /// restait affiché alors que plus rien ne circulait. Dernier pair → l'appel
   /// est fini ; sinon on retire ce participant et la communication continue.
   Future<void> _onPeerConnectionLost(String userId) async {
+    // La reprise a épuisé ses tentatives : ce pair ne « vacille » plus, il est
+    // perdu. Laisser « Reconnexion… » à l'écran après coup mentirait.
+    _marqueEnReconnexion(userId, false);
     if (activeCallId == null) return;
     final autres = joinedParticipantIds.where((id) => id != myUserId).toSet();
     if (autres.length <= 1) {
@@ -1611,6 +1646,29 @@ class CallController extends ChangeNotifier {
         }
         notifyListeners();
       }
+    } else if (type == "ws_connected") {
+      /*
+       * 🔴 LA SOCKET EST REVENUE : ON SE RÉANNONCE DANS L'APPEL.
+       *
+       * Le serveur tient l'appel ouvert 45 s après la chute d'une socket, mais
+       * il ne saura qu'on est revenu que si on le dit — et c'est cette trame
+       * qui lève son sursis et prévient le correspondant. Sans elle, l'appel
+       * mourrait à l'échéance alors que le réseau est déjà de retour.
+       *
+       * Le même modèle que les réunions (`meeting_join`), et pour la même
+       * raison : c'est idempotent, donc l'envoyer sur une socket qui n'était
+       * pas tombée ne coûte rien.
+       */
+      final enCours = activeCallId;
+      if (enCours != null) {
+        traceAppel("socket revenue → call_rejoin sur $enCours");
+        _rt.sendCallRejoin(enCours);
+      }
+    } else if (type == "call_rejoined") {
+      // Le serveur confirme qu'on est toujours dans l'appel. Rien à reconstruire
+      // ici : les sessions WebRTC ne sont pas tombées avec la socket, et si leur
+      // chemin réseau a lâché, chacune mène déjà sa propre reprise.
+      traceAppel("call_rejoined confirmé par le serveur");
     } else if (type == "call_state") {
       final state = e["state"] as String?;
       final callId = e["callId"] as String?;
@@ -1673,6 +1731,13 @@ class CallController extends ChangeNotifier {
             }
           }
         }
+      } else if (state == "reconnecting" || state == "resumed") {
+        // Le pair a perdu (ou retrouvé) sa socket. C'est le serveur qui le dit,
+        // et lui seul peut le savoir : une socket tombée ne coupe pas
+        // forcément le média tout de suite, l'écran doit pourtant le montrer.
+        if (userId == myUserId) return;
+        if (callId != activeCallId) return;
+        _marqueEnReconnexion(userId, state == "reconnecting");
       } else if (state == "ringing") {
         // L'appelé signale que son écran d'appel est affiché → « En train de sonner ».
         if (userId == myUserId) return;

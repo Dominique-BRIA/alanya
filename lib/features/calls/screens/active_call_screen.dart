@@ -323,6 +323,13 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
       return cc.remoteRinging ? "En train de sonner…" : "Sonnerie…";
     }
     if (cc.activeRole == ActiveCallRole.ongoing) {
+      /*
+       * ⚠️ « Reconnexion… » PASSE DEVANT LE CHRONOMÈTRE, et le chronomètre
+       * n'est pas remis à zéro pour autant : l'appel n'a pas recommencé, il
+       * traverse un trou. C'est aussi ce qui distingue cet état de
+       * « Connexion en cours… », qui décrit un appel qui n'a jamais abouti.
+       */
+      if (cc.reconnexionEnCours) return tr(context, 'call_reconnecting');
       if (cc.mediaConnected) return _formatElapsed(cc);
       return "Connexion en cours…";
     }
