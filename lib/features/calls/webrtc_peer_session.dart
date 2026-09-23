@@ -306,12 +306,29 @@ class WebrtcPeerSession {
 
     try {
       _offreRepriseEnVol = true;
+      /*
+       * 🔴 `restartIce()` D'ABORD, LA CONTRAINTE ENSUITE — les deux, et pas un
+       * seul des deux.
+       *
+       * `"IceRestart": true` est l'ancienne forme, passée dans les contraintes
+       * héritées. Elle est censée être honorée, mais elle traverse une couche
+       * de traduction jusqu'au natif, et rien dans l'API ne dit si elle a été
+       * comprise : une offre part dans tous les cas, simplement sans nouvel
+       * `ice-ufrag`, donc sans reprise réelle. C'est un échec parfaitement
+       * silencieux.
+       *
+       * `restartIce()` est la forme moderne, présente dans la version du paquet
+       * utilisée ici, et c'est CELLE QUE LE WEB EMPLOIE — où la reprise est
+       * vérifiée. Les deux demandent la même chose ; les poser ensemble ne
+       * coûte rien et supprime la question.
+       */
+      await pc.restartIce();
       final offre = await pc.createOffer({
         "mandatory": {
           "OfferToReceiveAudio": true,
           "OfferToReceiveVideo": isVideo,
-          // C'est TOUT le mécanisme : de nouveaux `ice-ufrag`/`ice-pwd`, donc
-          // une collecte de candidats neuve, sur des pistes déjà négociées.
+          // De nouveaux `ice-ufrag`/`ice-pwd`, donc une collecte de candidats
+          // neuve, sur des pistes déjà négociées.
           "IceRestart": true,
         },
         "optional": [],
