@@ -155,6 +155,10 @@ Future<void> main(List<String> args) async {
         ),
       };
 
+    /// Relit un QR produit par le WEB.
+    case "qr":
+      resultat = {"code": codeDepuisQr(entree["contenu"] as String)};
+
     default:
       throw ArgumentError('étape inconnue : $etape');
   }
@@ -214,4 +218,16 @@ List<int> sha512(List<int> entree) {
   d.update(Uint8List.fromList(entree), 0, entree.length);
   d.doFinal(sortie, 0);
   return sortie;
+}
+
+/// ⚠️ AJOUTÉ POUR LE BANC DU QR : relit un contenu scanné, exactement comme le
+/// fera l'application. Écrit ici pour que le banc éprouve LE VRAI code — le
+/// dupliquer aurait laissé les deux dériver.
+String? codeDepuisQr(String contenu) {
+  final parts = contenu.split(':');
+  if (parts.length != 3 || parts[0] != 'alanya-e2ee' || parts[1] != '1') {
+    return null;
+  }
+  final code = parts[2];
+  return RegExp(r'^[0-9]{60}$').hasMatch(code) ? code : null;
 }
