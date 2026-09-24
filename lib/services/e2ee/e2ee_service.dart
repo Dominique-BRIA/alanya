@@ -216,6 +216,41 @@ class E2eeService {
     return sortie.toString();
   }
 
+  /* ══════════════ LE QR DE VÉRIFICATION ══════════════ */
+
+  /// Ce que le QR code contient.
+  ///
+  /// 🔴 IL ENCODE LE CODE LUI-MÊME, RIEN D'AUTRE — décision, pas raccourci.
+  /// Signal encode les deux clés d'identité dans un format binaire ; nous
+  /// encodons les 60 chiffres DÉJÀ AFFICHÉS.
+  ///
+  /// ⚠️ POURQUOI C'EST PLUS SÛR ICI : deux formats différents — l'un pour l'œil,
+  /// l'autre pour la caméra — peuvent DIVERGER. Le défaut ne se verrait qu'au
+  /// moment où quelqu'un essaie vraiment de vérifier, c'est-à-dire quand il
+  /// s'inquiète. En scannant exactement ce qui est écrit, la divergence devient
+  /// impossible par construction.
+  ///
+  /// ⚠️ LE QR N'AJOUTE AUCUNE SÉCURITÉ, seulement de la COMMODITÉ : comparer
+  /// soixante chiffres à l'œil est pénible et on se trompe. La garantie reste la
+  /// même — il faut être EN FACE, hors du canal qu'on vérifie. Un QR reçu PAR la
+  /// conversation ne prouve rien, exactement comme un code recopié.
+  static String qrDepuisCode(String code) => 'alanya-e2ee:1:$code';
+
+  /// Relit un QR scanné et rend le code, ou `null` s'il n'est pas des nôtres.
+  ///
+  /// ⚠️ ON REFUSE CE QU'ON NE RECONNAÎT PAS. Scanner le QR d'une autre
+  /// application et afficher « ne correspond pas » ferait croire à une
+  /// interposition là où il n'y a qu'un mauvais QR.
+  static String? codeDepuisQr(String contenu) {
+    final parts = contenu.split(':');
+    if (parts.length != 3 || parts[0] != 'alanya-e2ee' || parts[1] != '1') {
+      return null;
+    }
+    final code = parts[2];
+    // Six groupes de cinq chiffres — la forme de l'empreinte de Signal.
+    return RegExp(r'^[0-9]{60}$').hasMatch(code) ? code : null;
+  }
+
   List<int> _sha512(List<int> entree) {
     final d = SHA512Digest();
     final sortie = Uint8List(64);
