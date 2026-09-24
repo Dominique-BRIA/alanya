@@ -27,3 +27,5 @@ android/key.properties
 # exist ». Flutter le régénère automatiquement à chaque build — c'est d'ailleurs
 # pourquoi il ressortait modifié après chaque compilation.
 android/local.properties
+interop/.dart_tool/
+interop/pubspec.lock
