@@ -31,6 +31,9 @@ dependencies:
   # Stockage sécurisé des tokens JWT
   # v10 : corrige le build natif Linux (json.hpp) avec les clang récents.
   flutter_secure_storage: ^10.3.1
+  libsignal_protocol_dart: ^0.8.2
+  qr_flutter: ^4.1.0
+  pointycastle: ^4.0.0
   # Gestion d'état
   provider: ^6.1.2
   # Temps réel (messagerie) — client WebSocket pur Dart (web + desktop)
