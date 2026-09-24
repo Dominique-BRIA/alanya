@@ -205,23 +205,40 @@ Uint8List ouvrirArchive(String secret, Serrure s) {
 /* ══════════════ LA CLÉ DE RÉCUPÉRATION ══════════════ */
 
 /// ⚠️ SANS ACCENT NI CARACTÈRE AMBIGU : elle sera recopiée à la main, sur un
-/// carnet, peut-être par quelqu'un qui n'a pas de clavier français. Le
-/// dictionnaire est LE MÊME que celui du web — deux listes différentes
-/// rendraient une clé créée sur un client illisible sur l'autre.
+/// carnet, peut-être par quelqu'un qui n'a pas de clavier français.
+///
+/// 🐛 CETTE LISTE A ÉTÉ ALIGNÉE SUR CELLE DU WEB APRÈS COUP. J'en avais écrit
+/// une autre — 36 mots différents — en affirmant dans un commentaire qu'elle
+/// était identique. Elle ne l'était pas.
+///
+/// ⚠️ ET L'AFFIRMATION ELLE-MÊME ÉTAIT FAUSSE : deux dictionnaires différents ne
+/// rendraient PAS une clé illisible d'un client à l'autre. Le secret est la
+/// CHAÎNE DE MOTS elle-même, pas un indice dans une liste — n'importe quelle
+/// suite de mots ouvre la serrure si elle est exacte. La liste ne sert qu'à
+/// TIRER une clé, jamais à la relire.
+///
+/// On l'aligne quand même, pour que les deux clients produisent des clés de même
+/// nature — et parce qu'un commentaire faux dans un fichier de cryptographie est
+/// plus dangereux que pas de commentaire.
 const List<String> motsRecuperation = [
-  'bambou', 'cerise', 'cousin', 'cypres', 'encrier', 'falaise', 'fenetre',
-  'guitare', 'harpe', 'hibou', 'lampe', 'montagne', 'orage', 'pivoine',
-  'riviere', 'sable', 'safran', 'tambour', 'tortue', 'brume', 'colline',
-  'dauphin', 'ecume', 'flamme', 'givre', 'ile', 'jardin', 'lagune', 'marbre',
-  'nuage', 'olive', 'prairie', 'quartz', 'roseau', 'silex', 'trefle',
+  'tortue', 'riviere', 'lampe', 'cousin', 'fenetre', 'orage',
+  'sable', 'guitare', 'renard', 'marbre', 'pluie', 'cerise',
+  'montagne', 'velours', 'hibou', 'bambou', 'falaise', 'encrier',
+  'girafe', 'menthe', 'tambour', 'nuage', 'corail', 'pivoine',
+  'safran', 'brume', 'loutre', 'cypres', 'silex', 'harpe',
+  'jonquille', 'ocean',
 ];
 
-/// Tire douze mots.
+/// Tire une clé de récupération : 12 mots parmi 32, soit 60 bits.
 ///
-/// ⚠️ DOUZE MOTS D'UN DICTIONNAIRE DE 36 ne font pas 256 bits — ils en font une
-/// soixantaine. C'est assez pour résister à une recherche hors ligne sur une
-/// serrure à une itération ? NON. Ce dictionnaire doit être élargi avant la
-/// production : il est ici pour que le format existe, pas pour protéger.
+/// 🐛 J'AVAIS ÉCRIT QUE 60 BITS ÉTAIENT INSUFFISANTS. C'est faux, et le web
+/// l'explique mieux : ce secret n'étant pas étiré, sa force EST sa seule
+/// protection — et soixante bits résistent à une attaque hors ligne pour un coût
+/// qui dépasse de très loin l'intérêt d'une archive de messagerie personnelle.
+///
+/// ⚠️ LES PORTER À 128 FERAIT VINGT-QUATRE MOTS À RECOPIER, et c'est le papier
+/// perdu qui deviendrait le vrai risque. Durcir un chiffre sans regarder ce
+/// qu'il coûte ailleurs n'est pas une amélioration.
 String tirerCleRecuperation() =>
     List.generate(12, (_) => motsRecuperation[_sort.nextInt(motsRecuperation.length)])
         .join(' ');
