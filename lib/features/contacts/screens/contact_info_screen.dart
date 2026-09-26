@@ -521,43 +521,93 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
   /// L'état du chiffrement de cette conversation, tel que le serveur le donne.
   bool _chiffree = false;
 
-  /// Crée la sauvegarde puis active le chiffrement.
+  /// Crée l'archive avec SES DEUX SERRURES, puis active le chiffrement.
   ///
-  /// 🔴 L'ARCHIVE EST PROTÉGÉE PAR UNE CLÉ DE RÉCUPÉRATION, pas par le mot de
-  /// passe (choix du user, 26/09/2026). Le mot de passe n'existe qu'à la
-  /// connexion, et le redemander au milieu d'un réglage ressemble à un piège —
-  /// c'est exactement ce qu'un vrai piège imiterait.
+  /// 🔴 DEUX SERRURES D'UN COUP, ET C'EST CE QUI REND LE RESTE SIMPLE. Le mot de
+  /// passe ouvre l'archive à chaque connexion, sans rien demander ; la clé de
+  /// récupération la rouvre sur un appareil neuf, ou si le mot de passe est
+  /// oublié. Avec une seule des deux, il resterait toujours un cas où l'archive
+  /// se referme sans que personne puisse la rouvrir.
   ///
-  /// 🔴 POURQUOI UNE ARCHIVE DÈS MAINTENANT. Sans elle, l'utilisateur se
-  /// déconnecte après sa première conversation chiffrée et TOUS SES MESSAGES
-  /// DEVIENNENT VIDES, sans avertissement. C'est le défaut signalé.
+  /// 🔴 POURQUOI MAINTENANT. Sans archive, l'utilisateur se déconnecte après sa
+  /// première conversation chiffrée et TOUS SES MESSAGES DEVIENNENT VIDES, sans
+  /// le moindre avertissement. C'est le défaut signalé le 26/09/2026.
   ///
-  /// ⚠️ LA SAUVEGARDE D'ABORD, LE CHIFFREMENT ENSUITE. L'ordre inverse
-  /// laisserait une fenêtre — courte mais réelle — où des messages chiffrés
+  /// ⚠️ LA SAUVEGARDE D'ABORD, LE CHIFFREMENT ENSUITE : l'ordre inverse
+  /// laisserait une fenêtre, courte mais réelle, où des messages chiffrés
   /// existeraient sans archive pour les recueillir.
   Future<void> _activerChiffrement() async {
     final pile = context.e2ee;
     final convId = widget.convId;
     if (pile == null || convId == null) return;
 
+    final mdp = await _demanderMotDePasse();
+    if (mdp == null || mdp.isEmpty) return;
+
     try {
-      final cle = await pile.sauvegarde.activerAvecCleRecuperation(pile.coffre);
+      final cle = await pile.sauvegarde.activerAvecDeuxSerrures(mdp, pile.coffre);
       await pile.fil.activer(convId);
       if (!mounted) return;
       setState(() => _chiffree = true);
-      await _montrerCleRecuperation(cle);
+      if (cle != null) await _montrerCleRecuperation(cle);
     } catch (_) {
       if (!mounted) return;
       /*
-       * ⚠️ ON N'ACCUSE PERSONNE DE PRÉCIS : l'échec vient le plus souvent d'un
+       * ⚠️ ON N'ACCUSE PAS LE MOT DE PASSE. L'échec vient le plus souvent d'un
        * correspondant qui n'a pas encore ouvert l'application sur un appareil à
-       * jour. Affirmer une autre cause ferait chercher au mauvais endroit.
+       * jour — affirmer la mauvaise cause fait chercher au mauvais endroit.
        */
       showAppSnackBar(
-        "Le chiffrement n'a pas pu être activé. Votre correspondant doit "
-        "d'abord ouvrir l'application sur un appareil à jour.",
+        "Le chiffrement n'a pas pu être activé. Vérifiez votre mot de passe, et "
+        "que votre correspondant a ouvert l'application récemment.",
       );
     }
+  }
+
+  /// Demande le mot de passe du compte.
+  ///
+  /// ⚠️ ON DIT POURQUOI ON LE DEMANDE. Un mot de passe réclamé sans raison
+  /// apparente, au milieu d'un réglage, ressemble à un piège — et c'est
+  /// exactement ce qu'un vrai piège imiterait.
+  Future<String?> _demanderMotDePasse() {
+    final ctrl = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Activer le chiffrement'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Votre mot de passe protège la sauvegarde de vos messages '
+              'chiffrés. Sans elle, ils seraient perdus à la prochaine '
+              'déconnexion.',
+              style: TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: ctrl,
+              obscureText: true,
+              autofocus: true,
+              decoration:
+                  const InputDecoration(labelText: 'Mot de passe du compte'),
+              onSubmitted: (v) => Navigator.of(ctx).pop(v),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(ctrl.text),
+            child: const Text('Activer'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// Montre les douze mots, une seule fois.

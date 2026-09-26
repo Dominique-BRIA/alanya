@@ -20,6 +20,7 @@ import 'ringtones_screen.dart';
 import 'repondeur_screen.dart';
 import 'export_medias_screen.dart';
 import 'translation_screen.dart';
+import '../../parametres/screens/sauvegarde_chiffree_screen.dart';
 import 'privacy_settings_screen.dart';
 import 'login_history_screen.dart';
 import 'pays_mobile_screen.dart';
@@ -152,6 +153,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
             trailing: _chevron(),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const PrivacySettingsScreen()),
+            ),
+          ),
+          /*
+           * ⚠️ DANS « SÉCURITÉ », juste après la confidentialité. C'est là qu'on
+           * va chercher ce qui touche à ses clés et à son compte — une section
+           * à part se serait ajoutée à une liste déjà longue, pour un réglage
+           * qu'on fait une fois.
+           */
+          _settingsTile(
+            icon: Icons.backup_outlined,
+            iconColor: _positive,
+            title: 'Sauvegarde chiffrée',
+            subtitle: 'Retrouver vos messages chiffrés sur un autre appareil',
+            trailing: _chevron(),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                  builder: (_) => const SauvegardeChiffreeScreen()),
             ),
           ),
           _settingsTile(

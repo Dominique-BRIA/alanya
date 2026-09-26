@@ -193,28 +193,31 @@ class E2eeSauvegarde {
   }
 
 
-  /// Crée l'archive protégée par une CLÉ DE RÉCUPÉRATION, et la rend.
+  /// Crée l'archive avec SES DEUX SERRURES, et rend la clé de récupération.
   ///
-  /// 🔴 C'EST LE SEUL SECRET DE CETTE ARCHIVE au moment où elle naît. Le mot de
-  /// passe n'existe qu'à la connexion ; on ne peut donc pas poser sa serrure
-  /// ici, et l'appelant DOIT montrer ces douze mots à l'utilisateur.
+  /// 🔴 DEUX SERRURES D'UN COUP. Le mot de passe rouvre l'archive à chaque
+  /// connexion sans rien demander ; la clé de récupération la rouvre sur un
+  /// appareil neuf, ou si le mot de passe est oublié. Avec une seule des deux,
+  /// il resterait toujours un cas où l'archive se referme pour de bon.
   ///
-  /// 🔴 LA CLÉ MAÎTRESSE EST RANGÉE SUR L'APPAREIL. Sans cela, cette archive
-  /// resterait fermée dès la prochaine connexion — il n'y aurait aucune serrure
-  /// que le mot de passe puisse ouvrir — et les nouveaux messages cesseraient
-  /// d'être sauvegardés sans que rien ne le signale. La connexion suivante s'en
-  /// sert pour poser la serrure manquante, sans rien demander.
+  /// ⚠️ LA CLÉ MAÎTRESSE EST AUSSI RANGÉE SUR L'APPAREIL : c'est ce qui permet
+  /// d'ajouter une serrure plus tard sans redemander quoi que ce soit.
   ///
-  /// ⚠️ SI UNE ARCHIVE EXISTE DÉJÀ, ON N'EN CRÉE PAS UNE SECONDE : on poserait
-  /// une archive orpheline, et l'ancienne deviendrait illisible.
-  Future<String> activerAvecCleRecuperation(CoffreE2ee coffre) async {
+  /// ⚠️ SI UNE ARCHIVE EXISTE DÉJÀ, ON N'EN CRÉE PAS UNE SECONDE — on poserait
+  /// une archive orpheline, et l'ancienne deviendrait illisible. On rend alors
+  /// `null` : il n'y a pas de nouvelle clé à montrer.
+  Future<String?> activerAvecDeuxSerrures(
+    String motDePasse,
+    CoffreE2ee coffre,
+  ) async {
     final etat = await lireCoffre();
-    if (etat.serrures.isNotEmpty) {
-      throw StateError('Une sauvegarde existe déjà sur ce compte.');
-    }
+    if (etat.serrures.isNotEmpty) return null;
 
     final cle = tirerCleRecuperation();
-    final a = creerArchive({TypeSerrure.recuperation: cle});
+    final a = creerArchive({
+      TypeSerrure.motdepasse: motDePasse,
+      TypeSerrure.recuperation: cle,
+    });
     for (final s in a.serrures) {
       await _poser(s);
     }
