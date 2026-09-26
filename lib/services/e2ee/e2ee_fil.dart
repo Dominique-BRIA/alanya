@@ -53,7 +53,13 @@ class E2eeFil {
   /// ⚠️ LE DÉPÔT EXIGE L APPAREIL EXPÉDITEUR : le serveur s en sert pour ne pas
   /// nous renvoyer nos propres enveloppes, et pour que le destinataire sache
   /// quelle session ouvrir.
-  final int monDeviceId;
+  ///
+  /// 🔴 POSÉ PAR `PileE2ee.demarrer()`, PAS PAR LE CONSTRUCTEUR. Le vrai numéro
+  /// dort dans le coffre et se lit en asynchrone ; le `1` du constructeur n'est
+  /// qu'un repli d'avant-démarrage. Laisser le `1` passé le démarrage
+  /// adresserait les enveloppes depuis un appareil qui n'a jamais publié de
+  /// clés — le destinataire ne pourrait pas les ouvrir.
+  int monDeviceId;
 
   final E2eeService _service;
   final Future<Map<String, dynamic>> Function(
@@ -94,6 +100,7 @@ class E2eeFil {
     required String convId,
     required String pairId,
     required String texte,
+    String? replyToId,
   }) async {
     var appareils = await _service.ouvrirSessions(pairId);
 
@@ -135,6 +142,10 @@ class E2eeFil {
     final message = await _api('POST', '/api/conversations/$convId/messages', {
       'type': 'TEXT',
       'chiffre': true,
+      // La citation voyage en clair comme métadonnée, comme sur la route
+      // ordinaire : seul le texte est chiffré, la structure du fil ne l'est
+      // pas — le serveur en a besoin pour les notifications et les aperçus.
+      if (replyToId != null) 'replyToId': replyToId,
     });
     final messageId = message['id'] as String;
 

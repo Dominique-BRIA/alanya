@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../l10n/app_localizations.dart';
-import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
+import '../../auth/auth_controller.dart';
 import '../../../services/e2ee/e2ee_fournisseur.dart';
 import '../../../widgets/e2ee/e2ee_widgets.dart';
 import 'package:flutter/services.dart';
@@ -521,16 +521,33 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
   Future<void> _ouvrirVerification() async {
     final pile = context.e2ee;
     if (pile == null) return;
+    String? moi;
     try {
-      final code = await pile.service.codeSecurite(
-        monId: widget.userId,
-        pairId: widget.userId,
-        adressePair: SignalProtocolAddress(widget.userId, 1),
-      );
+      moi = context.read<AuthController>().user?.id;
+    } catch (_) {
+      moi = null;
+    }
+    if (moi == null) return;
+    try {
+      /*
+       * 🐛 MÊMES DEUX BUGS QUE DANS LA CONVERSATION : `monId` recevait le
+       * pair, et l'appareil était codé en dur à `1` — voir
+       * `_ouvrirChiffrement`. Un code par VRAI appareil, ici aussi.
+       */
+      final codes = await pile.service
+          .codesSecurite(monId: moi, pairId: widget.userId);
       if (!mounted) return;
+      if (codes.isEmpty) {
+        showAppSnackBar(
+          "Aucune clé connue pour ce contact — échangez d'abord un message chiffré.",
+        );
+        return;
+      }
+      final seul = codes.length == 1;
       await Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => EcranVerification(
-          code: code,
+          code: codes.values.first,
+          codesParAppareil: seul ? null : codes,
           nomPair: widget.name,
           verifie: false,
           onBasculer: () => Navigator.of(context).pop(),

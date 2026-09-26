@@ -167,6 +167,7 @@ class EcranVerification extends StatelessWidget {
     required this.verifie,
     required this.onBasculer,
     this.onScanner,
+    this.codesParAppareil,
   });
 
   final String code;
@@ -175,23 +176,70 @@ class EcranVerification extends StatelessWidget {
   final VoidCallback onBasculer;
   final VoidCallback? onScanner;
 
-  /// Les six groupes de cinq chiffres.
+  /// Un code par appareil chiffré du correspondant, quand il en a plusieurs.
+  ///
+  /// 🔴 UNE IDENTITÉ PAR APPAREIL, DONC UN CODE PAR APPAREIL. N'en montrer
+  /// qu'un quand le pair en a deux ferait comparer le mauvais une fois sur
+  /// deux — et conclure à une interposition qui n'existe pas. Nul ou à un
+  /// seul élément : l'écran rend le code unique, comme avant.
+  final Map<int, String>? codesParAppareil;
+
+  /// Les douze groupes de cinq chiffres.
   ///
   /// ⚠️ GROUPÉS POUR ÊTRE LUS À VOIX HAUTE. Soixante chiffres d'affilée ne se
   /// dictent pas : on perd sa place, on recommence, et on finit par renoncer à
   /// vérifier — ce qui est exactement le résultat qu'on cherche à éviter.
-  List<String> get _groupes =>
-      List.generate(12, (i) => code.substring(i * 5, i * 5 + 5));
+  static List<String> _groupesDe(String c) =>
+      List.generate(12, (i) => c.substring(i * 5, i * 5 + 5));
+
+  Widget _blocsCode(String c) {
+    return Column(
+      children: [
+        Wrap(
+          alignment: WrapAlignment.center,
+          spacing: 10,
+          runSpacing: 6,
+          children: _groupesDe(c)
+              .map((g) => Text(g,
+                  style: const TextStyle(
+                      fontFamily: 'monospace', fontSize: 17, letterSpacing: 1)))
+              .toList(),
+        ),
+        const SizedBox(height: 22),
+        Center(
+          /*
+           * 🔴 LE QR ENCODE LE CODE LUI-MÊME. Deux formats — l'un pour l'œil,
+           * l'autre pour la caméra — pourraient DIVERGER, et le défaut ne se
+           * verrait qu'au moment où quelqu'un s'inquiète vraiment.
+           */
+          child: QrImageView(
+            data: E2eeService.qrDepuisCode(c),
+            size: 190,
+            // ⚠️ FOND BLANC IMPOSÉ : un QR sur fond sombre ne se scanne pas.
+            backgroundColor: Colors.white,
+          ),
+        ),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
+    // Non-nul dans tous les cas : à un seul code, le plan de repli porte le
+    // code unique — et la branche « plusieurs » ne le voit jamais.
+    final parAppareil = codesParAppareil ?? {0: code};
+    final plusieurs = parAppareil.length > 1;
     return Scaffold(
       appBar: AppBar(title: const Text('Code de sécurité')),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
           Text(
-            'Comparez ce code avec $nomPair, de vive voix ou en face à face.',
+            plusieurs
+                ? '$nomPair a ${parAppareil.length} appareils chiffrés : '
+                    'comparez chaque code avec le sien, de vive voix ou en '
+                    'face à face.'
+                : 'Comparez ce code avec $nomPair, de vive voix ou en face à face.',
             style: const TextStyle(fontSize: 13.5),
           ),
           /*
@@ -206,30 +254,29 @@ class EcranVerification extends StatelessWidget {
             style: TextStyle(fontSize: 12, color: Color(0xFF8A8A90)),
           ),
           const SizedBox(height: 18),
-          Wrap(
-            alignment: WrapAlignment.center,
-            spacing: 10,
-            runSpacing: 6,
-            children: _groupes
-                .map((g) => Text(g,
+          if (!plusieurs)
+            _blocsCode(code)
+          else
+            for (final entree in parAppareil.entries) ...[
+              Row(
+                children: [
+                  const Icon(Icons.smartphone, size: 16, color: Color(0xFF8A8A90)),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Appareil ${entree.key}',
                     style: const TextStyle(
-                        fontFamily: 'monospace', fontSize: 17, letterSpacing: 1)))
-                .toList(),
-          ),
-          const SizedBox(height: 22),
-          Center(
-            /*
-             * 🔴 LE QR ENCODE LE CODE LUI-MÊME. Deux formats — l'un pour l'œil,
-             * l'autre pour la caméra — pourraient DIVERGER, et le défaut ne se
-             * verrait qu'au moment où quelqu'un s'inquiète vraiment.
-             */
-            child: QrImageView(
-              data: E2eeService.qrDepuisCode(code),
-              size: 190,
-              // ⚠️ FOND BLANC IMPOSÉ : un QR sur fond sombre ne se scanne pas.
-              backgroundColor: Colors.white,
-            ),
-          ),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF8A8A90)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              _blocsCode(context, entree.value),
+              const SizedBox(height: 22),
+              const Divider(),
+              const SizedBox(height: 14),
+            ],
           if (onScanner != null) ...[
             const SizedBox(height: 14),
             Center(

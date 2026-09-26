@@ -23,11 +23,31 @@ import 'e2ee_service.dart';
 /// l'identifiant : deux comptes sur le même téléphone ne doivent jamais partager
 /// une identité Signal, sinon les messages de l'un s'ouvriraient chez l'autre.
 class PileE2ee {
-  PileE2ee._(this.coffre, this.service, this.fil);
+  PileE2ee._(this.compteId, this.coffre, this.service, this.fil);
+
+  /// Le compte que cette pile chiffre — voir `main.dart`, qui garde UNE pile
+  /// par compte et s'en sert pour ne pas la reconstruire à chaque
+  /// notification d'authentification.
+  final String compteId;
 
   final CoffreE2ee coffre;
   final E2eeService service;
   final E2eeFil fil;
+
+  /// Démarrage en cours — le démarrage est demandé à la fois par
+  /// l'authentification et par la reconnexion, et les deux peuvent tomber
+  /// ensemble. Sans cette garde, deux publications partiraient en même temps
+  /// avec deux réassorts concurrents.
+  bool _enCours = false;
+
+  /// Les clés de ce démarrage ont bien été publiées.
+  ///
+  /// 🔴 C'EST CE FANION QUI DÉCLENCHE LE RÉESSAI, pas le fanion persistant du
+  /// coffre : celui-là dit « publié un jour », celui-ci « publié depuis
+  /// l'ouverture de l'application ». Un démarrage hors réseau laisse le
+  /// premier à vrai et le second à faux — et la reconnexion réessaie.
+  bool _publie = false;
+  bool get publie => _publie;
 
 
   /// Prépare cet appareil et publie ses clés publiques.
@@ -52,12 +72,25 @@ class PileE2ee {
   /// ⚠️ NE LÈVE JAMAIS. Un réseau coupé au lancement ne doit pas empêcher
   /// l'application de s'ouvrir ; on réessaiera au démarrage suivant.
   Future<void> demarrer() async {
+    if (_enCours) return;
+    _enCours = true;
     try {
       await coffre.preparer();
-      await service.publierMesCles(deviceId: await coffre.deviceId());
+      final id = await coffre.deviceId();
+      // 🔴 LE FIL DOIT SIGNER DE SON VRAI NUMÉRO : sans cette ligne, les
+      // enveloppes partent avec l'appareil `1` du constructeur alors que les
+      // clés sont publiées sous le numéro tiré au sort — le serveur ne peut
+      // ni filtrer nos propres enveloppes, ni dire au destinataire quelle
+      // session ouvrir.
+      fil.monDeviceId = id;
+      await service.publierMesCles(deviceId: id);
+      _publie = true;
     } catch (_) {
       // Silencieux ici, mais pas invisible : sans clés publiées, l'écran de
       // conversation dira « aucun appareil chiffré chez ce correspondant ».
+      // Et pas définitif : la reconnexion réessaiera (voir `main.dart`).
+    } finally {
+      _enCours = false;
     }
   }
 
@@ -87,7 +120,7 @@ class PileE2ee {
 
     final coffre = CoffreE2ee(compteId);
     final service = E2eeService(coffre, appel);
-    return PileE2ee._(coffre, service, E2eeFil(service, appel));
+    return PileE2ee._(compteId, coffre, service, E2eeFil(service, appel));
   }
 }
 
@@ -99,7 +132,10 @@ class PileE2ee {
 extension E2eeContexte on BuildContext {
   PileE2ee? get e2ee {
     try {
-      return read<PileE2ee>();
+      // ⚠️ NULLABLE : le fournisseur existe toujours, mais il rend `null`
+      // tant que personne n'est connecté — voir le `ProxyProvider` de
+      // `main.dart`.
+      return read<PileE2ee?>();
     } catch (_) {
       return null;
     }

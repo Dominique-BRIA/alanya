@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'services/e2ee/e2ee_fournisseur.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -58,6 +57,15 @@ import 'features/meetings/meeting_controller.dart';
 import 'features/meetings/meetings_repository.dart';
 import 'features/status/status_repository.dart';
 
+/// La pile de chiffrement du compte courant, tenue par le `ProxyProvider`
+/// ci-dessous.
+///
+/// 🔴 UNE INDIRECTION POUR UN RÉESSAI : quand la connexion revient après un
+/// démarrage hors réseau, c'est ici que l'écouteur `ws_connected` trouve la
+/// pile à redémarrer. Posée pendant la construction (fil principal), lue
+/// depuis des événements (fil principal aussi) — pas de course.
+PileE2ee? _pileE2eeCourante;
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -102,6 +110,16 @@ void main() async {
   };
   // Registre des appareils : simple câblage, aucun appel réseau ici.
   // L'enregistrement a lieu à l'authentification (voir AuthController).
+  // 🐛 LA PUBLICATION DES CLÉS NE SURVIVAIT PAS À UN DÉMARRAGE HORS RÉSEAU :
+  // `demarrer()` échouait en silence et ne réessayait qu'au lancement suivant
+  // — entre-temps, personne ne pouvait écrire à ce compte, en ligne ou non.
+  // Tant que la pile du compte courant n'a pas publié, chaque reconnexion
+  // réessaie. Une fois publié, l'écouteur ne coûte plus qu'une comparaison.
+  realtime.events.listen((e) {
+    if (e['type'] != 'ws_connected') return;
+    final pile = _pileE2eeCourante;
+    if (pile != null && !pile.publie) unawaited(pile.demarrer());
+  });
   DeviceRegistry.instance.init(api: api, storage: storage);
   // Relevé de position : simple câblage. Rien ne démarre ici — c'est le serveur
   // qui dira si ce compte est concerné, et l'utilisateur qui devra l'accepter.
@@ -111,40 +129,27 @@ void main() async {
   await TraductionAuto.instance.load();
 
   /*
-   * 🔴 LA PILE DE CHIFFREMENT EST MONTÉE ICI, et son absence expliquait
-   * pourquoi AUCUN écran de chiffrement n'apparaissait : les widgets
-   * existaient, les services aussi, mais rien ne les reliait.
+   * 🔴 LA PILE DE CHIFFREMENT EST MONTÉE PLUS BAS, dans le `ProxyProvider` qui
+   * suit l'authentification — et plus ici, avant même de savoir qui est
+   * connecté.
+   *
+   * 🐛 LA VERSION PRÉCÉDENTE NE PUBLIAIT QU'AU REDÉMARRAGE. La pile naissait du
+   * profil en cache lu avant `runApp` : après une inscription ou une connexion
+   * FRAÎCHE, il n'y avait ni pile ni publication — et personne ne pouvait
+   * écrire à ce compte jusqu'au prochain lancement. Le « il n'y a pas les
+   * clés » survivait donc à son propre correctif pour tous les comptes
+   * nouveaux, qui sont justement ceux qu'on teste en premier.
    *
    * ⚠️ LIÉE AU COMPTE, PAS À L'APPLICATION : le coffre préfixe ses clés par
    * l'identifiant. Deux comptes sur le même téléphone ne doivent jamais
    * partager une identité Signal, sinon les messages de l'un s'ouvriraient
-   * chez l'autre.
+   * chez l'autre. Le `ProxyProvider` garde la même instance tant que le compte
+   * ne change pas — la reconstruire viderait la mémoire des conversations
+   * chiffrées.
    *
    * ⚠️ NULLE SI PERSONNE N'EST CONNECTÉ. Les écrans le gèrent en masquant ce
    * qui touche au chiffrement, plutôt qu'en plantant.
    */
-  String? idCompte;
-  try {
-    final brut = await storage.userJson;
-    if (brut != null) {
-      final u = jsonDecode(brut) as Map<String, dynamic>;
-      idCompte = (u['alanyaID'] ?? u['id'] ?? u['userId'])?.toString();
-    }
-  } catch (_) {
-    idCompte = null;
-  }
-
-  /*
-   * 🐛 LA PUBLICATION DES CLÉS MANQUAIT — cause du « il n y a pas les clés »
-   * quand le correspondant est hors ligne. Sans publication il n a AUCUNE clé
-   * sur le serveur, et sa présence n y change rien.
-   *
-   * ⚠️ LANCÉE SANS ATTENDRE : l application ne doit pas rester noire pendant un
-   * aller-retour réseau. On ne peut de toute façon pas recevoir avant d avoir
-   * publié.
-   */
-  final pileE2ee = idCompte == null ? null : PileE2ee.pour(authedApi, idCompte);
-  unawaited(pileE2ee?.demarrer() ?? Future<void>.value());
 
   runApp(
     MultiProvider(
@@ -181,8 +186,6 @@ void main() async {
         Provider<ChatRepository>.value(value: ChatRepository(authedApi)),
         Provider<ExportMediasRepository>.value(
             value: ExportMediasRepository(authedApi)),
-        if (idCompte != null)
-          Provider<PileE2ee>.value(value: pileE2ee!),
         Provider<AccountRepository>.value(value: AccountRepository(authedApi)),
         Provider<StatusRepository>.value(value: StatusRepository(authedApi)),
         Provider<AiRepository>.value(value: AiRepository(authedApi)),
@@ -279,6 +282,30 @@ void main() async {
             storage,
             realtime: ctx.read<RealtimeClient>(),
           )..bootstrap(),
+        ),
+        /*
+         * 🔴 LA PILE SUIT LE COMPTE, PAS LE LANCEMENT. Elle naît dès que
+         * quelqu'un est authentifié — session restaurée comme connexion
+         * fraîche — et publie aussitôt, sans attendre : on ne peut de toute
+         * façon pas recevoir avant d'avoir publié, et l'application ne doit
+         * pas rester noire pendant un aller-retour réseau.
+         */
+        ProxyProvider<AuthController, PileE2ee?>(
+          update: (_, auth, precedent) {
+            final id = auth.status == AuthStatus.authenticated
+                ? auth.user?.id
+                : null;
+            if (id == null) {
+              _pileE2eeCourante = null;
+              return null;
+            }
+            final pile = (precedent != null && precedent.compteId == id)
+                ? precedent
+                : PileE2ee.pour(authedApi, id);
+            _pileE2eeCourante = pile;
+            if (!pile.publie) unawaited(pile.demarrer());
+            return pile;
+          },
         ),
       ],
       child: const AlanyaApp(),

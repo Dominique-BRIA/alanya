@@ -129,6 +129,64 @@ class CoffreE2ee implements SignalProtocolStore {
     return n;
   }
 
+  /* ══════════════ LE RÉASSORT DES PRÉ-CLÉS ══════════════ */
+
+  /// Les identifiants des pré-clés à usage unique encore en stock.
+  ///
+  /// 🔴 L'INVENTAIRE AVANT LE RÉASSORT. Chaque pré-clé ne sert qu'une fois et
+  /// la bibliothèque supprime la sienne après usage : compter ce qui reste est
+  /// le seul moyen de savoir combien en générer — sans jeter celles que des
+  /// correspondants ont peut-être déjà retirées du serveur.
+  Future<List<int>> idsPrekeysUniques() async {
+    final tout = await _magasin.readAll(aOptions: _options);
+    final prefixe = _cle('prekey.');
+    final ids = <int>[];
+    for (final k in tout.keys) {
+      if (!k.startsWith(prefixe)) continue;
+      final n = int.tryParse(k.substring(prefixe.length));
+      if (n != null) ids.add(n);
+    }
+    return ids;
+  }
+
+  /// Le prochain identifiant de pré-clé à usage unique.
+  ///
+  /// 🔴 JAMAIS RÉUTILISÉ, MÊME APRÈS USAGE. Un identifiant recyclé avec une
+  /// matière neuve rendrait indéchiffrable le message qu'un correspondant a
+  /// préparé avec l'ancienne publique — c'est exactement ce que faisait la
+  /// régénération `0..49` à chaque démarrage, et pourquoi elle est partie.
+  Future<int> prochainIdPrekey() async =>
+      int.tryParse(await _lire('nextPrekeyId') ?? '') ?? 0;
+
+  Future<void> reglerProchainIdPrekey(int n) => _ecrire('nextPrekeyId', '$n');
+
+  /// L'identifiant de LA pré-clé signée de cet appareil.
+  ///
+  /// 🔴 UNE SEULE, STABLE. La rotation périodique casserait les liasses déjà
+  /// retirées par des correspondants qui n'ont pas encore écrit : on garde
+  /// donc la même tant qu'elle existe — y compris le `0` des versions
+  /// précédentes, réutilisé tel quel à la mise à jour.
+  Future<int> idPrekeySignee() async {
+    final rangees = await loadSignedPreKeys();
+    if (rangees.isNotEmpty) {
+      rangees.sort((a, b) => a.id.compareTo(b.id));
+      return rangees.first.id;
+    }
+    final n = int.tryParse(await _lire('signedId') ?? '');
+    if (n != null && n >= 0) return n;
+    await _ecrire('signedId', '1');
+    return 1;
+  }
+
+  /// Ce jeu de clés a-t-il déjà été publié ?
+  ///
+  /// 🔴 POSÉ APRÈS LE POST, JAMAIS AVANT. Un fanion posé avant l'envoi
+  /// mentirait en cas de réseau coupé entre les deux — et le démarrage
+  /// suivant croirait le serveur fourni alors qu'il ne l'est pas.
+  Future<bool> aPublie() async => await _lire('publie') == '1';
+
+  Future<void> noterPublication() => _ecrire('publie', '1');
+
   /* ══════════════ SESSIONS ══════════════ */
 
   @override

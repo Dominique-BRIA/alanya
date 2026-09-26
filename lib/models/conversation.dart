@@ -8,12 +8,17 @@ class LastMessage {
   final String senderId;
   final DateTime createdAt;
 
+  /// Le dernier message est chiffré : `content` est alors vide côté serveur,
+  /// et l'aperçu de la liste ne doit pas afficher une ligne blanche.
+  final bool chiffre;
+
   LastMessage({
     required this.id,
     required this.content,
     required this.type,
     required this.senderId,
     required this.createdAt,
+    this.chiffre = false,
   });
 
   factory LastMessage.fromJson(Map<String, dynamic> j) => LastMessage(
@@ -22,6 +27,7 @@ class LastMessage {
         type: j["type"] as String,
         senderId: j["senderId"] as String,
         createdAt: DateTime.parse(j["createdAt"] as String),
+        chiffre: (j["chiffre"] as bool?) ?? false,
       );
 }
 
@@ -109,6 +115,18 @@ class Conversation {
   /// l'interrupteur part alors de « non ».
   final bool sourdine;
 
+  /// Les messages de cette conversation sont chiffrés de bout en bout.
+  ///
+  /// 🔴 DIT PAR LE SERVEUR, PAS DEVINÉ. C'est lui qui a enregistré
+  /// l'activation — par ce téléphone ou par un autre appareil du compte — et
+  /// lui seul sait si elle a eu lieu. Le deviner depuis le contenu donnerait
+  /// un bouclier qui clignote au premier message en clair d'un appareil plus
+  /// ancien.
+  ///
+  /// Faux par défaut : un serveur qui ne renvoie pas le champ ne doit surtout
+  /// pas faire croire à un chiffrement qui n'existe pas.
+  final bool e2ee;
+
   Conversation({
     required this.id,
     required this.isGroup,
@@ -123,6 +141,7 @@ class Conversation {
     this.isPinned = false,
     this.isArchived = false,
     this.sourdine = false,
+    this.e2ee = false,
   });
 
   /// Copie avec la sourdine changée — le reste est intact.
@@ -144,6 +163,7 @@ class Conversation {
         isPinned: isPinned,
         isArchived: isArchived,
         sourdine: valeur,
+        e2ee: e2ee,
       );
 
   Map<String, String> get memberNames => {
@@ -172,5 +192,6 @@ class Conversation {
         isPinned: (j["isPinned"] as bool?) ?? false,
         isArchived: (j["isArchived"] as bool?) ?? false,
         sourdine: (j["sourdine"] as bool?) ?? false,
+        e2ee: (j["e2ee"] as bool?) ?? false,
       );
 }

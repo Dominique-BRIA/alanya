@@ -148,6 +148,13 @@ class Message {
   /// Le statut auquel ce message répond, recopié par le serveur à l'envoi.
   final StatutCite? statutCite;
 
+  /// Le texte voyage chiffré de bout en bout : `content` est alors NUL côté
+  /// serveur, et ne se remplit qu'après déchiffrement local d'une enveloppe.
+  ///
+  /// ⚠️ FAUX PAR DÉFAUT : un serveur antérieur n'envoie pas le champ, et un
+  /// message ordinaire ne doit pas passer pour chiffré.
+  final bool chiffre;
+
   Message({
     required this.id,
     required this.convId,
@@ -166,6 +173,7 @@ class Message {
     this.starred = false,
     this.mentions = const [],
     this.statutCite,
+    this.chiffre = false,
   });
 
   /// Vrai si le message a été supprimé pour tout le monde.
@@ -206,6 +214,7 @@ class Message {
             .whereType<Map<String, dynamic>>()
             .map(MentionMessage.fromJson)
             .toList(),
+        chiffre: (j["chiffre"] as bool?) ?? false,
       );
 }
 

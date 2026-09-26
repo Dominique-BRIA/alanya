@@ -1578,6 +1578,13 @@ class _ConversationsTabState extends State<_ConversationsTab>
     // L'ajouter demanderait de le faire remonter par l'API des conversations.
     String typeLabel() {
       if (last == null) return "—";
+      // 🔒 CHIFFRÉ : le serveur n'a pas le texte — sans cette ligne, un fil
+      // chiffré affichait une ligne BLANCHE comme dernier message. Le texte
+      // déchiffré ne remonte pas ici : la liste ne relève pas les enveloppes,
+      // seul le fil ouvert le fait.
+      if (last.chiffre && (last.content?.trim().isEmpty ?? true)) {
+        return "🔒 Message chiffré";
+      }
       /*
        * 🔴 UN MESSAGE SYSTÈME PORTE DU JSON, et la liste l'affichait tel quel :
        * le serveur recopie la charge `{"code":"member_added",…}` dans
@@ -1810,6 +1817,9 @@ class _ConversationsTabState extends State<_ConversationsTab>
               otherPublicNumber: other?.publicNumber,
               otherIsOnline: other?.isOnline ?? 0,
               otherLastSeen: other?.lastSeen,
+              // 🔴 SANS LUI, LE BOUCLIER S'ÉTEIGNAIT À CHAQUE RETOUR et l'envoi
+              // repartait en clair dans un fil chiffré — voir `ChatScreen.e2ee`.
+              e2ee: c.e2ee,
             ),
           ),
         );

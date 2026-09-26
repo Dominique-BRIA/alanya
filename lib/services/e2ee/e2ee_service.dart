@@ -53,13 +53,65 @@ class E2eeService {
     await coffre.preparer();
 
     final identite = await coffre.identiteLocale();
-    final signee = generateSignedPreKey(identite, 0);
-    await coffre.storeSignedPreKey(signee.id, signee);
 
-    final uniques = generatePreKeys(0, lotPreKeys);
-    for (final p in uniques) {
-      await coffre.storePreKey(p.id, p);
+    /*
+     * 🔴 LA SIGNÉE EST RÉUTILISÉE, PAS RÉGÉNÉRÉE. La version précédente
+     * fabriquait une matière neuve sous le MÊME identifiant à chaque
+     * démarrage : tout correspondant qui avait retiré la liasse avant le
+     * redémarrage préparait son message avec une publique dont la privée
+     * venait d'être jetée — indéchiffrable à l'arrivée.
+     */
+    final signedId = await coffre.idPrekeySignee();
+    final signeeNouvelle = !await coffre.containsSignedPreKey(signedId);
+    final signee = signeeNouvelle
+        ? generateSignedPreKey(identite, signedId)
+        : await coffre.loadSignedPreKey(signedId);
+    if (signeeNouvelle) {
+      await coffre.storeSignedPreKey(signee.id, signee);
     }
+
+    /*
+     * 🔴 LES UNIQUES SONT RÉASSORTIES, PAS REMPLACÉES. On complète le stock
+     * jusqu'au lot avec des identifiants FRAIS — jamais réutilisés, voir
+     * `CoffreE2ee.prochainIdPrekey` — et on ne touche pas à celles qui
+     * restent : des correspondants les tiennent peut-être déjà.
+     */
+    final existants = await coffre.idsPrekeysUniques();
+    var prochain = await coffre.prochainIdPrekey();
+    if (existants.isNotEmpty) {
+      final maxExistant = existants.reduce((a, b) => a > b ? a : b);
+      if (prochain <= maxExistant) prochain = maxExistant + 1;
+    }
+    final manque = lotPreKeys - existants.length;
+    final nouvelles = <PreKeyRecord>[];
+    if (manque > 0) {
+      for (final p in generatePreKeys(prochain, manque)) {
+        await coffre.storePreKey(p.id, p);
+        nouvelles.add(p);
+      }
+      await coffre.reglerProchainIdPrekey(prochain + manque);
+    }
+
+    final dejaPublie = await coffre.aPublie();
+    if (dejaPublie && !signeeNouvelle && nouvelles.isEmpty) {
+      // ℹ️ RIEN DE NEUF : le serveur tient déjà ce stock à l'identique, et
+      // le lui renvoyer en entier à chaque démarrage accumulerait des
+      // doublons s'il ajoute au lieu de remplacer.
+      return;
+    }
+
+    /*
+     * ⚠️ AU PREMIER ENVOI, TOUT LE STOCK — ensuite, SEULEMENT LE NOUVEAU.
+     * Le premier envoi doit fournir le lot complet ; les suivants ne disent
+     * que ce qui a changé, comme un réassort.
+     */
+    final aEnvoyer = <PreKeyRecord>[];
+    if (!dejaPublie) {
+      for (final id in existants) {
+        aEnvoyer.add(await coffre.loadPreKey(id));
+      }
+    }
+    aEnvoyer.addAll(nouvelles);
 
     await api('POST', '/api/e2ee/cles', {
       'deviceId': deviceId,
@@ -70,7 +122,7 @@ class E2eeService {
         'clePublique': base64.encode(signee.getKeyPair().publicKey.serialize()),
         'signature': base64.encode(signee.signature),
       },
-      'prekeysUniques': uniques
+      'prekeysUniques': aEnvoyer
           .map((p) => {
                 'prekeyId': p.id,
                 'clePublique':
@@ -78,9 +130,23 @@ class E2eeService {
               })
           .toList(),
     });
+    await coffre.noterPublication();
   }
 
   /* ══════════════ OUVRIR UNE SESSION ══════════════ */
+
+  /// Les appareils chiffrés d'un correspondant, SANS ouvrir de session.
+  ///
+  /// 🔴 SANS EFFET DE BORD, contrairement à [ouvrirSessions] : traiter une
+  /// liasse installe une session, ce que la vérification du code n'a pas à
+  /// faire — elle lit, elle ne négocie pas.
+  Future<List<int>> appareilsDe(String pairId) async {
+    final r = await api('GET', '/api/e2ee/cles/$pairId', null);
+    final paquets = ((r['appareils'] as List?) ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .toList();
+    return [for (final p in paquets) p['deviceId'] as int];
+  }
 
   /// Ouvre une session vers chaque appareil du correspondant.
   ///
@@ -89,7 +155,12 @@ class E2eeService {
   /// sinon l'un des deux ne le lira jamais.
   Future<List<int>> ouvrirSessions(String pairId) async {
     final r = await api('GET', '/api/e2ee/cles/$pairId', null);
-    final paquets = (r['appareils'] as List).cast<Map<String, dynamic>>();
+    // ⚠️ `appareils` ABSENT = personne à qui écrire, pas une erreur de
+    // contrat : un compte sans clés publiées rend une liste vide, et c'est
+    // l'appelant qui décide — voir `E2eeFil.envoyer`.
+    final paquets = ((r['appareils'] as List?) ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .toList();
     final ouverts = <int>[];
 
     for (final p in paquets) {
@@ -198,6 +269,35 @@ class E2eeService {
     // ⚠️ TRIÉES : les deux correspondants doivent lire la MÊME chaîne, quel que
     // soit celui qui regarde son écran.
     return ([a, b]..sort()).join();
+  }
+
+  /// Un code par appareil chiffré du correspondant.
+  ///
+  /// 🔴 UNE IDENTITÉ PAR APPAREIL, DONC UN CODE PAR APPAREIL. Le téléphone et
+  /// le navigateur du pair n'ont rien en commun : un seul code pour les deux
+  /// obligerait à en inventer un, que personne d'autre ne calculerait pareil.
+  ///
+  /// ⚠️ CEUX QU'ON NE PEUT PAS CALCULER SONT SAUTÉS, pas remplacés par une
+  /// erreur : une session existe par appareil, et on peut avoir écrit au
+  /// téléphone sans jamais avoir écrit au navigateur. Un plan vide veut dire
+  /// « aucune clé connue », et c'est l'écran qui le dit.
+  Future<Map<int, String>> codesSecurite({
+    required String monId,
+    required String pairId,
+  }) async {
+    final codes = <int, String>{};
+    for (final appareil in await appareilsDe(pairId)) {
+      try {
+        codes[appareil] = await codeSecurite(
+          monId: monId,
+          pairId: pairId,
+          adressePair: SignalProtocolAddress(pairId, appareil),
+        );
+      } catch (_) {
+        // Pas de session avec cet appareil — on passe au suivant.
+      }
+    }
+    return codes;
   }
 
   String _moitie(List<int> cle, List<int> identifiant) {

@@ -1,6 +1,6 @@
 // chat_screen.dart — WhatsApp previews COMPLET (thumbnails vidéo, PDF, waveform, grille)
 import 'dart:async';
-import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
+import '../../../services/e2ee/e2ee_fil.dart';
 import '../../../services/e2ee/e2ee_fournisseur.dart';
 import '../../../widgets/e2ee/e2ee_widgets.dart';
 import 'dart:typed_data';
@@ -104,6 +104,7 @@ class ChatScreen extends StatefulWidget {
     this.isBlocked = false,
     this.otherIsOnline = 0,
     this.otherLastSeen,
+    this.e2ee = false,
   });
   final String convId;
   final String title;
@@ -117,6 +118,15 @@ class ChatScreen extends StatefulWidget {
   final bool isBlocked;
   final int otherIsOnline;
   final DateTime? otherLastSeen;
+
+  /// La conversation est chiffrée de bout en bout, DIT PAR LE SERVEUR.
+  ///
+  /// 🔴 SANS CE PARAMÈTRE, LE BOUCLIER S'ÉTEIGNAIT À CHAQUE RETOUR : l'écran
+  /// partait de « non chiffré » et l'envoi repartait en clair dans un fil que
+  /// le serveur tient pour chiffré. La liste des conversations le fournit —
+  /// voir `Conversation.e2ee` — et les ouvertures sans ce renseignement
+  /// partent de faux, comme avant.
+  final bool e2ee;
   @override
   State<ChatScreen> createState() => _ChatScreenState();
 }
@@ -469,6 +479,10 @@ class _ChatScreenState extends State<ChatScreen>
   @override
   void initState() {
     super.initState();
+    _chiffrementActif = widget.e2ee;
+    // Le fil le retient aussi : sans ça, un écran ouvert sur un fil chiffré
+    // puis fermé sans relève oublierait l'état que le serveur lui avait dit.
+    context.e2ee?.fil.noteEtat(widget.convId, widget.e2ee);
     _lockPulse = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 900),
@@ -950,6 +964,8 @@ class _ChatScreenState extends State<ChatScreen>
       // Le message vient d'arriver : on le traduit sans attendre la prochaine
       // ouverture du fil. La passe ne reprend que ce qui n'est pas déjà traduit.
       _traduitAutomatiquement();
+      // …et s'il est chiffré, sa bulle est encore vide : la relève la remplit.
+      unawaited(_releverEnveloppes());
     } else if (type == "read") {
       if (e["convId"] != widget.convId) return;
       setState(() {
@@ -995,7 +1011,8 @@ class _ChatScreenState extends State<ChatScreen>
                     createdAt: m.createdAt,
                     reactions: m.reactions,
                     starred: m.starred,
-                    expiresAt: m.expiresAt)
+                    expiresAt: m.expiresAt,
+                    chiffre: m.chiffre)
                 : m)
             .toList();
       });
@@ -1023,7 +1040,8 @@ class _ChatScreenState extends State<ChatScreen>
                     createdAt: m.createdAt,
                     reactions: m.reactions,
                     starred: m.starred,
-                    expiresAt: m.expiresAt)
+                    expiresAt: m.expiresAt,
+                    chiffre: m.chiffre)
                 : m)
             .toList();
       });
@@ -1133,6 +1151,8 @@ class _ChatScreenState extends State<ChatScreen>
       // Reconnexion : ce qui s'est produit pendant la coupure n'a jamais été
       // reçu, et un événement WebSocket ne se rejoue pas. On rattrape.
       _rafraichitAppels();
+      // …y compris les enveloppes chiffrées arrivées pendant la coupure.
+      unawaited(_releverEnveloppes());
     }
   }
 
@@ -1235,6 +1255,9 @@ class _ChatScreenState extends State<ChatScreen>
       _markReadRemote();
       _scrollToBottom(immediat: true);
       _traduitAutomatiquement();
+      // Les lignes chiffrées arrivent SANS contenu : on relève les enveloppes
+      // pour remplir les bulles — voir [_releverEnveloppes].
+      unawaited(_releverEnveloppes());
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
@@ -1705,6 +1728,164 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   // ══════════════════════════════════════════════
+  // CHIFFREMENT — ENVOI ET RELÈVE
+  // ══════════════════════════════════════════════
+
+  /// Relève les enveloppes chiffrées en attente et remplit les bulles vides.
+  ///
+  /// 🔴 C'EST CE QUI REND LES CLÉS PUBLIÉES UTILES. Sans cette relève, le
+  /// correspondant peut écrire — X3DH ne demande pas notre présence — mais
+  /// ses messages restent des lignes sans contenu : des bulles vides.
+  ///
+  /// ⚠️ APPELÉE PARTOUT OÙ DU CHIFFRÉ PEUT ARRIVER : fin du chargement,
+  /// message temps réel, reconnexion. Les appels concurrents sont écartés par
+  /// [_releveEnCours], et une relève vide ne coûte qu'un GET qui rend rien.
+  ///
+  /// ⚠️ LE TEXTE DÉCHIFFRÉ EST MIS EN CACHE aussitôt : la relève acquitte les
+  /// enveloppes, qui disparaissent du serveur. Sans cache, fermer la
+  /// conversation avant la fin du chargement suivant viderait les bulles.
+  Future<void> _releverEnveloppes() async {
+    final pile = context.e2ee;
+    if (pile == null || widget.isGroup || _releveEnCours) return;
+    _releveEnCours = true;
+    try {
+      final releve = await pile.fil.relever();
+      if (!mounted) return;
+      final miennes = releve.messages
+          .where((m) => m.convId == widget.convId)
+          .toList();
+      if (miennes.isNotEmpty) {
+        final fusionnes = <Message>[];
+        setState(() {
+          for (final clair in miennes) {
+            final idx = _messages.indexWhere((m) => m.id == clair.id);
+            if (idx < 0) continue;
+            final maj = _avecTexteDechiffre(_messages[idx], clair.texte);
+            _messages[idx] = maj;
+            fusionnes.add(maj);
+            _cacheMsg(maj);
+          }
+          // Des enveloppes pour ce fil : il EST chiffré, même si le serveur
+          // ne l'avait pas dit à l'ouverture.
+          _chiffrementActif = true;
+          _rebuildCombined();
+        });
+        for (final maj in fusionnes) {
+          await MessageCache.upsert(maj, widget.convId);
+        }
+        // Les déchiffrements consomment le stock de pré-clés : on réassort,
+        // sans y passer plus d'une fois par heure.
+        final maintenant = DateTime.now();
+        if (_dernierReapproE2ee == null ||
+            maintenant.difference(_dernierReapproE2ee!) >
+                const Duration(hours: 1)) {
+          _dernierReapproE2ee = maintenant;
+          unawaited(pile.demarrer());
+        }
+        if (releve.illisibles > _illisiblesSignales) {
+          _illisiblesSignales = releve.illisibles;
+          showAppSnackBar('Certains messages chiffrés sont illisibles.');
+        }
+        // Pas de défilement : la fusion ne fait que remplir des bulles déjà
+        // posées — l'arrivée de la ligne a déjà défilé, ou l'ouverture.
+      }
+    } catch (_) {
+      // Silencieux : la relève reviendra au prochain message ou à la
+      // prochaine reconnexion — et un fil chiffré ne doit pas afficher
+      // d'erreur réseau là où un fil ordinaire n'en montre pas.
+    } finally {
+      _releveEnCours = false;
+    }
+  }
+
+  /// La même bulle, avec son texte déchiffré.
+  Message _avecTexteDechiffre(Message m, String texte) => Message(
+        id: m.id,
+        convId: m.convId,
+        senderId: m.senderId,
+        content: texte,
+        type: m.type,
+        status: m.status,
+        replyToId: m.replyToId,
+        replyTo: m.replyTo,
+        statutCite: m.statutCite,
+        deletedAt: m.deletedAt,
+        editedAt: m.editedAt,
+        media: m.media,
+        createdAt: m.createdAt,
+        reactions: m.reactions,
+        starred: m.starred,
+        expiresAt: m.expiresAt,
+        mentions: m.mentions,
+        chiffre: true,
+      );
+
+  /// Envoie un texte dans un fil chiffré.
+  ///
+  /// 🔴 LE BROUILLON EST GARDÉ À L'ÉCHEC, jamais jeté ni envoyé en clair. « Pas
+  /// de clés chez le correspondant » se réessaie quand il aura ouvert
+  /// l'application ; un repli silencieux vers le clair est exactement ce
+  /// qu'un attaquant cherche à provoquer.
+  ///
+  /// ⚠️ PAS DE FILE D'ATTENTE HORS LIGNE : elle stockerait le texte en clair
+  /// dans une base ordinaire, ce qui contredirait la promesse du bouclier.
+  Future<void> _sendChiffre(
+      String text, PileE2ee pile, String pair) async {
+    if (_sending) return;
+    setState(() => _sending = true);
+    _typingDebounce?.cancel();
+    _emitTyping(false);
+    final replyId = _replyTo?.id;
+    try {
+      final messageId = await pile.fil.envoyer(
+        convId: widget.convId,
+        pairId: pair,
+        texte: text,
+        replyToId: replyId,
+      );
+      if (!mounted) return;
+      final replyMsg = _replyTo;
+      final msg = Message(
+          id: messageId,
+          convId: widget.convId,
+          senderId: _myId ?? "",
+          content: text,
+          type: "TEXT",
+          status: "SENT",
+          replyToId: replyId,
+          replyTo: replyMsg != null
+              ? ReplyPreview(
+                  id: replyMsg.id,
+                  senderId: replyMsg.senderId,
+                  type: replyMsg.type,
+                  content:
+                      replyMsg.isDeleted ? null : replyMsg.content,
+                  isDeleted: replyMsg.isDeleted)
+              : null,
+          media: const [],
+          createdAt: DateTime.now(),
+          chiffre: true);
+      _cacheMsg(msg);
+      _inputCtrl.clear();
+      _mentionsEnCours.clear();
+      setState(() {
+        _messages = [..._messages, msg];
+        _rebuildCombined();
+        _replyTo = null;
+      });
+      _scrollToBottom();
+    } on E2eeImpossible catch (e) {
+      if (mounted) showAppSnackBar(e.message);
+    } catch (_) {
+      if (mounted) {
+        showAppSnackBar("Le message chiffré n'a pas pu partir.");
+      }
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  // ══════════════════════════════════════════════
   // SEND
   // ══════════════════════════════════════════════
   Future<void> _send() async {
@@ -1713,9 +1894,28 @@ class _ChatScreenState extends State<ChatScreen>
     // Les mentions encore présentes dans le texte — voir `_mentionsAEnvoyer`,
     // qui écarte celles que l'utilisateur a effacées après les avoir choisies.
     final mentions = _mentionsAEnvoyer(text);
+    // Un fil chiffré n'envoie JAMAIS en clair : ni le message, ni sa
+    // modification — une retouche partirait lisible par le serveur, qui
+    // n'aurait jamais dû lire la première version.
+    final pile = context.e2ee;
+    final enChiffre = _chiffrementActif &&
+        pile != null &&
+        !widget.isGroup &&
+        widget.otherUserId != null;
     // Mode édition : on modifie le message au lieu d'en envoyer un nouveau.
     if (_editing != null) {
+      if (enChiffre) {
+        showAppSnackBar(
+            'La modification est impossible dans une conversation chiffrée.');
+        return;
+      }
       _submitEdit(text);
+      return;
+    }
+    if (enChiffre) {
+      // `enChiffre` dit déjà que `pile` n'est pas nulle — le `!` ne fait que
+      // le répéter au compilateur, qui ne voit pas à travers un booléen.
+      await _sendChiffre(text, pile!, widget.otherUserId!);
       return;
     }
     _typingDebounce?.cancel();
@@ -1828,7 +2028,8 @@ class _ChatScreenState extends State<ChatScreen>
       createdAt: m.createdAt,
       reactions: m.reactions,
       starred: m.starred,
-      expiresAt: m.expiresAt);
+      expiresAt: m.expiresAt,
+      chiffre: m.chiffre);
 
   void _startEdit(Message m) {
     setState(() {
@@ -3560,10 +3761,22 @@ class _ChatScreenState extends State<ChatScreen>
   // ══════════════════════════════════════════════
   /// Le fil est-il chiffré ?
   ///
-  /// ⚠️ TENU LOCALEMENT ET MIS À JOUR PAR LE SERVEUR. Le deviner depuis le
-  /// contenu des messages donnerait un bouclier qui clignote au premier message
-  /// non chiffré arrivé d'un appareil plus ancien.
-  bool _chiffrementActif = false;
+  /// ⚠️ SEMÉ PAR LE SERVEUR, PAS DEVINÉ. Il part de `widget.e2ee` — voir
+  /// `initState` — puis l'activation et la relève des enveloppes le confirment.
+  /// Le deviner depuis le contenu des messages donnerait un bouclier qui
+  /// clignote au premier message non chiffré arrivé d'un appareil plus ancien.
+  late bool _chiffrementActif;
+
+  /// Une relève d'enveloppes est en cours — voir [_releverEnveloppes].
+  bool _releveEnCours = false;
+
+  /// Enveloppes illisibles déjà signalées — on ne prévient que des NOUVELLES,
+  /// pas du même stock à chaque ouverture de la conversation.
+  int _illisiblesSignales = 0;
+
+  /// Dernier réassort des pré-clés après réception — les déchiffrements
+  /// consomment le stock, mais pas au point de le recompter à chaque message.
+  DateTime? _dernierReapproE2ee;
 
   /// Active le chiffrement, ou ouvre la vérification s'il l'est déjà.
   ///
@@ -3590,16 +3803,27 @@ class _ChatScreenState extends State<ChatScreen>
       return;
     }
 
+    final moi = _myId;
+    if (moi == null) return;
     try {
-      final code = await pile.service.codeSecurite(
-        monId: pair,
-        pairId: pair,
-        adressePair: SignalProtocolAddress(pair, 1),
-      );
+      /*
+       * 🐛 DEUX BUGS ICI. `monId` recevait le PAIR — le code ne pouvait donc
+       * pas correspondre à celui que le correspondant calcule de son côté — et
+       * l'appareil était codé en dur à `1`, alors que les numéros sont tirés
+       * au sort à l'installation. On demande désormais un code par VRAI
+       * appareil du pair.
+       */
+      final codes = await pile.service.codesSecurite(monId: moi, pairId: pair);
       if (!mounted) return;
+      if (codes.isEmpty) {
+        showAppSnackBar("Aucune clé connue — échangez d'abord un message.");
+        return;
+      }
+      final seul = codes.length == 1;
       await Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => EcranVerification(
-          code: code,
+          code: codes.values.first,
+          codesParAppareil: seul ? null : codes,
           nomPair: widget.title,
           verifie: false,
           onBasculer: () => Navigator.of(context).pop(),
@@ -4747,6 +4971,22 @@ class _ChatScreenState extends State<ChatScreen>
     final isTranslating = _translating.contains(m.id);
     final onTextColor = _bubbleTextColor(mine);
     final onSubColor = mine ? Colors.white70 : _muted45;
+    /*
+     * 🔒 CHIFFRÉ, MAIS PAS (ENCORE) DÉCHIFFRÉ. Sans ces lignes, la bulle
+     * rendait VIDE : le contenu serveur est nul, et le `[TEXT]` de repli est
+     * filtré plus bas comme un bouton. Le cadenas dit l'attente, pas
+     * l'échec — la relève remplit la bulle dès que l'enveloppe arrive.
+     */
+    if (!m.isDeleted &&
+        m.media.isEmpty &&
+        (m.content ?? '').trim().isEmpty &&
+        m.chiffre) {
+      return Text(
+        '🔒 Message chiffré',
+        style: TextStyle(
+            color: onSubColor, fontStyle: FontStyle.italic, fontSize: 13),
+      );
+    }
     return GestureDetector(
       onTap: m.type == 'TEXT' && (m.content ?? '').isNotEmpty
           ? () => _translateMessage(m)
