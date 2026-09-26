@@ -106,6 +106,30 @@ class E2eeSauvegarde {
     }
   }
 
+
+  /// Crée l'archive protégée par une CLÉ DE RÉCUPÉRATION, et la rend.
+  ///
+  /// 🔴 C'EST LE SEUL SECRET DE CETTE ARCHIVE tant qu'aucun autre n'est ajouté.
+  /// Le mot de passe n'existe qu'à la connexion ; on ne peut donc pas poser sa
+  /// serrure ici, et l'appelant DOIT montrer ces douze mots à l'utilisateur.
+  ///
+  /// ⚠️ SI UNE ARCHIVE EXISTE DÉJÀ, ON N'EN CRÉE PAS UNE SECONDE : on poserait
+  /// sinon une archive orpheline, et l'ancienne deviendrait illisible.
+  Future<String> activerAvecCleRecuperation() async {
+    final coffre = await lireCoffre();
+    if (coffre.serrures.isNotEmpty) {
+      throw StateError('Une sauvegarde existe déjà sur ce compte.');
+    }
+
+    final cle = tirerCleRecuperation();
+    final a = creerArchive({TypeSerrure.recuperation: cle});
+    for (final s in a.serrures) {
+      await _poser(s);
+    }
+    _maitresse = a.maitresse;
+    return cle;
+  }
+
   /// Referme — déconnexion, ou changement de compte.
   void refermer() => _maitresse = null;
 

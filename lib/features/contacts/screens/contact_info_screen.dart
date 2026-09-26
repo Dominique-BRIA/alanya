@@ -521,96 +521,97 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
   /// L'état du chiffrement de cette conversation, tel que le serveur le donne.
   bool _chiffree = false;
 
-  /// Demande le mot de passe, puis crée la sauvegarde et active le chiffrement.
+  /// Crée la sauvegarde puis active le chiffrement.
   ///
-  /// 🔴 POURQUOI DEMANDER LE MOT DE PASSE ICI. La sauvegarde s'ouvre avec lui,
-  /// et il n'existe QU'À LA CONNEXION — il a disparu de la mémoire depuis. Sans
-  /// lui, quelqu'un qui active le chiffrement en cours de session n'aurait
-  /// aucune archive avant sa prochaine connexion : il se déconnecterait entre
-  /// les deux et TOUS SES MESSAGES CHIFFRÉS SERAIENT PERDUS.
+  /// 🔴 L'ARCHIVE EST PROTÉGÉE PAR UNE CLÉ DE RÉCUPÉRATION, pas par le mot de
+  /// passe (choix du user, 26/09/2026). Le mot de passe n'existe qu'à la
+  /// connexion, et le redemander au milieu d'un réglage ressemble à un piège —
+  /// c'est exactement ce qu'un vrai piège imiterait.
   ///
-  /// ⚠️ C'EST EXACTEMENT LE DÉFAUT SIGNALÉ, et il est silencieux : rien
-  /// n'avertit, les messages disparaissent simplement à la reconnexion.
+  /// 🔴 POURQUOI UNE ARCHIVE DÈS MAINTENANT. Sans elle, l'utilisateur se
+  /// déconnecte après sa première conversation chiffrée et TOUS SES MESSAGES
+  /// DEVIENNENT VIDES, sans avertissement. C'est le défaut signalé.
   ///
-  /// ⚠️ LA SAUVEGARDE D'ABORD, LE CHIFFREMENT ENSUITE. L'ordre inverse laisserait
-  /// une fenêtre — courte, mais réelle — où des messages chiffrés existeraient
-  /// sans archive pour les recueillir.
+  /// ⚠️ LA SAUVEGARDE D'ABORD, LE CHIFFREMENT ENSUITE. L'ordre inverse
+  /// laisserait une fenêtre — courte mais réelle — où des messages chiffrés
+  /// existeraient sans archive pour les recueillir.
   Future<void> _activerChiffrement() async {
     final pile = context.e2ee;
     final convId = widget.convId;
     if (pile == null || convId == null) return;
 
-    final mdp = await showDialog<String>(
-      context: context,
-      builder: (ctx) {
-        final ctrl = TextEditingController();
-        return AlertDialog(
-          title: const Text('Activer le chiffrement'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              /*
-               * ⚠️ ON DIT POURQUOI ON DEMANDE. Un mot de passe réclamé sans
-               * raison apparente, au milieu d'un réglage, ressemble à un piège —
-               * et c'est exactement ce qu'un vrai piège imiterait.
-               */
-              const Text(
-                'Votre mot de passe protège la sauvegarde de vos messages '
-                'chiffrés. Sans elle, ils seraient perdus à la prochaine '
-                'déconnexion.',
-                style: TextStyle(fontSize: 13),
-              ),
-              const SizedBox(height: 14),
-              TextField(
-                controller: ctrl,
-                obscureText: true,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  labelText: 'Mot de passe du compte',
-                ),
-                onSubmitted: (v) => Navigator.of(ctx).pop(v),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Annuler'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(ctrl.text),
-              child: const Text('Activer'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (mdp == null || mdp.isEmpty) return;
-
     try {
-      // ① La sauvegarde, avant tout : c'est elle qui recueillera les messages.
-      await pile.sauvegarde.aLaConnexion(mdp);
-      // ② Puis le chiffrement lui-même.
+      final cle = await pile.sauvegarde.activerAvecCleRecuperation();
       await pile.fil.activer(convId);
       if (!mounted) return;
       setState(() => _chiffree = true);
-      showAppSnackBar('Chiffrement activé, et vos messages sont sauvegardés.');
+      await _montrerCleRecuperation(cle);
     } catch (_) {
       if (!mounted) return;
       /*
-       * ⚠️ ON NE DIT PAS « MOT DE PASSE INCORRECT » : l'échec peut aussi venir
-       * du correspondant, qui n'a pas encore ouvert l'application sur un
-       * appareil à jour. Affirmer la mauvaise cause fait chercher au mauvais
-       * endroit.
+       * ⚠️ ON N'ACCUSE PERSONNE DE PRÉCIS : l'échec vient le plus souvent d'un
+       * correspondant qui n'a pas encore ouvert l'application sur un appareil à
+       * jour. Affirmer une autre cause ferait chercher au mauvais endroit.
        */
       showAppSnackBar(
-        "Le chiffrement n'a pas pu être activé. Vérifiez votre mot de passe, "
-        "et que votre correspondant a ouvert l'application récemment.",
+        "Le chiffrement n'a pas pu être activé. Votre correspondant doit "
+        "d'abord ouvrir l'application sur un appareil à jour.",
       );
     }
   }
+
+  /// Montre les douze mots, une seule fois.
+  ///
+  /// ⚠️ ELLE N'EXISTE EN CLAIR QUE DANS CET INSTANT : ni le serveur ni nous ne
+  /// pouvons la redonner. L'écran le dit AVANT de la montrer — lu après,
+  /// l'avertissement arrive une fois les mots déjà recopiés à la va-vite.
+  Future<void> _montrerCleRecuperation(String cle) async {
+    final mots = cle.split(' ');
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Votre clé de récupération'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Notez-la maintenant. Elle ne sera plus jamais affichée, et nous '
+              'ne pouvons pas la retrouver. C’est le seul moyen de '
+              'retrouver vos messages sur un autre appareil.',
+              style: TextStyle(fontSize: 12.5),
+            ),
+            const SizedBox(height: 14),
+            // ⚠️ NUMÉROTÉS : douze mots se recopient dans le désordre plus
+            // souvent qu'on ne le croit, et l'erreur ne se découvre qu'au
+            // moment de s'en servir — des mois plus tard.
+            Wrap(
+              spacing: 10,
+              runSpacing: 6,
+              children: [
+                for (var i = 0; i < mots.length; i++)
+                  Text('${i + 1}. ${mots[i]}',
+                      style: const TextStyle(
+                          fontFamily: 'monospace', fontSize: 13.5)),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Clipboard.setData(ClipboardData(text: cle)),
+            child: const Text('Copier'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Je l’ai notée'),
+          ),
+        ],
+      ),
+    );
+  }
+
 
   Future<void> _ouvrirVerification() async {
     final pile = context.e2ee;
