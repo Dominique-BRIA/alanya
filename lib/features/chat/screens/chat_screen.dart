@@ -1238,6 +1238,9 @@ class _ChatScreenState extends State<ChatScreen>
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
+    // Les enveloppes chiffrées : leur texte n est pas dans `getMessages`.
+    unawaited(_releverChiffres());
+
     // Charge aussi les appels de cette conversation pour les afficher façon WhatsApp
     _loadCalls();
   }
@@ -1454,6 +1457,82 @@ class _ChatScreenState extends State<ChatScreen>
   /// vide, donc ne pouvait jamais découvrir un appel nouveau : un seul appel en
   /// cache suffisait à ce que tous les rechargements suivants relisent ce même
   /// cache. L'événement WebSocket arrivait bien, mais ne changeait rien.
+
+  /// Relève les enveloppes chiffrées et remplit le texte des messages vides.
+  ///
+  /// 🔴 SANS CET APPEL, LE MOBILE NE LIT RIEN. Un message chiffré arrive avec un
+  /// `content` VIDE — le serveur ne l'a jamais eu. Le texte est dans une
+  /// enveloppe qu'il faut relever et déchiffrer soi-même. Tant que personne ne
+  /// le faisait, le fil restait désespérément vide côté mobile.
+  ///
+  /// ⚠️ ON ACQUITTE APRÈS AVOIR DÉCHIFFRÉ, jamais avant — c'est `relever` qui
+  /// s'en charge. Une enveloppe acquittée est définitivement perdue : le ratchet
+  /// a avancé et la clé du message est détruite.
+  ///
+  /// ⚠️ NE LÈVE JAMAIS. Un échec de déchiffrement ne doit pas empêcher
+  /// l'affichage des messages en clair de la même conversation.
+  Future<void> _releverChiffres() async {
+    final pile = context.e2ee;
+    if (pile == null) return;
+
+    try {
+      final r = await pile.fil.relever();
+      if (r.messages.isEmpty || !mounted) return;
+
+      final textes = <String, String>{
+        for (final m in r.messages) m.id: m.texte,
+      };
+
+      /*
+       * ⚠️ ON RECONSTRUIT LES MESSAGES, faute de `copyWith` sur le modèle. Ne
+       * remplir que le cache ne suffirait pas : la liste déjà affichée garderait
+       * ses bulles vides jusqu'au prochain chargement.
+       */
+      final remplis = _messages.map((m) {
+        final t = textes[m.id];
+        if (t == null || (m.content ?? '').isNotEmpty) return m;
+        return Message(
+          id: m.id,
+          convId: m.convId,
+          senderId: m.senderId,
+          content: t,
+          type: m.type,
+          status: m.status,
+          replyToId: m.replyToId,
+          media: m.media,
+          createdAt: m.createdAt,
+          deletedAt: m.deletedAt,
+          editedAt: m.editedAt,
+          expiresAt: m.expiresAt,
+          replyTo: m.replyTo,
+          reactions: m.reactions,
+          starred: m.starred,
+          mentions: m.mentions,
+          statutCite: m.statutCite,
+        );
+      }).toList();
+
+      await MessageCache.putConv(widget.convId, remplis);
+      if (!mounted) return;
+      setState(() {
+        _messages = remplis;
+        _rebuildCombined();
+      });
+
+      /*
+       * 🔴 ET ON ARCHIVE CE QU'ON VIENT DE LIRE. L'enveloppe est acquittée, donc
+       * morte : si ce texte n'entre pas dans l'archive maintenant, il n'existera
+       * plus que dans le cache de CET appareil et disparaîtra avec lui.
+       */
+      await pile.sauvegarde.deposer([
+        for (final m in r.messages)
+          {'id': m.id, 'convId': m.convId, 'texte': m.texte, 'quand': m.quand},
+      ]);
+    } catch (_) {
+      // Silencieux : les messages en clair de la conversation restent affichés.
+    }
+  }
+
   Future<void> _loadCalls() async {
     // Dépôt capturé AVANT tout await : le lire après reviendrait à toucher un
     // BuildContext qui peut avoir été démonté entre-temps.
