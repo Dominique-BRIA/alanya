@@ -1,5 +1,11 @@
 import 'package:flutter/material.dart';
+<<<<<<< HEAD
 import '../../../l10n/app_localizations.dart';
+=======
+import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
+import '../../../services/e2ee/e2ee_fournisseur.dart';
+import '../../../widgets/e2ee/e2ee_widgets.dart';
+>>>>>>> 4242c04 (Les écrans de chiffrement deviennent visibles sur le mobile)
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -481,6 +487,22 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
             label: tr(context, 'about'),
             value: bio,
           ),
+          /*
+           * 🔴 C'EST ICI QU'ON VA CHERCHER LE CODE DE SÉCURITÉ — modèle
+           * WhatsApp, décision du user. La vérification n'a de sens que dans la
+           * fiche du correspondant : c'est SA clé qu'on compare, pas un réglage
+           * de l'application.
+           */
+          if (context.e2ee != null) ...[
+            _divider(),
+            _infoRow(
+              icon: Icons.verified_user_outlined,
+              label: "Chiffrement",
+              value: "Vérifier le code de sécurité",
+              trailing: Icons.chevron_right_rounded,
+              onTap: _ouvrirVerification,
+            ),
+          ],
           if (username != null && username.isNotEmpty) ...[
             _divider(),
             _infoRow(
@@ -492,6 +514,37 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
         ],
       ),
     );
+  }
+
+  /// Ouvre l'écran de vérification.
+  ///
+  /// ⚠️ LE CODE NE PEUT PAS TOUJOURS SE CALCULER : il faut qu'une session existe
+  /// déjà, donc qu'un message ait été échangé. On le dit plutôt que d'afficher
+  /// un écran vide — un écran vide fait croire à une panne.
+  Future<void> _ouvrirVerification() async {
+    final pile = context.e2ee;
+    if (pile == null) return;
+    try {
+      final code = await pile.service.codeSecurite(
+        monId: widget.userId,
+        pairId: widget.userId,
+        adressePair: SignalProtocolAddress(widget.userId, 1),
+      );
+      if (!mounted) return;
+      await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => EcranVerification(
+          code: code,
+          nomPair: widget.name,
+          verifie: false,
+          onBasculer: () => Navigator.of(context).pop(),
+        ),
+      ));
+    } catch (_) {
+      if (!mounted) return;
+      showAppSnackBar(
+        "Aucune clé connue pour ce contact — échangez d'abord un message chiffré.",
+      );
+    }
   }
 
   Widget _infoRow({

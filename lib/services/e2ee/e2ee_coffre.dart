@@ -15,6 +15,7 @@
 library;
 
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
@@ -102,6 +103,31 @@ class CoffreE2ee implements SignalProtocolStore {
     Direction direction,
   ) async =>
       true;
+
+
+  /* ══════════════ L'IDENTIFIANT D'APPAREIL ══════════════ */
+
+  /// Le numéro de CET appareil, stable pour toute la durée de l'installation.
+  ///
+  /// 🔴 IL DOIT SURVIVRE AUX REDÉMARRAGES. Le protocole adresse les enveloppes
+  /// par (personne, appareil) : un numéro qui change à chaque lancement créerait
+  /// une identité neuve à chaque fois, et le correspondant verrait un
+  /// avertissement de changement de clé à chaque ouverture de l'application.
+  ///
+  /// ⚠️ TIRÉ AU SORT, PAS INCRÉMENTÉ. Le serveur ne distribue pas ces numéros ;
+  /// deux appareils qui partiraient de 1 entreraient en collision sur le même
+  /// compte, et les messages de l'un s'ouvriraient chez l'autre.
+  Future<int> deviceId() async {
+    final garde = await _lire('deviceId');
+    if (garde != null) {
+      final n = int.tryParse(garde);
+      if (n != null && n > 0) return n;
+    }
+    // 1..2^31-1 : l'intervalle qu'accepte la colonne du serveur.
+    final n = 1 + Random.secure().nextInt(2147483646);
+    await _ecrire('deviceId', '$n');
+    return n;
+  }
 
   /* ══════════════ SESSIONS ══════════════ */
 

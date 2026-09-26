@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'services/e2ee/e2ee_fournisseur.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -107,6 +109,30 @@ void main() async {
   await NotificationSettings.instance.load();
   await TraductionAuto.instance.load();
 
+  /*
+   * 🔴 LA PILE DE CHIFFREMENT EST MONTÉE ICI, et son absence expliquait
+   * pourquoi AUCUN écran de chiffrement n'apparaissait : les widgets
+   * existaient, les services aussi, mais rien ne les reliait.
+   *
+   * ⚠️ LIÉE AU COMPTE, PAS À L'APPLICATION : le coffre préfixe ses clés par
+   * l'identifiant. Deux comptes sur le même téléphone ne doivent jamais
+   * partager une identité Signal, sinon les messages de l'un s'ouvriraient
+   * chez l'autre.
+   *
+   * ⚠️ NULLE SI PERSONNE N'EST CONNECTÉ. Les écrans le gèrent en masquant ce
+   * qui touche au chiffrement, plutôt qu'en plantant.
+   */
+  String? idCompte;
+  try {
+    final brut = await storage.userJson;
+    if (brut != null) {
+      final u = jsonDecode(brut) as Map<String, dynamic>;
+      idCompte = (u['alanyaID'] ?? u['id'] ?? u['userId'])?.toString();
+    }
+  } catch (_) {
+    idCompte = null;
+  }
+
   runApp(
     MultiProvider(
       providers: [
@@ -140,8 +166,13 @@ void main() async {
             value: SonneriesDeListes(
                 ContactListsRepository(authedApi), api, storage)),
         Provider<ChatRepository>.value(value: ChatRepository(authedApi)),
+<<<<<<< HEAD
         Provider<ExportMediasRepository>.value(
             value: ExportMediasRepository(authedApi)),
+=======
+        if (idCompte != null)
+          Provider<PileE2ee>.value(value: PileE2ee.pour(authedApi, idCompte)),
+>>>>>>> 4242c04 (Les écrans de chiffrement deviennent visibles sur le mobile)
         Provider<AccountRepository>.value(value: AccountRepository(authedApi)),
         Provider<StatusRepository>.value(value: StatusRepository(authedApi)),
         Provider<AiRepository>.value(value: AiRepository(authedApi)),

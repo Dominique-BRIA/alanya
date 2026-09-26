@@ -1,5 +1,8 @@
 // chat_screen.dart — WhatsApp previews COMPLET (thumbnails vidéo, PDF, waveform, grille)
 import 'dart:async';
+import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
+import '../../../services/e2ee/e2ee_fournisseur.dart';
+import '../../../widgets/e2ee/e2ee_widgets.dart';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -3555,6 +3558,60 @@ class _ChatScreenState extends State<ChatScreen>
   // ══════════════════════════════════════════════
   // APPBAR
   // ══════════════════════════════════════════════
+  /// Le fil est-il chiffré ?
+  ///
+  /// ⚠️ TENU LOCALEMENT ET MIS À JOUR PAR LE SERVEUR. Le deviner depuis le
+  /// contenu des messages donnerait un bouclier qui clignote au premier message
+  /// non chiffré arrivé d'un appareil plus ancien.
+  bool _chiffrementActif = false;
+
+  /// Active le chiffrement, ou ouvre la vérification s'il l'est déjà.
+  ///
+  /// 🔴 UNE FOIS CHIFFRÉ, LE BOUTON MÈNE À LA VÉRIFICATION. Le chiffrement ne se
+  /// défait pas : laisser un bouton inerte à l'endroit exact où l'on va chercher
+  /// « l'état du chiffrement » serait une place gâchée.
+  Future<void> _ouvrirChiffrement() async {
+    final pile = context.e2ee;
+    final pair = widget.otherUserId;
+    /*
+     * ⚠️ SANS CORRESPONDANT IDENTIFIÉ, RIEN À FAIRE. Un fil sans `otherUserId`
+     * est un groupe ou une conversation incomplète : le bouton est déjà masqué
+     * dans ces cas, ce contrôle est le filet.
+     */
+    if (pile == null || pair == null) return;
+
+    if (!_chiffrementActif) {
+      try {
+        await pile.fil.activer(widget.convId);
+        if (mounted) setState(() => _chiffrementActif = true);
+      } catch (_) {
+        if (mounted) showAppSnackBar("Le chiffrement n'a pas pu être activé.");
+      }
+      return;
+    }
+
+    try {
+      final code = await pile.service.codeSecurite(
+        monId: pair,
+        pairId: pair,
+        adressePair: SignalProtocolAddress(pair, 1),
+      );
+      if (!mounted) return;
+      await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => EcranVerification(
+          code: code,
+          nomPair: widget.title,
+          verifie: false,
+          onBasculer: () => Navigator.of(context).pop(),
+        ),
+      ));
+    } catch (_) {
+      if (mounted) {
+        showAppSnackBar("Aucune clé connue — échangez d'abord un message.");
+      }
+    }
+  }
+
   PreferredSizeWidget _whatsappAppBar() {
     return AppBar(
       backgroundColor: _appBarBg,
@@ -3618,11 +3675,36 @@ class _ChatScreenState extends State<ChatScreen>
         ]),
       ),
       actions: [
+<<<<<<< HEAD
         // Avec une personne, la place de la loupe revient à la traduction :
         // la recherche descend dans le menu ⋮ plus bas, elle n'est pas perdue.
         // Un groupe garde sa loupe — il n'a pas les deux boutons d'appel, la
         // barre y a de la place.
         if (widget.isGroup)
+=======
+        /*
+         * 🔴 LE BOUCLIER DU CHIFFREMENT. Un BOUCLIER et non un cadenas : le
+         * cadenas sert déjà au verrou de conversation, et il le décrit mieux —
+         * un verrou s'ouvre et se referme. Le chiffrement, lui, NE SE DÉFAIT
+         * PAS, et un cadenas qu'on ne peut pas rouvrir est une métaphore qui
+         * ment.
+         *
+         * ⚠️ ABSENT EN GROUPE ET SANS PILE : les groupes ne sont pas couverts
+         * (ils demanderaient un second protocole), et un bouton qui échouerait
+         * sous le doigt est pire que pas de bouton.
+         */
+        if (!widget.isGroup && context.e2ee != null)
+          BoutonChiffrement(
+            actif: _chiffrementActif,
+            activable: true,
+            onAppui: _ouvrirChiffrement,
+          ),
+        IconButton(
+            tooltip: "Rechercher",
+            icon: const Icon(Icons.search),
+            onPressed: _openSearch),
+        if (!widget.isGroup) ...[
+>>>>>>> 4242c04 (Les écrans de chiffrement deviennent visibles sur le mobile)
           IconButton(
               tooltip: tr(context, 'search'),
               icon: const Icon(Icons.search),
