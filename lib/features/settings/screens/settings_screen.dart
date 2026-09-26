@@ -20,6 +20,7 @@ import 'ringtones_screen.dart';
 import 'repondeur_screen.dart';
 import 'export_medias_screen.dart';
 import 'translation_screen.dart';
+import '../../../services/e2ee/e2ee_fournisseur.dart';
 import '../../parametres/screens/sauvegarde_chiffree_screen.dart';
 import 'privacy_settings_screen.dart';
 import 'login_history_screen.dart';
@@ -429,7 +430,54 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: OutlinedButton.icon(
-              onPressed: () {
+              onPressed: () async {
+                /*
+                 * 🔴 ON AVERTIT SI LA SAUVEGARDE MANQUE, et c'est le seul moment
+                 * où cela sert encore. Se déconnecter efface le coffre et purge
+                 * le cache — deux décisions justes — et les enveloppes sont
+                 * acquittées : l'historique chiffré disparaît, sans que rien ne
+                 * le dise.
+                 *
+                 * ⚠️ ON AVERTIT, ON N'EMPÊCHE PAS. Se déconnecter est un geste
+                 * de sécurité : quelqu'un qui quitte un poste partagé doit
+                 * pouvoir le faire tout de suite.
+                 *
+                 * ⚠️ ET SEULEMENT S'IL Y A QUELQUE CHOSE À PERDRE. Un
+                 * avertissement qui s'affiche à tout le monde à chaque fois
+                 * cesse d'être lu.
+                 */
+                final pile = context.e2ee;
+                if (pile != null && pile.fil.conversationsChiffrees() > 0) {
+                  final coffre = await pile.sauvegarde.lireCoffre();
+                  if (coffre.serrures.isEmpty && context.mounted) {
+                    final quandMeme = await showDialog<bool>(
+                      context: context,
+                      builder: (c) => AlertDialog(
+                        title: const Text('Vos messages chiffrés seront perdus'),
+                        content: const Text(
+                          'Vous avez des conversations chiffrées et aucune '
+                          'sauvegarde. En vous déconnectant, ces messages '
+                          'seront définitivement perdus : ils ne vivent que sur '
+                          'cet appareil, et personne — nous compris — ne peut '
+                          'les retrouver.',
+                          style: TextStyle(fontSize: 13),
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(c, false),
+                            child: const Text('Annuler'),
+                          ),
+                          TextButton(
+                            onPressed: () => Navigator.pop(c, true),
+                            child: const Text('Se déconnecter quand même'),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (quandMeme != true) return;
+                  }
+                }
+                if (!context.mounted) return;
                 showDialog(
                   context: context,
                   builder: (_) => AlertDialog(

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../services/e2ee/e2ee_fournisseur.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/api_client.dart';
@@ -57,6 +58,22 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
     });
     try {
       await context.read<AccountRepository>().changePassword(current, next);
+
+      /*
+       * 🐛 LA SAUVEGARDE DOIT SUIVRE, SINON ELLE CASSE EN SILENCE. Sa serrure
+       * garde l'ANCIEN mot de passe tant qu'on ne la ré-enveloppe pas :
+       * l'ouverture automatique échouerait à la connexion suivante, et
+       * l'utilisateur le découvrirait au pire moment — en changeant d'appareil.
+       *
+       * ⚠️ APRÈS le changement, jamais avant : si l'API refuse, il n'y a rien à
+       * ré-envelopper, et on aurait posé une serrure pour un mot de passe que le
+       * compte n'a pas.
+       *
+       * ⚠️ RIEN N'EST RECHIFFRÉ : on ré-enveloppe 32 octets.
+       */
+      if (context.mounted) {
+        await context.e2ee?.sauvegarde.suivreChangementMotDePasse(next);
+      }
       if (!mounted) return;
       showAppSnackBar(tr(context, 'password_changed'));
       Navigator.of(context).pop();

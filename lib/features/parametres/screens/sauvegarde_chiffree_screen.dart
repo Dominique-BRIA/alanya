@@ -27,6 +27,10 @@ class _SauvegardeChiffreeScreenState extends State<SauvegardeChiffreeScreen> {
   bool _refusee = false;
   List<Serrure> _serrures = const [];
 
+  /// ⚠️ ON NE PROPOSE PAS CE QU'ON NE PEUT PAS TENIR : sans biométrie ni code de
+  /// verrouillage, le bouton échouerait sous le doigt.
+  bool _trousseauPossible = false;
+
   @override
   void initState() {
     super.initState();
@@ -39,11 +43,13 @@ class _SauvegardeChiffreeScreenState extends State<SauvegardeChiffreeScreen> {
       if (mounted) setState(() => _charge = false);
       return;
     }
+    final dispo = await pile.trousseau.disponible();
     final c = await pile.sauvegarde.lireCoffre();
     if (!mounted) return;
     setState(() {
       _serrures = c.serrures;
       _refusee = c.refusee;
+      _trousseauPossible = dispo;
       _charge = false;
     });
   }
@@ -146,6 +152,53 @@ class _SauvegardeChiffreeScreenState extends State<SauvegardeChiffreeScreen> {
         if (sur != true) return;
         await context.e2ee?.sauvegarde.toutEffacer();
         await _relire();
+      });
+
+  /// Pose la serrure du trousseau de cet appareil.
+  ///
+  /// 🔴 C'EST LA SEULE SERRURE QUE NOTRE SERVEUR NE PEUT PAS OUVRIR : son secret
+  /// ne lui est jamais transmis, contrairement au mot de passe qu'il reçoit à
+  /// chaque connexion.
+  Future<void> _poserTrousseau() => _avec(() async {
+        final pile = context.e2ee;
+        if (pile == null) return;
+
+        final secret = await pile.trousseau.secret(
+          raison: 'Protéger votre sauvegarde avec cet appareil',
+        );
+        // ⚠️ ANNULER N'EST PAS UNE PANNE : on ne dit rien.
+        if (secret == null) return;
+
+        final appareil = '${await pile.coffre.deviceId()}';
+        final ok = await pile.sauvegarde.poserTrousseau(secret, appareil);
+        if (!mounted) return;
+        showAppSnackBar(ok
+            ? 'Cet appareil ouvre maintenant votre sauvegarde.'
+            : "La sauvegarde n'est pas ouverte sur cet appareil.");
+        await _relire();
+      });
+
+  /// Ouvre l'archive par le trousseau, sans rien taper.
+  Future<void> _ouvrirParTrousseau() => _avec(() async {
+        final pile = context.e2ee;
+        if (pile == null) return;
+
+        final secret = await pile.trousseau.secret(
+          raison: 'Ouvrir votre sauvegarde',
+        );
+        if (secret == null) return;
+
+        final appareil = '${await pile.coffre.deviceId()}';
+        final ok = await pile.sauvegarde
+            .ouvrirParTrousseau(secret, appareil, pile.coffre);
+        if (!mounted) return;
+        if (!ok) {
+          showAppSnackBar('Cet appareil n’a pas de serrure sur cette sauvegarde.');
+          return;
+        }
+        final r = await pile.sauvegarde.restaurer();
+        if (!mounted) return;
+        showAppSnackBar('${r.messages.length} message(s) restauré(s).');
       });
 
   /* ══════════════ DIALOGUES ══════════════ */
@@ -296,6 +349,19 @@ class _SauvegardeChiffreeScreenState extends State<SauvegardeChiffreeScreen> {
                   onPressed: _occupe ? null : _restaurerAvecCle,
                   child: const Text('Restaurer avec ma clé de récupération'),
                 ),
+                if (_trousseauPossible) ...[
+                  const SizedBox(height: 8),
+                  if (active && !_a('trousseau'))
+                    OutlinedButton(
+                      onPressed: _occupe ? null : _poserTrousseau,
+                      child: const Text('Utiliser cet appareil pour ouvrir'),
+                    ),
+                  if (_a('trousseau'))
+                    OutlinedButton(
+                      onPressed: _occupe ? null : _ouvrirParTrousseau,
+                      child: const Text('Ouvrir avec cet appareil'),
+                    ),
+                ],
                 if (active) ...[
                   const SizedBox(height: 24),
                   TextButton(

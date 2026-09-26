@@ -226,6 +226,76 @@ class E2eeSauvegarde {
     return cle;
   }
 
+  /// Ré-enveloppe la serrure « mot de passe » avec le nouveau.
+  ///
+  /// 🐛 SANS CECI, CHANGER DE MOT DE PASSE CASSE LA SAUVEGARDE EN SILENCE : la
+  /// serrure garde l'ANCIEN, et l'ouverture automatique échoue à la connexion
+  /// suivante. L'utilisateur le découvre au pire moment — en changeant
+  /// d'appareil.
+  ///
+  /// ⚠️ RIEN N'EST RECHIFFRÉ : on ré-enveloppe 32 octets.
+  ///
+  /// ⚠️ IL FAUT QUE L'ARCHIVE SOIT OUVERTE. Elle l'est si cet appareil a déjà
+  /// sa clé maîtresse — c'est le cas normal après une connexion réussie.
+  ///
+  /// ⚠️ NE LÈVE JAMAIS : le mot de passe du compte a DÉJÀ changé quand on
+  /// arrive ici. Échouer bruyamment laisserait croire que le changement n'a pas
+  /// eu lieu.
+  Future<bool> suivreChangementMotDePasse(String nouveau) async {
+    final cle = _maitresse;
+    if (cle == null) return false;
+    try {
+      await _poser(poserSerrure(cle, TypeSerrure.motdepasse, nouveau));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Pose la serrure « trousseau » de cet appareil.
+  ///
+  /// ⚠️ ELLE EST PAR APPAREIL, pas par compte : le serveur l'exige, et c'est ce
+  /// qui permet au téléphone et au navigateur d'en avoir chacun une. Sans cette
+  /// distinction, poser la sienne effacerait celle de l'autre.
+  Future<bool> poserTrousseau(String secret, String appareil) async {
+    final cle = _maitresse;
+    if (cle == null) return false;
+    try {
+      await _poser(poserSerrure(cle, TypeSerrure.trousseau, secret,
+          appareil: appareil));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Ouvre l'archive par le trousseau de cet appareil.
+  Future<bool> ouvrirParTrousseau(
+    String secret,
+    String appareil,
+    CoffreE2ee coffre,
+  ) async {
+    try {
+      final etat = await lireCoffre();
+      /*
+       * ⚠️ ON CHERCHE LA SERRURE DE CET APPAREIL, pas « la » serrure trousseau.
+       * Celle du téléphone n'ouvre rien depuis la tablette, et essayer avec le
+       * mauvais secret échouerait sans qu'on sache pourquoi.
+       */
+      final sienne = etat.serrures.where(
+        (s) => s.type == 'trousseau' && s.appareil == appareil,
+      );
+      if (sienne.isEmpty) return false;
+
+      final cle = ouvrirArchive(secret, sienne.first);
+      _maitresse = cle;
+      await coffre.rangerMaitresse(cle);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Referme — déconnexion, ou changement de compte.
   void refermer() => _maitresse = null;
 

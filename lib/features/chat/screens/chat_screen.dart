@@ -1239,6 +1239,9 @@ class _ChatScreenState extends State<ChatScreen>
       if (mounted) setState(() => _loading = false);
     }
     // Les enveloppes chiffrées : leur texte n est pas dans `getMessages`.
+    // L'état du chiffrement : il commande la bannière.
+    unawaited(_lireEtatChiffrement());
+    unawaited(_verifierChangementDeCle());
     unawaited(_releverChiffres());
 
     // Charge aussi les appels de cette conversation pour les afficher façon WhatsApp
@@ -1471,6 +1474,60 @@ class _ChatScreenState extends State<ChatScreen>
   ///
   /// ⚠️ NE LÈVE JAMAIS. Un échec de déchiffrement ne doit pas empêcher
   /// l'affichage des messages en clair de la même conversation.
+  /// Le fil est-il chiffré ?
+  ///
+  /// ⚠️ ON DEMANDE AU SERVEUR plutôt que de le deviner du contenu des messages :
+  /// un seul message ancien, arrivé en clair avant l'activation, ferait conclure
+  /// que le fil ne l'est pas — et la bannière clignoterait au défilement.
+  bool _filChiffre = false;
+
+  Future<void> _lireEtatChiffrement() async {
+    final pile = context.e2ee;
+    if (pile == null) return;
+    try {
+      final r = await pile.fil.etat(widget.convId);
+      if (mounted && r != _filChiffre) setState(() => _filChiffre = r);
+    } catch (_) {
+      // Sans réponse, on n'affirme rien : pas de bannière plutôt qu'une fausse.
+    }
+  }
+
+  /// Avertit si la clé du correspondant a changé.
+  ///
+  /// 🔴 ON AVERTIT, ON NE BLOQUE JAMAIS. Un changement de clé est soit une
+  /// réinstallation, soit une interposition — et les deux sont INDISTINGUABLES.
+  /// Bloquer punirait la réinstallation, de loin le cas le plus fréquent.
+  ///
+  /// ⚠️ LA SEULE ACTION UTILE EST DE COMPARER LE CODE hors de ce canal : c'est
+  /// donc la seule que l'avertissement propose.
+  Future<void> _verifierChangementDeCle() async {
+    final pile = context.e2ee;
+    final pair = widget.otherUserId;
+    if (pile == null || pair == null) return;
+    if (!pile.coffre.correspondantsChanges.remove(pair)) return;
+    if (!mounted) return;
+
+    /*
+     * ⚠️ `showMaterialBanner` EXIGE UN `MaterialBanner`, pas un widget qui en
+     * rend un. On lui donne donc ce que notre composant construit, plutôt que
+     * le composant lui-même.
+     */
+    ScaffoldMessenger.of(context).showMaterialBanner(
+      AvertissementCleChangee(
+        nomPair: widget.title,
+        onVerifier: () {
+          ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
+          showAppSnackBar(
+            'Ouvrez les infos du contact, puis « Chiffrement », pour comparer '
+            'le code de sécurité.',
+          );
+        },
+        onIgnorer: () =>
+            ScaffoldMessenger.of(context).hideCurrentMaterialBanner(),
+      ).build(context) as MaterialBanner,
+    );
+  }
+
   Future<void> _releverChiffres() async {
     final pile = context.e2ee;
     if (pile == null) return;
@@ -4102,8 +4159,24 @@ class _ChatScreenState extends State<ChatScreen>
                           controller: _scrollCtrl,
                           reverse: true,
                           padding: const EdgeInsets.all(12),
-                          itemCount: _combined.length,
+                          /*
+                           * 🔴 +1 POUR LA BANNIÈRE « À PARTIR D'ICI, CHIFFRÉ ».
+                           * Elle dit une vérité qui se tairait autrement : les
+                           * messages ANTÉRIEURS restent lisibles par le serveur.
+                           * Laisser croire que l'activation protège
+                           * rétroactivement serait un mensonge par omission — le
+                           * plus dangereux, parce qu'il rassure.
+                           *
+                           * ⚠️ LA LISTE EST INVERSÉE : le dernier indice affiché
+                           * est le PLUS ANCIEN. La bannière y trouve donc sa
+                           * place, en tête du fil.
+                           */
+                          itemCount: _combined.length + (_filChiffre ? 1 : 0),
                           itemBuilder: (_, iAffichage) {
+                            if (_filChiffre &&
+                                iAffichage == _combined.length) {
+                              return const BanniereChiffrement();
+                            }
                             // L'ordre des données reste chronologique : seule la
                             // lecture s'inverse. Tout le reste de l'écran (dates,
                             // pagination, saut vers un message) continue de

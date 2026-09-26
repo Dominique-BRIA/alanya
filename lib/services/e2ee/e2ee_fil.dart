@@ -205,6 +205,17 @@ class E2eeFil {
     return (messages: messages, illisibles: illisibles);
   }
 
+  /// L'état du chiffrement d'une conversation, tel que le serveur le donne.
+  ///
+  /// 🔴 ON NE LE DEVINE PAS DU CONTENU : un message ancien, arrivé en clair
+  /// avant l'activation, ferait conclure que le fil ne l'est pas.
+  Future<bool> etat(String convId) async {
+    final r = await _api('GET', '/api/conversations/$convId/e2ee', null);
+    final actif = r['e2eeActif'] == true;
+    noteEtat(convId, actif);
+    return actif;
+  }
+
   /* ══════════════ ACTIVER ══════════════ */
 
   /// Active le chiffrement sur une conversation.

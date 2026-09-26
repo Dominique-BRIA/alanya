@@ -85,13 +85,21 @@ class CoffreE2ee implements SignalProtocolStore {
   /// de clé est soit une réinstallation, soit une interposition — on ne peut pas
   /// les distinguer, donc on le dit sans bloquer, comme sur le web.
   @override
+  /// ⚠️ LE `true` NE DOIT PAS SE PERDRE. C'est le SEUL signal qu'une clé a
+  /// changé, et personne ne le rattrapera plus tard : la nouvelle clé est déjà
+  /// rangée. On le note donc ici pour que l'écran puisse le lire.
+  final Set<String> correspondantsChanges = {};
+
+  @override
   Future<bool> saveIdentity(SignalProtocolAddress address, IdentityKey? id) async {
     if (id == null) return false;
     final k = 'identite.${address.toString()}';
     final avant = await _lire(k);
     final apres = base64.encode(id.serialize());
     await _ecrire(k, apres);
-    return avant != null && avant != apres;
+    final change = avant != null && avant != apres;
+    if (change) correspondantsChanges.add(address.getName());
+    return change;
   }
 
   /// ⚠️ ON ACCEPTE TOUJOURS, ET ON AVERTIT AILLEURS. Refuser ici ferait échouer
@@ -288,6 +296,16 @@ class CoffreE2ee implements SignalProtocolStore {
     final b = await _lire('archive.maitresse');
     return b == null ? null : Uint8List.fromList(base64.decode(b));
   }
+
+  /// Le secret de la serrure « trousseau » de CET appareil.
+  ///
+  /// ⚠️ IL NE QUITTE JAMAIS LE COFFRE MATÉRIEL, et notre serveur ne le voit
+  /// jamais — contrairement au mot de passe, qu'il reçoit à chaque connexion.
+  /// C'est ce qui fait de cette serrure la plus forte des trois face à un
+  /// serveur compromis.
+  Future<String?> lireSecretTrousseau() => _lire('trousseau.secret');
+  Future<void> rangerSecretTrousseau(String s) =>
+      _ecrire('trousseau.secret', s);
 
   /* ══════════════ OUBLI ══════════════ */
 
