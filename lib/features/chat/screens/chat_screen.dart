@@ -12,6 +12,7 @@ import '../../../core/connectivity_service.dart';
 import '../../../core/memoire_langues.dart';
 import '../../../core/message_cache.dart';
 import '../../../core/messages_systeme.dart';
+import '../../../core/ouverture_conversation.dart';
 import '../../../core/whatsapp_text.dart';
 import '../../../core/whatsapp_format_input.dart';
 import '../../../core/whatsapp_editing_controller.dart';
@@ -144,6 +145,29 @@ class _ChatScreenState extends State<ChatScreen>
   List<dynamic> _combined = [];
   bool _loading = true;
   bool _sending = false;
+
+  /// Le fil n'a pas pu être chargé, et le cache était vide.
+  ///
+  /// 🔴 CET ÉTAT EXISTE PARCE QU'UN ÉCRAN VIDE N'EST PAS TOUJOURS UN ÉCRAN FINI.
+  /// Avant lui, l'échec du chargement rendait soit une roue sans fin, soit «
+  /// aucun message » — un mensonge quand les messages sont sur le serveur. Ici,
+  /// l'écran dit ce qu'il n'a pas pu faire, et propose de reprendre.
+  bool _echecChargement = false;
+
+  /// Borne d'une attente LOCALE : le cache SQLite comme le coffre sécurisé
+  /// traversent un canal de plateforme, et un canal occupé répond tard — ou ne
+  /// répond pas.
+  ///
+  /// ⚠️ BORNÉE VOLONTAIREMENT, et ce n'est pas de l'impatience : au-delà,
+  /// attendre n'améliore rien. Ce que l'utilisateur peut lire tout de suite vaut
+  /// mieux qu'une certitude dans trente secondes.
+  static const Duration _borneLocale = Duration(seconds: 3);
+
+  /// Borne de l'aller-retour qui rend le fil. Plus large : c'est du réseau.
+  static const Duration _borneReseau = Duration(seconds: 12);
+
+  /// Vrai pendant un rattrapage — voir `_poll`.
+  bool _pollEnCours = false;
 
   /// Barre de mise en forme dépliée par le bouton « A » du composeur.
   bool _formatBarOpen = false;
@@ -1203,67 +1227,149 @@ class _ChatScreenState extends State<ChatScreen>
 
   Future<void> _load() async {
     // _myId est désormais un getter (toujours à jour) — plus besoin de le figer ici.
+    //
+    // ⚠️ TOUT CE QUI SORT DU `context` EST LU AVANT LE PREMIER `await` : après
+    // une coupure asynchrone, l'écran peut avoir été démonté.
+    final repo = context.read<ChatRepository>();
+    final storage = context.read<TokenStorage>();
     _baseUrl = context.read<ApiClient>().baseUrl;
     initMediaIntegration(_baseUrl);
     /*
-     * 🔴 LE CACHE D'ABORD, LE JETON ENSUITE — et l'ordre n'est pas cosmétique.
+     * 🔴 LE CHARGEMENT NE PEUT DÉPENDRE NI DU COFFRE, NI DU SERVEUR.
      *
-     * 🐛 `accessToken` LIT LE COFFRE SÉCURISÉ, qui passe par le canal de
-     * plateforme. Quand ce canal est occupé — et il l'était, par les cinquante
-     * écritures de pré-clés au démarrage — cette lecture ne revient pas, et
-     * l'écran reste en chargement INFINI alors que les messages sont là, dans le
-     * cache local, disponibles immédiatement.
+     * Trois attentes ici : la base locale, le jeton du coffre sécurisé, l'aller-
+     * retour réseau. Chacune peut ne JAMAIS revenir — le coffre et la base
+     * traversent le même canal de plateforme, sériel, et le réseau n'a aucun
+     * délai par défaut. La correction précédente avait rendu l'ordre favorable
+     * (le cache d'abord, le jeton ensuite) ; elle laissait les trois attentes
+     * SANS BORNE et sans filet : une seule qui ne répond pas, et l'écran tourne
+     * indéfiniment sur un fil dont on connaît peut-être déjà le contenu.
      *
-     * ⚠️ AUCUN AFFICHAGE NE DOIT DÉPENDRE D'UNE LECTURE DE COFFRE SÉCURISÉ. Le
-     * jeton ne sert qu'aux appels réseau qui suivent ; les messages déjà connus
-     * n'en ont pas besoin. Les faire attendre derrière lui, c'était accepter que
-     * n'importe quelle lenteur du coffre vide l'écran.
+     * ⚠️ ICI CHACUNE EST BORNÉE, AUCUNE NE PEUT FAIRE ÉCHOUER L'AFFICHAGE, et le
+     * `finally` rend la main dans le dernier des cas. Le fil affiché peut être
+     * incomplet — il est toujours lisible, et le bandeau « hors ligne » global
+     * le dit. Un chargement qui échoue SE DIT ; il ne tourne pas.
      */
-    final cached = await MessageCache.getConv(widget.convId);
-    if (cached.isNotEmpty && mounted) {
-      setState(() {
-        _messages = cached;
-        _rebuildCombined();
-        _loading = false;
-      });
-      for (final m in _messages) {
-        _cacheMsg(m);
-      }
-      _scrollToBottom(immediat: true);
-    }
-
-    // Le jeton n'est nécessaire qu'à partir d'ici, pour le réseau.
-    if (!mounted) return;
-    _token = await context.read<TokenStorage>().accessToken;
-
     try {
-      final repo = context.read<ChatRepository>();
-      final msgs = await repo.getMessages(widget.convId);
+      // ① LE CACHE D'ABORD — instantané, et il ne demande aucun jeton.
+      //
+      // ⚠️ Liste MUTABLE, et non `const` : ce `caches` peut finir dans
+      // `_messages`, que les autres chemins de l'écran recopient avant d'ajouter
+      // (`[..._messages, msg]`). Rien ne l'y oblige aujourd'hui — mais une liste
+      // figée partagée avec l'état d'un écran est un piège gratuit à laisser
+      // ouvert pour le prochain qui passera.
+      var caches = <Message>[];
+      try {
+        caches =
+            await MessageCache.getConv(widget.convId).timeout(_borneLocale);
+      } catch (_) {
+        // Base illisible, migration en cours, canal saturé : on repart de rien.
+        // Ce n'est pas une raison de laisser l'utilisateur devant une roue.
+      }
+      if (caches.isNotEmpty && mounted) {
+        setState(() {
+          _messages = caches;
+          // ⚠️ `_loading` AVANT la recomposition, et l'ordre n'est pas une
+          // fantaisie : `_rebuildCombined()` va chercher les envois en cours
+          // dans le magasin d'envois. Une exception levée là ne posait jamais
+          // le `_loading = false` qui la suivait — l'écran restait en
+          // chargement avec son fil sous les yeux.
+          _loading = false;
+          _rebuildCombined();
+        });
+        for (final m in _messages) {
+          _cacheMsg(m);
+        }
+        _scrollToBottom(immediat: true);
+      }
+
       if (!mounted) return;
-      final reversed = msgs.reversed.toList();
-      await MessageCache.putConv(widget.convId, reversed);
+
+      // ② LE JETON — utile au seul réseau qui suit, et plus jamais à l'écran.
+      // Une fois lu, il ne relit plus le coffre : voir le miroir de
+      // `TokenStorage.accessToken`.
+      try {
+        // `null` au bout du compte veut dire « le coffre n'a pas répondu », et
+        // non « il n'y a pas de session » : rien n'est effacé, et le fil connu
+        // reste à l'écran.
+        _token = await storage.accessToken
+            .timeout(_borneLocale, onTimeout: () => null);
+      } catch (_) {
+        _token = null;
+      }
+
+      // ③ LE SERVEUR — une mise à jour du fil, plus une condition de son
+      // affichage. `null` veut dire « rien de neuf », et c'est ce qui est rendu.
+      List<Message>? recus;
+      try {
+        final msgs =
+            await repo.getMessages(widget.convId).timeout(_borneReseau);
+        recus = msgs.reversed.toList();
+      } catch (_) {
+        recus = null;
+      }
+
+      final issue = decideOuverture(caches: caches, recus: recus);
+      // Le cache se met à jour EN TÂCHE DE FOND, jamais devant l'écran.
+      if (issue.cacheAReecrire) _reecritLeCache(issue.messages);
+      if (!mounted) return;
       setState(() {
-        _messages = reversed;
-        _rebuildCombined();
+        _messages = issue.messages;
+        _echecChargement = issue.enPanne;
         _loading = false;
+        _rebuildCombined();
       });
       for (final m in _messages) {
         _cacheMsg(m);
       }
-      _markReadRemote();
-      _scrollToBottom(immediat: true);
-      _traduitAutomatiquement();
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
-    }
-    // Les enveloppes chiffrées : leur texte n est pas dans `getMessages`.
-    // L'état du chiffrement : il commande la bannière.
-    unawaited(_lireEtatChiffrement());
-    unawaited(_verifierChangementDeCle());
-    unawaited(_releverChiffres());
+      if (recus != null) {
+        _markReadRemote();
+        _scrollToBottom(immediat: true);
+        _traduitAutomatiquement();
+      }
+      // Les enveloppes chiffrées : leur texte n est pas dans `getMessages`.
+      // L'état du chiffrement : il commande la bannière.
+      unawaited(_lireEtatChiffrement());
+      unawaited(_verifierChangementDeCle());
+      unawaited(_releverChiffres());
 
-    // Charge aussi les appels de cette conversation pour les afficher façon WhatsApp
-    _loadCalls();
+      // Charge aussi les appels de cette conversation pour les afficher façon WhatsApp
+      _loadCalls();
+    } finally {
+      /*
+       * ⚠️ LE FILET, PAS LE CHEMIN NORMAL. Quoi qu'il soit arrivé au-dessus —
+       * une exception qu'aucun `catch` n'a vue, un widget parti sous la main —
+       * l'écran rend quelque chose.
+       *
+       * 🔴 UNE ROUE QUI TOURNE SANS FIN EST LE SEUL DÉFAUT DONT L'UTILISATEUR NE
+       * SORT PAS SEUL : il n'y a rien à toucher. Et ce filet ferme aussi une
+       * seconde porte, moins visible — `_poll()` s'arrête tant que `_loading`
+       * est vrai, donc un chargement accroché DÉSACTIVE le rattrapage de trois
+       * secondes qui aurait dû le reprendre. Le drapeau collé à vrai se
+       * gardait lui-même en vie.
+       */
+      if (mounted && _loading) setState(() => _loading = false);
+    }
+  }
+
+  /// Réécrit le cache local du fil, SANS QUE L'ÉCRAN L'ATTENDE.
+  ///
+  /// 🔴 CE N'EST PAS UN DÉTAIL DE STYLE. `putConv` est une ÉCRITURE dans la
+  /// SQLite locale, sur le même canal de plateforme que la lecture qui a rendu
+  /// ce fil infini : l'attendre avant d'afficher, c'est laisser une écriture de
+  /// coulisse décider de l'instant où l'utilisateur voit ses messages — la faute
+  /// qu'on est en train de corriger, remise du côté de l'écriture.
+  ///
+  /// ⚠️ LE CACHE VIENT APRÈS L'ÉCRAN, IL NE LE PRÉCÈDE JAMAIS. Son échec ne
+  /// coûte qu'un cache moins frais à la prochaine ouverture ; il ne coûte pas un
+  /// écran vide maintenant.
+  void _reecritLeCache(List<Message> messages) {
+    unawaited(
+      MessageCache.putConv(widget.convId, messages).catchError((Object _) {
+        // silencieux par nature : `mounted` n'a même pas à être consulté,
+        // l'écran a déjà rendu ce qu'il avait à rendre.
+      }),
+    );
   }
 
   // Scroll infini : proche du haut → charge les messages plus anciens.
@@ -1318,14 +1424,27 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
+  /// Le rattrapage de trois secondes : borné, et non réentrant.
+  ///
+  /// ⚠️ CE VERROUT EST LE PRIX À PAYER PAR LE FILET DE `_load()`. Tant que
+  /// `_loading` restait collé à vrai, `_poll()` ne partait pas — le défaut
+  /// s'auto-entretenait, mais il ne s'accumulait pas non plus. Maintenant que
+  /// l'écran sort du chargement sur une panne, le rattrapage reprend toutes les
+  /// trois secondes : sans verrou ni délai maximal, chaque requête accrochée en
+  /// empilerait une nouvelle, indéfiniment.
   Future<void> _poll() async {
-    if (!mounted || _loading) return;
+    if (!mounted || _loading || _pollEnCours) return;
     // Ne pas écraser l'historique chargé via le scroll infini.
     if (_loadingOlder || _loadedOlder) return;
     if (context.read<RealtimeClient>().connected) return;
+    _pollEnCours = true;
     try {
       final repo = context.read<ChatRepository>();
-      final latest = (await repo.getMessages(widget.convId)).reversed.toList();
+      // Même borne qu'à l'ouverture : un rattrapage qui s'accroche ne doit
+      // tenir en otage ni ce verrou, ni l'écran.
+      final bruts =
+          await repo.getMessages(widget.convId).timeout(_borneReseau);
+      final latest = bruts.reversed.toList();
       if (!mounted) return;
       if (_signature(latest) == _signature(_messages)) return;
       final hadMore = latest.length > _messages.length;
@@ -1334,6 +1453,9 @@ class _ChatScreenState extends State<ChatScreen>
               _scrollCtrl.position.maxScrollExtent - 60;
       setState(() {
         _messages = latest;
+        // Un rattrapage qui a répondu : le panneau « réessayez » n'a plus rien
+        // à faire à l'écran.
+        _echecChargement = false;
         _rebuildCombined();
       });
       for (final m in latest) {
@@ -1341,7 +1463,11 @@ class _ChatScreenState extends State<ChatScreen>
       }
       if (hadMore) repo.markRead(widget.convId);
       if (hadMore && atBottom) _scrollToBottom();
-    } catch (_) {}
+    } catch (_) {
+      // Silencieux : le prochain battement réessaiera, voilà tout.
+    } finally {
+      _pollEnCours = false;
+    }
   }
 
   String _signature(List<Message> msgs) =>
@@ -3024,8 +3150,14 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
+  /// Le jeton collé aux URL de médias et de téléchargement.
+  ///
+  /// ⚠️ LECTURE DIRECTE DU COFFRE, miroir court-circuité — la SEULE exception de
+  /// cette règle dans cet écran. Une URL porte le jeton en clair et ne part pas
+  /// par `AuthedApi` : elle ne sera donc jamais reprise après un 401, et doit
+  /// partir de la valeur fraîche. L'affichage, lui, reste sur le miroir.
   Future<String> _freshToken() async {
-    _token = await context.read<TokenStorage>().accessToken;
+    _token = await context.read<TokenStorage>().accessTokenFrais;
     return _token ?? '';
   }
 
@@ -4129,6 +4261,59 @@ class _ChatScreenState extends State<ChatScreen>
             lastSeen: widget.otherLastSeen)));
   }
 
+  /// Le fil n'est pas arrivé : on le DIT, et on propose de le reprendre.
+  ///
+  /// 🔴 UN BOUTON, PAS UNE ROUE. Ce qui rendait le défaut sans issue, ce
+  /// n'était pas l'échec — c'est l'absence du mot « échec » : une roue ne se
+  /// refuse pas, ne se relance pas, et n'explique rien à qui la regarde.
+  /// Ce panneau rend les trois.
+  ///
+  /// ⚠️ AUCUN TEXTE AJOUTÉ AU CATALOGUE : `network_error_retry` et `retry`
+  /// existent déjà dans les neuf langues. En créer d'autres ici aurait voulu
+  /// dire réécrire huit langues, sous l'œil de `l10n_parite_test`.
+  Widget _panneauEchecChargement() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.cloud_off, size: 48, color: _mutedIcon),
+            const SizedBox(height: 12),
+            Text(
+              tr(context, 'network_error_retry'),
+              textAlign: TextAlign.center,
+              style: TextStyle(color: _muted),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              onPressed: _rechargeLeFil,
+              icon: const Icon(Icons.refresh, size: 18),
+              label: Text(tr(context, 'retry')),
+              style: ElevatedButton.styleFrom(backgroundColor: _accent),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Reprend le même chemin qu'à l'ouverture : le cache d'abord, le réseau
+  /// ensuite — donc hors ligne, le bouton affiche quand même le fil connu.
+  ///
+  /// ⚠️ LE DRAPEAU D'ÉCHEC TOMBE AVANT L'ATTENTE : sinon un second échec
+  /// rendrait exactement le panneau que l'on vient de toucher, sans que le
+  /// geste ait paru servir à rien — et l'utilisateur aurait raison d'en conclure
+  /// que le bouton ne fait rien.
+  Future<void> _rechargeLeFil() async {
+    if (!mounted) return;
+    setState(() {
+      _echecChargement = false;
+      _loading = true;
+    });
+    await _load();
+  }
+
   // ══════════════════════════════════════════════
   // BUILD
   // ══════════════════════════════════════════════
@@ -4154,7 +4339,13 @@ class _ChatScreenState extends State<ChatScreen>
               child: _loading
                   ? Center(child: CircularProgressIndicator(color: _accent))
                   : _combined.isEmpty
-                      ? Center(child: Text(tr(context, 'no_messages')))
+                      // 🔴 « RIEN À MONTRER » SE DIT DEUX FAÇONS, et les
+                      // confondre est ce qui rendait le défaut sans issue : un
+                      // fil vide n'est pas un fil qui n'est pas arrivé. Le
+                      // premier se constate, le second se reprend.
+                      ? (_echecChargement
+                          ? _panneauEchecChargement()
+                          : Center(child: Text(tr(context, 'no_messages'))))
                       // 🔴 **LISTE ANCRÉE EN BAS** (`reverse: true`), corrigé le
                       // 17/08/2026 sur preuve de `logcat`.
                       //

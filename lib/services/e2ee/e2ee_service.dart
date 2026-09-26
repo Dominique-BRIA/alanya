@@ -56,10 +56,32 @@ class E2eeService {
     final signee = generateSignedPreKey(identite, 0);
     await coffre.storeSignedPreKey(signee.id, signee);
 
+    /*
+     * 🔴 UNE ÉCRITURE AU TOTAL — voir `CoffreE2ee.storePreKeys`, qui existe
+     * pour ça depuis la première correction du chargement infini, et que rien
+     * n'appelait : le lot groupé avait été écrit, la publication était restée
+     * à la boucle.
+     *
+     * 🐛 La boucle qui précédait appelait `storePreKey` cinquante fois. Or
+     * cette méthode RANGE TOUTE LA TABLE à chaque tour : elle relit les
+     * pré-clés déjà là, en ajoute une, et réécrit l'ensemble. Cinquante tours
+     * = cinquante lectures + cinquante écritures d'un contenu qui grossit à
+     * chaque tour, soit environ mille deux cents entrées re-sérialisées et
+     * quatre-vingt-dix traversées inutiles du canal de plateforme.
+     *
+     * ⚠️ CE CANAL EST UNIQUE ET SÉRIEL. Toutes les lectures de coffre de
+     * l'application — dont celle du jeton de session, qu'`AuthedApi` fait avant
+     * CHAQUE requête — font la queue derrière. L'ouverture d'une conversation
+     * attendait donc son tour, sans délai maximal : « chargement infini ».
+     *
+     * ⚠️ ET LE COÛT RESTAIT CACHÉ SOUS LE SUCCÈS : `demarrer()` ne note la
+     * publication qu'une fois le POST accepté. Un premier lancement hors ligne
+     * laissait donc `publie` absent, et REJOUAIT les cinquante écritures à
+     * chaque démarrage suivant — le défaut se reproduisait au lieu de se
+     * corriger tout seul.
+     */
     final uniques = generatePreKeys(0, lotPreKeys);
-    for (final p in uniques) {
-      await coffre.storePreKey(p.id, p);
-    }
+    await coffre.storePreKeys(uniques);
 
     await api('POST', '/api/e2ee/cles', {
       'deviceId': deviceId,
