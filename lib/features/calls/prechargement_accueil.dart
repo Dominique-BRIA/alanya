@@ -41,11 +41,48 @@ class PrechargementAccueil {
   /// une annulation, sous peine de la laisser sans son.
   String? _adopte;
 
+  /// TÉLÉCHARGE L'ACCUEIL, PAR LA VOIE RAPIDE PUIS PAR LA VOIE SÛRE.
+  ///
+  /// 🔴 LA RAPIDE EST L'ADRESSE FIXE DU BUCKET OUVERT : aucun jeton, aucune
+  /// signature, et le cache HTTP du téléphone la garde — un accueil déjà
+  /// entendu ne repart même pas sur le réseau.
+  ///
+  /// ⚠️ ET LA SÛRE RESTE, PARCE QU'UNE ADRESSE PEUT ÉCHOUER. Bucket non
+  /// configuré, règle de stockage changée, réseau d'entreprise qui filtre les
+  /// domaines tiers : dans tous ces cas `/api/media/<id>` répond, lui. Ne
+  /// tenter que la rapide ferait dépendre le son d'un réglage de console.
+  Future<Uint8List?> _telecharger(
+    http.Client client,
+    String relative,
+    String? publique,
+  ) async {
+    if (publique != null && publique.isNotEmpty) {
+      try {
+        final rapide = await client.get(Uri.parse(publique));
+        if (rapide.statusCode == 200 && rapide.bodyBytes.isNotEmpty) {
+          return rapide.bodyBytes;
+        }
+      } catch (e) {
+        debugPrint("[Alanya] accueil : voie rapide indisponible, repli ($e)");
+      }
+    }
+
+    final jeton = await TokenStorage().accessToken;
+    final url = relative.startsWith("http")
+        ? relative
+        : "${ServerConfig.apiBase}$relative"
+            "${(jeton == null || jeton.isEmpty) ? "" : "?token=$jeton"}";
+    final sure = await client.get(Uri.parse(url));
+    return sure.statusCode == 200 ? sure.bodyBytes : null;
+  }
+
   /// Commence à télécharger l'accueil de la personne appelée.
   ///
   /// [urlDirecte] court-circuite la demande au serveur : en mode absence, la
   /// trame `repondeur_direct` porte déjà l'adresse, et redemander serait un
   /// aller-retour de plus pour une réponse qu'on a sous la main.
+  /// [urlPubliqueDirecte] est son équivalent rapide, que la même trame porte
+  /// désormais — les deux voyagent ensemble, et l'on essaie la rapide d'abord.
   ///
   /// ⚠️ NE LÈVE JAMAIS. Un préchargement qui échoue n'est pas une panne : on
   /// retombe sur l'adresse réseau, exactement comme avant. Le laisser remonter
@@ -54,7 +91,12 @@ class PrechargementAccueil {
   /// l'accueil doit être réclamée au serveur. Il est fourni par l'appelant
   /// plutôt que construit ici : il porte la session authentifiée, qui vit dans
   /// l'arbre de l'application et n'a pas à être dupliquée dans un singleton.
-  void demarrer(String callId, {String? urlDirecte, RepondeurRepository? depot}) {
+  void demarrer(
+    String callId, {
+    String? urlDirecte,
+    String? urlPubliqueDirecte,
+    RepondeurRepository? depot,
+  }) {
     if (_callId == callId) return;
     annuler();
 
@@ -67,23 +109,19 @@ class PrechargementAccueil {
     unawaited(() async {
       try {
         var relative = urlDirecte;
+        var publique = urlPubliqueDirecte;
         if (relative == null && depot != null) {
           final accueil = await depot.accueilDeLAppel(callId);
           relative = accueil?.url;
+          publique = accueil?.urlPublique;
         }
         if (relative == null || relative.isEmpty) {
           if (!attente.isCompleted) attente.complete(null);
           return;
         }
 
-        final jeton = await TokenStorage().accessToken;
-        final url = relative.startsWith("http")
-            ? relative
-            : "${ServerConfig.apiBase}$relative"
-                "${(jeton == null || jeton.isEmpty) ? "" : "?token=$jeton"}";
-
-        final reponse = await client.get(Uri.parse(url));
-        if (reponse.statusCode != 200 || reponse.bodyBytes.isEmpty) {
+        final octets = await _telecharger(client, relative, publique);
+        if (octets == null || octets.isEmpty) {
           if (!attente.isCompleted) attente.complete(null);
           return;
         }
@@ -93,7 +131,7 @@ class PrechargementAccueil {
         // l'utilisateur, ni compter dans la sauvegarde du téléphone.
         final dossier = await getTemporaryDirectory();
         final chemin = "${dossier.path}/accueil-$callId.audio";
-        await File(chemin).writeAsBytes(reponse.bodyBytes, flush: true);
+        await File(chemin).writeAsBytes(octets, flush: true);
 
         // L'appel a pu changer entre-temps : on ne garde pas un fichier qui n'a
         // plus de destinataire.

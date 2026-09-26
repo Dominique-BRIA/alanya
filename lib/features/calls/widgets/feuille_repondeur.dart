@@ -133,6 +133,15 @@ class _FeuilleRepondeurState extends State<FeuilleRepondeur> {
       // média, on RATTACHE ensuite son identifiant à l'appel. La route du
       // répondeur ne reçoit aucun octet — elle refuse d'ailleurs tout ce qui
       // n'est pas audio.
+      /*
+       * 🔴 AUCUN `usage` ICI, ET C'EST LE POINT LE PLUS IMPORTANT DE CE BLOC.
+       *
+       * Sans lui, le fichier part dans le stockage PRIVÉ, servi par URL signée.
+       * Ce message a été laissé par quelqu'un pour UNE personne : le mettre dans
+       * le bucket ouvert le rendrait lisible de tout Internet à qui connaît son
+       * adresse. L'absence d'argument EST la protection — ne la comble pas en
+       * croyant harmoniser avec l'écran des réglages.
+       */
       final media = await medias.upload(
         capture.bytes,
         "repondeur-${DateTime.now().millisecondsSinceEpoch}.m4a",
