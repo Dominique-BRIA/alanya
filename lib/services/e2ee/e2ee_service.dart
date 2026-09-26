@@ -83,18 +83,42 @@ class E2eeService {
     final uniques = generatePreKeys(0, lotPreKeys);
     await coffre.storePreKeys(uniques);
 
-    await api('POST', '/api/e2ee/cles', {
+    /*
+     * 🐛 TROIS MOTS DE CE CORPS ÉTAIENT FAUX, ET AUCUN NE SE VOYAIT.
+     *
+     * Le contrat est écrit dans `backend-alanya/src/app/api/e2ee/cles/route.ts`,
+     * dont le commentaire d'en-tête donne l'exemple du corps. Le mobile disait :
+     *
+     *   · `POST`  → la route n'exporte que GET, PUT et DELETE. Next.js répond
+     *              405 et la publication n'a JAMAIS abouti. C'est le défaut
+     *              signalé : sans identité en base, `POST …/e2ee` refuse avec
+     *              `CLES_MANQUANTES` — « impossible d'activer le chiffrement ».
+     *   · `prekeySignee.prekeyId` → le serveur lit `ps.id`. Un champ absent ne
+     *              se plaint pas, il rend `undefined`, et `entier(undefined)`
+     *              vaut faux : 400 « « prekeySignee » incomplète ».
+     *   · `prekeysUniques` → le serveur lit `r.prekeys`. Celui-là était le plus
+     *              traître : `Array.isArray(undefined)` vaut faux, donc
+     *              `brutes = []`, donc ZÉRO pré-clé rangée — sans erreur. Le
+     *              stock serait resté vide et chaque correspondant aurait reçu
+     *              une session affaiblie, silencieusement.
+     *
+     * ⚠️ LES NOMS VIENNENT DU SERVEUR, PAS DU SOUVENIR. Un champ mal orthographié
+     * compile très bien : c'est à l'exécution qu'il rend `null`. La règle vaut
+     * pour chaque clé de ce corps, et `test/e2ee_contrat_backend_test.dart` les
+     * épelle toutes contre le dépôt backend.
+     */
+    await api('PUT', '/api/e2ee/cles', {
       'deviceId': deviceId,
       'registrationId': await coffre.getLocalRegistrationId(),
       'cleIdentite': base64.encode(identite.getPublicKey().serialize()),
       'prekeySignee': {
-        'prekeyId': signee.id,
+        'id': signee.id,
         'clePublique': base64.encode(signee.getKeyPair().publicKey.serialize()),
         'signature': base64.encode(signee.signature),
       },
-      'prekeysUniques': uniques
+      'prekeys': uniques
           .map((p) => {
-                'prekeyId': p.id,
+                'id': p.id,
                 'clePublique':
                     base64.encode(p.getKeyPair().publicKey.serialize()),
               })
@@ -111,11 +135,30 @@ class E2eeService {
   /// sinon l'un des deux ne le lira jamais.
   Future<List<int>> ouvrirSessions(String pairId) async {
     final r = await api('GET', '/api/e2ee/cles/$pairId', null);
-    final paquets = (r['appareils'] as List).cast<Map<String, dynamic>>();
+    /*
+     * 🐛 LA CLÉ ÉTAIT `appareils`, le serveur rend `paquets` — et le pluriel ne
+     * se devine pas : `ok({ userId, paquets })`, dans
+     * `cles/[userId]/route.ts`. Un `null as List` ne rend pas une liste vide, il
+     * LÈVE : chaque ouverture de session échouait donc avant même d'avoir lu une
+     * clé, et `envoyer` n'atteignait jamais son « Aucun appareil chiffré chez ce
+     * correspondant », pourtant écrit pour ce cas-là.
+     *
+     * ⚠️ 404 `PAS_DE_CLES` EST UNE RÉPONSE, PAS UNE PANNE. Le serveur la rend
+     * exprès pour dire « ce compte ne fait pas de chiffrement » — elle remonte
+     * en `ApiException` et l'écran doit la distinguer d'une coupure.
+     */
+    final paquets = (r['paquets'] as List).cast<Map<String, dynamic>>();
     final ouverts = <int>[];
 
     for (final p in paquets) {
       final adresse = SignalProtocolAddress(pairId, p['deviceId'] as int);
+      /*
+       * ⚠️ ASYMÉTRIE DU CONTRAT, ET ELLE EST RÉELLE : à l'ALLER le serveur lit
+       * `prekeySignee.id` et `prekeys[].id` ; au RETOUR il rend
+       * `prekeySignee.prekeyId` et `prekeyUnique.prekeyId`, parce que la route
+       *projette directement les colonnes Prisma. Vérifier « les deux sens portent
+       * les mêmes noms » aurait été faux — chaque sens se lit dans SA route.
+       */
       final signee = p['prekeySignee'] as Map<String, dynamic>;
       final unique = p['prekeyUnique'] as Map<String, dynamic>?;
 

@@ -3870,6 +3870,19 @@ class _ChatScreenState extends State<ChatScreen>
       try {
         await pile.fil.activer(widget.convId);
         if (mounted) setState(() => _chiffrementActif = true);
+      } on ApiException catch (e) {
+        /*
+         * 🔴 LE SERVEUR A ÉCRIT LA RÉPONSE POUR QU'ELLE SOIT LUE. Ses trois
+         * refus portent une phrase française et un code — `HORS_PERIMETRE`,
+         * `GROUPE_NON_SUPPORTE`, `CLES_MANQUANTES` — et la route précise même
+         * que « l'écran a besoin de le DIRE, pas seulement de griser un bouton ».
+         * Un `catch (_)` les jetait pour dire « n'a pas pu être activé », ce qui
+         * ne distingue pas un fil d'agents (refus DÉFINITIF, par conception)
+         * d'un correspondant qui n'a pas encore ouvert l'application (refus qui
+         * se lève tout seul). Le premier n'a aucun remède ; le second en a un,
+         * et il est dans le message.
+         */
+        if (mounted) showAppSnackBar(e.message);
       } catch (_) {
         if (mounted) showAppSnackBar("Le chiffrement n'a pas pu être activé.");
       }

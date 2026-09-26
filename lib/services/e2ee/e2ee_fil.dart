@@ -11,6 +11,7 @@
 /// lire.
 library;
 
+import 'e2ee_coffre.dart';
 import 'e2ee_service.dart';
 
 /// Un message tel que le fil le manipule, en clair.
@@ -48,12 +49,28 @@ MotifRefus? motifRefus({
 
 /// Le fil chiffré : ce que l'écran de conversation appelle.
 class E2eeFil {
-  E2eeFil(this._service, this._api, {this.monDeviceId = 1});
+  E2eeFil(this._service, this._api, {required CoffreE2ee coffre})
+      : _coffre = coffre;
 
-  /// ⚠️ LE DÉPÔT EXIGE L APPAREIL EXPÉDITEUR : le serveur s en sert pour ne pas
+  /// Le coffre de cet appareil — il détient le numéro d'appareil PUBLIÉ.
+  final CoffreE2ee _coffre;
+
+  /// ⚠️ LE DÉPÔT EXIGE L'APPAREIL EXPÉDITEUR : le serveur s'en sert pour ne pas
   /// nous renvoyer nos propres enveloppes, et pour que le destinataire sache
   /// quelle session ouvrir.
-  final int monDeviceId;
+  ///
+  /// 🐛 C'ÉTAIT UN `= 1` PAR DÉFAUT, ET PERSONNE NE LE PASSAIT. Or
+  /// `CoffreE2ee.deviceId()` tire un numéro ALÉATOIRE dans 1..2³¹-1 à la première
+  /// ouverture : l'identité était donc publiée sous un numéro, et chaque
+  /// enveloppe partait sous le numéro 1. Le destinataire ouvrait alors une
+  /// session vers `SignalProtocolAddress(expediteurId, 1)` — une adresse qui
+  /// n'existe chez personne — et le message restait illisible sans qu'aucune
+  /// erreur ne nomme la cause.
+  ///
+  /// ⚠️ LU À CHAQUE ENVOI, ET NON MIS EN CACHE ICI : le coffre le range dès la
+  /// première création, donc la relecture est stable ; la dupliquer ici ferait
+  /// deux sources pour un seul fait.
+  Future<int> get monDeviceId => _coffre.deviceId();
 
   final E2eeService _service;
   final Future<Map<String, dynamic>> Function(
@@ -140,7 +157,7 @@ class E2eeFil {
 
     await _api('POST', '/api/e2ee/enveloppes', {
       'convId': convId,
-      'deviceId': monDeviceId,
+      'deviceId': await monDeviceId,
       'enveloppes': enveloppes,
       'messageId': messageId,
     });
@@ -160,7 +177,23 @@ class E2eeFil {
   /// ⚠️ UNE ENVELOPPE ILLISIBLE NE BLOQUE PAS LES AUTRES. On la compte et on
   /// continue : un message perdu vaut mieux qu'un fil entier qui ne charge plus.
   Future<({List<MessageClair> messages, int illisibles})> relever() async {
-    final r = await _api('GET', '/api/e2ee/enveloppes', null);
+    /*
+     * 🐛 `?deviceId=` MANQUAIT, ET LA ROUTE LE RÉCLAME : sans lui elle répond
+     * 400 « « deviceId » est requis ». Aucun message chiffré n'a donc jamais pu
+     * être relevé sur mobile.
+     *
+     * ⚠️ CE N'EST PAS UN FILTRE DE COMMODITÉ. C'est sur cet appel que le serveur
+     * horodate `derniereReleve` — le seul signe de vie fiable d'un appareil, et
+     * ce qui empêche ses correspondants de continuer à chiffrer trente jours
+     * pour un téléphone qui ne lira jamais. Le passer, c'est dire QUI relève.
+     *
+     * ⚠️ ET C'EST AUSSI CE QUI GARDE LES ENVELOPPES SÉPARÉES : le téléphone et
+     * le navigateur du même compte ont chacun leurs enveloppes, chacun relève
+     * les siennes.
+     */
+    final r =
+        await _api('GET', '/api/e2ee/enveloppes?deviceId=${await monDeviceId}',
+            null);
     final brutes = (r['enveloppes'] as List).cast<Map<String, dynamic>>();
 
     final messages = <MessageClair>[];

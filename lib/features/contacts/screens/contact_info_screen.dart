@@ -550,6 +550,18 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
       if (!mounted) return;
       setState(() => _chiffree = true);
       if (cle != null) await _montrerCleRecuperation(cle);
+    } on ApiException catch (e) {
+      /*
+       * 🔴 LE MOTIF DU SERVEUR D'ABORD. Le texte ci-dessous est écrit pour un
+       * échec dont on ne sait rien ; celui-ci est une réponse, et elle nomme la
+       * cause — périmètre, groupe, ou clés manquantes chez le correspondant.
+       *
+       * ⚠️ IL NE FAUT PAS LE CONFONDRE AVEC UN MOT DE PASSE REFUSÉ : ce dernier
+       * arrive plus tôt, dans `activerAvecDeuxSerrures`, et garde son propre
+       * texte. C'est tout l'enjeu de l'ordre des `catch`.
+       */
+      if (!mounted) return;
+      showAppSnackBar(e.message);
     } catch (_) {
       if (!mounted) return;
       /*

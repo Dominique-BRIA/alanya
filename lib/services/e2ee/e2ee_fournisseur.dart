@@ -93,21 +93,48 @@ class PileE2ee {
       String chemin,
       Map<String, dynamic>? corps,
     ) {
+      /*
+       * 🐛 CE `default` ÉTAIT LE DÉFAUT LE MIEUX CACHÉ DU CHIFFREMENT.
+       *
+       * Il transformait TOUT verbe non reconnu en `PATCH`. Or deux routes du
+       * chiffrement s'écrivent en `PUT` — `/api/e2ee/cles` (publier ses clés)
+       * et `/api/e2ee/coffre` (sauvegarder) — et `PUT` n'avait pas de cas. Les
+       * deux partaient donc en `PATCH` sur une route qui ne l'exporte pas :
+       * Next.js répond 405, la publication n'aboutit jamais, aucune identité
+       * n'existe en base, et `POST /api/conversations/<id>/e2ee` refuse avec
+       * `CLES_MANQUANTES`. C'est très exactement « impossible d'activer le
+       * chiffrement sur mobile ».
+       *
+       * 🔴 UN VERBE INCONNU LÈVE, ET NE DEVINE PLUS. Un repli silencieux sur un
+       * autre verbe ne se voit nulle part : la requête part, elle échoue, et
+       * l'écran dit « le chiffrement n'a pas pu être activé » sans que rien,
+       * dans aucun journal, ne nomme le verbe. Mieux vaut un plantage bruyant
+       * au premier appel — il dit le mot exact.
+       */
       switch (methode) {
         case 'GET':
           return api.get(chemin);
         case 'POST':
           return api.post(chemin, corps ?? const {});
+        case 'PUT':
+          return api.put(chemin, corps ?? const {});
+        case 'PATCH':
+          return api.patch(chemin, corps ?? const {});
         case 'DELETE':
           return api.delete(chemin, body: corps);
         default:
-          return api.patch(chemin, corps ?? const {});
+          throw ArgumentError.value(
+              methode, 'methode', 'verbe HTTP non pris en charge');
       }
     }
 
     final coffre = CoffreE2ee(compteId);
     final service = E2eeService(coffre, appel);
-    return PileE2ee._(coffre, service, E2eeFil(service, appel), E2eeSauvegarde(appel));
+    // ⚠️ LE COFFRE EST PASSÉ AU FIL : c'est lui qui détient le numéro
+    // d'appareil réellement publié. Laisser la valeur par défaut ferait partir
+    // chaque enveloppe sous un numéro que le serveur ne connaît pas.
+    return PileE2ee._(coffre, service, E2eeFil(service, appel, coffre: coffre),
+        E2eeSauvegarde(appel));
   }
 }
 
