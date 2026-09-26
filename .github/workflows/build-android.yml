@@ -1,11 +1,26 @@
 name: Build Android APK
 
 on:
+  # DEUX CONSTRUCTIONS PARTAIENT POUR UN SEUL COMMIT, et c'est `pull_request`
+  # qui les doublait : une poussee sur une branche listee declenchait `push`,
+  # et la meme poussee mettait a jour la PR ouverte depuis cette branche, ce
+  # qui declenchait `pull_request: synchronize`. Meme commit, meme APK, deux
+  # fois huit minutes de machine.
+  #
+  # `push` suffit : il couvre chaque commit des branches listees, qu'une PR
+  # soit ouverte ou non. Le declencheur manuel reste pour les cas ponctuels.
   push:
     branches: [arena/01a09534-alanya, feature/vocal-attente-loop, feat/chip-appel-callstyle]
-  pull_request:
-    branches: [arena/01a09534-alanya, feature/vocal-attente-loop, feat/chip-appel-callstyle]
   workflow_dispatch:
+
+# Deux poussees rapprochees : la premiere construction ne sert deja plus a rien
+# des que la seconde part. On l'annule au lieu de la laisser finir.
+#
+# ⚠️ LA CLE EST LA BRANCHE, PAS LE COMMIT. Groupee par commit, chaque poussee
+# aurait son propre groupe et rien ne serait jamais annule.
+concurrency:
+  group: apk-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-android:

@@ -23,7 +23,23 @@ import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
 
 /// ⚠️ `encryptedSharedPreferences` RETIRÉ : Google a déprécié Jetpack Security
 /// et le greffon migre tout seul. Le garder ne produisait qu un avertissement.
-const _options = AndroidOptions();
+///
+/// 🔴 `resetOnError: false` — L'INVERSE DU CHOIX FAIT POUR LES JETONS, ET POUR
+/// LA RAISON EXACTEMENT INVERSE.
+///
+/// La valeur par défaut est `true` : à la moindre erreur de déchiffrement, le
+/// greffon VIDE le coffre et repart à neuf. Pour deux jetons, c'est la bonne
+/// réponse — ils se refabriquent en tapant son mot de passe.
+///
+/// ⚠️ ICI RIEN NE SE REFABRIQUE. Ce coffre porte l'identité Signal de cet
+/// appareil, ses pré-clés et la clé maîtresse de l'archive. Effacées, les
+/// conversations déjà reçues deviennent DÉFINITIVEMENT indéchiffrables, et
+/// le correspondant voit une identité changer sans comprendre pourquoi.
+///
+/// ⚠️ ET CE SERAIT SILENCIEUX. C'est ce qui rend le défaut grave : rien
+/// n'avertirait, ni ici ni en face. Mieux vaut une erreur qui remonte — le
+/// démarrage la rattrape et le chiffrement reste simplement indisponible.
+const _options = AndroidOptions(resetOnError: false);
 
 /// Les magasins que la bibliothèque Signal exige, adossés au coffre matériel.
 ///
