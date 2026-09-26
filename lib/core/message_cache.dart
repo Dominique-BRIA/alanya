@@ -47,7 +47,7 @@ class MessageCache {
        * Toute évolution future de ce cache passe désormais par `onUpgrade`, en
        * incrémentant `version`.
        */
-      version: 3,
+      version: 4,
       onUpgrade: (db, ancienne, nouvelle) async {
         if (ancienne < 2) await _creeTableTraductions(db);
         /*
@@ -63,6 +63,7 @@ class MessageCache {
         if (ancienne < 3) {
           await db.execute('ALTER TABLE messages ADD COLUMN mentions_json TEXT');
         }
+        if (ancienne < 4) await _creeTableMessagesDechiffres(db);
       },
       onCreate: (db, _) async {
         await db.execute('''
@@ -85,6 +86,7 @@ class MessageCache {
           'CREATE INDEX idx_messages_conv ON messages(conv_id, created_at)',
         );
         await _creeTableTraductions(db);
+        await _creeTableMessagesDechiffres(db);
       },
     );
     return _db!;
@@ -183,10 +185,89 @@ class MessageCache {
     await db.delete('traductions', where: 'message_id = ?', whereArgs: [messageId]);
   }
 
+  /*
+   * ═══ MESSAGES DÉCHIFFRÉS (E2EE) ═══
+   *
+   * 🔴 TABLE DÉDIÉE QUI SURVIT AUX RAFRAÎCHISSEMENTS.
+   * Le serveur ne stocke JAMAIS le texte clair d'un message chiffré de bout
+   * en bout : il renvoie `content: null`. Sans cette table, chaque ouverture
+   * de conversation ou appel à `_poll` écraserait le texte déchiffré local
+   * avec le `null` du serveur, transformant les bulles en « Message chiffré »
+   * illisible.
+   */
+  static Future<void> _creeTableMessagesDechiffres(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS messages_dechiffres (
+        message_id TEXT PRIMARY KEY,
+        conv_id TEXT NOT NULL,
+        texte TEXT NOT NULL,
+        cree_le TEXT NOT NULL
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_dechiffres_conv ON messages_dechiffres(conv_id)',
+    );
+  }
+
+  /// Retient le texte déchiffré d'un message chiffré de bout en bout.
+  static Future<void> sauvegarderTexteDechiffre(
+    String messageId,
+    String convId,
+    String texte,
+  ) async {
+    final db = await _database();
+    await db.insert(
+      'messages_dechiffres',
+      {
+        'message_id': messageId,
+        'conv_id': convId,
+        'texte': texte,
+        'cree_le': DateTime.now().toIso8601String(),
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+    // Met également à jour la colonne content dans messages si présente
+    await db.update(
+      'messages',
+      {'content': texte},
+      where: 'id = ?',
+      whereArgs: [messageId],
+    );
+  }
+
+  /// Les textes déchiffrés d'une conversation {messageId: texte}.
+  static Future<Map<String, String>> textesDechiffresDe(String convId) async {
+    final db = await _database();
+    final rows = await db.query(
+      'messages_dechiffres',
+      columns: ['message_id', 'texte'],
+      where: 'conv_id = ?',
+      whereArgs: [convId],
+    );
+    return {
+      for (final r in rows) r['message_id'] as String: r['texte'] as String,
+    };
+  }
+
+  /// Récupère le texte déchiffré d'un message précis.
+  static Future<String?> texteDechiffre(String messageId) async {
+    final db = await _database();
+    final rows = await db.query(
+      'messages_dechiffres',
+      columns: ['texte'],
+      where: 'message_id = ?',
+      whereArgs: [messageId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return rows.first['texte'] as String?;
+  }
+
   /// Sauvegarde (ou met à jour) une liste de messages pour une conversation.
   /// Remplace entièrement les messages existants de cette conversation.
   static Future<void> putConv(String convId, List<Message> messages) async {
     final db = await _database();
+    final dechiffres = await textesDechiffresDe(convId);
     final batch = db.batch();
 
     // Supprime les anciens messages de cette conversation.
@@ -196,15 +277,20 @@ class MessageCache {
       whereArgs: [convId],
     );
 
-    // Insère les nouveaux.
+    // Insère les nouveaux en préservant le texte déchiffré s'il existe.
     for (final m in messages) {
+      final clair = dechiffres[m.id];
+      final content = (m.content == null || m.content!.isEmpty)
+          ? clair ?? m.content
+          : m.content;
+
       batch.insert(
         'messages',
         {
           'id': m.id,
           'conv_id': convId,
           'sender_id': m.senderId,
-          'content': m.content,
+          'content': content,
           'type': m.type,
           'status': m.status,
           'reply_to_id': m.replyToId,
@@ -265,18 +351,41 @@ class MessageCache {
   static Future<void> remove(String messageId) async {
     final db = await _database();
     await db.delete('messages', where: 'id = ?', whereArgs: [messageId]);
+    await db.delete('messages_dechiffres', where: 'message_id = ?', whereArgs: [messageId]);
   }
 
   /// Récupère tous les messages d'une conversation (du plus ancien au plus récent).
   static Future<List<Message>> getConv(String convId) async {
     final db = await _database();
+    final dechiffres = await textesDechiffresDe(convId);
     final rows = await db.query(
       'messages',
       where: 'conv_id = ?',
       whereArgs: [convId],
       orderBy: 'created_at ASC',
     );
-    return rows.map(_rowToMessage).toList();
+    return rows.map((r) {
+      final msg = _rowToMessage(r);
+      final clair = dechiffres[msg.id];
+      if (clair != null && (msg.content == null || msg.content!.isEmpty)) {
+        return Message(
+          id: msg.id,
+          convId: msg.convId,
+          senderId: msg.senderId,
+          content: clair,
+          type: msg.type,
+          status: msg.status,
+          replyToId: msg.replyToId,
+          replyTo: msg.replyTo,
+          deletedAt: msg.deletedAt,
+          media: msg.media,
+          createdAt: msg.createdAt,
+          mentions: msg.mentions,
+          chiffre: true,
+        );
+      }
+      return msg;
+    }).toList();
   }
 
   /// Vide tout le cache (déconnexion).
@@ -286,6 +395,7 @@ class MessageCache {
     // Les traductions sont du contenu de messages : les laisser derrière
     // laisserait des bribes de conversations du compte précédent sur l'appareil.
     await db.delete('traductions');
+    await db.delete('messages_dechiffres');
   }
 
   // --- Sérialisation helpers ---

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'services/e2ee/e2ee_fournisseur.dart';
+import 'services/e2ee/e2ee_journal.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -73,6 +74,7 @@ void main() async {
   // lancement, l'APK installé ne contient pas les correctifs d'appel — et il
   // est inutile d'interpréter quoi que ce soit d'autre.
   traceAppel("build diagnostic appels — traces actives");
+  E2eeJournal.tracer = (ligne) => traceAppel('E2EE $ligne');
 
   if (!kIsWeb) {
     try {

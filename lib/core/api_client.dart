@@ -49,27 +49,87 @@ class _RequeteMultipartSuivie extends http.MultipartRequest {
 
 /// Client HTTP minimal vers le backend Alanya (Next.js).
 class ApiClient {
-  ApiClient({String? baseUrl}) : baseUrl = baseUrl ?? _defaultBaseUrl;
+  ApiClient({String? baseUrl, Duration? delaiReponse})
+      : baseUrl = baseUrl ?? _defaultBaseUrl,
+        delaiReponse = delaiReponse ?? delaiJson;
 
   final String baseUrl;
 
+  /// Plafond d'attente des requêtes JSON de CETTE instance.
+  ///
+  /// ⚠️ PARAMÉTRABLE POUR ÊTRE ÉPROUVABLE. Un test ne peut pas attendre trente
+  /// secondes pour vérifier qu'une attente est bornée : il raccourcit le délai
+  /// et mesure. Le défaut reste [delaiJson], le seul que l'application utilise.
+  final Duration delaiReponse;
+
   static String get _defaultBaseUrl => ServerConfig.apiBase;
+
+  /// Au-delà, une requête JSON est réputée perdue.
+  ///
+  /// 🔴 **SANS CETTE BORNE, UNE REQUÊTE QUI N'ABOUTIT PAS BLOQUE L'ÉCRAN POUR
+  /// TOUJOURS.** `package:http` n'applique AUCUN délai : une connexion TCP
+  /// acceptée mais jamais servie — relais qui avale les paquets, serveur figé,
+  /// changement de réseau en plein vol — laisse le `Future` en suspens
+  /// indéfiniment. L'écran de conversation, qui attend cette réponse pour
+  /// remplacer son cercle de chargement, tournait alors sans fin : c'est
+  /// exactement le symptôme « ça charge indéfiniment ».
+  ///
+  /// ⚠️ 30 s N'EST PAS UN DÉLAI DE PATIENCE, C'EST UNE BORNE DE DIAGNOSTIC. Une
+  /// requête JSON met quelques centaines de millisecondes ; trois secondes sont
+  /// déjà un incident. Trente laissent passer un réseau mobile lent sans
+  /// transformer une lenteur en panne, et rendent la main au bouton
+  /// « Réessayer » au lieu d'un cercle éternel.
+  static const delaiJson = Duration(seconds: 30);
+
+  /// Applique [delaiReponse] à une requête et traduit l'expiration en
+  /// [ApiException] — pour que tous les écrans qui lisent déjà `e.message`
+  /// l'affichent, au lieu de laisser une attente sans fin ni explication.
+  ///
+  /// ⚠️ LE CODE 408 EST SIGNIFICATIF : la session n'est PAS morte. Un délai
+  /// dépassé ne doit jamais faire croire à une déconnexion — voir
+  /// `sessionMorteApresEchec`, qui ne ferme la session que sur les codes du
+  /// serveur, jamais sur celui-ci.
+  ///
+  /// ⚠️ **LES ENVOIS DE MÉDIAS NE PASSENT PAS PAR ICI, ET C'EST VOULU.** Un
+  /// `uploadBytes` de 20 Mo sur un réseau mobile est LÉGITIMEMENT long : un
+  /// délai TOTAL y couperait des envois qui progressent. Leur borne, c'est la
+  /// progression elle-même — le magasin d'envois sait dire « bloqué » sur une
+  /// absence de progrès, ce qu'un délai fixe ne sait pas faire.
+  Future<T> _borne<T>(Future<T> requete, String methode, String path) {
+    return requete.timeout(
+      delaiReponse,
+      onTimeout: () => throw ApiException(
+        408,
+        "Le serveur n'a pas répondu en ${delaiReponse.inMilliseconds} ms "
+        "($methode $path).",
+        'DELAI_DEPASSE',
+      ),
+    );
+  }
 
   Future<Map<String, dynamic>> post(
     String path,
     Map<String, dynamic> body, {
     String? bearer,
   }) async {
-    final res = await http.post(
-      Uri.parse("$baseUrl$path"),
-      headers: _headers(bearer),
-      body: jsonEncode(body),
+    final res = await _borne(
+      http.post(
+        Uri.parse("$baseUrl$path"),
+        headers: _headers(bearer),
+        body: jsonEncode(body),
+      ),
+      "POST",
+      path,
     );
     return _decode(res);
   }
 
   Future<Map<String, dynamic>> get(String path, {String? bearer}) async {
-    final res = await http.get(Uri.parse("$baseUrl$path"), headers: _headers(bearer));
+    final res = await _borne(
+      http.get(Uri.parse("$baseUrl$path"), headers: _headers(bearer)),
+      "GET",
+      path,
+    );
     return _decode(res);
   }
 
@@ -78,10 +138,14 @@ class ApiClient {
     Map<String, dynamic> body, {
     String? bearer,
   }) async {
-    final res = await http.patch(
-      Uri.parse("$baseUrl$path"),
-      headers: _headers(bearer),
-      body: jsonEncode(body),
+    final res = await _borne(
+      http.patch(
+        Uri.parse("$baseUrl$path"),
+        headers: _headers(bearer),
+        body: jsonEncode(body),
+      ),
+      "PATCH",
+      path,
     );
     return _decode(res);
   }
@@ -96,20 +160,28 @@ class ApiClient {
     Map<String, dynamic> body, {
     String? bearer,
   }) async {
-    final res = await http.put(
-      Uri.parse("$baseUrl$path"),
-      headers: _headers(bearer),
-      body: jsonEncode(body),
+    final res = await _borne(
+      http.put(
+        Uri.parse("$baseUrl$path"),
+        headers: _headers(bearer),
+        body: jsonEncode(body),
+      ),
+      "PUT",
+      path,
     );
     return _decode(res);
   }
 
   Future<Map<String, dynamic>> delete(String path,
       {String? bearer, Map<String, dynamic>? body}) async {
-    final res = await http.delete(
-      Uri.parse("$baseUrl$path"),
-      headers: _headers(bearer),
-      body: body != null ? jsonEncode(body) : null,
+    final res = await _borne(
+      http.delete(
+        Uri.parse("$baseUrl$path"),
+        headers: _headers(bearer),
+        body: body != null ? jsonEncode(body) : null,
+      ),
+      "DELETE",
+      path,
     );
     return _decode(res);
   }

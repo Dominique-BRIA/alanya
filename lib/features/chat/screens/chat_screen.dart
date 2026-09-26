@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 
 import '../../../core/compression_image.dart';
 import '../../../core/connectivity_service.dart';
+import '../../../core/debug_overlay.dart';
 import '../../../core/memoire_langues.dart';
 import '../../../core/message_cache.dart';
 import '../../../core/messages_systeme.dart';
@@ -155,6 +156,27 @@ class _ChatScreenState extends State<ChatScreen>
   bool _loading = true;
   bool _sending = false;
 
+  /// Le chargement du fil a échoué ET il n'y a rien à montrer.
+  ///
+  /// 🔴 CE DRAPEAU EXISTE POUR REMPLACER UN CERCLE ÉTERNEL PAR UNE PHRASE. Sans
+  /// lui, un échec se rendait comme une conversation vide (`no_messages`) ou,
+  /// pire, comme un chargement qui n'en finit pas — deux mensonges dont
+  /// l'utilisateur ne pouvait rien tirer.
+  bool _echecChargement = false;
+
+  /// Plafond des attentes LOCALES (jeton, cache). Court à dessein : ces appels
+  /// répondent en microsecondes, et au-delà de quelques secondes ce n'est plus
+  /// de la lenteur mais un blocage de la plateforme.
+  static const _delaiLectureLocale = Duration(seconds: 5);
+
+  /// Une interrogation périodique est en vol.
+  ///
+  /// ⚠️ NÉCESSAIRE DEPUIS QUE LES REQUÊTES SONT BORNÉES : le minuteur appelle
+  /// `_poll` toutes les 3 s alors qu'une requête peut désormais rester 30 s en
+  /// attente. Sans ce verrou, dix requêtes identiques s'empilaient sur une
+  /// connexion déjà mauvaise — ce qui l'aggravait au lieu de la rattraper.
+  bool _pollEnCours = false;
+
   /// Barre de mise en forme dépliée par le bouton « A » du composeur.
   bool _formatBarOpen = false;
 
@@ -182,6 +204,23 @@ class _ChatScreenState extends State<ChatScreen>
     } catch (_) {
       return null;
     }
+  }
+
+  /// Identifiant du correspondant pour le chiffrement et les appels 1-to-1.
+  ///
+  /// Si absent des paramètres reçus au constructeur (ex. ouverture depuis une
+  /// recherche ou un contact existant), il se déduit du premier message reçu.
+  String? get _otherUserId {
+    if (widget.otherUserId != null && widget.otherUserId!.isNotEmpty) {
+      return widget.otherUserId;
+    }
+    final myId = _myId;
+    for (final m in _messages) {
+      if (m.senderId.isNotEmpty && m.senderId != myId) {
+        return m.senderId;
+      }
+    }
+    return null;
   }
 
   /// Noms des membres du GROUPE, lus sur le serveur à l'ouverture.
@@ -479,10 +518,11 @@ class _ChatScreenState extends State<ChatScreen>
   @override
   void initState() {
     super.initState();
-    _chiffrementActif = widget.e2ee;
-    // Le fil le retient aussi : sans ça, un écran ouvert sur un fil chiffré
-    // puis fermé sans relève oublierait l'état que le serveur lui avait dit.
-    context.e2ee?.fil.noteEtat(widget.convId, widget.e2ee);
+    _chiffrementActif = widget.e2ee ||
+        (context.e2ee?.fil.estChiffree(widget.convId) ?? false);
+    if (_chiffrementActif) {
+      context.e2ee?.fil.noteEtat(widget.convId, true);
+    }
     _lockPulse = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 900),
@@ -935,7 +975,18 @@ class _ChatScreenState extends State<ChatScreen>
     if (type == "message") {
       final data = e["message"] as Map<String, dynamic>?;
       if (data == null || data["convId"] != widget.convId) return;
-      final msg = Message.fromJson(data);
+      var msg = Message.fromJson(data);
+      if (msg.chiffre && (msg.content == null || msg.content!.isEmpty)) {
+        final dechiffre = _messages
+            .firstWhere(
+              (m) => m.id == msg.id && (m.content ?? '').isNotEmpty,
+              orElse: () => msg,
+            )
+            .content;
+        if (dechiffre != null && dechiffre.isNotEmpty) {
+          msg = _avecTexteDechiffre(msg, dechiffre);
+        }
+      }
       _cacheMsg(msg);
       final tempId = e["tempId"] as String?;
       setState(() {
@@ -945,6 +996,10 @@ class _ChatScreenState extends State<ChatScreen>
           _messages[idx] = msg;
         } else if (!_messages.any((m) => m.id == msg.id)) {
           _messages = [..._messages, msg];
+        }
+        if (msg.chiffre) {
+          _chiffrementActif = true;
+          context.e2ee?.fil.noteEtat(widget.convId, true);
         }
         // L'écho est la seule preuve que le message existe côté serveur : c'est
         // ici, et nulle part avant, que l'envoi cesse d'être « en cours ».
@@ -1221,34 +1276,105 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
+  /// Charge le fil : le cache d'abord (immédiat), le serveur ensuite.
+  ///
+  /// 🔴 **TOUT EST SOUS SURVEILLANCE, PROLOGUE COMPRIS — ET C'EST LE CŒUR DE CE
+  /// CORRECTIF.** Trois lectures précédaient le `try` : le jeton (canal de
+  /// plateforme du Keychain / Keystore), puis le cache SQLite. Une seule qui
+  /// lève — une ligne de cache illisible, un canal natif en erreur — partait en
+  /// exception NON CAPTURÉE, et `_loading` restait à `true` **pour toujours** :
+  /// un cercle qui tourne, sans message, sans bouton, sans trace. Le symptôme
+  /// exact rapporté (« quand j'ouvre une conversation, ça charge
+  /// indéfiniment »), sans qu'aucun des chemins visibles n'ait échoué.
+  ///
+  /// ⚠️ ET LES DEUX ATTENTES LOCALES SONT BORNÉES. Ni le canal natif du
+  /// stockage sécurisé ni l'ouverture de la base ne sont tenus de répondre : ce
+  /// sont eux aussi des appels de plateforme, et une attente sans borne y
+  /// produit le même cercle éternel qu'une requête réseau perdue. Le plafond
+  /// est court (5 s) parce que la réponse locale est en microsecondes dans le
+  /// cas normal — au-delà, ce n'est pas de la lenteur, c'est un blocage.
   Future<void> _load() async {
-    // _myId est désormais un getter (toujours à jour) — plus besoin de le figer ici.
-    _baseUrl = context.read<ApiClient>().baseUrl;
-    initMediaIntegration(_baseUrl);
-    _token = await context.read<TokenStorage>().accessToken;
-    final cached = await MessageCache.getConv(widget.convId);
-    if (cached.isNotEmpty && mounted) {
-      setState(() {
-        _messages = cached;
-        _rebuildCombined();
-        _loading = false;
-      });
-      for (final m in _messages) {
-        _cacheMsg(m);
-      }
-      _scrollToBottom(immediat: true);
-    }
+    // Il sert à DATER l'échec dans le journal : « 30000 ms » désigne le délai
+    // dépassé d'`ApiClient` (le serveur n'a pas répondu), un temps court une
+    // erreur immédiate (cache illisible, jeton absent, décodage).
+    final montre = Stopwatch()..start();
     try {
+      // _myId est désormais un getter (toujours à jour) — plus besoin de le figer ici.
+      _baseUrl = context.read<ApiClient>().baseUrl;
+      initMediaIntegration(_baseUrl);
+      /*
+       * ⚠️ `onTimeout: () => null` ET NON UNE EXCEPTION : sans jeton, la
+       * conversation reste parfaitement lisible (les médias protégés ne se
+       * téléchargent pas, c'est tout). Faire échouer ici tout le chargement
+       * pour un jeton en retard serait pire que le mal.
+       */
+      _token = await context.read<TokenStorage>().accessToken.timeout(
+            _delaiLectureLocale,
+            onTimeout: () {
+              traceAppel('MESSAGES jeton illisible en '
+                  '${_delaiLectureLocale.inSeconds} s');
+              return null;
+            },
+          );
+
+      final cached = await _cacheDeLaConversation();
+      if (cached.isNotEmpty && mounted) {
+        setState(() {
+          _messages = cached;
+          _rebuildCombined();
+          _loading = false;
+          _echecChargement = false;
+        });
+        for (final m in _messages) {
+          _cacheMsg(m);
+        }
+        _scrollToBottom(immediat: true);
+      }
+
       final repo = context.read<ChatRepository>();
       final msgs = await repo.getMessages(widget.convId);
       if (!mounted) return;
-      final reversed = msgs.reversed.toList();
-      await MessageCache.putConv(widget.convId, reversed);
+      final dechiffres = await MessageCache.textesDechiffresDe(widget.convId);
+      final reversed = msgs.reversed.map((m) {
+        final clair = dechiffres[m.id] ??
+            _messages
+                .firstWhere(
+                  (x) => x.id == m.id && (x.content ?? '').isNotEmpty,
+                  orElse: () => m,
+                )
+                .content;
+        if (m.chiffre &&
+            (m.content == null || m.content!.isEmpty) &&
+            clair != null &&
+            clair.isNotEmpty) {
+          return _avecTexteDechiffre(m, clair);
+        }
+        return m;
+      }).toList();
+      if (reversed.any((m) => m.chiffre)) {
+        _chiffrementActif = true;
+        context.e2ee?.fil.noteEtat(widget.convId, true);
+      }
       setState(() {
         _messages = reversed;
         _rebuildCombined();
         _loading = false;
+        _echecChargement = false;
       });
+      /*
+       * 🐛 LE CACHE S'ÉCRIT APRÈS L'AFFICHAGE, PLUS AVANT (26/09/2026).
+       *
+       * Il était attendu avant le `setState` : une écriture disque qui échoue —
+       * base pleine, verrou — faisait donc basculer le chargement en échec
+       * ALORS QUE LES MESSAGES ÉTAIENT ARRIVÉS, et la conversation s'affichait
+       * comme vide. Le cache est une optimisation : son échec ne doit jamais
+       * coûter un message reçu.
+       */
+      try {
+        await MessageCache.putConv(widget.convId, reversed);
+      } catch (e) {
+        traceAppel("MESSAGES cache non écrit : $e");
+      }
       for (final m in _messages) {
         _cacheMsg(m);
       }
@@ -1258,11 +1384,105 @@ class _ChatScreenState extends State<ChatScreen>
       // Les lignes chiffrées arrivent SANS contenu : on relève les enveloppes
       // pour remplir les bulles — voir [_releverEnveloppes].
       unawaited(_releverEnveloppes());
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
+    } catch (e) {
+      if (!mounted) return;
+      /*
+       * 🔴 ON CESSE D'ATTENDRE, ET ON LE DIT. L'écran d'erreur ne remplace la
+       * conversation QUE s'il n'y a rien à montrer : un fil déjà rempli par le
+       * cache ou par l'arrivée temps réel reste lisible, et l'échec du
+       * rafraîchissement n'a pas à effacer ce qu'on a sous les yeux.
+       */
+      setState(() {
+        _loading = false;
+        _echecChargement = _messages.isEmpty;
+      });
+      /*
+       * ⚠️ LA TRACE EST LE SEUL MOYEN DE SAVOIR *POURQUOI*, et c'est elle qui
+       * manquait. Le message porte le temps écoulé : « 30000 ms » désigne le
+       * délai dépassé d'`ApiClient` (le serveur n'a pas répondu), un temps
+       * court une erreur immédiate (cache, jeton, décodage). Sans elle, les
+       * deux se ressemblent — un cercle qui tourne.
+       */
+      traceAppel('MESSAGES ${widget.convId} — chargement en échec après '
+          '${montre.elapsedMilliseconds} ms : $e');
+    } finally {
+      montre.stop();
     }
     // Charge aussi les appels de cette conversation pour les afficher façon WhatsApp
     _loadCalls();
+  }
+
+  /// Le cache local du fil, ou une liste vide si on ne peut pas s'y fier.
+  ///
+  /// 🔴 **UN CACHE ILLISIBLE SE PURGE, IL NE CONDAMNE PAS L'ÉCRAN.** Une ligne
+  /// abîmée — JSON tronqué, date illisible, colonne écrite par une version
+  /// antérieure — faisait lever la conversion à CHAQUE ouverture, donc à vie :
+  /// la conversation était définitivement inaccessible, et rien ne le disait.
+  /// En vidant la table du fil, on rend le prochain chargement capable de
+  /// repartir du serveur, qui est la seule source de vérité. Le cache n'est
+  /// jamais qu'une avance d'affichage.
+  /// ⚠️ ON NE PURGE QUE CE QUI NE PEUT PAS GUÉRIR. Un DÉLAI dépassé n'est pas
+  /// une preuve d'abîme : une base simplement lente à s'ouvrir — démarrage à
+  /// froid, stockage saturé — rendrait un cache parfaitement valide à jeter, et
+  /// la conversation se retéléchargerait pour rien. Une ERREUR DE LECTURE, elle,
+  /// ne guérira pas : la ligne fautive est relue à chaque ouverture.
+  Future<List<Message>> _cacheDeLaConversation() async {
+    try {
+      return await MessageCache.getConv(widget.convId)
+          .timeout(_delaiLectureLocale);
+    } on TimeoutException catch (e) {
+      traceAppel('MESSAGES cache lent (> ${_delaiLectureLocale.inSeconds} s), '
+          'non purgé : $e');
+      return const [];
+    } catch (e) {
+      traceAppel("MESSAGES cache illisible, purgé : $e");
+      try {
+        await MessageCache
+            .putConv(widget.convId, const [])
+            .timeout(_delaiLectureLocale);
+      } catch (_) {
+        // La base elle-même ne répond pas : le serveur reste la voie de secours.
+      }
+      return const [];
+    }
+  }
+
+  /// Relance le chargement depuis l'écran d'échec.
+  void _reessayerChargement() {
+    if (_loading) return;
+    setState(() {
+      _loading = true;
+      _echecChargement = false;
+    });
+    _load();
+  }
+
+  /// L'écran d'échec du fil : une phrase, un bouton, aucune attente muette.
+  Widget _echecDeChargement() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.cloud_off_outlined, size: 46, color: _mutedIcon),
+            const SizedBox(height: 14),
+            Text(
+              tr(context, 'hist_load_error'),
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 14, color: _muted),
+            ),
+            const SizedBox(height: 18),
+            OutlinedButton.icon(
+              onPressed: _reessayerChargement,
+              icon: const Icon(Icons.refresh, size: 18),
+              label: Text(tr(context, 'retry')),
+              style: OutlinedButton.styleFrom(foregroundColor: _accent),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   // Scroll infini : proche du haut → charge les messages plus anciens.
@@ -1292,7 +1512,17 @@ class _ChatScreenState extends State<ChatScreen>
       if (older.isEmpty) {
         _hasMoreOlder = false;
       } else {
-        final newMsgs = older.reversed.toList();
+        final dechiffres = await MessageCache.textesDechiffresDe(widget.convId);
+        final newMsgs = older.reversed.map((m) {
+          final clair = dechiffres[m.id];
+          if (m.chiffre &&
+              (m.content == null || m.content!.isEmpty) &&
+              clair != null &&
+              clair.isNotEmpty) {
+            return _avecTexteDechiffre(m, clair);
+          }
+          return m;
+        }).toList();
         final before =
             _scrollCtrl.hasClients ? _scrollCtrl.position.maxScrollExtent : 0.0;
         _loadedOlder = true;
@@ -1318,21 +1548,50 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Future<void> _poll() async {
-    if (!mounted || _loading) return;
+    if (!mounted || _loading || _pollEnCours) return;
     // Ne pas écraser l'historique chargé via le scroll infini.
     if (_loadingOlder || _loadedOlder) return;
     if (context.read<RealtimeClient>().connected) return;
+    // Posé AVANT le premier `await` : c'est le seul endroit d'où l'on sait
+    // qu'une requête est déjà partie (voir [_pollEnCours]).
+    _pollEnCours = true;
     try {
       final repo = context.read<ChatRepository>();
-      final latest = (await repo.getMessages(widget.convId)).reversed.toList();
+      final dechiffres = await MessageCache.textesDechiffresDe(widget.convId);
+      final rawLatest =
+          (await repo.getMessages(widget.convId)).reversed.toList();
+      final latest = rawLatest.map((m) {
+        final clair = dechiffres[m.id] ??
+            _messages
+                .firstWhere(
+                  (x) => x.id == m.id && (x.content ?? '').isNotEmpty,
+                  orElse: () => m,
+                )
+                .content;
+        if (m.chiffre &&
+            (m.content == null || m.content!.isEmpty) &&
+            clair != null &&
+            clair.isNotEmpty) {
+          return _avecTexteDechiffre(m, clair);
+        }
+        return m;
+      }).toList();
       if (!mounted) return;
       if (_signature(latest) == _signature(_messages)) return;
       final hadMore = latest.length > _messages.length;
       final atBottom = !_scrollCtrl.hasClients ||
           _scrollCtrl.position.pixels >=
               _scrollCtrl.position.maxScrollExtent - 60;
+      if (latest.any((m) => m.chiffre)) {
+        _chiffrementActif = true;
+        context.e2ee?.fil.noteEtat(widget.convId, true);
+      }
       setState(() {
         _messages = latest;
+        // Le fil vient de répondre : l'échec précédent est levé. Sans cette
+        // ligne, un chargement initial raté laissait son écran d'erreur en
+        // travers du minuteur qui, lui, finit par réussir.
+        _echecChargement = false;
         _rebuildCombined();
       });
       for (final m in latest) {
@@ -1340,7 +1599,10 @@ class _ChatScreenState extends State<ChatScreen>
       }
       if (hadMore) repo.markRead(widget.convId);
       if (hadMore && atBottom) _scrollToBottom();
-    } catch (_) {}
+    } catch (_) {
+    } finally {
+      _pollEnCours = false;
+    }
   }
 
   String _signature(List<Message> msgs) =>
@@ -1751,6 +2013,14 @@ class _ChatScreenState extends State<ChatScreen>
     try {
       final releve = await pile.fil.relever();
       if (!mounted) return;
+      // 🔴 SAUVEGARDE DE TOUTES LES ENVELOPPES REÇUES DANS LE CACHE LOCAL.
+      // Une enveloppe relevée est acquittée et supprimée du serveur :
+      // il faut impérativement enregistrer TOUS les messages déchiffrés,
+      // y compris ceux d'autres conversations, sinon ils sont perdus à jamais.
+      for (final clair in releve.messages) {
+        await MessageCache.sauvegarderTexteDechiffre(
+            clair.id, clair.convId, clair.texte);
+      }
       final miennes = releve.messages
           .where((m) => m.convId == widget.convId)
           .toList();
@@ -1866,6 +2136,8 @@ class _ChatScreenState extends State<ChatScreen>
           createdAt: DateTime.now(),
           chiffre: true);
       _cacheMsg(msg);
+      await MessageCache.sauvegarderTexteDechiffre(
+          messageId, widget.convId, text);
       _inputCtrl.clear();
       _mentionsEnCours.clear();
       setState(() {
@@ -1875,10 +2147,16 @@ class _ChatScreenState extends State<ChatScreen>
       });
       _scrollToBottom();
     } on E2eeImpossible catch (e) {
+      traceAppel("MESSAGES chiffrement impossible : $e");
       if (mounted) showAppSnackBar(e.message);
-    } catch (_) {
+    } on ApiException catch (e) {
+      traceAppel(
+          "MESSAGES erreur API envoi chiffré ${e.statusCode} : ${e.message}");
+      if (mounted) showAppSnackBar(e.message);
+    } catch (e) {
+      traceAppel("MESSAGES erreur envoi chiffré : $e");
       if (mounted) {
-        showAppSnackBar("Le message chiffré n'a pas pu partir.");
+        showAppSnackBar("Le message chiffré n'a pas pu partir : $e");
       }
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -1898,10 +2176,11 @@ class _ChatScreenState extends State<ChatScreen>
     // modification — une retouche partirait lisible par le serveur, qui
     // n'aurait jamais dû lire la première version.
     final pile = context.e2ee;
+    final pair = _otherUserId;
     final enChiffre = _chiffrementActif &&
         pile != null &&
         !widget.isGroup &&
-        widget.otherUserId != null;
+        pair != null;
     // Mode édition : on modifie le message au lieu d'en envoyer un nouveau.
     if (_editing != null) {
       if (enChiffre) {
@@ -1915,7 +2194,7 @@ class _ChatScreenState extends State<ChatScreen>
     if (enChiffre) {
       // `enChiffre` dit déjà que `pile` n'est pas nulle — le `!` ne fait que
       // le répéter au compilateur, qui ne voit pas à travers un booléen.
-      await _sendChiffre(text, pile!, widget.otherUserId!);
+      await _sendChiffre(text, pile!, pair!);
       return;
     }
     _typingDebounce?.cancel();
@@ -3785,7 +4064,7 @@ class _ChatScreenState extends State<ChatScreen>
   /// « l'état du chiffrement » serait une place gâchée.
   Future<void> _ouvrirChiffrement() async {
     final pile = context.e2ee;
-    final pair = widget.otherUserId;
+    final pair = _otherUserId;
     /*
      * ⚠️ SANS CORRESPONDANT IDENTIFIÉ, RIEN À FAIRE. Un fil sans `otherUserId`
      * est un groupe ou une conversation incomplète : le bouton est déjà masqué
@@ -3796,9 +4075,17 @@ class _ChatScreenState extends State<ChatScreen>
     if (!_chiffrementActif) {
       try {
         await pile.fil.activer(widget.convId);
-        if (mounted) setState(() => _chiffrementActif = true);
-      } catch (_) {
-        if (mounted) showAppSnackBar("Le chiffrement n'a pas pu être activé.");
+        if (mounted) {
+          setState(() => _chiffrementActif = true);
+          showAppSnackBar("Chiffrement activé de bout en bout.");
+        }
+      } catch (e) {
+        traceAppel("MESSAGES activation chiffrement échouée : $e");
+        if (mounted) {
+          showAppSnackBar(e is ApiException
+              ? e.message
+              : "Le chiffrement n'a pas pu être activé.");
+        }
       }
       return;
     }
@@ -4232,8 +4519,18 @@ class _ChatScreenState extends State<ChatScreen>
           Expanded(
               child: _loading
                   ? Center(child: CircularProgressIndicator(color: _accent))
-                  : _combined.isEmpty
-                      ? Center(child: Text(tr(context, 'no_messages')))
+                  : (_echecChargement && _combined.isEmpty)
+                      // L'échec se DIT. Un fil qu'on n'a pas pu charger et un
+                      // fil vide ne se ressemblent pas, et c'est au premier que
+                      // l'utilisateur doit pouvoir répondre « Réessayer ».
+                      //
+                      // ⚠️ LE DOUBLET `&& _combined.isEmpty` N'EST PAS DÉCORATIF :
+                      // un message peut arriver pendant l'échec (temps réel,
+                      // minuteur). Le fil a alors quelque chose à montrer, et
+                      // l'écran d'erreur s'efface tout seul devant lui.
+                      ? _echecDeChargement()
+                      : _combined.isEmpty
+                          ? Center(child: Text(tr(context, 'no_messages')))
                       // 🔴 **LISTE ANCRÉE EN BAS** (`reverse: true`), corrigé le
                       // 17/08/2026 sur preuve de `logcat`.
                       //

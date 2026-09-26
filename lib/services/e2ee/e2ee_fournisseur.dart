@@ -15,6 +15,7 @@ import 'package:provider/provider.dart';
 import '../../core/authed_api.dart';
 import 'e2ee_coffre.dart';
 import 'e2ee_fil.dart';
+import 'e2ee_journal.dart';
 import 'e2ee_service.dart';
 
 /// Construit la pile de chiffrement pour un compte.
@@ -85,10 +86,10 @@ class PileE2ee {
       fil.monDeviceId = id;
       await service.publierMesCles(deviceId: id);
       _publie = true;
-    } catch (_) {
-      // Silencieux ici, mais pas invisible : sans clés publiées, l'écran de
-      // conversation dira « aucun appareil chiffré chez ce correspondant ».
-      // Et pas définitif : la reconnexion réessaiera (voir `main.dart`).
+    } catch (e) {
+      E2eeJournal.note('échec démarrage pile E2EE: $e');
+      // Sans clés publiées, l'écran de conversation dira « aucun appareil
+      // chiffré chez ce correspondant ». La reconnexion réessaiera.
     } finally {
       _enCours = false;
     }
