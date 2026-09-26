@@ -12,6 +12,7 @@ import '../auth_repository.dart';
 import 'forgot_password_screen.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../core/alanya_id_formatter.dart';
+import '../../../core/erreur_lisible.dart';
 
 /// Connexion par email OU numéro public (6 ou 8 chiffres) + mot de passe.
 class LoginScreen extends StatefulWidget {
@@ -74,8 +75,8 @@ class _LoginScreenState extends State<LoginScreen> {
       Navigator.of(context).popUntil((r) => r.isFirst);
     } on ApiException catch (e) {
       showAppSnackBar(e.message);
-    } catch (_) {
-      showAppSnackBar(tr(context, 'server_unreachable'));
+    } catch (e) {
+      showAppSnackBar(messageDErreur(context, e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }

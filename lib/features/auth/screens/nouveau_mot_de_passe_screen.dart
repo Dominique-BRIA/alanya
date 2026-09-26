@@ -8,6 +8,7 @@ import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../../../widgets/motif_background.dart';
 import '../auth_repository.dart';
+import '../../../core/erreur_lisible.dart';
 
 /// SECOND écran de la reprise par code de récupération : le nouveau mot de
 /// passe, saisi deux fois.
@@ -98,8 +99,8 @@ class _NouveauMotDePasseScreenState extends State<NouveauMotDePasseScreen> {
       Navigator.of(context).popUntil((route) => route.isFirst);
     } on ApiException catch (e) {
       _onError(e.message);
-    } catch (_) {
-      _onError(tr(context, 'server_unreachable'));
+    } catch (e) {
+      _onError(messageDErreur(context, e));
     }
   }
 

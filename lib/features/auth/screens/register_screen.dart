@@ -9,6 +9,7 @@ import '../../../widgets/back_app_bar.dart';
 import '../auth_repository.dart';
 import 'otp_screen.dart';
 import 'setup_screen.dart';
+import '../../../core/erreur_lisible.dart';
 
 /// Étape 1 : saisie de l'email pour recevoir le code de confirmation.
 class RegisterScreen extends StatefulWidget {
@@ -41,8 +42,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
       );
     } on ApiException catch (e) {
       showAppSnackBar(e.message);
-    } catch (_) {
-      showAppSnackBar(tr(context, 'server_unreachable'));
+    } catch (e) {
+      showAppSnackBar(messageDErreur(context, e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -98,8 +99,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
       );
     } on ApiException catch (e) {
       showAppSnackBar(e.message);
-    } catch (_) {
-      showAppSnackBar(tr(context, 'server_unreachable'));
+    } catch (e) {
+      showAppSnackBar(messageDErreur(context, e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }

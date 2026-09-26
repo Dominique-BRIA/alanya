@@ -12,6 +12,7 @@ class AppLocalizations {
   String get(String key) => _localizedValues[languageCode]?[key] ?? _localizedValues['fr']?[key] ?? key;
   static const _localizedValues = <String, Map<String, String>>{
 'fr': {
+'unexpected_error': 'Une erreur inattendue est survenue.',
 'exp_titre': 'Exportation des médias',
 'exp_sub': 'Rassemblez vos photos, vidéos, vocaux et documents reçus dans une seule archive.',
 'exp_etape_disc': 'Quelles discussions ?',
@@ -1197,6 +1198,7 @@ class AppLocalizations {
 'ivr_complaint_service': 'Service plainte',
 },
 'en': {
+'unexpected_error': 'An unexpected error occurred.',
 'exp_titre': 'Media export',
 'exp_sub': 'Gather the photos, videos, voice notes and documents you received into a single archive.',
 'exp_etape_disc': 'Which chats?',
@@ -2382,6 +2384,7 @@ class AppLocalizations {
 'ivr_complaint_service': 'Complaint service',
 },
 'es': {
+'unexpected_error': 'Se ha producido un error inesperado.',
 'exp_titre': 'Exportación de medios',
 'exp_sub': 'Reúna las fotos, vídeos, notas de voz y documentos recibidos en un único archivo.',
 'exp_etape_disc': '¿Qué chats?',
@@ -3567,6 +3570,7 @@ class AppLocalizations {
 'ivr_complaint_service': 'Servicio de reclamaciones',
 },
 'de': {
+'unexpected_error': 'Ein unerwarteter Fehler ist aufgetreten.',
 'exp_titre': 'Medienexport',
 'exp_sub': 'Fassen Sie empfangene Fotos, Videos, Sprachnachrichten und Dokumente in einem Archiv zusammen.',
 'exp_etape_disc': 'Welche Chats?',
@@ -4752,6 +4756,7 @@ class AppLocalizations {
 'ivr_complaint_service': 'Beschwerdedienst',
 },
 'pt': {
+'unexpected_error': 'Ocorreu um erro inesperado.',
 'exp_titre': 'Exportação de media',
 'exp_sub': 'Reúna as fotos, vídeos, mensagens de voz e documentos recebidos num único arquivo.',
 'exp_etape_disc': 'Que conversas?',
@@ -5937,6 +5942,7 @@ class AppLocalizations {
 'ivr_complaint_service': 'Serviço de reclamações',
 },
 'ru': {
+'unexpected_error': 'Произошла непредвиденная ошибка.',
 'exp_titre': 'Экспорт медиа',
 'exp_sub': 'Соберите полученные фото, видео, голосовые и документы в один архив.',
 'exp_etape_disc': 'Какие чаты?',
@@ -7122,6 +7128,7 @@ class AppLocalizations {
 'ivr_complaint_service': 'Служба жалоб',
 },
 'zh': {
+'unexpected_error': '发生意外错误。',
 'exp_titre': '媒体导出',
 'exp_sub': '把收到的照片、视频、语音和文档整理成一个压缩包。',
 'exp_etape_disc': '哪些聊天？',
@@ -8307,6 +8314,7 @@ class AppLocalizations {
 'ivr_complaint_service': '投诉服务',
 },
 'sv': {
+'unexpected_error': 'Ett oväntat fel inträffade.',
 'exp_titre': 'Medieexport',
 'exp_sub': 'Samla mottagna foton, videor, röstmeddelanden och dokument i ett enda arkiv.',
 'exp_etape_disc': 'Vilka chattar?',
@@ -9492,6 +9500,7 @@ class AppLocalizations {
 'ivr_complaint_service': 'Klagomålstjänst',
 },
 'no': {
+'unexpected_error': 'Det oppstod en uventet feil.',
 'exp_titre': 'Medieeksport',
 'exp_sub': 'Samle mottatte bilder, videoer, talemeldinger og dokumenter i ett arkiv.',
 'exp_etape_disc': 'Hvilke samtaler?',

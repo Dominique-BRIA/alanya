@@ -9,6 +9,7 @@ import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../auth_repository.dart';
 import 'setup_screen.dart';
+import '../../../core/erreur_lisible.dart';
 
 /// Étape 2 : saisie du code OTP à 6 chiffres reçu par email.
 class OtpScreen extends StatefulWidget {
@@ -42,8 +43,8 @@ class _OtpScreenState extends State<OtpScreen> {
       );
     } on ApiException catch (e) {
       showAppSnackBar(e.message);
-    } catch (_) {
-      showAppSnackBar(tr(context, 'server_unreachable'));
+    } catch (e) {
+      showAppSnackBar(messageDErreur(context, e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
