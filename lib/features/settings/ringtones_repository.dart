@@ -44,6 +44,10 @@ class RingtonesRepository {
       nomFichier,
       typeMime,
       onProgress: onProgress,
+      // ⚠️ BUCKET OUVERT : une sonnerie est jouée à chaque appel, et ne
+      // révèle rien — c'est un son choisi, pas une conversation. Adresse
+      // fixe, mise en cache, plus de retéléchargement à chaque fois.
+      usage: UsageMedia.sonnerie,
     );
     final data = await _api.post("/api/ringtones", {
       // L'URL est envoyée TELLE QUELLE : le serveur exige la forme

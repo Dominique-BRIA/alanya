@@ -14,10 +14,22 @@ class AccueilRepondeur {
     required this.mediaId,
     required this.url,
     required this.absence,
+    this.urlPublique,
   });
 
   final String mediaId;
+
+  /// LA VOIE SÛRE : `/api/media/<id>`, authentifiée, toujours fonctionnelle.
   final String url;
+
+  /// LA VOIE RAPIDE : l'adresse fixe du bucket ouvert, ou `null`.
+  ///
+  /// Aucun jeton, aucune signature, mise en cache — un accueil déjà entendu ne
+  /// se retélécharge pas.
+  ///
+  /// ⚠️ TOUJOURS AVEC UN REPLI SUR [url]. Elle est absente quand le bucket
+  /// ouvert n'est pas configuré, et peut échouer quand il l'est.
+  final String? urlPublique;
 
   /// Vrai quand le correspondant a posé une ABSENCE, et non seulement allumé
   /// son répondeur. La nuance se dit à l'écran : « absent » plutôt que « n'a
@@ -33,6 +45,7 @@ class AccueilRepondeur {
     return AccueilRepondeur(
       mediaId: id,
       url: url,
+      urlPublique: media["urlPublique"]?.toString(),
       absence: j["absence"] == true,
     );
   }

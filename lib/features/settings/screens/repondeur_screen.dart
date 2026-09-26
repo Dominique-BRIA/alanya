@@ -259,6 +259,12 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
         "accueil-${DateTime.now().millisecondsSinceEpoch}.m4a",
         "audio/mp4",
         durationMs: capture.durationMs,
+        // ⚠️ BUCKET OUVERT, ET C'EST VOULU : cet enregistrement est destiné à
+        // être entendu par QUICONQUE appelle. Son adresse devient fixe, donc
+        // mise en cache — l'accueil peut partir à l'instant où la sonnerie
+        // s'arrête. Ne JAMAIS recopier cette ligne là où l'on téléverse un
+        // message LAISSÉ par quelqu'un : celui-là est privé.
+        usage: UsageMedia.accueil,
       );
       return depot.ajouterAccueil(
         mediaId: media.id,

@@ -2067,10 +2067,16 @@ class CallController extends ChangeNotifier {
        * clignote et l'on n'a rien entendu. Un plafond, sinon un réseau lent
        * ferait sonner une minute dans le vide pour un appel sans issue.
        */
-      final urlDirecte = (e["accueil"] is Map)
-          ? (e["accueil"] as Map)["url"] as String?
-          : null;
-      PrechargementAccueil.instance.demarrer(callId, urlDirecte: urlDirecte);
+      final accueilTrame = e["accueil"] is Map ? e["accueil"] as Map : null;
+      final urlDirecte = accueilTrame?["url"] as String?;
+      // L'adresse fixe du bucket ouvert, quand l'accueil y est : le
+      // préchargement l'essaie d'abord, et retombe sur `urlDirecte` sinon.
+      final urlPublique = accueilTrame?["urlPublique"] as String?;
+      PrechargementAccueil.instance.demarrer(
+        callId,
+        urlDirecte: urlDirecte,
+        urlPubliqueDirecte: urlPublique,
+      );
 
       final debut = DateTime.now();
       final localAbsence = await PrechargementAccueil.instance
