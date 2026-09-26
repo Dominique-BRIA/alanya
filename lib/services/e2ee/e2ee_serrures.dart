@@ -250,3 +250,23 @@ String tirerCleRecuperation() =>
 /// qui n'a rien à voir avec la sécurité.
 String normaliserCleRecuperation(String saisie) =>
     saisie.trim().toLowerCase().split(RegExp(r'\s+')).join(' ');
+
+/* ══════════════ LE CONTENU DE L'ARCHIVE ══════════════ */
+
+/// Un IV neuf, à chaque bloc.
+///
+/// 🔴 JAMAIS RÉUTILISÉ. Deux blocs chiffrés avec le même IV et la même clé
+/// laissent AES-GCM s'effondrer : leur différence révèle la différence des
+/// clairs. C'est la faute la plus classique de ce mode, et la plus grave.
+Uint8List ivNeuf() => _auHasard(12);
+
+/// Chiffre un bloc d'archive avec la clé maîtresse.
+Uint8List chiffrerAvec(Uint8List maitresse, Uint8List iv, Uint8List clair) =>
+    _gcm(maitresse, iv, clair, true);
+
+/// Déchiffre un bloc d'archive.
+///
+/// ⚠️ LÈVE SI LE BLOC A ÉTÉ TOUCHÉ : AES-GCM authentifie. L'appelant compte le
+/// bloc comme illisible plutôt que de rendre des octets douteux.
+Uint8List dechiffrerAvec(Uint8List maitresse, Uint8List iv, Uint8List chiffre) =>
+    _gcm(maitresse, iv, chiffre, false);

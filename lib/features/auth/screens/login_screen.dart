@@ -1,3 +1,5 @@
+import 'dart:async';
+import '../../../services/e2ee/e2ee_fournisseur.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../l10n/app_localizations.dart';
@@ -49,6 +51,23 @@ class _LoginScreenState extends State<LoginScreen> {
           );
       if (!mounted) return;
       await context.read<AuthController>().completeLogin(session);
+
+      /*
+       * 🔴 LE MOT DE PASSE EST DÉJÀ LÀ — l utilisateur vient de le taper. C est
+       * le seul moment du cycle de vie où ce secret existe sans qu on ait à le
+       * redemander, et c est ce qui permet d ouvrir la sauvegarde sans rien
+       * demander de plus.
+       *
+       * ⚠️ IL N EST GARDÉ NULLE PART : il traverse cet appel et en sort.
+       *
+       * ⚠️ SANS ATTENDRE, ET SANS JAMAIS BLOQUER : empêcher quelqu un d entrer
+       * parce qu une sauvegarde a échoué serait bien pire que l absence
+       * d historique.
+       */
+      unawaited(
+        context.e2ee?.sauvegarde.aLaConnexion(_passwordCtrl.text) ??
+            Future<int>.value(0),
+      );
       if (!mounted) return;
       Navigator.of(context).popUntil((r) => r.isFirst);
     } on ApiException catch (e) {

@@ -15,6 +15,7 @@ import 'package:provider/provider.dart';
 import '../../core/authed_api.dart';
 import 'e2ee_coffre.dart';
 import 'e2ee_fil.dart';
+import 'e2ee_sauvegarde.dart';
 import 'e2ee_service.dart';
 
 /// Construit la pile de chiffrement pour un compte.
@@ -23,11 +24,16 @@ import 'e2ee_service.dart';
 /// l'identifiant : deux comptes sur le même téléphone ne doivent jamais partager
 /// une identité Signal, sinon les messages de l'un s'ouvriraient chez l'autre.
 class PileE2ee {
-  PileE2ee._(this.coffre, this.service, this.fil);
+  PileE2ee._(this.coffre, this.service, this.fil, this.sauvegarde);
 
   final CoffreE2ee coffre;
   final E2eeService service;
   final E2eeFil fil;
+
+  /// ⚠️ ACTIVÉE PAR DÉFAUT à la connexion, comme sur le web : perdre son
+  /// historique en changeant d appareil est un piège que personne ne voit
+  /// venir. Un refus, lui, tient — il vit sur le compte.
+  final E2eeSauvegarde sauvegarde;
 
 
   /// Prépare cet appareil et publie ses clés publiques.
@@ -87,7 +93,7 @@ class PileE2ee {
 
     final coffre = CoffreE2ee(compteId);
     final service = E2eeService(coffre, appel);
-    return PileE2ee._(coffre, service, E2eeFil(service, appel));
+    return PileE2ee._(coffre, service, E2eeFil(service, appel), E2eeSauvegarde(appel));
   }
 }
 
