@@ -17,6 +17,7 @@ import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
 import 'package:pointycastle/digests/sha512.dart';
 
 import 'e2ee_coffre.dart';
+import 'e2ee_journal.dart';
 
 /// Combien de pré-clés à usage unique on publie d'un coup.
 ///
@@ -97,6 +98,7 @@ class E2eeService {
       // ℹ️ RIEN DE NEUF : le serveur tient déjà ce stock à l'identique, et
       // le lui renvoyer en entier à chaque démarrage accumulerait des
       // doublons s'il ajoute au lieu de remplacer.
+      E2eeJournal.note('clés à jour — rien à republier (appareil $deviceId)');
       return;
     }
 
@@ -131,6 +133,8 @@ class E2eeService {
           .toList(),
     });
     await coffre.noterPublication();
+    E2eeJournal.note('clés publiées — appareil $deviceId, '
+        '${aEnvoyer.length} pré-clé(s) unique(s)');
   }
 
   /* ══════════════ OUVRIR UNE SESSION ══════════════ */
@@ -141,11 +145,23 @@ class E2eeService {
   /// liasse installe une session, ce que la vérification du code n'a pas à
   /// faire — elle lit, elle ne négocie pas.
   Future<List<int>> appareilsDe(String pairId) async {
-    final r = await api('GET', '/api/e2ee/cles/$pairId', null);
-    final paquets = ((r['appareils'] as List?) ?? const [])
-        .whereType<Map<String, dynamic>>()
-        .toList();
-    return [for (final p in paquets) p['deviceId'] as int];
+    try {
+      final r = await api('GET', '/api/e2ee/cles/$pairId', null);
+      final paquets = ((r['appareils'] as List?) ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .toList();
+      return [
+        for (final p in paquets)
+          if (((p['deviceId'] as num?)?.toInt() ??
+                  int.tryParse(p['deviceId']?.toString() ?? '') ??
+                  0) >
+              0)
+            (p['deviceId'] as num?)?.toInt() ??
+                int.parse(p['deviceId'].toString())
+      ];
+    } catch (_) {
+      return const [];
+    }
   }
 
   /// Ouvre une session vers chaque appareil du correspondant.
@@ -153,47 +169,112 @@ class E2eeService {
   /// ⚠️ UNE SESSION PAR APPAREIL, PAS PAR PERSONNE. Bob peut avoir un téléphone
   /// et un navigateur ; un message doit être chiffré séparément pour chacun,
   /// sinon l'un des deux ne le lira jamais.
+  ///
+  /// 🔴 SI UNE SESSION ACTIVE EXISTE DÉJÀ, ON LA GARDE !
+  /// Réexécuter `processPreKeyBundle` sur chaque message réinitialiserait le
+  /// ratchet et forcerait chaque envoi en `PreKeySignalMessage` (type 3).
+  /// Or le destinataire supprime sa pré-clé unique dès le premier déchiffrement :
+  /// lui renvoyer un type 3 échoue systématiquement en « pré-clé absente »,
+  /// rendant tous les messages suivants indéchiffrables.
   Future<List<int>> ouvrirSessions(String pairId) async {
-    final r = await api('GET', '/api/e2ee/cles/$pairId', null);
-    // ⚠️ `appareils` ABSENT = personne à qui écrire, pas une erreur de
-    // contrat : un compte sans clés publiées rend une liste vide, et c'est
-    // l'appelant qui décide — voir `E2eeFil.envoyer`.
+    Map<String, dynamic> r;
+    try {
+      r = await api('GET', '/api/e2ee/cles/$pairId', null);
+    } catch (e) {
+      E2eeJournal.note('échec récupération clés pour $pairId: $e');
+      return const [];
+    }
+
     final paquets = ((r['appareils'] as List?) ?? const [])
         .whereType<Map<String, dynamic>>()
         .toList();
     final ouverts = <int>[];
 
     for (final p in paquets) {
-      final adresse = SignalProtocolAddress(pairId, p['deviceId'] as int);
-      final signee = p['prekeySignee'] as Map<String, dynamic>;
-      final unique = p['prekeyUnique'] as Map<String, dynamic>?;
+      final deviceId = (p['deviceId'] as num?)?.toInt() ??
+          int.tryParse(p['deviceId']?.toString() ?? '') ??
+          0;
+      if (deviceId <= 0) continue;
+      final adresse = SignalProtocolAddress(pairId, deviceId);
 
-      final bundle = PreKeyBundle(
-        p['registrationId'] as int,
-        p['deviceId'] as int,
-        // ⚠️ `-1` quand le stock est épuisé : la bibliothèque saute alors la
-        // pré-clé unique, ce qui reste valide mais affaiblit la session.
-        unique == null ? -1 : unique['prekeyId'] as int,
-        unique == null
-            ? null
-            : Curve.decodePoint(
-                base64.decode(unique['clePublique'] as String), 0),
-        signee['prekeyId'] as int,
-        Curve.decodePoint(base64.decode(signee['clePublique'] as String), 0),
-        base64.decode(signee['signature'] as String),
-        IdentityKey.fromBytes(base64.decode(p['cleIdentite'] as String), 0),
-      );
+      // Si une session active et utilisable existe déjà avec cet appareil,
+      // on n'a pas besoin de renégocier avec le serveur : le double ratchet
+      // est en place et les messages ordinaires (type 1) peuvent partir.
+      if (await coffre.containsSession(adresse)) {
+        try {
+          final session = await coffre.loadSession(adresse);
+          if (session.hasUsableSession()) {
+            ouverts.add(deviceId);
+            continue;
+          }
+        } catch (_) {
+          // Session locale corrompue : on reconstruira depuis le bundle.
+        }
+      }
 
-      /*
-       * 🔴 `processPreKeyBundle` VÉRIFIE LA SIGNATURE de la pré-clé signée avec
-       * la clé d'identité. C'est LE contrôle qui écarte un serveur servant une
-       * pré-clé fabriquée. On laisse l'exception remonter : une session qu'on
-       * n'a pas pu vérifier ne doit pas s'ouvrir.
-       */
-      await SessionBuilder.fromSignalStore(coffre, adresse)
-          .processPreKeyBundle(bundle);
-      ouverts.add(p['deviceId'] as int);
+      try {
+        final signee = p['prekeySignee'] as Map<String, dynamic>?;
+        if (signee == null) continue;
+        final unique = p['prekeyUnique'] as Map<String, dynamic>?;
+
+        final regId = (p['registrationId'] as num?)?.toInt() ??
+            int.tryParse(p['registrationId']?.toString() ?? '') ??
+            0;
+        final signeeId = (signee['prekeyId'] as num?)?.toInt() ??
+            int.tryParse(signee['prekeyId']?.toString() ?? '') ??
+            0;
+        final signeePub = signee['clePublique'] as String?;
+        final signeeSig = signee['signature'] as String?;
+        final identitePub = p['cleIdentite'] as String?;
+
+        if (signeePub == null || signeeSig == null || identitePub == null) {
+          continue;
+        }
+
+        final uniqueId = unique != null
+            ? ((unique['prekeyId'] as num?)?.toInt() ??
+                int.tryParse(unique['prekeyId']?.toString() ?? '') ??
+                -1)
+            : -1;
+        final uniquePub = unique != null ? unique['clePublique'] as String? : null;
+
+        final bundle = PreKeyBundle(
+          regId,
+          deviceId,
+          uniquePub == null ? -1 : uniqueId,
+          uniquePub == null
+              ? null
+              : Curve.decodePoint(base64.decode(uniquePub), 0),
+          signeeId,
+          Curve.decodePoint(base64.decode(signeePub), 0),
+          base64.decode(signeeSig),
+          IdentityKey.fromBytes(base64.decode(identitePub), 0),
+        );
+
+        /*
+         * 🔴 `processPreKeyBundle` VÉRIFIE LA SIGNATURE de la pré-clé signée avec
+         * la clé d'identité. C'est LE contrôle qui écarte un serveur servant une
+         * pré-clé fabriquée.
+         */
+        await SessionBuilder.fromSignalStore(coffre, adresse)
+            .processPreKeyBundle(bundle);
+        ouverts.add(deviceId);
+      } catch (e) {
+        E2eeJournal.note('échec négo session appareil $deviceId: $e');
+      }
     }
+    /*
+     * 🔴 LA LIGNE LA PLUS UTILE DU JOURNAL, ET CELLE QUI MANQUAIT.
+     * `ouvrirSessions` est appelée AVANT chaque envoi. Quand elle rend une
+     * liste vide, l'envoi échoue et l'écran affiche « Aucun appareil chiffré
+     * chez ce correspondant » — une phrase qui accuse le correspondant, alors
+     * que la cause est presque toujours de notre côté (nos clés n'ont pas été
+     * publiées, ou le serveur n'a pas la route). Distinguer les deux est
+     * exactement ce que ce journal rend possible.
+     */
+    E2eeJournal.note(ouverts.isEmpty
+        ? 'aucun appareil chiffré chez $pairId'
+        : 'sessions ouvertes chez $pairId : ${ouverts.length} appareil(s)');
     return ouverts;
   }
 

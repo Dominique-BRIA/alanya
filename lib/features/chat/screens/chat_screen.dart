@@ -206,6 +206,23 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
+  /// Identifiant du correspondant pour le chiffrement et les appels 1-to-1.
+  ///
+  /// Si absent des paramètres reçus au constructeur (ex. ouverture depuis une
+  /// recherche ou un contact existant), il se déduit du premier message reçu.
+  String? get _otherUserId {
+    if (widget.otherUserId != null && widget.otherUserId!.isNotEmpty) {
+      return widget.otherUserId;
+    }
+    final myId = _myId;
+    for (final m in _messages) {
+      if (m.senderId.isNotEmpty && m.senderId != myId) {
+        return m.senderId;
+      }
+    }
+    return null;
+  }
+
   /// Noms des membres du GROUPE, lus sur le serveur à l'ouverture.
   ///
   /// 🔴 « MEMBRE » S'AFFICHAIT À LA PLACE DES NOMS (signalé sur device le
@@ -501,10 +518,11 @@ class _ChatScreenState extends State<ChatScreen>
   @override
   void initState() {
     super.initState();
-    _chiffrementActif = widget.e2ee;
-    // Le fil le retient aussi : sans ça, un écran ouvert sur un fil chiffré
-    // puis fermé sans relève oublierait l'état que le serveur lui avait dit.
-    context.e2ee?.fil.noteEtat(widget.convId, widget.e2ee);
+    _chiffrementActif = widget.e2ee ||
+        (context.e2ee?.fil.estChiffree(widget.convId) ?? false);
+    if (_chiffrementActif) {
+      context.e2ee?.fil.noteEtat(widget.convId, true);
+    }
     _lockPulse = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 900),
@@ -957,7 +975,18 @@ class _ChatScreenState extends State<ChatScreen>
     if (type == "message") {
       final data = e["message"] as Map<String, dynamic>?;
       if (data == null || data["convId"] != widget.convId) return;
-      final msg = Message.fromJson(data);
+      var msg = Message.fromJson(data);
+      if (msg.chiffre && (msg.content == null || msg.content!.isEmpty)) {
+        final dechiffre = _messages
+            .firstWhere(
+              (m) => m.id == msg.id && (m.content ?? '').isNotEmpty,
+              orElse: () => msg,
+            )
+            .content;
+        if (dechiffre != null && dechiffre.isNotEmpty) {
+          msg = _avecTexteDechiffre(msg, dechiffre);
+        }
+      }
       _cacheMsg(msg);
       final tempId = e["tempId"] as String?;
       setState(() {
@@ -967,6 +996,10 @@ class _ChatScreenState extends State<ChatScreen>
           _messages[idx] = msg;
         } else if (!_messages.any((m) => m.id == msg.id)) {
           _messages = [..._messages, msg];
+        }
+        if (msg.chiffre) {
+          _chiffrementActif = true;
+          context.e2ee?.fil.noteEtat(widget.convId, true);
         }
         // L'écho est la seule preuve que le message existe côté serveur : c'est
         // ici, et nulle part avant, que l'envoi cesse d'être « en cours ».
@@ -1301,7 +1334,27 @@ class _ChatScreenState extends State<ChatScreen>
       final repo = context.read<ChatRepository>();
       final msgs = await repo.getMessages(widget.convId);
       if (!mounted) return;
-      final reversed = msgs.reversed.toList();
+      final dechiffres = await MessageCache.textesDechiffresDe(widget.convId);
+      final reversed = msgs.reversed.map((m) {
+        final clair = dechiffres[m.id] ??
+            _messages
+                .firstWhere(
+                  (x) => x.id == m.id && (x.content ?? '').isNotEmpty,
+                  orElse: () => m,
+                )
+                .content;
+        if (m.chiffre &&
+            (m.content == null || m.content!.isEmpty) &&
+            clair != null &&
+            clair.isNotEmpty) {
+          return _avecTexteDechiffre(m, clair);
+        }
+        return m;
+      }).toList();
+      if (reversed.any((m) => m.chiffre)) {
+        _chiffrementActif = true;
+        context.e2ee?.fil.noteEtat(widget.convId, true);
+      }
       setState(() {
         _messages = reversed;
         _rebuildCombined();
@@ -1459,7 +1512,17 @@ class _ChatScreenState extends State<ChatScreen>
       if (older.isEmpty) {
         _hasMoreOlder = false;
       } else {
-        final newMsgs = older.reversed.toList();
+        final dechiffres = await MessageCache.textesDechiffresDe(widget.convId);
+        final newMsgs = older.reversed.map((m) {
+          final clair = dechiffres[m.id];
+          if (m.chiffre &&
+              (m.content == null || m.content!.isEmpty) &&
+              clair != null &&
+              clair.isNotEmpty) {
+            return _avecTexteDechiffre(m, clair);
+          }
+          return m;
+        }).toList();
         final before =
             _scrollCtrl.hasClients ? _scrollCtrl.position.maxScrollExtent : 0.0;
         _loadedOlder = true;
@@ -1494,13 +1557,35 @@ class _ChatScreenState extends State<ChatScreen>
     _pollEnCours = true;
     try {
       final repo = context.read<ChatRepository>();
-      final latest = (await repo.getMessages(widget.convId)).reversed.toList();
+      final dechiffres = await MessageCache.textesDechiffresDe(widget.convId);
+      final rawLatest =
+          (await repo.getMessages(widget.convId)).reversed.toList();
+      final latest = rawLatest.map((m) {
+        final clair = dechiffres[m.id] ??
+            _messages
+                .firstWhere(
+                  (x) => x.id == m.id && (x.content ?? '').isNotEmpty,
+                  orElse: () => m,
+                )
+                .content;
+        if (m.chiffre &&
+            (m.content == null || m.content!.isEmpty) &&
+            clair != null &&
+            clair.isNotEmpty) {
+          return _avecTexteDechiffre(m, clair);
+        }
+        return m;
+      }).toList();
       if (!mounted) return;
       if (_signature(latest) == _signature(_messages)) return;
       final hadMore = latest.length > _messages.length;
       final atBottom = !_scrollCtrl.hasClients ||
           _scrollCtrl.position.pixels >=
               _scrollCtrl.position.maxScrollExtent - 60;
+      if (latest.any((m) => m.chiffre)) {
+        _chiffrementActif = true;
+        context.e2ee?.fil.noteEtat(widget.convId, true);
+      }
       setState(() {
         _messages = latest;
         // Le fil vient de répondre : l'échec précédent est levé. Sans cette
@@ -1928,6 +2013,14 @@ class _ChatScreenState extends State<ChatScreen>
     try {
       final releve = await pile.fil.relever();
       if (!mounted) return;
+      // 🔴 SAUVEGARDE DE TOUTES LES ENVELOPPES REÇUES DANS LE CACHE LOCAL.
+      // Une enveloppe relevée est acquittée et supprimée du serveur :
+      // il faut impérativement enregistrer TOUS les messages déchiffrés,
+      // y compris ceux d'autres conversations, sinon ils sont perdus à jamais.
+      for (final clair in releve.messages) {
+        await MessageCache.sauvegarderTexteDechiffre(
+            clair.id, clair.convId, clair.texte);
+      }
       final miennes = releve.messages
           .where((m) => m.convId == widget.convId)
           .toList();
@@ -2043,6 +2136,8 @@ class _ChatScreenState extends State<ChatScreen>
           createdAt: DateTime.now(),
           chiffre: true);
       _cacheMsg(msg);
+      await MessageCache.sauvegarderTexteDechiffre(
+          messageId, widget.convId, text);
       _inputCtrl.clear();
       _mentionsEnCours.clear();
       setState(() {
@@ -2052,10 +2147,16 @@ class _ChatScreenState extends State<ChatScreen>
       });
       _scrollToBottom();
     } on E2eeImpossible catch (e) {
+      traceAppel("MESSAGES chiffrement impossible : $e");
       if (mounted) showAppSnackBar(e.message);
-    } catch (_) {
+    } on ApiException catch (e) {
+      traceAppel(
+          "MESSAGES erreur API envoi chiffré ${e.statusCode} : ${e.message}");
+      if (mounted) showAppSnackBar(e.message);
+    } catch (e) {
+      traceAppel("MESSAGES erreur envoi chiffré : $e");
       if (mounted) {
-        showAppSnackBar("Le message chiffré n'a pas pu partir.");
+        showAppSnackBar("Le message chiffré n'a pas pu partir : $e");
       }
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -2075,10 +2176,11 @@ class _ChatScreenState extends State<ChatScreen>
     // modification — une retouche partirait lisible par le serveur, qui
     // n'aurait jamais dû lire la première version.
     final pile = context.e2ee;
+    final pair = _otherUserId;
     final enChiffre = _chiffrementActif &&
         pile != null &&
         !widget.isGroup &&
-        widget.otherUserId != null;
+        pair != null;
     // Mode édition : on modifie le message au lieu d'en envoyer un nouveau.
     if (_editing != null) {
       if (enChiffre) {
@@ -2092,7 +2194,7 @@ class _ChatScreenState extends State<ChatScreen>
     if (enChiffre) {
       // `enChiffre` dit déjà que `pile` n'est pas nulle — le `!` ne fait que
       // le répéter au compilateur, qui ne voit pas à travers un booléen.
-      await _sendChiffre(text, pile!, widget.otherUserId!);
+      await _sendChiffre(text, pile!, pair!);
       return;
     }
     _typingDebounce?.cancel();
@@ -3962,7 +4064,7 @@ class _ChatScreenState extends State<ChatScreen>
   /// « l'état du chiffrement » serait une place gâchée.
   Future<void> _ouvrirChiffrement() async {
     final pile = context.e2ee;
-    final pair = widget.otherUserId;
+    final pair = _otherUserId;
     /*
      * ⚠️ SANS CORRESPONDANT IDENTIFIÉ, RIEN À FAIRE. Un fil sans `otherUserId`
      * est un groupe ou une conversation incomplète : le bouton est déjà masqué
@@ -3973,9 +4075,17 @@ class _ChatScreenState extends State<ChatScreen>
     if (!_chiffrementActif) {
       try {
         await pile.fil.activer(widget.convId);
-        if (mounted) setState(() => _chiffrementActif = true);
-      } catch (_) {
-        if (mounted) showAppSnackBar("Le chiffrement n'a pas pu être activé.");
+        if (mounted) {
+          setState(() => _chiffrementActif = true);
+          showAppSnackBar("Chiffrement activé de bout en bout.");
+        }
+      } catch (e) {
+        traceAppel("MESSAGES activation chiffrement échouée : $e");
+        if (mounted) {
+          showAppSnackBar(e is ApiException
+              ? e.message
+              : "Le chiffrement n'a pas pu être activé.");
+        }
       }
       return;
     }

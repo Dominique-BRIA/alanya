@@ -1641,6 +1641,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
        */
       final libelle = last.content?.trim() ?? "";
       if (libelle.isNotEmpty) return libelle;
+      if (last.chiffre) return "🔒 Message chiffré";
       // Colonne vide : on retombe sur la règle commune, qui sait nommer un
       // média sans légende.
       return apercuMessage(last.type, last.content);

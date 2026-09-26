@@ -11,6 +11,7 @@
 /// lire.
 library;
 
+import 'e2ee_journal.dart';
 import 'e2ee_service.dart';
 
 /// Un message tel que le fil le manipule, en clair.
@@ -147,15 +148,26 @@ class E2eeFil {
       // pas — le serveur en a besoin pour les notifications et les aperçus.
       if (replyToId != null) 'replyToId': replyToId,
     });
-    final messageId = message['id'] as String;
+    final messageId =
+        (message['id'] ?? (message['message'] as Map?)?['id'])?.toString();
+    if (messageId == null || messageId.isEmpty) {
+      throw const E2eeImpossible(
+          "Le serveur n'a pas renvoyé d'identifiant de message.");
+    }
+
+    final senderDeviceId = monDeviceId > 1
+        ? monDeviceId
+        : await _service.coffre.deviceId();
 
     await _api('POST', '/api/e2ee/enveloppes', {
       'convId': convId,
-      'deviceId': monDeviceId,
+      'deviceId': senderDeviceId,
       'enveloppes': enveloppes,
       'messageId': messageId,
     });
 
+    E2eeJournal.note('message $messageId envoyé chiffré à $pairId '
+        '(${enveloppes.length} enveloppe(s))');
     return messageId;
   }
 
@@ -171,8 +183,17 @@ class E2eeFil {
   /// ⚠️ UNE ENVELOPPE ILLISIBLE NE BLOQUE PAS LES AUTRES. On la compte et on
   /// continue : un message perdu vaut mieux qu'un fil entier qui ne charge plus.
   Future<({List<MessageClair> messages, int illisibles})> relever() async {
-    final r = await _api('GET', '/api/e2ee/enveloppes', null);
-    final brutes = (r['enveloppes'] as List).cast<Map<String, dynamic>>();
+    Map<String, dynamic> r;
+    try {
+      r = await _api('GET', '/api/e2ee/enveloppes', null);
+    } catch (e) {
+      E2eeJournal.note('échec relève enveloppes: $e');
+      return (messages: <MessageClair>[], illisibles: 0);
+    }
+
+    final brutes = ((r['enveloppes'] as List?) ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .toList();
 
     final messages = <MessageClair>[];
     final aAcquitter = <String>[];
@@ -180,26 +201,50 @@ class E2eeFil {
 
     for (final e in brutes) {
       try {
+        final expediteurId =
+            (e['expediteurId'] ?? e['senderId'])?.toString() ?? '';
+        final expediteurDevice = (e['expediteurDevice'] as num?)?.toInt() ??
+            int.tryParse(e['expediteurDevice']?.toString() ?? '') ??
+            1;
+        final type = (e['type'] as num?)?.toInt() ??
+            int.tryParse(e['type']?.toString() ?? '') ??
+            1;
+        final corps = (e['corps'] ?? e['body'] ?? '') as String;
+        final convId = (e['convId'] ?? e['conversationId'])?.toString() ?? '';
+        final messageId = (e['messageId'] ?? e['id'])?.toString() ?? '';
+
         final texte = await _service.dechiffrer(
-          e['expediteurId'] as String,
-          e['expediteurDevice'] as int,
-          e['type'] as int,
-          e['corps'] as String,
+          expediteurId,
+          expediteurDevice,
+          type,
+          corps,
         );
         /*
          * ⚠️ LES NOMS VIENNENT DU SERVEUR, PAS DE MON SOUVENIR : `convId` et
          * `createdAt`, vérifiés dans la route. Une clé mal orthographiée ne se
          * voit pas à la compilation — elle rend `null` à l'exécution.
          */
+        final quand = e['createdAt'] != null
+            ? (DateTime.tryParse(e['createdAt'].toString())
+                    ?.millisecondsSinceEpoch ??
+                DateTime.now().millisecondsSinceEpoch)
+            : DateTime.now().millisecondsSinceEpoch;
+
         messages.add((
-          id: (e['messageId'] ?? e['id']) as String,
-          convId: e['convId'] as String,
+          id: messageId,
+          convId: convId,
           texte: texte,
-          quand: DateTime.parse(e['createdAt'] as String).millisecondsSinceEpoch,
+          quand: quand,
         ));
-        aAcquitter.add(e['id'] as String);
-        noteEtat(e['convId'] as String, true);
-      } catch (_) {
+        if (e['id'] != null) {
+          aAcquitter.add(e['id'].toString());
+        }
+        if (convId.isNotEmpty) {
+          noteEtat(convId, true);
+        }
+        E2eeJournal.note('enveloppe déchiffrée message $messageId (conv $convId)');
+      } catch (err) {
+        E2eeJournal.note('erreur déchiffrement enveloppe: $err');
         illisibles++;
       }
     }
@@ -210,8 +255,12 @@ class E2eeFil {
        * les identifiants passent en PARAMÈTRE D'URL, séparés par des virgules —
        * c'est le contrat que le serveur applique déjà au web.
        */
-      final ids = aAcquitter.join(',');
-      await _api('DELETE', '/api/e2ee/enveloppes?ids=$ids', null);
+      try {
+        final ids = aAcquitter.join(',');
+        await _api('DELETE', '/api/e2ee/enveloppes?ids=$ids', null);
+      } catch (e) {
+        E2eeJournal.note('erreur acquittement enveloppes: $e');
+      }
     }
     return (messages: messages, illisibles: illisibles);
   }
