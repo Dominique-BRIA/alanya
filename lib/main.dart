@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'services/e2ee/e2ee_fournisseur.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -133,6 +134,18 @@ void main() async {
     idCompte = null;
   }
 
+  /*
+   * 🐛 LA PUBLICATION DES CLÉS MANQUAIT — cause du « il n y a pas les clés »
+   * quand le correspondant est hors ligne. Sans publication il n a AUCUNE clé
+   * sur le serveur, et sa présence n y change rien.
+   *
+   * ⚠️ LANCÉE SANS ATTENDRE : l application ne doit pas rester noire pendant un
+   * aller-retour réseau. On ne peut de toute façon pas recevoir avant d avoir
+   * publié.
+   */
+  final pileE2ee = idCompte == null ? null : PileE2ee.pour(authedApi, idCompte);
+  unawaited(pileE2ee?.demarrer() ?? Future<void>.value());
+
   runApp(
     MultiProvider(
       providers: [
@@ -169,7 +182,7 @@ void main() async {
         Provider<ExportMediasRepository>.value(
             value: ExportMediasRepository(authedApi)),
         if (idCompte != null)
-          Provider<PileE2ee>.value(value: PileE2ee.pour(authedApi, idCompte)),
+          Provider<PileE2ee>.value(value: pileE2ee!),
         Provider<AccountRepository>.value(value: AccountRepository(authedApi)),
         Provider<StatusRepository>.value(value: StatusRepository(authedApi)),
         Provider<AiRepository>.value(value: AiRepository(authedApi)),
