@@ -183,7 +183,13 @@ class E2eeFil {
     }
 
     if (aAcquitter.isNotEmpty) {
-      await _api('POST', '/api/e2ee/enveloppes/acquitter', {'ids': aAcquitter});
+      /*
+       * 🐛 J'AVAIS INVENTÉ `POST .../acquitter`. L'acquittement est un DELETE et
+       * les identifiants passent en PARAMÈTRE D'URL, séparés par des virgules —
+       * c'est le contrat que le serveur applique déjà au web.
+       */
+      final ids = aAcquitter.join(',');
+      await _api('DELETE', '/api/e2ee/enveloppes?ids=$ids', null);
     }
     return (messages: messages, illisibles: illisibles);
   }
