@@ -1368,10 +1368,19 @@ class _ChatScreenState extends State<ChatScreen>
   /// En vidant la table du fil, on rend le prochain chargement capable de
   /// repartir du serveur, qui est la seule source de vérité. Le cache n'est
   /// jamais qu'une avance d'affichage.
+  /// ⚠️ ON NE PURGE QUE CE QUI NE PEUT PAS GUÉRIR. Un DÉLAI dépassé n'est pas
+  /// une preuve d'abîme : une base simplement lente à s'ouvrir — démarrage à
+  /// froid, stockage saturé — rendrait un cache parfaitement valide à jeter, et
+  /// la conversation se retéléchargerait pour rien. Une ERREUR DE LECTURE, elle,
+  /// ne guérira pas : la ligne fautive est relue à chaque ouverture.
   Future<List<Message>> _cacheDeLaConversation() async {
     try {
       return await MessageCache.getConv(widget.convId)
           .timeout(_delaiLectureLocale);
+    } on TimeoutException catch (e) {
+      traceAppel('MESSAGES cache lent (> ${_delaiLectureLocale.inSeconds} s), '
+          'non purgé : $e');
+      return const [];
     } catch (e) {
       traceAppel("MESSAGES cache illisible, purgé : $e");
       try {
