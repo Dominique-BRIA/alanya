@@ -1219,7 +1219,15 @@ class _ChatScreenState extends State<ChatScreen>
      * n'en ont pas besoin. Les faire attendre derrière lui, c'était accepter que
      * n'importe quelle lenteur du coffre vide l'écran.
      */
-    final cached = await MessageCache.getConv(widget.convId);
+    /*
+     * ⚠️ LE CACHE AUSSI PASSE PAR LE CANAL DE PLATEFORME. `sqflite` ouvre sa
+     * base a travers lui : la lecture qui doit NOUS SAUVER de l attente peut
+     * elle-meme attendre. Trois secondes, puis on continue sans elle — un
+     * ecran vide qui se remplit ensuite vaut mieux qu un ecran qui tourne.
+     */
+    final cached = await MessageCache.getConv(widget.convId)
+        .timeout(const Duration(seconds: 3), onTimeout: () => const [])
+        .catchError((_) => const <Message>[]);
     if (cached.isNotEmpty && mounted) {
       setState(() {
         _messages = cached;
@@ -1234,7 +1242,18 @@ class _ChatScreenState extends State<ChatScreen>
 
     // Le jeton n'est nécessaire qu'à partir d'ici, pour le réseau.
     if (!mounted) return;
-    _token = await context.read<TokenStorage>().accessToken;
+    /*
+     * ⚠️ LE COFFRE SÉCURISÉ A DROIT À CINQ SECONDES, PAS DAVANTAGE. Il passe
+     * par le canal de plateforme, qui est une file d'attente partagée : si
+     * quelque chose l'occupe, cette lecture ne revient pas, et rien ici ne la
+     * réveillerait. Cinq secondes sans réponse, c'est déjà une panne ; mieux
+     * vaut continuer sans jeton — les appels réseau échoueront proprement —
+     * que laisser l'écran tourner à vide.
+     */
+    _token = await context
+        .read<TokenStorage>()
+        .accessToken
+        .timeout(const Duration(seconds: 5), onTimeout: () => null);
 
     try {
       final repo = context.read<ChatRepository>();
@@ -1255,6 +1274,22 @@ class _ChatScreenState extends State<ChatScreen>
       _traduitAutomatiquement();
     } catch (_) {
       if (mounted) setState(() => _loading = false);
+    } finally {
+      /*
+       * 🔴 LE FILET QUI REND LE CHARGEMENT INFINI IMPOSSIBLE.
+       *
+       * 🐛 Les deux corrections précédentes — le cache avant le jeton, les
+       * pré-clés groupées — traitaient DES CAUSES. Celle-ci traite le
+       * SYMPTÔME, et c'est volontaire : tant qu'un seul chemin peut sortir
+       * d'ici sans éteindre l'indicateur, l'écran peut encore rester bloqué,
+       * et la prochaine cause sera une nouvelle découverte en production.
+       *
+       * ⚠️ UN INDICATEUR DE CHARGEMENT S'ÉTEINT DANS UN `finally`, JAMAIS
+       * AILLEURS. Le mettre à faux à la fin du `try` laisse le cas d'erreur
+       * découvert ; le mettre dans le `catch` laisse le cas du `return`
+       * anticipé. Seul le `finally` couvre les trois sorties.
+       */
+      if (mounted && _loading) setState(() => _loading = false);
     }
     // Les enveloppes chiffrées : leur texte n est pas dans `getMessages`.
     // L'état du chiffrement : il commande la bannière.

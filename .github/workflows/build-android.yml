@@ -140,6 +140,11 @@ jobs:
           PROPS
           echo "Clé de signature en place."
 
+      # Trente secondes ici evitent dix minutes de Gradle pour rien : une cle
+      # de traduction repetee ne casse qu'a la compilation, tout a la fin.
+      - name: Cles de traduction en double
+        run: python3 outils/doublons_traductions.py
+
       - name: Build APK
         # Le démon Gradle sert à garder une JVM chaude entre deux builds. Un
         # runner est détruit après le sien, donc le démon ne fait qu'occuper de

@@ -53,6 +53,25 @@ class ApiClient {
 
   final String baseUrl;
 
+  /// Le temps au bout duquel on cesse d'attendre une reponse.
+  ///
+  /// 🔴 C'EST LA CAUSE DU CHARGEMENT INFINI SIGNALE. `package:http` N'A AUCUN
+  /// DELAI PAR DEFAUT : une requete dont la reponse n'arrive jamais — reseau
+  /// coupe apres l'etablissement, serveur qui ne repond plus, portail wifi qui
+  /// avale la connexion — attend INDEFINIMENT. Le `Future` ne se termine ni en
+  /// succes ni en erreur, donc le `catch` de l'appelant ne s'execute jamais et
+  /// son indicateur de chargement reste vrai pour toujours.
+  ///
+  /// ⚠️ UN `try/catch` NE PROTEGE PAS D'UNE ATTENTE SANS FIN. Il n'attrape que
+  /// ce qui est leve ; une attente qui ne revient pas ne leve rien. Le seul
+  /// remede est un delai, et il doit vivre ICI — pas dans chaque ecran, sinon
+  /// il manquera partout ou l'on aura oublie de le mettre.
+  ///
+  /// ⚠️ NE S'APPLIQUE PAS AUX ENVOIS DE MEDIAS. Televerser une video de dix
+  /// megaoctets depasse legitimement trente secondes ; les couper serait
+  /// transformer une lenteur normale en echec.
+  static const Duration delaiReponse = Duration(seconds: 30);
+
   static String get _defaultBaseUrl => ServerConfig.apiBase;
 
   Future<Map<String, dynamic>> post(
@@ -64,12 +83,14 @@ class ApiClient {
       Uri.parse("$baseUrl$path"),
       headers: _headers(bearer),
       body: jsonEncode(body),
-    );
+    ).timeout(delaiReponse, onTimeout: _expire);
     return _decode(res);
   }
 
   Future<Map<String, dynamic>> get(String path, {String? bearer}) async {
-    final res = await http.get(Uri.parse("$baseUrl$path"), headers: _headers(bearer));
+    final res = await http
+        .get(Uri.parse("$baseUrl$path"), headers: _headers(bearer))
+        .timeout(delaiReponse, onTimeout: _expire);
     return _decode(res);
   }
 
@@ -82,7 +103,7 @@ class ApiClient {
       Uri.parse("$baseUrl$path"),
       headers: _headers(bearer),
       body: jsonEncode(body),
-    );
+    ).timeout(delaiReponse, onTimeout: _expire);
     return _decode(res);
   }
 
@@ -100,7 +121,7 @@ class ApiClient {
       Uri.parse("$baseUrl$path"),
       headers: _headers(bearer),
       body: jsonEncode(body),
-    );
+    ).timeout(delaiReponse, onTimeout: _expire);
     return _decode(res);
   }
 
@@ -110,7 +131,7 @@ class ApiClient {
       Uri.parse("$baseUrl$path"),
       headers: _headers(bearer),
       body: body != null ? jsonEncode(body) : null,
-    );
+    ).timeout(delaiReponse, onTimeout: _expire);
     return _decode(res);
   }
 
@@ -185,6 +206,14 @@ class ApiClient {
     final res = await http.Response.fromStream(streamed);
     return _decode(res);
   }
+
+  /// Ce que l'on rend quand le delai est ecoule.
+  ///
+  /// ⚠️ ON LEVE UNE `ApiException`, PAS UNE `TimeoutException`. Tout l'appli
+  /// sait deja traiter la premiere ; la seconde serait un type de plus a
+  /// attraper dans chaque ecran, et on en oublierait.
+  static Never _expire() =>
+      throw ApiException(408, "Le serveur n'a pas repondu a temps.");
 
   Map<String, String> _headers(String? bearer) => {
         "Content-Type": "application/json",
