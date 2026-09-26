@@ -164,54 +164,104 @@ class CoffreE2ee implements SignalProtocolStore {
 
   /* ══════════════ PRÉ-CLÉS ══════════════ */
 
+  /// 🔴 TOUTES LES PRÉ-CLÉS DANS UNE SEULE ENTRÉE, et c'est un correctif de
+  /// performance qui bloquait l'application.
+  ///
+  /// 🐛 Elles étaient rangées une par une : cinquante écritures dans le coffre
+  /// sécurisé à chaque publication. Sur Android chaque écriture traverse le
+  /// canal de plateforme et coûte plusieurs dizaines de millisecondes ; les
+  /// enchaîner MONOPOLISAIT ce canal, et les lectures qui l'attendaient — dont
+  /// celle du jeton de session — ne revenaient plus. L'écran de conversation
+  /// restait en chargement infini.
+  ///
+  /// ⚠️ LE COFFRE SÉCURISÉ N'EST PAS UNE BASE DE DONNÉES. Il range quelques
+  /// valeurs, lentement. Y faire des dizaines d'accès est un contresens d'usage,
+  /// pas une simple lenteur.
+  Future<Map<String, String>> _table(String nom) async {
+    final brut = await _lire(nom);
+    if (brut == null) return {};
+    return (jsonDecode(brut) as Map<String, dynamic>)
+        .map((k, v) => MapEntry(k, v as String));
+  }
+
+  Future<void> _ecrireTable(String nom, Map<String, String> t) =>
+      _ecrire(nom, jsonEncode(t));
+
   @override
   Future<PreKeyRecord> loadPreKey(int preKeyId) async {
-    final b = await _lire('prekey.$preKeyId');
+    final b = (await _table('prekeys'))['$preKeyId'];
     if (b == null) throw InvalidKeyIdException('pré-clé $preKeyId absente');
     return PreKeyRecord.fromBuffer(base64.decode(b));
   }
 
   @override
-  Future<void> storePreKey(int preKeyId, PreKeyRecord record) =>
-      _ecrire('prekey.$preKeyId', base64.encode(record.serialize()));
+  Future<void> storePreKey(int preKeyId, PreKeyRecord record) async {
+    final t = await _table('prekeys');
+    t['$preKeyId'] = base64.encode(record.serialize());
+    await _ecrireTable('prekeys', t);
+  }
+
+  /// Range tout un lot d'un coup — UNE seule écriture.
+  Future<void> storePreKeys(List<PreKeyRecord> lot) async {
+    final t = await _table('prekeys');
+    for (final p in lot) {
+      t['${p.id}'] = base64.encode(p.serialize());
+    }
+    await _ecrireTable('prekeys', t);
+  }
 
   @override
   Future<bool> containsPreKey(int preKeyId) async =>
-      await _lire('prekey.$preKeyId') != null;
+      (await _table('prekeys')).containsKey('$preKeyId');
 
-  /// 🔴 UNE PRÉ-CLÉ NE SERT QU'UNE FOIS. La supprimer après usage n'est pas du
+  /// 🔴 UNE PRÉ-CLÉ NE SERT QU'UNE FOIS. La retirer après usage n'est pas du
   /// ménage : la réutiliser affaiblirait l'accord de clés du message suivant.
   @override
-  Future<void> removePreKey(int preKeyId) =>
-      _magasin.delete(key: _cle('prekey.$preKeyId'));
+  Future<void> removePreKey(int preKeyId) async {
+    final t = await _table('prekeys');
+    t.remove('$preKeyId');
+    await _ecrireTable('prekeys', t);
+  }
 
   @override
   Future<SignedPreKeyRecord> loadSignedPreKey(int id) async {
-    final b = await _lire('signed.$id');
+    final b = (await _table('signed'))['$id'];
     if (b == null) throw InvalidKeyIdException('pré-clé signée $id absente');
     return SignedPreKeyRecord.fromSerialized(base64.decode(b));
   }
 
   @override
-  Future<List<SignedPreKeyRecord>> loadSignedPreKeys() async {
-    final tout = await _magasin.readAll(aOptions: _options);
-    return tout.entries
-        .where((e) => e.key.startsWith(_cle('signed.')))
-        .map((e) => SignedPreKeyRecord.fromSerialized(base64.decode(e.value)))
-        .toList();
+  Future<List<SignedPreKeyRecord>> loadSignedPreKeys() async =>
+      (await _table('signed'))
+          .values
+          .map((v) => SignedPreKeyRecord.fromSerialized(base64.decode(v)))
+          .toList();
+
+  @override
+  Future<void> storeSignedPreKey(int id, SignedPreKeyRecord record) async {
+    final t = await _table('signed');
+    t['$id'] = base64.encode(record.serialize());
+    await _ecrireTable('signed', t);
   }
 
   @override
-  Future<void> storeSignedPreKey(int id, SignedPreKeyRecord record) =>
-      _ecrire('signed.$id', base64.encode(record.serialize()));
-
-  @override
   Future<bool> containsSignedPreKey(int id) async =>
-      await _lire('signed.$id') != null;
+      (await _table('signed')).containsKey('$id');
 
   @override
-  Future<void> removeSignedPreKey(int id) =>
-      _magasin.delete(key: _cle('signed.$id'));
+  Future<void> removeSignedPreKey(int id) async {
+    final t = await _table('signed');
+    t.remove('$id');
+    await _ecrireTable('signed', t);
+  }
+
+  /// A-t-on déjà publié nos clés ?
+  ///
+  /// ⚠️ ON NE REPUBLIE PAS À CHAQUE LANCEMENT. L'identité ne change pas, et
+  /// republier cinquante pré-clés à chaque ouverture coûte cher pour rien.
+  Future<bool> dejaPublie() async => (await _lire('publie')) == '1';
+
+  Future<void> noterPublie() => _ecrire('publie', '1');
 
   /* ══════════════ OUBLI ══════════════ */
 

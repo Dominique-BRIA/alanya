@@ -60,7 +60,15 @@ class PileE2ee {
   Future<void> demarrer() async {
     try {
       await coffre.preparer();
+      /*
+       * ⚠️ UNE SEULE PUBLICATION. L identité ne change pas, et republier
+       * cinquante pré-clés à chaque ouverture coûte cher pour rien — c est ce
+       * qui bloquait le démarrage. Le stock se réapprovisionnera quand il
+       * baissera, pas à chaque lancement.
+       */
+      if (await coffre.dejaPublie()) return;
       await service.publierMesCles(deviceId: await coffre.deviceId());
+      await coffre.noterPublie();
     } catch (_) {
       // Silencieux ici, mais pas invisible : sans clés publiées, l'écran de
       // conversation dira « aucun appareil chiffré chez ce correspondant ».

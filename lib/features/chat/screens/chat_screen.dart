@@ -3676,22 +3676,13 @@ class _ChatScreenState extends State<ChatScreen>
       ),
       actions: [
         /*
-         * 🔴 LE BOUCLIER DU CHIFFREMENT. Un BOUCLIER et non un cadenas : le
-         * cadenas sert déjà au verrou de conversation, et il le décrit mieux —
-         * un verrou s'ouvre et se referme. Le chiffrement, lui, NE SE DÉFAIT
-         * PAS, et un cadenas qu'on ne peut pas rouvrir est une métaphore qui
-         * ment.
+         * ⚠️ PAS DE BOUCLIER DANS LA BARRE — décision du user, 26/09/2026.
          *
-         * ⚠️ ABSENT EN GROUPE ET SANS PILE : les groupes ne sont pas couverts
-         * (ils demanderaient un second protocole), et un bouton qui échouerait
-         * sous le doigt est pire que pas de bouton.
+         * La barre est déjà pleine, et le chiffrement n est pas un GESTE qu on
+         * refait : c est un état qu on CONSULTE. Sa place est dans les infos du
+         * contact, avec le code de sécurité — là où l on va déjà chercher ce
+         * qui concerne la personne.
          */
-        if (!widget.isGroup && context.e2ee != null)
-          BoutonChiffrement(
-            actif: _chiffrementActif,
-            activable: true,
-            onAppui: _ouvrirChiffrement,
-          ),
         // Avec une personne, la place de la loupe revient à la traduction :
         // la recherche descend dans le menu ⋮ plus bas, elle n'est pas perdue.
         // Un groupe garde sa loupe — il n'a pas les deux boutons d'appel, la
