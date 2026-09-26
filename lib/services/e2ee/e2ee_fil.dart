@@ -108,7 +108,13 @@ class E2eeFil {
     final enveloppes = <Map<String, dynamic>>[];
     for (final deviceId in appareils) {
       final e = await _service.chiffrer(pairId, deviceId, texte);
+      /*
+       * 🐛 `destinataireId` MANQUAIT. Le serveur refuse l'enveloppe sans lui —
+       * il ne peut pas deviner à QUI la remettre à partir du seul numéro
+       * d'appareil, qui n'est unique que par personne.
+       */
       enveloppes.add({
+        'destinataireId': pairId,
         'destinataireDevice': deviceId,
         'type': e.type,
         'corps': e.corps,
@@ -169,14 +175,19 @@ class E2eeFil {
           e['type'] as int,
           e['corps'] as String,
         );
+        /*
+         * ⚠️ LES NOMS VIENNENT DU SERVEUR, PAS DE MON SOUVENIR : `convId` et
+         * `createdAt`, vérifiés dans la route. Une clé mal orthographiée ne se
+         * voit pas à la compilation — elle rend `null` à l'exécution.
+         */
         messages.add((
-          id: e['messageId'] as String,
-          convId: e['conversationId'] as String,
+          id: (e['messageId'] ?? e['id']) as String,
+          convId: e['convId'] as String,
           texte: texte,
-          quand: e['quand'] as int,
+          quand: DateTime.parse(e['createdAt'] as String).millisecondsSinceEpoch,
         ));
         aAcquitter.add(e['id'] as String);
-        noteEtat(e['conversationId'] as String, true);
+        noteEtat(e['convId'] as String, true);
       } catch (_) {
         illisibles++;
       }
