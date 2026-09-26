@@ -272,7 +272,7 @@ class EcranVerification extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 10),
-              _blocsCode(context, entree.value),
+              _blocsCode(entree.value),
               const SizedBox(height: 22),
               const Divider(),
               const SizedBox(height: 14),
