@@ -28,6 +28,7 @@ android/key.properties
 # pourquoi il ressortait modifié après chaque compilation.
 android/local.properties
 
+
 # ⚠️ SORTIE DE COMPILATION — NE JAMAIS VERSIONNER.
 #
 # Ces deux dossiers sont REGENERES par `flutter pub get` et `flutter build` a
@@ -41,3 +42,9 @@ android/local.properties
 # necessaire a la compilation : tout se regenere.
 build/
 .dart_tool/
+
+# Le banc d interoperabilite est un paquet Dart a part : son verrou de
+# dependances ne concerne que lui. `.dart_tool/` ci-dessus couvre deja le sien,
+# a tous les niveaux.
+interop/pubspec.lock
+
