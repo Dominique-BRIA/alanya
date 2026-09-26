@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/call_ui_native.dart';
+import '../../l10n/app_localizations.dart';
 
 /// Demande, au premier lancement, l'autorisation d'ouvrir l'écran d'appel
 /// par-dessus le verrouillage.
@@ -38,22 +39,18 @@ class FullScreenPermission {
         context: context,
         builder: (ctx) => AlertDialog(
           icon: const Icon(Icons.phone_in_talk_outlined, size: 32),
-          title: const Text("Afficher les appels en plein écran"),
-          content: const Text(
-            "Pour qu'un appel entrant s'affiche par-dessus l'écran verrouillé, "
-            "comme sur un téléphone, Android demande une autorisation "
-            "supplémentaire.\n\n"
-            "Sans elle, l'appel n'apparaîtra qu'en notification et tu risques "
-            "de le manquer.",
+          title: Text(tr(context, 'full_screen_calls_title')),
+          content: Text(
+            tr(context, 'full_screen_calls_body'),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text("Plus tard"),
+              child: Text(tr(ctx, 'later')),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text("Autoriser"),
+              child: Text(tr(ctx, 'allow')),
             ),
           ],
         ),

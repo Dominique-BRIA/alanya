@@ -276,8 +276,13 @@ class RealtimeClient extends ChangeNotifier {
     }
   }
 
+  /// [mentions] : les comptes visés par un `@`, chacun `{userId, libelle}`.
+  ///
+  /// ⚠️ LE SERVEUR LES REFILTRE sur les participants réels du groupe : ce que
+  /// le client annonce ici est une intention, pas une autorisation. Envoyer
+  /// l'identifiant de quelqu'un hors du groupe ne le notifie pas.
   void sendMessage(String convId, String content, String tempId,
-          {String? replyToId}) =>
+          {String? replyToId, List<Map<String, String>>? mentions}) =>
       _send({
         "type": "send",
         "convId": convId,
@@ -285,6 +290,7 @@ class RealtimeClient extends ChangeNotifier {
         "msgType": "TEXT",
         "tempId": tempId,
         if (replyToId != null) "replyToId": replyToId,
+        if (mentions != null && mentions.isNotEmpty) "mentions": mentions,
       });
 
   void sendMedia(String convId, String mediaId, String msgType, String tempId,
@@ -299,9 +305,13 @@ class RealtimeClient extends ChangeNotifier {
         if (replyToId != null) "replyToId": replyToId,
       });
 
+  /// [mentions] : les `@` de la LÉGENDE. Une légende est un texte comme un
+  /// autre — elle peut donc désigner quelqu'un, et le serveur la traite pareil.
   void sendMultiMedia(
           String convId, List<String> mediaIds, String msgType, String tempId,
-          {String? replyToId, String? content}) =>
+          {String? replyToId,
+          String? content,
+          List<Map<String, String>>? mentions}) =>
       _send({
         "type": "send",
         "convId": convId,
@@ -310,6 +320,7 @@ class RealtimeClient extends ChangeNotifier {
         "tempId": tempId,
         if (content != null && content.isNotEmpty) "content": content,
         if (replyToId != null) "replyToId": replyToId,
+        if (mentions != null && mentions.isNotEmpty) "mentions": mentions,
       });
 
   /// Message dont la charge utile vit dans `content` : `CONTACT`, `LOCATION`.
@@ -467,6 +478,64 @@ class RealtimeClient extends ChangeNotifier {
         "meetingId": meetingId,
         "toUserId": toUserId,
         "signal": signal,
+      });
+
+  /// Écrit dans le fil de la salle.
+  ///
+  /// Passe par le SERVEUR et non par [meetingSignal] de pair à pair : c'est le
+  /// verbe que le serveur et le web parlent déjà. Un fil relayé de pair à pair
+  /// n'atteignait que les autres mobiles, et jamais un participant web —
+  /// chacun écrivait dans le vide.
+  ///
+  /// Rien n'est affiché localement en attendant : le serveur renvoie le message
+  /// à son auteur comme aux autres, et c'est son ordre qui fait foi. Poser la
+  /// bulle tout de suite la placerait ailleurs chez soi que chez les autres.
+  ///
+  /// ⚠️ VOLONTAIREMENT ABSENTE de [_typesCritiques], comme la main levée. Le
+  /// fil est éphémère : un message rejoué trente secondes après une coupure
+  /// arriverait après ceux qu'on a écrits depuis, donc dans le désordre — et il
+  /// se retape, alors qu'un ordre faux ne se rattrape pas.
+  void meetingMessage(int meetingId, String texte) => _send({
+        "type": "meeting_message",
+        "meetingId": meetingId,
+        "text": texte,
+      });
+
+  /// Lève ou baisse la main.
+  ///
+  /// Même règle que le fil : le serveur renvoie l'état à l'auteur comme aux
+  /// autres, donc tout le monde voit la même main au même instant. Rien n'est
+  /// conservé côté serveur — qui arrive ensuite ne voit pas les mains déjà
+  /// levées, sur mobile comme sur le web.
+  void meetingHand(int meetingId, bool levee) => _send({
+        "type": "meeting_hand",
+        "meetingId": meetingId,
+        "levee": levee,
+      });
+
+  /// Demande à un participant de couper son micro ([media] = `"audio"`) ou sa
+  /// caméra ([media] = `"video"`). Organisateur seul, contrôlé par le SERVEUR.
+  ///
+  /// ON NE COUPE PAS UN FLUX À DISTANCE : la piste appartient à l'appareil du
+  /// participant, et rien ici ni dans WebRTC ne peut l'éteindre depuis
+  /// l'extérieur. Ce verbe DEMANDE, et l'application d'en face obéit — c'est un
+  /// message de protocole, pas une commande.
+  ///
+  /// ⚠️ L'AUTORISATION NE SE VÉRIFIE PAS ICI. Le serveur relit l'organisateur en
+  /// base à chaque coupure, et ignore la trame en silence si l'expéditeur n'est
+  /// pas lui. Un contrôle côté client seul se contournerait en forgeant la
+  /// trame, et n'importe quel participant ferait taire toute la salle.
+  ///
+  /// ⚠️ VOLONTAIREMENT ABSENTE de [_typesCritiques], comme la main levée. Une
+  /// coupure rejouée trente secondes après une coupure réseau éteindrait un
+  /// micro alors que la raison de le couper a disparu depuis longtemps — et
+  /// elle se redemande d'un geste, alors qu'une coupure surprise ne se rattrape
+  /// pas.
+  void meetingMute(int meetingId, String toUserId, String media) => _send({
+        "type": "meeting_mute",
+        "meetingId": meetingId,
+        "toUserId": toUserId,
+        "media": media,
       });
 
   void disconnect() {

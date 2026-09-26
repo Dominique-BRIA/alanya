@@ -1,4 +1,5 @@
 import 'dart:io';
+import '../../../l10n/app_localizations.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -36,14 +37,14 @@ class _NotificationSettingsScreenState
     final accorde = await plugin.requestFullScreenIntentPermission();
     if (!mounted) return;
     showAppSnackBar(accorde == true
-        ? "Autorisation déjà accordée : les appels s'ouvriront tout seuls"
-        : "Active « Applications pouvant afficher des notifications plein écran » pour Alanya");
+        ? tr(context, 'notif_perm_granted')
+        : tr(context, 'notif_perm_hint'));
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: backAppBar(context, "Notifications"),
+      appBar: backAppBar(context, tr(context, 'set_notifications')),
       body: ListView(
         children: [
           SwitchListTile(
@@ -51,8 +52,8 @@ class _NotificationSettingsScreenState
                 color: themed(context,
                     light: AlanyaColors.forest,
                     dark: AlanyaColors.indigoLight)),
-            title: const Text("Notifications de messages"),
-            subtitle: const Text("Bandeau et notification à chaque message reçu"),
+            title: Text(tr(context, 'notif_messages')),
+            subtitle: Text(tr(context, 'notif_messages_sub')),
             value: _s.messagesOn,
             onChanged: (v) {
               _s.setMessages(v);
@@ -64,9 +65,9 @@ class _NotificationSettingsScreenState
                 color: themed(context,
                     light: AlanyaColors.forest,
                     dark: AlanyaColors.indigoLight)),
-            title: const Text("Aperçu du message"),
-            subtitle: const Text(
-                "Afficher le contenu dans la notification (sinon « Nouveau message »)"),
+            title: Text(tr(context, 'notif_preview')),
+            subtitle: Text(
+                tr(context, 'notif_preview_sub')),
             value: _s.previewOn,
             onChanged: _s.messagesOn
                 ? (v) {
@@ -79,8 +80,8 @@ class _NotificationSettingsScreenState
           SwitchListTile(
             secondary:
                 const Icon(Icons.call_outlined, color: AlanyaColors.terracotta),
-            title: const Text("Notifications d'appels"),
-            subtitle: const Text("Écran d'appel entrant quand l'app est fermée"),
+            title: Text(tr(context, 'notif_calls')),
+            subtitle: Text(tr(context, 'notif_calls_sub')),
             value: _s.callsOn,
             onChanged: (v) {
               _s.setCalls(v);
@@ -99,10 +100,9 @@ class _NotificationSettingsScreenState
             ListTile(
               leading:
                   const Icon(Icons.fullscreen, color: AlanyaColors.terracotta),
-              title: const Text("Ouverture automatique des appels"),
-              subtitle: const Text(
-                  "Afficher l'écran d'appel sans avoir à toucher la notification. "
-                  "Android 14 et suivants demandent une autorisation à part."),
+              title: Text(tr(context, 'notif_auto_open')),
+              subtitle: Text(
+                  tr(context, 'notif_auto_open_sub')),
               trailing: const Icon(Icons.open_in_new, size: 18),
               onTap: _demandeOuvertureAutomatique,
             ),
@@ -110,7 +110,7 @@ class _NotificationSettingsScreenState
           Padding(
             padding: const EdgeInsets.all(16),
             child: Text(
-              "Le son et la vibration se règlent dans les paramètres de notification Android d'Alanya.",
+              tr(context, 'notif_android_hint'),
               style: TextStyle(
                   fontSize: 12,
                   color: themed(context,

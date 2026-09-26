@@ -10,6 +10,7 @@ import '../../auth/auth_controller.dart';
 import '../../contacts/contacts_repository.dart';
 import '../chat_repository.dart';
 import 'chat_screen.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Création d'un groupe : nom + sélection de contacts du répertoire.
 class NewGroupScreen extends StatefulWidget {
@@ -55,11 +56,11 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
   Future<void> _create() async {
     final name = _nameCtrl.text.trim();
     if (name.length < 2) {
-      setState(() => _error = "Donne un nom au groupe (2 caractères min.)");
+      setState(() => _error = tr(context, 'grp_name_min'));
       return;
     }
     if (_selected.isEmpty) {
-      setState(() => _error = "Sélectionne au moins un contact");
+      setState(() => _error = tr(context, 'grp_select_min'));
       return;
     }
     setState(() {
@@ -84,7 +85,7 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
     } on ApiException catch (e) {
       setState(() => _error = e.message);
     } catch (_) {
-      setState(() => _error = "Création impossible");
+      setState(() => _error = tr(context, 'grp_create_failed'));
     } finally {
       if (mounted) setState(() => _creating = false);
     }
@@ -102,9 +103,9 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
                   padding: const EdgeInsets.all(16),
                   child: TextField(
                     controller: _nameCtrl,
-                    decoration: const InputDecoration(
-                      labelText: "Nom du groupe",
-                      prefixIcon: Icon(Icons.groups),
+                    decoration: InputDecoration(
+                      labelText: tr(context, 'grp_name_label'),
+                      prefixIcon: const Icon(Icons.groups),
                     ),
                   ),
                 ),
@@ -118,7 +119,7 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
                   child: Row(
                     children: [
                       Text(
-                        "Contacts (${_selected.length} sélectionné${_selected.length > 1 ? "s" : ""})",
+                        trN(context, 'contacts_selected', _selected.length),
                         style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
                     ],
@@ -130,7 +131,7 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
                           child: Padding(
                             padding: const EdgeInsets.all(24),
                             child: Text(
-                              "Aucun contact.\nAjoute des contacts avant de créer un groupe.",
+                              tr(context, 'grp_no_contacts'),
                               textAlign: TextAlign.center,
                               style: TextStyle(color: mutedOf(context, Colors.black54)),
                             ),
@@ -153,7 +154,7 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
                                 });
                               },
                               title: Text(c.displayName),
-                              subtitle: Text("Alanya ID : ${formatAlanyaId(c.publicNumber)}",
+                              subtitle: Text('${tr(context, 'alanya_number_label')}${formatAlanyaId(c.publicNumber)}',
                                   style: alanyaIdStyleOf(context)),
                               secondary: CircleAvatar(
                                 backgroundColor: AlanyaColors.gold,
@@ -180,7 +181,7 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
                                 child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                               )
                             : const Icon(Icons.check),
-                        label: const Text("Créer le groupe"),
+                        label: Text(tr(context, 'create_group')),
                       ),
                     ),
                   ),

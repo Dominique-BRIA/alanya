@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../../../theme/alanya_theme.dart';
 import '../call_controller.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Pavé numérique d'un standard téléphonique, affiché DANS l'écran d'appel.
 ///
@@ -46,6 +47,34 @@ class IvrPanel extends StatefulWidget {
   /// « Retour à l'accueil » d'un centre vocal. Jamais appelé pour un centre
   /// d'appels : le bouton n'y est pas affiché.
   final Future<void> Function() onRetourAccueil;
+
+  /// Ce panneau montre-t-il le PAVÉ, ou l'écran d'attente ?
+  ///
+  /// 🔴 **UN SEUL ENDROIT RÉPOND À CETTE QUESTION**, et c'est tout l'intérêt de
+  /// cette fonction. L'écran d'appel a besoin de la même réponse que [build] :
+  /// c'est elle qui décide s'il doit rendre son en-tête compact pour laisser la
+  /// place aux touches. Tant qu'il la redemandait à sa façon — en testant
+  /// `etape == menu` —, l'ajout d'une étape suffisait à les faire diverger : le
+  /// panneau affichait le pavé, l'écran croyait le contraire, et l'avatar
+  /// reprenait sa grande taille au milieu d'une lecture (signalé par le user le
+  /// 18/08/2026).
+  ///
+  /// La formulation par la NÉGATIVE n'est pas un détail : « le pavé est là sauf
+  /// pendant l'attente » reste vraie pour toute étape qu'on ajouterait ensuite,
+  /// alors qu'une liste d'étapes autorisées serait à compléter à chaque fois —
+  /// et l'oubli ne casserait rien de visible ici, seulement la taille des
+  /// touches là-bas.
+  static bool afficheLePave(IvrSession session) =>
+      session.etape != IvrEtape.attente;
+
+  /// Repère de test posé sur le pavé — voir `test/ivr_panel_hauteur_test.dart`.
+  ///
+  /// La règle « le pavé ne change jamais de taille pendant un appel » s'est
+  /// cassée DEUX FOIS (17/08 puis 18/08/2026), et à chaque fois parce qu'un
+  /// élément situé AU-DESSUS de lui variait — jamais le pavé lui-même. Une
+  /// relecture n'attrape pas ça : il faut mesurer. Cette clé est le seul moyen
+  /// de le faire depuis un test.
+  static const cleDuPave = Key("ivr-pave");
 
   @override
   State<IvrPanel> createState() => _IvrPanelState();
@@ -104,16 +133,38 @@ class _IvrPanelState extends State<IvrPanel> {
     return "${m.toString().padLeft(2, '0')}:${(s % 60).toString().padLeft(2, '0')}";
   }
 
+  /// L'option d'une touche, `null` si elle ne mène nulle part.
+  ///
+  /// 🔴 **LA TOUCHE 0 D'UN CENTRE VOCAL EST UNE OPTION IMPLICITE**, et elle ne
+  /// vient PAS de `center_audio` : le serveur la réserve à l'enregistrement
+  /// d'une plainte, quoi que porte la table (voir `handleIvrDtmfVocal`). Sans
+  /// cette synthèse, elle restait la seule touche SANS anneau et sans libellé
+  /// à l'appui long — signalé sur device le 20/08/2026 — alors qu'elle mène
+  /// quelque part, et même à la seule touche qui écrit quelque chose.
+  ///
+  /// Fabriquée ICI plutôt qu'ajoutée aux `options` reçues : ces options sont ce
+  /// que le SERVEUR a envoyé, et y glisser une entrée maison ferait mentir tout
+  /// ce qui les compte ou les parcourt.
   IvrOption? _optionPour(int digit) {
     for (final o in widget.session.options) {
       if (o.digit == digit) return o;
+    }
+    if (widget.session.vocal && digit == 0) {
+      // Libellé de la touche 0 d'un centre vocal, révélé à l'appui long.
+      return IvrOption(
+        digit: 0,
+        label: tr(context, 'ivr_complaint_service'),
+        // Toujours joignable : il n'y a aucun agent à trouver derrière, c'est
+        // le téléphone lui-même qui enregistre.
+        disponible: true,
+      );
     }
     return null;
   }
 
   @override
   Widget build(BuildContext context) {
-    if (widget.session.etape == IvrEtape.attente) return _attente();
+    if (!IvrPanel.afficheLePave(widget.session)) return _attente();
 
     // 🔴 **LE MESSAGE N'EST PLUS AFFICHÉ ICI**, et c'est la correction du
     // rétrécissement du pavé signalé par le user (17/08/2026).
@@ -158,13 +209,13 @@ class _IvrPanelState extends State<IvrPanel> {
     String? sous;
     if (digit != null) {
       if (option == null) {
-        titre = "Aucun service sur cette touche";
+        titre = tr(context, 'ivr_no_service');
       } else {
         // `nom_service` d'abord, `libelle` en repli — demande du user du
         // 12/08/2026. Les deux viennent de la table `center` : le premier est le
         // nom montré au public, le second le nom interne de la ligne.
         titre = option.nomAffiche;
-        if (!option.disponible) sous = "Bientôt disponible";
+        if (!option.disponible) sous = tr(context, 'coming_soon');
       }
     }
 
@@ -218,13 +269,25 @@ class _IvrPanelState extends State<IvrPanel> {
   /// un écran de lecture qui remplacerait le pavé, mais une bande au-dessus de
   /// lui, exactement comme la révélation d'un appui long.
   ///
-  /// Hauteur constante, occupée ou non : voir l'appel dans [build].
+  /// Hauteur RÉSERVÉE au bandeau, et jamais reprise.
+  ///
+  /// 🔴 **NULLE POUR UN CENTRE D'APPELS.** Elle valait 40 pour tout le monde,
+  /// donc mon bandeau prenait 40 points aux touches d'un standard qui ne peut
+  /// jamais l'afficher — une régression sur un pavé que le user avait
+  /// précisément fait ajuster au point près le 17/08/2026.
+  ///
+  /// ⚠️ Elle ne dépend que de `vocal`, qui est `final` et fixé à la création de
+  /// la session : elle est donc CONSTANTE pendant toute la durée d'un appel. La
+  /// faire dépendre de l'étape aurait ramené le défaut d'origine — le pavé
+  /// rétrécissant au premier appui, puisqu'il prend « ce qui reste ».
+  double get _hauteurBandeau => widget.session.vocal ? 40 : 0;
+
   Widget _bandeauLecture() {
     final s = widget.session;
     final enLecture = s.vocal && s.etape == IvrEtape.lecture;
 
     return SizedBox(
-      height: 40,
+      height: _hauteurBandeau,
       child: AnimatedOpacity(
         opacity: enLecture ? 1 : 0,
         duration: const Duration(milliseconds: 150),
@@ -241,7 +304,7 @@ class _IvrPanelState extends State<IvrPanel> {
                   // pavé.
                   Flexible(
                     child: Text(
-                      s.titreEnLecture ?? "Lecture en cours",
+                      s.titreEnLecture ?? tr(context, 'ivr_playing'),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -255,7 +318,7 @@ class _IvrPanelState extends State<IvrPanel> {
                   TextButton.icon(
                     onPressed: () => widget.onRetourAccueil(),
                     icon: const Icon(Icons.home_outlined, size: 16),
-                    label: const Text("Accueil"),
+                    label: Text(tr(context, 'ivr_home')),
                     style: TextButton.styleFrom(
                       foregroundColor: Colors.white,
                       backgroundColor: Colors.white.withValues(alpha: 0.16),
@@ -316,6 +379,7 @@ class _IvrPanelState extends State<IvrPanel> {
 
   Widget _pave() {
     return Padding(
+      key: IvrPanel.cleDuPave,
       padding: const EdgeInsets.fromLTRB(_margeH, 0, _margeH, _margeBas),
       child: Column(
         children: [
@@ -449,7 +513,7 @@ class _IvrPanelState extends State<IvrPanel> {
         ),
         const SizedBox(height: 18),
         Text(
-          widget.session.serviceChoisi ?? "Mise en relation",
+          widget.session.serviceChoisi ?? tr(context, 'ivr_connecting_short'),
           textAlign: TextAlign.center,
           style: const TextStyle(
             color: Colors.white,
@@ -489,10 +553,10 @@ class _IvrPanelState extends State<IvrPanel> {
             ]),
           ),
         const SizedBox(height: 10),
-        const Text(
-          "Nous vous mettons en relation.\nMerci de patienter.",
+        Text(
+          tr(context, 'ivr_connecting'),
           textAlign: TextAlign.center,
-          style: TextStyle(color: Colors.white54, fontSize: 13),
+          style: const TextStyle(color: Colors.white54, fontSize: 13),
         ),
       ],
     );

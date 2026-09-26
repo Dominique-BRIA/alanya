@@ -5,6 +5,28 @@
         <!-- Show a splash screen on the activity. Automatically removed when
              the Flutter engine draws its first frame -->
         <item name="android:windowBackground">@drawable/launch_background</item>
+
+        <!--
+            🔴 FOND BLANC MEME EN MODE SOMBRE, demande du user le 18/08/2026.
+
+            C'est CE fichier qui produisait le logo sur fond noir : le parent
+            `Theme.Black.NoTitleBar` donne un `?android:colorBackground` noir,
+            que le splash reprenait. Le symptome n'apparaissait donc que sur un
+            telephone en mode sombre, ce qui le rendait intermittent a l'usage.
+
+            ⚠️ `windowSplashScreenBackground` est l'attribut qui compte depuis
+            Android 12 (API 31) : le systeme y dessine LUI-MEME l'icone de
+            l'application, et c'est de la qu'on vient — il n'y a aucune bitmap
+            dans `launch_background.xml`, elle est commentee. Sur un appareil
+            plus ancien l'attribut est simplement ignore, et c'est
+            `windowBackground` ci-dessus qui fait le travail : les deux sont
+            necessaires, aucun ne suffit seul.
+
+            L'icone adaptative ayant deja un fond blanc, le logo se pose
+            desormais sur une surface continue au lieu d'un disque clair cerne
+            de noir.
+        -->
+        <item name="android:windowSplashScreenBackground">@android:color/white</item>
     </style>
     <!-- Theme applied to the Android Window as soon as the process has started.
          This theme determines the color of the Android Window while your

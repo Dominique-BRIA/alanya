@@ -15,6 +15,8 @@
 library;
 
 import 'dart:convert';
+import 'dart:typed_data';
+import 'dart:math';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
@@ -83,13 +85,21 @@ class CoffreE2ee implements SignalProtocolStore {
   /// de clé est soit une réinstallation, soit une interposition — on ne peut pas
   /// les distinguer, donc on le dit sans bloquer, comme sur le web.
   @override
+  /// ⚠️ LE `true` NE DOIT PAS SE PERDRE. C'est le SEUL signal qu'une clé a
+  /// changé, et personne ne le rattrapera plus tard : la nouvelle clé est déjà
+  /// rangée. On le note donc ici pour que l'écran puisse le lire.
+  final Set<String> correspondantsChanges = {};
+
+  @override
   Future<bool> saveIdentity(SignalProtocolAddress address, IdentityKey? id) async {
     if (id == null) return false;
     final k = 'identite.${address.toString()}';
     final avant = await _lire(k);
     final apres = base64.encode(id.serialize());
     await _ecrire(k, apres);
-    return avant != null && avant != apres;
+    final change = avant != null && avant != apres;
+    if (change) correspondantsChanges.add(address.getName());
+    return change;
   }
 
   /// ⚠️ ON ACCEPTE TOUJOURS, ET ON AVERTIT AILLEURS. Refuser ici ferait échouer
@@ -102,6 +112,31 @@ class CoffreE2ee implements SignalProtocolStore {
     Direction direction,
   ) async =>
       true;
+
+
+  /* ══════════════ L'IDENTIFIANT D'APPAREIL ══════════════ */
+
+  /// Le numéro de CET appareil, stable pour toute la durée de l'installation.
+  ///
+  /// 🔴 IL DOIT SURVIVRE AUX REDÉMARRAGES. Le protocole adresse les enveloppes
+  /// par (personne, appareil) : un numéro qui change à chaque lancement créerait
+  /// une identité neuve à chaque fois, et le correspondant verrait un
+  /// avertissement de changement de clé à chaque ouverture de l'application.
+  ///
+  /// ⚠️ TIRÉ AU SORT, PAS INCRÉMENTÉ. Le serveur ne distribue pas ces numéros ;
+  /// deux appareils qui partiraient de 1 entreraient en collision sur le même
+  /// compte, et les messages de l'un s'ouvriraient chez l'autre.
+  Future<int> deviceId() async {
+    final garde = await _lire('deviceId');
+    if (garde != null) {
+      final n = int.tryParse(garde);
+      if (n != null && n > 0) return n;
+    }
+    // 1..2^31-1 : l'intervalle qu'accepte la colonne du serveur.
+    final n = 1 + Random.secure().nextInt(2147483646);
+    await _ecrire('deviceId', '$n');
+    return n;
+  }
 
   /* ══════════════ SESSIONS ══════════════ */
 
@@ -138,54 +173,139 @@ class CoffreE2ee implements SignalProtocolStore {
 
   /* ══════════════ PRÉ-CLÉS ══════════════ */
 
+  /// 🔴 TOUTES LES PRÉ-CLÉS DANS UNE SEULE ENTRÉE, et c'est un correctif de
+  /// performance qui bloquait l'application.
+  ///
+  /// 🐛 Elles étaient rangées une par une : cinquante écritures dans le coffre
+  /// sécurisé à chaque publication. Sur Android chaque écriture traverse le
+  /// canal de plateforme et coûte plusieurs dizaines de millisecondes ; les
+  /// enchaîner MONOPOLISAIT ce canal, et les lectures qui l'attendaient — dont
+  /// celle du jeton de session — ne revenaient plus. L'écran de conversation
+  /// restait en chargement infini.
+  ///
+  /// ⚠️ LE COFFRE SÉCURISÉ N'EST PAS UNE BASE DE DONNÉES. Il range quelques
+  /// valeurs, lentement. Y faire des dizaines d'accès est un contresens d'usage,
+  /// pas une simple lenteur.
+  Future<Map<String, String>> _table(String nom) async {
+    final brut = await _lire(nom);
+    if (brut == null) return {};
+    return (jsonDecode(brut) as Map<String, dynamic>)
+        .map((k, v) => MapEntry(k, v as String));
+  }
+
+  Future<void> _ecrireTable(String nom, Map<String, String> t) =>
+      _ecrire(nom, jsonEncode(t));
+
   @override
   Future<PreKeyRecord> loadPreKey(int preKeyId) async {
-    final b = await _lire('prekey.$preKeyId');
+    final b = (await _table('prekeys'))['$preKeyId'];
     if (b == null) throw InvalidKeyIdException('pré-clé $preKeyId absente');
     return PreKeyRecord.fromBuffer(base64.decode(b));
   }
 
   @override
-  Future<void> storePreKey(int preKeyId, PreKeyRecord record) =>
-      _ecrire('prekey.$preKeyId', base64.encode(record.serialize()));
+  Future<void> storePreKey(int preKeyId, PreKeyRecord record) async {
+    final t = await _table('prekeys');
+    t['$preKeyId'] = base64.encode(record.serialize());
+    await _ecrireTable('prekeys', t);
+  }
+
+  /// Range tout un lot d'un coup — UNE seule écriture.
+  Future<void> storePreKeys(List<PreKeyRecord> lot) async {
+    final t = await _table('prekeys');
+    for (final p in lot) {
+      t['${p.id}'] = base64.encode(p.serialize());
+    }
+    await _ecrireTable('prekeys', t);
+  }
 
   @override
   Future<bool> containsPreKey(int preKeyId) async =>
-      await _lire('prekey.$preKeyId') != null;
+      (await _table('prekeys')).containsKey('$preKeyId');
 
-  /// 🔴 UNE PRÉ-CLÉ NE SERT QU'UNE FOIS. La supprimer après usage n'est pas du
+  /// 🔴 UNE PRÉ-CLÉ NE SERT QU'UNE FOIS. La retirer après usage n'est pas du
   /// ménage : la réutiliser affaiblirait l'accord de clés du message suivant.
   @override
-  Future<void> removePreKey(int preKeyId) =>
-      _magasin.delete(key: _cle('prekey.$preKeyId'));
+  Future<void> removePreKey(int preKeyId) async {
+    final t = await _table('prekeys');
+    t.remove('$preKeyId');
+    await _ecrireTable('prekeys', t);
+  }
 
   @override
   Future<SignedPreKeyRecord> loadSignedPreKey(int id) async {
-    final b = await _lire('signed.$id');
+    final b = (await _table('signed'))['$id'];
     if (b == null) throw InvalidKeyIdException('pré-clé signée $id absente');
     return SignedPreKeyRecord.fromSerialized(base64.decode(b));
   }
 
   @override
-  Future<List<SignedPreKeyRecord>> loadSignedPreKeys() async {
-    final tout = await _magasin.readAll(aOptions: _options);
-    return tout.entries
-        .where((e) => e.key.startsWith(_cle('signed.')))
-        .map((e) => SignedPreKeyRecord.fromSerialized(base64.decode(e.value)))
-        .toList();
+  Future<List<SignedPreKeyRecord>> loadSignedPreKeys() async =>
+      (await _table('signed'))
+          .values
+          .map((v) => SignedPreKeyRecord.fromSerialized(base64.decode(v)))
+          .toList();
+
+  @override
+  Future<void> storeSignedPreKey(int id, SignedPreKeyRecord record) async {
+    final t = await _table('signed');
+    t['$id'] = base64.encode(record.serialize());
+    await _ecrireTable('signed', t);
   }
 
   @override
-  Future<void> storeSignedPreKey(int id, SignedPreKeyRecord record) =>
-      _ecrire('signed.$id', base64.encode(record.serialize()));
-
-  @override
   Future<bool> containsSignedPreKey(int id) async =>
-      await _lire('signed.$id') != null;
+      (await _table('signed')).containsKey('$id');
 
   @override
-  Future<void> removeSignedPreKey(int id) =>
-      _magasin.delete(key: _cle('signed.$id'));
+  Future<void> removeSignedPreKey(int id) async {
+    final t = await _table('signed');
+    t.remove('$id');
+    await _ecrireTable('signed', t);
+  }
+
+  /// A-t-on déjà publié nos clés ?
+  ///
+  /// ⚠️ ON NE REPUBLIE PAS À CHAQUE LANCEMENT. L'identité ne change pas, et
+  /// republier cinquante pré-clés à chaque ouverture coûte cher pour rien.
+  Future<bool> dejaPublie() async => (await _lire('publie')) == '1';
+
+  Future<void> noterPublie() => _ecrire('publie', '1');
+
+
+  /* ══════════════ LA CLÉ MAÎTRESSE DE L'ARCHIVE ══════════════ */
+
+  /// Range la clé maîtresse de l'archive dans le coffre matériel.
+  ///
+  /// 🔴 C'EST CE QUI FERME LA BOUCLE. Une archive créée avec la seule clé de
+  /// récupération ne pourrait plus s'ouvrir à la connexion suivante : il n'y a
+  /// pas de serrure « mot de passe », et le mot de passe ne peut pas en poser
+  /// une sans d'abord OUVRIR l'archive. En gardant la clé maîtresse ici, la
+  /// connexion suivante l'ouvre directement et pose la serrure manquante.
+  ///
+  /// ⚠️ CE QUE CELA COÛTE, ET IL FAUT L'ASSUMER : le coffre contient déjà les
+  /// clés Signal et le cache. Mais l'archive porte l'historique d'AVANT cet
+  /// appareil — y ranger sa clé élargit ce qu'une compromission rapporte.
+  ///
+  /// ⚠️ CE QUI LE REND ACCEPTABLE : le coffre est adossé au MATÉRIEL, et
+  /// `oublier()` le vide à la déconnexion — la clé part avec.
+  Future<void> rangerMaitresse(Uint8List cle) =>
+      _ecrire('archive.maitresse', base64.encode(cle));
+
+  Future<Uint8List?> lireMaitresse() async {
+    final b = await _lire('archive.maitresse');
+    return b == null ? null : Uint8List.fromList(base64.decode(b));
+  }
+
+  /// Le secret de la serrure « trousseau » de CET appareil.
+  ///
+  /// ⚠️ IL NE QUITTE JAMAIS LE COFFRE MATÉRIEL, et notre serveur ne le voit
+  /// jamais — contrairement au mot de passe, qu'il reçoit à chaque connexion.
+  /// C'est ce qui fait de cette serrure la plus forte des trois face à un
+  /// serveur compromis.
+  Future<String?> lireSecretTrousseau() => _lire('trousseau.secret');
+  Future<void> rangerSecretTrousseau(String s) =>
+      _ecrire('trousseau.secret', s);
 
   /* ══════════════ OUBLI ══════════════ */
 

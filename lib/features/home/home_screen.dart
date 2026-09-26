@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../../l10n/app_localizations.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,17 +9,25 @@ import '../../core/whatsapp_text.dart';
 
 import '../../core/connectivity_service.dart';
 import '../../core/conversation_cache.dart';
+import '../../core/messages_systeme.dart';
 import '../../core/geo_service.dart';
 import '../geo/screens/geo_disclosure_screen.dart';
 import '../../core/push_service.dart';
 import '../../core/notification_settings.dart';
 import '../../core/realtime_client.dart';
+import '../../widgets/back_app_bar.dart';
+import '../annuaire/annuaire_tab.dart';
+import '../entreprises/screens/entreprises_tab.dart';
+import '../../core/sonneries_listes.dart';
 import '../../core/call_cache.dart';
 import '../../core/call_status.dart';
 import '../../core/missed_calls.dart';
 import '../../models/call_record.dart';
 import '../../models/ai_message.dart';
 import '../../models/auth_user.dart';
+import '../../core/texte_recherche.dart';
+import '../../models/contact_list.dart';
+import 'filtre_conversations.dart';
 import '../../models/conversation.dart';
 import '../../models/status.dart';
 import '../../theme/alanya_theme.dart';
@@ -29,6 +38,7 @@ import '../../widgets/avatar_circle.dart';
 import '../../widgets/motif_background.dart';
 import '../../widgets/multi_select_mixin.dart';
 import '../account/screens/avatar_viewer_screen.dart';
+import '../settings/screens/repondeur_screen.dart';
 import '../settings/screens/settings_screen.dart';
 import '../settings/screens/devices_screen.dart';
 import '../ai/ai_repository.dart';
@@ -36,6 +46,9 @@ import '../auth/auth_controller.dart';
 import '../chat/chat_repository.dart';
 import '../chat/screens/chat_screen.dart';
 import '../calls/screens/dialer_screen.dart';
+import '../contacts/teintes_listes.dart';
+import '../../core/sonneries_livrees.dart';
+import '../contacts/screens/contact_lists_screen.dart';
 import '../contacts/screens/contacts_screen.dart';
 import '../calls/call_controller.dart';
 import '../calls/ouvrir_appel_en_cours.dart';
@@ -45,9 +58,16 @@ import '../calls/screens/calls_screen.dart';
 import '../calls/screens/abandoned_clients_screen.dart';
 import '../meetings/meeting_controller.dart';
 import '../meetings/screens/meetings_screen.dart';
+import '../status/horodatage_statut.dart';
+import '../status/statuts_persistes.dart';
+import '../status/publication_statuts.dart';
 import '../status/screens/create_status_screen.dart';
 import '../status/screens/status_viewer_screen.dart';
 import '../status/status_repository.dart';
+import '../status/widgets/anneau_statuts.dart';
+// L'aperçu d'une ligne d'un message, commun aux quatre écrans qui en affichent
+// un — voir `apercuMessage`.
+import '../../models/message_payload.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -58,6 +78,37 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _tab = 0;
+
+  /// Vitesse à partir de laquelle un balayage change d'onglet, en pixels par
+  /// seconde. En dessous, c'est une hésitation : on ne bouge pas.
+  static const double _vitesseBalayage = 220;
+
+  /// Va à l'onglet [i]. Passe par ici et non par `setState` direct : la
+  /// pastille des appels manqués doit tomber quel que soit le geste — appui
+  /// sur la barre du bas comme balayage.
+  void _allerOnglet(int i) {
+    if (i == _tab) return;
+    setState(() => _tab = i);
+    // Ouvrir l'onglet Appels vaut consultation : la pastille tombe.
+    if (i == 2) MissedCalls.instance.marquerVus();
+  }
+
+  /// Un balayage horizontal fait glisser d'un onglet, façon WhatsApp.
+  ///
+  /// ⚠️ LE SENS EST CELUI DU CONTENU, PAS DU DOIGT : glisser vers la GAUCHE
+  /// tire l'onglet SUIVANT vers soi — de Chats vers Status. C'est l'inverse du
+  /// signe de la vélocité, d'où la comparaison qui suit.
+  ///
+  /// Les extrémités ne bouclent pas : depuis le premier onglet, un balayage
+  /// vers la droite ne fait rien. Boucler ferait atterrir sur l'onglet le plus
+  /// éloigné en croyant reculer d'un cran.
+  void _balayerOnglet(DragEndDetails d, int nombreOnglets) {
+    final v = d.primaryVelocity ?? 0;
+    if (v.abs() < _vitesseBalayage) return;
+    final cible = v < 0 ? _tab + 1 : _tab - 1;
+    if (cible < 0 || cible >= nombreOnglets) return;
+    _allerOnglet(cible);
+  }
   int _appelsManques = 0;
   // Décide seulement l'AFFICHAGE du menu « Clients abandonnés » — un
   // non-agent ne doit rien voir (demande user 15/08/2026), pas même un
@@ -80,14 +131,17 @@ class _HomeScreenState extends State<HomeScreen> {
       context.read<RealtimeClient>().connect();
       final user = context.read<AuthController>().user;
       if (user != null) {
-        context.read<CallController>().bindUser(
-              user.id,
-              user.pseudo ?? user.publicNumber,
-            );
-        context.read<MeetingController>().bindUser(
-              user.id,
-              user.pseudo ?? user.publicNumber,
-            );
+        // 🔴 LE NOM D'ABORD, comme partout ailleurs.
+        //
+        // C'est le nom sous lequel on se présente aux autres en appel comme en
+        // réunion. Ces deux lignes disaient `pseudo ?? publicNumber`, alors que
+        // la règle du projet — `nom ?? pseudo ?? numéro` — est écrite côté
+        // serveur dans `display-name.mjs` et appliquée par toutes les routes.
+        // Signalé par le user le 26/08/2026 : en réunion, chacun voyait le
+        // pseudo des autres au lieu de leur nom.
+        final nomAffiche = user.nomAffiche;
+        context.read<CallController>().bindUser(user.id, nomAffiche);
+        context.read<MeetingController>().bindUser(user.id, nomAffiche);
       }
       MissedCalls.instance
         ..bind(context.read<CallsRepository>())
@@ -168,12 +222,62 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    /*
+     * 🔴 L'ONGLET COLLÈGUES N'EXISTE QUE POUR LES AGENTS (`type_compte = 2`).
+     *
+     * L'annuaire montre les services d'une ENTREPRISE et les gens qui les
+     * tiennent : il n'a aucun sens pour un particulier, qui n'en a pas. Le
+     * masquer vaut mieux que de l'afficher vide.
+     *
+     * ⚠️ CE N'EST PAS UN CONTRÔLE D'ACCÈS — un onglet caché ne protège rien.
+     * C'est `GET /api/collegues` qui refuse par 403 aux non-agents.
+     *
+     * ⚠️ La liste des onglets et celle de la barre du bas doivent rester de
+     * MÊME LONGUEUR ET DANS LE MÊME ORDRE : `_tab` sert d'index aux deux. Une
+     * entrée ajoutée d'un seul côté décalerait silencieusement toute la
+     * navigation.
+     */
+    /*
+     * 🔴 LA CINQUIÈME PLACE DÉPEND DU TYPE DE COMPTE.
+     *
+     *   - PARTICULIER (type 0) → Entreprises : l'annuaire des standards qu'il
+     *     peut appeler ;
+     *   - AGENT (type 2)       → Collègues : l'annuaire interne de son
+     *     employeur ;
+     *   - standards (3 et 4)   → ni l'un ni l'autre. Ce sont des comptes de
+     *     service, pas des personnes qui consultent un annuaire.
+     *
+     * Les deux ne cohabitent jamais : un agent n'a pas besoin de chercher un
+     * service client depuis l'application avec laquelle il EST le service
+     * client, et un particulier n'a pas de collègues.
+     *
+     * ⚠️ CE N'EST PAS UN CONTRÔLE D'ACCÈS. `GET /api/collegues` refuse par 403
+     * aux non-agents parce qu'elle expose l'annuaire interne d'un employeur.
+     * `GET /api/entreprises`, elle, NE refuse personne : c'est un annuaire
+     * public, et masquer l'onglet n'est qu'un choix de produit.
+     *
+     * ⚠️ `typeCompte` VIENT DE `/api/me`, relu à chaque connexion depuis le
+     * 25/08/2026. Il valait 0 pour tout le monde juste après un login — la
+     * réponse de `/api/auth/login` ne le porte pas — et l'onglet n'apparaissait
+     * qu'au redémarrage suivant. Ne pas revenir à la valeur mise en cache.
+     *
+     * ⚠️ La liste des onglets et celle de la barre du bas doivent rester de
+     * MÊME LONGUEUR ET DANS LE MÊME ORDRE : `_tab` sert d'index aux deux.
+     */
+    final typeCompte = context.watch<AuthController>().user?.typeCompte ?? 0;
+    final estAgent = typeCompte == 2;
+    final estParticulier = typeCompte == 0;
+
     final tabs = [
       const _ConversationsTab(),
       const _StatusTab(),
       const CallsScreen(),
       const MeetingsScreen(),
-      const _AiTab(),
+      // L agent recoit l ANNUAIRE — ses collegues ET les entreprises, en deux
+      // volets. Le particulier garde Entreprises seul : il n a pas de collegues,
+      // et un selecteur a un seul volet ne serait qu un obstacle.
+      if (estAgent) const AnnuaireTab(),
+      if (estParticulier) const EntreprisesTab(),
     ];
 
     return Scaffold(
@@ -192,8 +296,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   : AlanyaColors.terracotta,
             ),
             tooltip: Theme.of(context).brightness == Brightness.dark
-                ? "Passer au mode clair"
-                : "Passer au mode sombre",
+                ? tr(context, 'theme_to_light')
+                : tr(context, 'theme_to_dark'),
             onPressed: () {
               final themeCtrl = context.read<ThemeController>();
               themeCtrl.basculerClairSombre(
@@ -211,93 +315,184 @@ class _HomeScreenState extends State<HomeScreen> {
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const DevicesScreen()),
                 );
+              } else if (v == "repondeur") {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const RepondeurScreen()),
+                );
               } else if (v == "abandoned") {
                 Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const AbandonedClientsScreen()),
+                  MaterialPageRoute(
+                      builder: (_) => const AbandonedClientsScreen()),
                 );
               } else if (v == "logout") {
                 context.read<AuthController>().logout();
               }
             },
             itemBuilder: (_) => [
-              const PopupMenuItem(
+              PopupMenuItem(
                   value: "devices",
                   child: ListTile(
-                    leading: Icon(Icons.devices_outlined),
-                    title: Text("Appareils connectés"),
+                    leading: const Icon(Icons.devices_outlined),
+                    title: Text(tr(context, 'home_devices')),
+                    contentPadding: EdgeInsets.zero,
+                  )),
+              // Le répondeur reste dans les Réglages — c'est là qu'on va le
+              // chercher quand on sait ce qu'on veut. Il est AUSSI ici parce
+              // qu'on l'allume et on l'éteint en partant, sans intention de
+              // régler quoi que ce soit : trois écrans pour cocher une case,
+              // c'est deux de trop (demande user 21/09/2026).
+              PopupMenuItem(
+                  value: "repondeur",
+                  child: ListTile(
+                    leading: const Icon(Icons.voicemail_outlined),
+                    title: Text(tr(context, 'vm_title')),
                     contentPadding: EdgeInsets.zero,
                   )),
               // Un non-agent ne doit RIEN voir (demande user 15/08/2026) —
               // pas un message « réservé ». _isAgent n'est qu'un reflet
               // d'affichage ; la vraie garde reste le 403 serveur.
               if (_isAgent)
-                const PopupMenuItem(
+                PopupMenuItem(
                     value: "abandoned",
                     child: ListTile(
-                      leading: Icon(Icons.person_search_outlined),
-                      title: Text("Clients abandonnés"),
+                      leading: const Icon(Icons.person_search_outlined),
+                      title: Text(tr(context, 'home_abandoned_clients')),
                       contentPadding: EdgeInsets.zero,
                     )),
-              const PopupMenuItem(
+              PopupMenuItem(
                   value: "settings",
                   child: ListTile(
-                    leading: Icon(Icons.settings_outlined),
-                    title: Text("Paramètres"),
+                    leading: const Icon(Icons.settings_outlined),
+                    title: Text(tr(context, 'settings')),
                     contentPadding: EdgeInsets.zero,
                   )),
-              const PopupMenuItem(
-                  value: "logout", child: Text("Se déconnecter")),
+              PopupMenuItem(
+                  value: "logout", child: Text(tr(context, 'logout'))),
             ],
           ),
         ],
       ),
-      body: IndexedStack(index: _tab, children: tabs),
+      /*
+       * BALAYAGE HORIZONTAL ENTRE ONGLETS (demande du user, 04/09/2026).
+       *
+       * 🔴 UN `GestureDetector` PAR-DESSUS L'`IndexedStack`, ET NON UN
+       * `PageView`. Le `PageView` aurait été la voie évidente, et c'est un
+       * piège ici pour deux raisons :
+       *   - il CONSTRUIT LES PAGES VOISINES d'avance — le même défaut que la
+       *     visionneuse de statuts, où les statuts des personnes suivantes
+       *     défilaient en arrière-plan. Ici, cela réveillerait l'annuaire et
+       *     les réunions à chaque passage sur Appels ;
+       *   - il DÉTRUIT les pages éloignées, alors que l'`IndexedStack` garde
+       *     l'état de chaque onglet — position de défilement, recherche en
+       *     cours, filtre choisi. On les perdrait toutes.
+       *
+       * ⚠️ Les listes horizontales des onglets (la rangée de filtres, le
+       * bandeau des collègues) GAGNENT l'arène quand le doigt part sur elles :
+       * un `GestureDetector` de haut niveau ne l'emporte que sur le vide. C'est
+       * exactement le partage voulu.
+       */
+      body: GestureDetector(
+        // `onHorizontalDragEnd` seul : sans `onHorizontalDragStart`, le
+        // détecteur ne réclame pas le geste tant qu'il n'est pas horizontal,
+        // et le défilement vertical des listes n'est jamais gêné.
+        onHorizontalDragEnd: (d) => _balayerOnglet(d, tabs.length),
+        child: IndexedStack(index: _tab, children: tabs),
+      ),
+      /*
+       * DEUX BOUTONS EMPILÉS, l'IA au-dessus de l'écriture.
+       *
+       * 🔴 L'IA a quitté la barre du bas (elle a laissé sa place à Collègues) et
+       * devient ce bouton rond, exactement comme Meta AI dans WhatsApp.
+       *
+       * ⚠️ Le bouton IA est VOLONTAIREMENT PLUS PETIT et discret : le geste
+       * principal de cet écran reste d'écrire à quelqu'un. Deux boutons de même
+       * poids feraient hésiter, et l'IA n'est pas ce qu'on vient chercher en
+       * ouvrant ses discussions.
+       *
+       * ⚠️ `mainAxisSize.min` : sans lui, la Column prend toute la hauteur de
+       * l'écran et l'emplacement du bouton flottant part en haut.
+       *
+       * ⚠️ `heroTag` distincts — deux `FloatingActionButton` à l'écran partagent
+       * sinon la même étiquette d'animation, et Flutter lève à la construction.
+       */
       floatingActionButton: _tab == 0
-          ? FloatingActionButton(
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const ContactsScreen()),
-              ),
-              // Nuit : icône sombre sur la terre cuite (contraste du modèle).
-              child: Icon(Icons.edit,
-                  color: Theme.of(context).brightness == Brightness.dark
-                      ? const Color(0xFF160B06)
-                      : Colors.white),
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FloatingActionButton.small(
+                  heroTag: "fab-ia",
+                  // Même nom que le titre de l'écran qu'il ouvre : un bouton
+                  // qui s'annonce autrement que l'endroit où il mène.
+                  tooltip: tr(context, 'home_assistant'),
+                  backgroundColor:
+                      Theme.of(context).colorScheme.surfaceContainerHighest,
+                  foregroundColor: accentOf(context),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const AiScreen()),
+                  ),
+                  child: const Icon(Icons.auto_awesome_outlined),
+                ),
+                const SizedBox(height: 12),
+                FloatingActionButton(
+                  heroTag: "fab-ecrire",
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const ContactsScreen()),
+                  ),
+                  // Nuit : icône sombre sur la terre cuite (contraste du modèle).
+                  child: Icon(Icons.edit,
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? const Color(0xFF160B06)
+                          : Colors.white),
+                ),
+              ],
             )
           : null,
       bottomNavigationBar: AlanyaNavBar(
         currentIndex: _tab,
-        onTap: (i) {
-          setState(() => _tab = i);
-          // Ouvrir l'onglet Appels vaut consultation : la pastille tombe.
-          if (i == 2) MissedCalls.instance.marquerVus();
-        },
+        onTap: _allerOnglet,
         items: [
-          const AlanyaNavItem(
+          AlanyaNavItem(
             icon: Icons.chat_bubble_outline,
             activeIcon: Icons.chat_bubble,
-            label: 'Chats',
+            label: tr(context, 'chats'),
           ),
-          const AlanyaNavItem(
+          AlanyaNavItem(
             icon: Icons.radio_button_unchecked,
             activeIcon: Icons.adjust,
-            label: 'Status',
+            label: tr(context, 'status'),
           ),
           AlanyaNavItem(
             icon: Icons.call_outlined,
             activeIcon: Icons.call,
-            label: 'Appels',
+            label: tr(context, 'calls'),
             badge: _appelsManques,
           ),
-          const AlanyaNavItem(
+          AlanyaNavItem(
             icon: Icons.videocam_outlined,
             activeIcon: Icons.videocam,
-            label: 'Réunions',
+            label: tr(context, 'meetings'),
           ),
-          const AlanyaNavItem(
-            icon: Icons.auto_awesome_outlined,
-            activeIcon: Icons.auto_awesome,
-            label: 'IA',
-          ),
+          // L Annuaire prend la place qu occupait l IA, et disparaît avec elle
+          // pour un non-agent : voir la note sur `tabs`, les deux listes doivent
+          // rester de même longueur.
+          //
+          // « Annuaire » et non « Collègues » : l onglet porte désormais deux
+          // volets. Le libellé est aussi le plus court des deux, ce qui compte
+          // à 60 dp de large.
+          if (estAgent)
+            AlanyaNavItem(
+              icon: Icons.menu_book_outlined,
+              activeIcon: Icons.menu_book,
+              label: tr(context, 'directory'),
+            ),
+          // Entreprises prend la MÊME place pour un particulier — voir la note
+          // sur `tabs` : les deux listes doivent rester de même longueur.
+          if (estParticulier)
+            AlanyaNavItem(
+              icon: Icons.domain_outlined,
+              activeIcon: Icons.domain,
+              label: tr(context, 'directory_companies'),
+            ),
         ],
       ),
     );
@@ -322,6 +517,19 @@ class _ConversationsTabState extends State<_ConversationsTab>
   final _searchCtrl = TextEditingController();
   String _searchQuery = '';
   int _tabFilter = 0;
+
+  /// Les listes de contacts de l'utilisateur, pour la rangée de filtres.
+  ///
+  /// 🐛 **ELLE NE SE METTAIT À JOUR QU'AU DÉMARRAGE** (signalé le 19/08/2026).
+  /// Cet écran gardait sa PROPRE copie, chargée une seule fois dans `initState` :
+  /// une liste créée ou renommée depuis le carnet n'apparaissait qu'au
+  /// redémarrage de l'application. La copie est supprimée — la source est
+  /// désormais `SonneriesDeListes`, qui prévient tout le monde quand elle change.
+  List<ListeContacts> get _listes => context.watch<SonneriesDeListes>().listes;
+
+  /// L'identifiant de la liste qui filtre, ou `null` — un seul filtre de liste
+  /// actif à la fois, comme sur le web.
+  String? _listeActive;
   bool _wasBusy = false;
 
   // Formalisme centralisé – voir lib/core/call_status.dart
@@ -424,6 +632,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
     WidgetsBinding.instance.addObserver(this);
     _load();
     _loadCalls();
+    _chargerListes();
     // Rafraîchit la liste + affiche une notification locale pour les nouveaux messages.
     _rtSub = context.read<RealtimeClient>().events.listen((e) {
       final t = e["type"];
@@ -442,6 +651,18 @@ class _ConversationsTabState extends State<_ConversationsTab>
         }
       } else if (t == "read") {
         _poll();
+      } else if (t == "message_edited") {
+        // Un message modifié peut être le DERNIER de sa conversation : le libellé
+        // de la liste change alors, et il vient du serveur (voir
+        // `apercu-conversation.mjs`). `lastMessage` absent ou nul dit que la
+        // modification portait sur un message plus ancien — la liste n'a rien à
+        // montrer de nouveau, on s'épargne la requête.
+        //
+        // Sans cette branche, la correction finissait tout de même par
+        // apparaître, mais au prochain tour du `Timer.periodic` : jusqu'à cinq
+        // secondes pendant lesquelles l'utilisateur voit son ancien texte et
+        // croit sa modification perdue.
+        if (e["lastMessage"] != null) _poll();
       } else if (t == "call_ended") {
         // Le serveur pousse l'appel COMPLET : on l'insère, sans rien recharger.
         final brut = e["call"];
@@ -507,35 +728,46 @@ class _ConversationsTabState extends State<_ConversationsTab>
         break;
       }
     }
-    final title = conv?.title ?? "Nouveau message";
+    /*
+     * 🔴 LA SOURDINE VAUT AUSSI POUR CETTE NOTIFICATION-CI.
+     *
+     * Le serveur écarte le destinataire de la POUSSÉE, mais celle-ci est
+     * fabriquée par l'application elle-même, à la réception d'une trame temps
+     * réel : elle passe donc à côté du filtre du serveur. Sans cette garde,
+     * mettre une conversation en sourdine n'aurait aucun effet tant que
+     * l'application reste ouverte — c'est-à-dire précisément quand on la
+     * regarde.
+     */
+    if (conv?.sourdine == true) return;
+    final title = conv?.title ?? tr(context, 'notif_new_message');
 
     // Aperçu du message selon le type — on retire les marqueurs pour les
     // notifications système, qui ne peuvent pas afficher de rich text.
     String body;
     switch (type) {
       case "IMAGE":
-        body = "Photo";
+        body = tr(context, 'media_photo');
         break;
       case "AUDIO":
-        body = "Message vocal";
+        body = tr(context, 'media_voice');
         break;
       case "FILE":
-        body = "Fichier";
+        body = tr(context, 'media_file');
         break;
       case "VIDEO":
-        body = "Vidéo";
+        body = tr(context, 'video');
         break;
       default:
         // Si c'est un message formaté, on n'affiche pas les * _ ~ dans la notif
         body = content == null
-            ? "Nouveau message"
+            ? tr(context, 'notif_new_message')
             : sansMarqueursWhatsApp(content);
-        if (body.trim().isEmpty) body = "Nouveau message";
+        if (body.trim().isEmpty) body = tr(context, 'notif_new_message');
     }
 
     // Aperçu désactivé → texte générique (dans le bandeau ET la notif système).
     if (!NotificationSettings.instance.previewOn) {
-      body = "Nouveau message";
+      body = tr(context, 'notif_new_message');
     }
 
     // Le bandeau interne a été retiré : il faisait DOUBLON avec la notification
@@ -546,12 +778,33 @@ class _ConversationsTabState extends State<_ConversationsTab>
     // fonctionner application fermée. Elle a reçu en échange ce qui faisait
     // l'intérêt du bandeau : l'avatar de l'expéditeur et le regroupement par
     // conversation (voir `PushService.show`).
+    // Le son de la LISTE de l'expediteur, quand elle en a un.
+    //
+    // ⚠️ ICI ON RESOUT EN LOCAL, la ou le chemin FCM recoit le canal deja
+    // choisi par le serveur : ce chemin-ci ne passe PAS par un push. Il vient du
+    // WebSocket, application ouverte, donc le cache des listes est sous la main
+    // et une requete de plus serait inutile. La regle d'arbitrage est la meme
+    // des deux cotes — elle vit dans `SonneriesDeListes`.
+    //
+    // ⚠️ UN SON IMPORTE RETOMBE SUR LE CANAL PAR DEFAUT : `canalMessagePour`
+    // ne rend un canal que pour un son LIVRE, seul cas ou Android sait lire le
+    // fichier depuis l'interface systeme.
+    final expediteur =
+        (e["message"] as Map<String, dynamic>?)?["senderId"] as String?;
+    final sonDeListe = expediteur == null
+        ? null
+        : context
+            .read<SonneriesDeListes>()
+            .listePourExpediteur(expediteurId: expediteur)
+            ?.ringtoneMessage;
+
     PushService.instance.show(
       title: title,
       body: body,
       convId: convId,
       avatarUrl: conv?.avatarUrl,
       payload: {"type": "message", "convId": convId},
+      canal: canalMessagePour(sonDeListe),
     );
   }
 
@@ -567,6 +820,9 @@ class _ConversationsTabState extends State<_ConversationsTab>
     if (state == AppLifecycleState.resumed) {
       _rafraichitAppels();
       _poll();
+      // Une liste a pu être créée ou renommée depuis un autre appareil — ou
+      // depuis le carnet, sur celui-ci.
+      _chargerListes();
     }
   }
 
@@ -653,6 +909,10 @@ class _ConversationsTabState extends State<_ConversationsTab>
   Future<void> _refresh() async {
     await _load();
     await _loadCalls();
+    // Tirer pour rafraîchir doit rafraîchir CE QUE L'ÉCRAN MONTRE, rangée de
+    // filtres comprise : c'est le geste que l'utilisateur fait quand quelque
+    // chose lui paraît périmé.
+    await _chargerListes();
   }
 
   @override
@@ -667,7 +927,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
     if (isSelecting) {
       return Scaffold(
         appBar: selectAppBar(
-          title: "Conversations",
+          title: tr(context, 'home_conversations'),
           onDelete: _deleteSelected,
           onCancel: clearSelection,
           onSelectAll: () =>
@@ -684,9 +944,10 @@ class _ConversationsTabState extends State<_ConversationsTab>
       );
     }
 
-    return DefaultTabController(
-      length: 3,
-      child: MotifBackground(
+    // Plus de `DefaultTabController` : il n'existait que pour le `TabBar` des
+    // trois filtres système, remplacé par la rangée unique de puces. Un
+    // contrôleur sans onglet à piloter est du décor qui survit à son objet.
+    return MotifBackground(
         overlayOpacity: 0.92,
         plainInDark: true,
         child: Column(
@@ -714,7 +975,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
                 onChanged: (v) =>
                     setState(() => _searchQuery = v.trim().toLowerCase()),
                 decoration: InputDecoration(
-                  hintText: "Rechercher une discussion…",
+                  hintText: tr(context, 'home_search_hint'),
                   prefixIcon:
                       Icon(Icons.search, color: searchIconColor, size: 20),
                   suffixIcon: _searchQuery.isNotEmpty
@@ -752,19 +1013,8 @@ class _ConversationsTabState extends State<_ConversationsTab>
                 style: const TextStyle(fontSize: 14),
               ),
             ),
-            // --- Onglets : Tous / Non lues / Groupes ---
-            TabBar(
-              tabs: const [
-                Tab(text: "Tous"),
-                Tab(text: "Non lues"),
-                Tab(text: "Groupes"),
-              ],
-              labelColor: AlanyaColors.terracotta,
-              unselectedLabelColor: AlanyaColors.craie2,
-              indicatorColor: AlanyaColors.terracotta,
-              indicatorWeight: 2.5,
-              onTap: (i) => setState(() => _tabFilter = i),
-            ),
+            // --- Une SEULE rangée : Tous / Non lues / Groupes / les listes ---
+            _rangeeFiltres(),
             Expanded(
               child: RefreshIndicator(
                 onRefresh: _refresh,
@@ -773,7 +1023,222 @@ class _ConversationsTabState extends State<_ConversationsTab>
             ),
           ],
         ),
+    );
+  }
+
+  /// Charge les listes de contacts, en échec silencieux.
+  ///
+  /// ⚠️ Un échec ne doit RIEN casser : la rangée disparaît, les conversations
+  /// restent. Ce n'est pas une donnée dont dépend l'écran, c'est un confort.
+  Future<void> _chargerListes() async {
+    // L'échec est silencieux et sans effet : la rangée garde ce qu'elle
+    // affichait, plutôt que de disparaître sur une coupure réseau passagère.
+    await context.read<SonneriesDeListes>().rafraichir();
+  }
+
+  /// TOUTES LES LISTES DU COMPTE, dans l'ordre de priorité choisi.
+  ///
+  /// 🔴 ELLES ÉTAIENT FILTRÉES SUR « a-t-elle une conversation en cours ? »,
+  /// et une liste vide n'apparaissait pas. La raison était défendable — quatre
+  /// listes existent dès la création du compte, et quatre boutons qui ne filtrent
+  /// rien poussaient les filtres système hors de vue.
+  ///
+  /// Le user a tranché l'inverse le 15/09/2026 : **toutes** les listes se
+  /// montrent, vides comprises, celles créées d'office comprises. Une liste qu'on
+  /// vient de créer est vide par construction : la faire disparaître de la rangée
+  /// au moment même où on la crée est ce qui se comprend le moins.
+  ///
+  /// ⚠️ L'ORDRE EST CELUI DE LA PRIORITÉ, pas l'alphabétique : c'est celui que
+  /// l'utilisateur a posé lui-même dans l'écran des sonneries, et le même qui
+  /// décide quelle sonnerie gagne. Deux ordres différents pour les mêmes listes
+  /// n'auraient rien voulu dire. Tant que rien n'est ordonné, il se réduit à
+  /// l'ancienneté — l'ordre où les listes ont été créées.
+  List<ListeContacts> get _listesPourFiltres =>
+      List<ListeContacts>.from(_listes)
+        ..sort(SonneriesDeListes.comparePriorite);
+
+  /// Restreint les conversations à la liste active, s'il y en a une.
+  List<Conversation> _appliqueListe(List<Conversation> convs) {
+    final id = _listeActive;
+    if (id == null) return convs;
+    final liste = _listes.where((l) => l.id == id).firstOrNull;
+    // ⚠️ Une liste supprimée — ou dont la dernière conversation vient de
+    // disparaître — laisse un filtre actif sur un bouton absent. On rend alors
+    // TOUTES les conversations plutôt qu'un écran vide sans moyen d'en sortir.
+    if (liste == null) return convs;
+
+    // Construits UNE FOIS : la liste se refiltre à chaque message reçu.
+    final filtre = MembresDuFiltre(
+      liste.members.map((m) => m.id.toLowerCase()).toSet(),
+      liste.members
+          .map((m) => chiffresSeuls(m.publicNumber))
+          .where((n) => n.isNotEmpty)
+          .toSet(),
+    );
+    final monId = context.read<AuthController>().user?.id;
+
+    return convs
+        .where((c) => estDansListe(
+              estGroupe: c.isGroup,
+              membres: c.members
+                  .map((m) => (id: m.id, numero: m.publicNumber))
+                  .toList(),
+              monId: monId,
+              filtre: filtre,
+            ))
+        .toList();
+  }
+
+  /// UNE SEULE RANGÉE : les filtres système, puis les listes, puis « + ».
+  ///
+  /// 🔴 ELLES ÉTAIENT SUR DEUX LIGNES, et c'était un choix assumé : un filtre
+  /// système décrit un ÉTAT de la conversation — non lue, groupe — quand une
+  /// liste désigne un CERCLE DE PERSONNES que l'utilisateur a constitué. La
+  /// séparation disait cette différence de nature. Le user a tranché l'inverse le
+  /// 13/09/2026 : une ligne rendue à la liste des conversations, et un seul geste
+  /// pour passer d'un filtre à l'autre.
+  ///
+  /// ⚠️ CE QU'ON Y PERD : les deux filtres se CUMULAIENT. On pouvait voir « les
+  /// non lues de Famille ». Sur une rangée unique, choisir c'est remplacer.
+  ///
+  /// 🔴 CHAQUE PUCE SYSTÈME PORTE UNE ICÔNE (15/09/2026, maquette du user), et
+  /// c'est une ICÔNE MATÉRIELLE, jamais un emoji — règle du dépôt. Un emoji change
+  /// de dessin d'un téléphone à l'autre, ne suit pas la couleur du texte, et ne
+  /// se met pas à l'échelle avec la police.
+  ///
+  /// ⚠️ LES CINQ SYSTÈMES PASSENT DEVANT, toujours : « Tous » est le retour à
+  /// l'état neutre, il doit rester la chose la plus facile à atteindre.
+  ///
+  /// ⚠️ « + » FERME LA RANGÉE et ne se sélectionne pas : ce n'est pas un filtre
+  /// mais une action. Il est donc dessiné autrement — un cercle bordé, sans
+  /// libellé — pour qu'on ne le prenne pas pour une liste qu'on aurait ratée.
+  Widget _rangeeFiltres() {
+    final sombre = Theme.of(context).brightness == Brightness.dark;
+    final listes = _listesPourFiltres;
+    // Meme grise que le reste de l'accueil : `muted2` y est une variable locale
+    // a chaque methode, pas un champ.
+    final muted2 =
+        themed(context, light: AlanyaColors.grey500, dark: AlanyaColors.craie2);
+
+    // Une puce système : sélectionnée seulement si AUCUNE liste ne filtre —
+    // sans quoi « Tous » resterait allumé pendant qu'on regarde « Famille ».
+    Widget systeme(int index, String cle, IconData icone) {
+      final actif = _listeActive == null && _tabFilter == index;
+      return FilterChip(
+        selected: actif,
+        // Pas de second appui qui désélectionne : contrairement à une liste,
+        // il faut toujours qu'un filtre système soit choisi. Le retour au
+        // neutre, c'est « Tous ».
+        onSelected: (_) => setState(() {
+          _tabFilter = index;
+          _listeActive = null;
+        }),
+        // 🔴 SANS COCHE, ET C'EST INDISPENSABLE ICI : une `FilterChip`
+        // sélectionnée remplace son `avatar` par une coche. L'icône — la seule
+        // chose que ce lot ajoute — aurait donc disparu au moment précis où on
+        // appuie dessus. Le fond teinté dit déjà la sélection.
+        showCheckmark: false,
+        // L'icône prend la place de l'`avatar`, celle qu'occupe le point coloré
+        // d'une liste : les deux familles de puces gardent ainsi le même gabarit.
+        //
+        // ⚠️ Elle SUIT la couleur du libellé — `null` laisse le thème décider —
+        // sans quoi elle resterait sombre sur une puce sélectionnée.
+        avatar: Icon(icone, size: 16, color: actif ? null : muted2),
+        label: Text(tr(context, cle), style: const TextStyle(fontSize: 13)),
+      );
+    }
+
+    return SizedBox(
+      height: 46,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        children: [
+          systeme(0, 'filter_all', Icons.apps_rounded),
+          const SizedBox(width: 8),
+          systeme(1, 'filter_chats', Icons.person_outline_rounded),
+          const SizedBox(width: 8),
+          systeme(2, 'filter_groups', Icons.groups_outlined),
+          const SizedBox(width: 8),
+          systeme(3, 'filter_unread', Icons.mail_outline_rounded),
+          const SizedBox(width: 8),
+          systeme(4, 'filter_archived', Icons.archive_outlined),
+          for (final l in listes) ...[
+            const SizedBox(width: 8),
+            _puceListe(l, sombre),
+          ],
+          const SizedBox(width: 8),
+          _boutonNouvelleListe(),
+        ],
       ),
+    );
+  }
+
+  /// « + » en fin de rangée : crée une liste sans quitter l'accueil.
+  ///
+  /// ⚠️ La rangée se remet à jour toute seule — `ouvrirCreationListe` rafraîchit
+  /// `SonneriesDeListes`, dont cet écran est un `watch`. Pas de `setState` ici.
+  Widget _boutonNouvelleListe() {
+    final muted2 =
+        themed(context, light: AlanyaColors.grey500, dark: AlanyaColors.craie2);
+    return Tooltip(
+      message: tr(context, 'list_new'),
+      child: InkWell(
+        onTap: () => ouvrirCreationListe(context),
+        customBorder: const CircleBorder(),
+        child: Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: faintOf(context, Colors.black38)),
+          ),
+          child: Icon(Icons.add_rounded, size: 18, color: muted2),
+        ),
+      ),
+    );
+  }
+
+  Widget _puceListe(ListeContacts l, bool sombre) {
+    final actif = l.id == _listeActive;
+    final teinte = couleurDeListe(l.color, sombre: sombre);
+    return FilterChip(
+      selected: actif,
+      // Même raison que pour les puces système : la coche mangerait le point
+      // coloré, qui est justement ce qui identifie la liste.
+      showCheckmark: false,
+      // ⚠️ LA SÉLECTION PREND LA COULEUR DE LA LISTE, et retombe sur le ton du
+      // thème quand aucune n'a été choisie. `couleurDeListe` rend déjà la
+      // variante qui convient au mode courant : rien n'est à décider ici, et le
+      // mode clair n'est pas touché.
+      selectedColor: teinte?.withValues(alpha: sombre ? 0.22 : 0.14),
+      side: actif && teinte != null
+          ? BorderSide(color: teinte.withValues(alpha: 0.55))
+          : null,
+      // Un second appui sur la liste active la RETIRE, et ramène à « Tous ».
+      // C'est le geste attendu, et il évite de chercher un bouton de sortie.
+      onSelected: (_) => setState(() {
+        _listeActive = actif ? null : l.id;
+        // La liste REMPLACE le filtre système, elle ne s'y ajoute pas : deux
+        // sélections visibles au même niveau ne doivent pas se combiner en
+        // secret.
+        if (!actif) _tabFilter = 0;
+      }),
+      avatar: Container(
+        width: 10,
+        height: 10,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          // Sans couleur choisie, un CONTOUR vide plutôt qu'un point couleur
+          // d'accent — repris du web : un point coloré ferait croire à une
+          // teinte qui n'a pas été choisie.
+          color: teinte,
+          border: teinte == null
+              ? Border.all(color: faintOf(context, Colors.black38))
+              : null,
+        ),
+      ),
+      label: Text(l.name, style: const TextStyle(fontSize: 13)),
     );
   }
 
@@ -805,7 +1270,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(
                 builder: (_) => AvatarViewerScreen(
-                  name: user.nom ?? user.pseudo ?? "Moi",
+                  name: user.nom ?? user.pseudo ?? tr(context, 'home_me'),
                   avatarUrl: user.avatarUrl,
                 ),
               ),
@@ -819,9 +1284,11 @@ class _ConversationsTabState extends State<_ConversationsTab>
                 // La carte identifie l'utilisateur par son nom. `nom` est
                 // nullable : repli sur le pseudo pour les comptes qui
                 // n'en ont pas encore, plutôt qu'un « Moi » anonyme.
-                Text(user.nom ?? user.pseudo ?? "Moi",
+                Text(user.nom ?? user.pseudo ?? tr(context, 'home_me'),
                     style: const TextStyle(fontWeight: FontWeight.bold)),
-                Text("Alanya ID : ${formatAlanyaId(user.publicNumber)}",
+                Text(
+                    tr(context, 'home_alanya_id',
+                        {'id': formatAlanyaId(user.publicNumber)}),
                     style: TextStyle(
                         color: alanyaIdOf(context, Colors.black54),
                         fontSize: 13)),
@@ -859,17 +1326,17 @@ class _ConversationsTabState extends State<_ConversationsTab>
           // Tout le contenu est littéral depuis que les couleurs ne dépendent
           // plus du thème : le sous-arbre entier devient constant, donc
           // construit une seule fois.
-          child: const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.phone, color: Colors.white, size: 24),
-                SizedBox(height: 2),
+                const Icon(Icons.phone, color: Colors.white, size: 24),
+                const SizedBox(height: 2),
                 Text(
-                  "Saisir ID",
-                  style: TextStyle(
+                  tr(context, 'home_enter_id'),
+                  style: const TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
                     color: Colors.white,
@@ -898,17 +1365,44 @@ class _ConversationsTabState extends State<_ConversationsTab>
       );
     }
     if (_error) {
-      return ListView(children: const [
-        SizedBox(height: 80),
-        Center(child: Text("Erreur de chargement. Tire pour réessayer.")),
+      return ListView(children: [
+        const SizedBox(height: 80),
+        Center(child: Text(tr(context, 'home_load_error'))),
       ]);
     }
     final allConvs = _convs ?? [];
-    final baseConvs = _tabFilter == 0
-        ? allConvs
-        : (_tabFilter == 1
-            ? allConvs.where((c) => c.unread > 0).toList()
-            : allConvs.where((c) => c.isGroup).toList());
+    // Les cinq filtres système, dans l'ordre de la rangée.
+    //
+    // ⚠️ « Archivés » NE PUISE PAS DANS LA MÊME SOURCE : `_convs` ne porte que
+    // les conversations actives — le serveur les rend séparément
+    // (`?archived=true`), et `_archivedConvs` les tient. Les chercher dans
+    // `allConvs` aurait rendu un écran vide, sans erreur pour l'expliquer.
+    //
+    // ⚠️ Les archivées se chargent EN TÂCHE DE FOND, après le premier rendu :
+    // `null` vaut « pas encore là », et rendre une liste vide est ici la bonne
+    // réponse — le message « aucune conversation » s'affichera une fraction de
+    // seconde plutôt qu'une erreur.
+    final List<Conversation> parOnglet;
+    switch (_tabFilter) {
+      case 1:
+        // « Discussions » : les échanges à deux, par opposition aux groupes.
+        parOnglet = allConvs.where((c) => !c.isGroup).toList();
+        break;
+      case 2:
+        parOnglet = allConvs.where((c) => c.isGroup).toList();
+        break;
+      case 3:
+        parOnglet = allConvs.where((c) => c.unread > 0).toList();
+        break;
+      case 4:
+        parOnglet = _archivedConvs ?? const <Conversation>[];
+        break;
+      default:
+        parOnglet = allConvs;
+    }
+    // La liste s'applique APRÈS le filtre système, jamais à sa place : les deux
+    // répondent à des questions différentes et se cumulent naturellement.
+    final baseConvs = _appliqueListe(parOnglet);
     if (baseConvs.isEmpty) {
       return ListView(children: [
         const SizedBox(height: 100),
@@ -916,7 +1410,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Text(
-              "Aucune discussion.\nAppuie sur le bouton en bas pour accéder à tes contacts et démarrer une discussion.",
+              tr(context, 'home_no_chats'),
               textAlign: TextAlign.center,
               style: TextStyle(color: muted),
             ),
@@ -955,7 +1449,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
                       light: AlanyaColors.grey300, dark: AlanyaColors.craie2)),
               const SizedBox(height: 12),
               Text(
-                "Aucun résultat pour \"$_searchQuery\"",
+                tr(context, 'home_no_results', {'q': _searchQuery}),
                 style: TextStyle(color: muted2),
               ),
             ],
@@ -969,12 +1463,14 @@ class _ConversationsTabState extends State<_ConversationsTab>
 
     return ListView(
       children: [
-        // Bouton "Conversations archivées" style WhatsApp
-        if (archivedCount > 0 && _searchQuery.isEmpty)
+        // Bouton tr(context, 'home_archived') style WhatsApp
+        // ⚠️ Masquée sous le filtre « Archivés » : proposer d'ouvrir les
+        // archivées alors qu'on les a sous les yeux n'aurait rien voulu dire.
+        if (archivedCount > 0 && _searchQuery.isEmpty && _tabFilter != 4)
           ListTile(
             leading: Icon(Icons.archive_outlined, color: muted2, size: 24),
             title: Text(
-              "Conversations archivées",
+              tr(context, 'home_archived'),
               style: TextStyle(
                 fontWeight: FontWeight.w500,
                 color: muted2,
@@ -989,7 +1485,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
               ),
               child: Text(
                 "$archivedCount",
-                style: TextStyle(
+                style: const TextStyle(
                   color: AlanyaColors.terracotta,
                   fontWeight: FontWeight.w600,
                   fontSize: 12,
@@ -998,11 +1494,49 @@ class _ConversationsTabState extends State<_ConversationsTab>
             ),
             onTap: _showArchived,
           ),
-        if (archivedCount > 0 && _searchQuery.isEmpty) const Divider(height: 1),
+        if (archivedCount > 0 && _searchQuery.isEmpty && _tabFilter != 4)
+          const Divider(height: 1),
         // Liste des conversations
         ...convs.map((c) => _tile(c)),
       ],
     );
+  }
+
+  /// L'aperçu d'un message, avec ses `@mentions` en gras.
+  ///
+  /// 🔴 ICI ON DÉTECTE LES MENTIONS AU MOTIF, contrairement à la bulle de
+  /// discussion qui s'appuie sur la liste portée par le message. La raison est
+  /// dans la charge : la liste des conversations ne reçoit QUE le texte du
+  /// dernier message (`lastMessage`), jamais ses mentions. Les faire remonter
+  /// demanderait de charger, pour chaque conversation, les mentions d'un
+  /// message qu'on ne montre qu'en résumé.
+  ///
+  /// ⚠️ CE QUE CE CHOIX ACCEPTE : un `@` écrit à la main se met en gras ici
+  /// alors qu'il ne désigne personne. C'est une différence de STYLE dans un
+  /// aperçu d'une ligne — aucune notification, aucun compte visé n'en dépend.
+  /// Le `@` doit tout de même ouvrir un mot, ce qui écarte les adresses
+  /// électroniques.
+  List<InlineSpan> _spansApercuAvecMentions(String texte, TextStyle base) {
+    final motif = RegExp(r'(^|\s)(@[^\s@]{1,40})');
+    if (!motif.hasMatch(texte)) return spansWhatsApp(texte);
+
+    final spans = <InlineSpan>[];
+    var position = 0;
+    for (final m in motif.allMatches(texte)) {
+      final debutMention = m.start + m.group(1)!.length;
+      if (debutMention > position) {
+        spans.addAll(spansWhatsApp(texte.substring(position, debutMention)));
+      }
+      spans.add(TextSpan(
+        text: m.group(2),
+        style: base.copyWith(fontWeight: FontWeight.w700),
+      ));
+      position = m.end;
+    }
+    if (position < texte.length) {
+      spans.addAll(spansWhatsApp(texte.substring(position)));
+    }
+    return spans;
   }
 
   Widget _tile(Conversation c) {
@@ -1030,21 +1564,79 @@ class _ConversationsTabState extends State<_ConversationsTab>
       }
     }
 
-    // Libellés pour les types non-texte
+    // Libellés pour les types non-texte.
+    //
+    // 🔴 `apercuMessage` et non une liste de cas locale (18/08/2026). Le
+    // `default:` d'origine rendait `last.content`, c'est-à-dire la charge JSON
+    // BRUTE d'un CONTACT ou d'une LOCATION — le défaut signalé par le user,
+    // identique à celui de la barre de réponse. La règle vit désormais dans
+    // `message_payload.dart`, seul endroit qui décide de cet aperçu pour les
+    // quatre écrans qui l'affichent.
+    //
+    // ⚠️ `LastMessage` ne porte PAS le média, donc pas de nom de fichier ici :
+    // un document apparaît en « 📎 Fichier », ou avec sa légende s'il en a une.
+    // L'ajouter demanderait de le faire remonter par l'API des conversations.
     String typeLabel() {
       if (last == null) return "—";
-      switch (last.type) {
-        case "AUDIO":
-          return "Message vocal";
-        case "IMAGE":
-          return "Photo";
-        case "VIDEO":
-          return "Vidéo";
-        case "FILE":
-          return "Fichier";
-        default:
-          return last.content ?? "[${last.type}]";
+      /*
+       * 🔴 UN MESSAGE SYSTÈME PORTE DU JSON, et la liste l'affichait tel quel :
+       * le serveur recopie la charge `{"code":"member_added",…}` dans
+       * `conversation.lastMessage`, parce que la phrase dépend de la langue du
+       * lecteur et ne peut donc pas être figée en base.
+       *
+       * Le fil de discussion compose déjà cette phrase ; la liste doit passer
+       * par le MÊME composeur, sans quoi le défaut reste visible à l'endroit le
+       * plus regardé de l'application.
+       */
+      /*
+       * ⚠️ ON RECONNAÎT L'AVIS À SA CHARGE, PAS À SON TYPE — et c'est ce qui
+       * manquait (défaut signalé le 01/09/2026 : le JSON s'affichait encore).
+       *
+       * La liste reçoit le type du dernier message sous forme de NOMBRE
+       * (`lastMessageType`), et le serveur range tout ce qui n'est ni texte ni
+       * média sous le 2, que `_typeToString` traduit par « FILE ». Un avis
+       * système arrive donc étiqueté « FILE » : le test `type == "SYSTEM"` ne
+       * pouvait jamais se déclencher.
+       *
+       * `estAvisSysteme` regarde le contenu : `{"code": …}` et rien d'autre.
+       * Un CONTACT ou une LOCATION porte aussi du JSON, mais sans clé `code` —
+       * ils gardent donc leur aperçu habituel.
+       */
+      if (estAvisSysteme(last.content)) {
+        return composerMessageSysteme(
+          context,
+          last.content,
+          context.read<AuthController>().user?.id,
+        );
       }
+
+      /*
+       * 🔴 LA COLONNE EST DÉJÀ DÉCORÉE — ON L'AFFICHE TELLE QUELLE.
+       *
+       * Défaut signalé sur device le 04/09/2026 : « deux icônes avant
+       * Photo/Vidéo ». `conversation.lastMessage` contient DÉJÀ le libellé
+       * complet, emoji compris — c'est `apercuMessage` qui l'y écrit, côté
+       * SERVEUR, et la colonne est faite pour être lue telle quelle par les
+       * trois clients (dont l'application de l'équipe, qu'on ne recompile
+       * pas). La redécorer ici donnait « 📷 📷 Photo ».
+       *
+       * ⚠️ CE N'ÉTAIT PAS UNE QUESTION DE NOMBRE DE MÉDIAS, contrairement à ce
+       * que le symptôme laissait croire : c'est qui a ÉCRIT la ligne. Relevé en
+       * production — `lastMessage` vaut « 📷 Ok » sur les lignes récentes et
+       * « Ok » sur une ligne antérieure au 18/08/2026, quand la colonne
+       * recevait encore le texte brut. Les anciennes n'avaient qu'une icône,
+       * les récentes deux. Elles se corrigent d'elles-mêmes au message suivant.
+       *
+       * 🚫 NE PAS APPLIQUER CE RAISONNEMENT AUX TROIS AUTRES ÉCRANS qui
+       * affichent un aperçu (citation d'une réponse, bandeau du message
+       * épinglé, barre du composeur) : eux reçoivent le contenu BRUT d'un
+       * message et doivent continuer de passer par `apercuMessage`.
+       */
+      final libelle = last.content?.trim() ?? "";
+      if (libelle.isNotEmpty) return libelle;
+      // Colonne vide : on retombe sur la règle commune, qui sait nommer un
+      // média sans légende.
+      return apercuMessage(last.type, last.content);
     }
 
     // Construit l'aperçu formaté : si TEXT on affiche en formaté (sans *),
@@ -1090,7 +1682,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
       if (!isText) {
         final label = typeLabel();
         final full = c.isGroup && c.members.isNotEmpty
-            ? "${c.members.length} membres · $label"
+            ? tr(context, 'group_members_prefix', {'n': '${c.members.length}'}) + label
             : label;
         return Text(full,
             style: baseStyle, maxLines: 1, overflow: TextOverflow.ellipsis);
@@ -1099,9 +1691,9 @@ class _ConversationsTabState extends State<_ConversationsTab>
       final raw = last.content!.trim();
       // Coupe à 120 char pour ne pas surcharger le ListTile avec un pavé
       final trimmed = raw.length > 120 ? "${raw.substring(0, 120)}…" : raw;
-      final spans = spansWhatsApp(trimmed);
+      final spans = _spansApercuAvecMentions(trimmed, baseStyle);
       if (c.isGroup && c.members.isNotEmpty) {
-        final prefix = "${c.members.length} membres · ";
+        final prefix = tr(context, 'group_members_prefix', {'n': '${c.members.length}'});
         return Text.rich(
           TextSpan(
             style: baseStyle,
@@ -1121,7 +1713,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
       );
     }
 
-    final title = c.title ?? "Discussion";
+    final title = c.title ?? tr(context, 'chat_untitled');
     final myId = context.read<AuthController>().user?.id;
     final other = c.isGroup
         ? null
@@ -1165,6 +1757,16 @@ class _ConversationsTabState extends State<_ConversationsTab>
             Padding(
               padding: const EdgeInsets.only(left: 4),
               child: Icon(Icons.push_pin,
+                  size: 14,
+                  color: isDark ? AlanyaColors.craie2 : AlanyaColors.grey400),
+            ),
+          // Cloche barrée : sans elle, une conversation en sourdine ne se
+          // distingue en rien d'une conversation où personne n'écrit. C'est le
+          // seul endroit où l'on peut s'en apercevoir sans ouvrir le menu.
+          if (c.sourdine)
+            Padding(
+              padding: const EdgeInsets.only(left: 4),
+              child: Icon(Icons.notifications_off,
                   size: 14,
                   color: isDark ? AlanyaColors.craie2 : AlanyaColors.grey400),
             ),
@@ -1229,7 +1831,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
           children: [
             Padding(
               padding: const EdgeInsets.all(16),
-              child: Text(c.title ?? "Conversation",
+              child: Text(c.title ?? tr(context, 'chat_untitled'),
                   style: const TextStyle(
                       fontSize: 18, fontWeight: FontWeight.bold)),
             ),
@@ -1239,7 +1841,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
                 c.isPinned ? Icons.push_pin_outlined : Icons.push_pin,
                 color: AlanyaColors.terracotta,
               ),
-              title: Text(c.isPinned ? "Désépingler" : "Épingler"),
+              title: Text(c.isPinned ? tr(context, 'unpin') : tr(context, 'pin')),
               onTap: () async {
                 Navigator.pop(ctx);
                 await context
@@ -1248,12 +1850,64 @@ class _ConversationsTabState extends State<_ConversationsTab>
                 _load();
               },
             ),
+            /*
+             * SOURDINE — rattrapage du web (31/08/2026).
+             *
+             * ⚠️ ÊTRE EN SOURDINE, C'EST NE PAS ÊTRE DÉRANGÉ, pas cesser de
+             * recevoir : le serveur écarte le destinataire de la POUSSÉE, mais
+             * les messages arrivent, le compteur monte et le temps réel
+             * continue. Le libellé le dit — « notifications », pas
+             * « conversation ».
+             *
+             * L'état affiché est CELUI QUE REND LE SERVEUR, jamais celui qu'on
+             * espérait : c'est le défaut exact que le web venait de corriger,
+             * un interrupteur qui basculait localement et n'envoyait rien.
+             */
+            ListTile(
+              leading: Icon(
+                c.sourdine
+                    ? Icons.notifications_active_outlined
+                    : Icons.notifications_off_outlined,
+                color: AlanyaColors.terracotta,
+              ),
+              title: Text(c.sourdine
+                  ? tr(context, 'unmute')
+                  : tr(context, 'mute')),
+              onTap: () async {
+                Navigator.pop(ctx);
+                try {
+                  final etat = await context
+                      .read<ChatRepository>()
+                      .definirSourdine(c.id, !c.sourdine);
+                  if (!mounted) return;
+                  // Mise à jour en place : recharger toute la liste pour un
+                  // booléen ferait clignoter l'écran, et le serveur vient de
+                  // nous dire l'état retenu.
+                  setState(() {
+                    final liste = _convs;
+                    if (liste == null) return;
+                    final i = liste.indexWhere((x) => x.id == c.id);
+                    if (i >= 0) liste[i] = liste[i].copieAvecSourdine(etat);
+                  });
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(etat
+                        ? tr(context, 'muted_toast')
+                        : tr(context, 'unmuted_toast')),
+                  ));
+                } catch (_) {
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(tr(context, 'home_server_unreachable')),
+                  ));
+                }
+              },
+            ),
             ListTile(
               leading: Icon(
                 c.isArchived ? Icons.unarchive : Icons.archive_outlined,
                 color: AlanyaColors.chocolate,
               ),
-              title: Text(c.isArchived ? "Désarchiver" : "Archiver"),
+              title: Text(c.isArchived ? tr(context, 'home_unarchive') : tr(context, 'archive')),
               onTap: () async {
                 Navigator.pop(ctx);
                 await context
@@ -1265,22 +1919,22 @@ class _ConversationsTabState extends State<_ConversationsTab>
             ListTile(
               leading: const Icon(Icons.delete_outline, color: Colors.red),
               title:
-                  const Text("Supprimer", style: TextStyle(color: Colors.red)),
+                  Text(tr(context, 'delete'), style: const TextStyle(color: Colors.red)),
               onTap: () async {
                 Navigator.pop(ctx);
                 final ok = await showDialog<bool>(
                   context: context,
                   builder: (_) => AlertDialog(
-                    title: const Text("Supprimer cette conversation ?"),
-                    content: const Text("Cette action est irréversible."),
+                    title: Text(tr(context, 'home_delete_conversation_q')),
+                    content: Text(tr(context, 'action_irreversible')),
                     actions: [
                       TextButton(
                           onPressed: () => Navigator.pop(context, false),
-                          child: const Text("Annuler")),
+                          child: Text(tr(context, 'cancel'))),
                       TextButton(
                           onPressed: () => Navigator.pop(context, true),
-                          child: const Text("Supprimer",
-                              style: TextStyle(color: Colors.red))),
+                          child: Text(tr(context, 'delete'),
+                              style: const TextStyle(color: Colors.red))),
                     ],
                   ),
                 );
@@ -1332,9 +1986,9 @@ class _ConversationsTabState extends State<_ConversationsTab>
               padding: const EdgeInsets.all(16),
               child: Row(
                 children: [
-                  const Text("Conversations archivées",
+                  Text(tr(context, 'home_archived'),
                       style:
-                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   const Spacer(),
                   Text("${_archivedConvs!.length}",
                       style: TextStyle(color: muted2)),
@@ -1348,7 +2002,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
                 itemCount: _archivedConvs!.length,
                 itemBuilder: (_, i) {
                   final c = _archivedConvs![i];
-                  final title = c.title ?? "Discussion";
+                  final title = c.title ?? tr(context, 'chat_untitled');
                   // Aperçu formaté également dans les archivées : on affiche
                   // le style réel (gras/italique) et plus les marqueurs.
                   Widget archivedPreview() {
@@ -1362,12 +2016,12 @@ class _ConversationsTabState extends State<_ConversationsTab>
                     if (last.type != "TEXT") {
                       return Text(
                         last.type == "AUDIO"
-                            ? "Message vocal"
+                            ? tr(context, 'media_voice')
                             : last.type == "IMAGE"
-                                ? "Photo"
+                                ? tr(context, 'media_photo')
                                 : last.type == "VIDEO"
-                                    ? "Vidéo"
-                                    : "Fichier",
+                                    ? tr(context, 'video')
+                                    : tr(context, 'media_file'),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(fontSize: 12, color: muted2),
@@ -1402,7 +2056,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
                         Navigator.pop(ctx);
                         _load();
                       },
-                      child: const Text("Désarchiver"),
+                      child: Text(tr(context, 'home_unarchive')),
                     ),
                   );
                 },
@@ -1419,16 +2073,16 @@ class _ConversationsTabState extends State<_ConversationsTab>
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text("Supprimer $count conversation(s) ?"),
-        content: const Text("Cette action est irréversible."),
+        title: Text(tr(context, 'home_delete_n_q', {'n': '$count'})),
+        content: Text(tr(context, 'action_irreversible')),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text("Annuler")),
+              child: Text(tr(context, 'cancel'))),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
               child:
-                  const Text("Supprimer", style: TextStyle(color: Colors.red))),
+                  Text(tr(context, 'delete'), style: const TextStyle(color: Colors.red))),
         ],
       ),
     );
@@ -1445,6 +2099,16 @@ class _ConversationsTabState extends State<_ConversationsTab>
   }
 }
 
+/// Diamètre de la vignette d'une ligne de statut, anneau compris.
+///
+/// Il est figé pour que la ligne « Mon statut » ne change pas de largeur selon
+/// qu'elle porte l'anneau ou la pastille « + » : sans ça, publier un statut
+/// décale toute la liste.
+const double _tailleVignetteStatut = 57;
+
+/// Rayon de l'avatar quand il est cerclé — l'anneau occupe le reste.
+const double _rayonAvatarCercle = 23;
+
 class _StatusTab extends StatefulWidget {
   const _StatusTab();
 
@@ -1456,10 +2120,42 @@ class _StatusTabState extends State<_StatusTab> {
   StatusFeed? _feed;
   bool _error = false;
 
+  /// Statuts qui attendent le réseau — voir [_compterAttente].
+  int _enAttente = 0;
+
   @override
   void initState() {
     super.initState();
     _load();
+    // La publication continue APRÈS la fermeture de l'écran de composition, et
+    // même après la sortie de l'application : la liste ne peut donc pas se
+    // contenter de se recharger au retour de cet écran. Le publieur la prévient.
+    PublicationStatuts.instance.surPublication = () {
+      if (mounted) _load();
+    };
+    // Un statut qui se met à attendre le réseau — ou qui repart — change le
+    // compte affiché, sans rien changer au fil lui-même.
+    PublicationStatuts.instance.surAttente = _compterAttente;
+    _compterAttente();
+  }
+
+  /// Combien de statuts attendent le réseau.
+  ///
+  /// ⚠️ UN COMPTE, PAS UNE VIGNETTE FANTÔME dans « Mon statut ». Un statut en
+  /// attente n'existe encore nulle part côté serveur : l'insérer dans le fil
+  /// obligerait à lui inventer un identifiant, une expiration et un compteur de
+  /// vues qu'il n'a pas. Un compte dit la même chose sans mentir sur ce qui
+  /// existe.
+  Future<void> _compterAttente() async {
+    final n = await StatutsPersistes.compter();
+    if (mounted && n != _enAttente) setState(() => _enAttente = n);
+  }
+
+  @override
+  void dispose() {
+    PublicationStatuts.instance.surPublication = null;
+    PublicationStatuts.instance.surAttente = null;
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -1475,20 +2171,104 @@ class _StatusTabState extends State<_StatusTab> {
     }
   }
 
-  Future<void> _openCreate() async {
+  Future<void> _openCreate([SourceStatut source = SourceStatut.texte]) async {
     final published = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => const CreateStatusScreen()),
+      MaterialPageRoute(builder: (_) => CreateStatusScreen(source: source)),
     );
     if (published == true) _load();
   }
 
-  Future<void> _openViewer(StatusGroup group, {required bool isMine}) async {
+  /// Le bouton « + » : par où l'on ajoute un statut.
+  ///
+  /// 🔴 DEMANDE DU USER (03/09/2026). Le seul accès était l'icône d'appareil
+  /// photo de la ligne « Mon statut », et elle n'apparaît que si l'on a DÉJÀ un
+  /// statut en ligne — sinon il fallait deviner qu'on appuie sur la ligne
+  /// elle-même. Un bouton flottant, toujours là, à l'endroit où WhatsApp le
+  /// met.
+  ///
+  /// Les quatre sources sont proposées ICI plutôt que dans l'écran suivant :
+  /// choisir « Appareil photo » puis voir l'éditeur de texte s'ouvrir avant la
+  /// caméra donne l'impression de s'être trompé de bouton.
+  Future<void> _menuNouveauStatut() async {
+    final source = await showModalBottomSheet<SourceStatut>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(tr(context, 'status_new'),
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.text_fields),
+              title: Text(tr(context, 'text')),
+              subtitle: Text(tr(context, 'status_colored_bg')),
+              onTap: () => Navigator.pop(ctx, SourceStatut.texte),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: Text(tr(context, 'gallery')),
+              subtitle: Text(tr(context, 'status_from_device')),
+              onTap: () => Navigator.pop(ctx, SourceStatut.galerie),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: Text(tr(context, 'camera')),
+              onTap: () => Navigator.pop(ctx, SourceStatut.cameraPhoto),
+            ),
+            ListTile(
+              leading: const Icon(Icons.videocam_outlined),
+              title: Text(tr(context, 'video')),
+              subtitle: Text(
+                  tr(context, 'status_max_duration', {'n': '${dureeVideoStatutMax.inSeconds}'})),
+              onTap: () => Navigator.pop(ctx, SourceStatut.cameraVideo),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (source == null || !mounted) return;
+    await _openCreate(source);
+  }
+
+  /// Ouvre la visionneuse sur TOUTE la liste, pas sur une seule personne :
+  /// c'est ce qui lui permet d'enchaîner sur la suivante quand les statuts de
+  /// celle qu'on regarde sont épuisés.
+  Future<void> _openViewer(List<StatusGroup> groups,
+      {required int index, required bool isMine}) async {
     await Navigator.of(context).push(
       MaterialPageRoute(
-          builder: (_) => StatusViewerScreen(group: group, isMine: isMine)),
+        builder: (_) => StatusViewerScreen(
+            groups: groups, initialGroup: index, isMine: isMine),
+      ),
     );
     _load();
   }
+
+  /// Date du statut le PLUS RÉCENT d'une personne : c'est elle qui date la
+  /// ligne et qui range la liste.
+  ///
+  /// Elle est recalculée plutôt que lue sur le dernier élément : rien dans le
+  /// format d'échange ne promet que le serveur les envoie triés.
+  static DateTime _dernierStatut(StatusGroup g) {
+    if (g.statuses.isEmpty) return DateTime.fromMillisecondsSinceEpoch(0);
+    var d = g.statuses.first.createdAt;
+    for (final s in g.statuses) {
+      if (s.createdAt.isAfter(d)) d = s.createdAt;
+    }
+    return d;
+  }
+
+  /// Du plus récent au plus ancien.
+  static int _parRecence(StatusGroup a, StatusGroup b) =>
+      _dernierStatut(b).compareTo(_dernierStatut(a));
 
   @override
   Widget build(BuildContext context) {
@@ -1496,9 +2276,29 @@ class _StatusTabState extends State<_StatusTab> {
     final others = _feed?.others ?? [];
     final muted =
         themed(context, light: Colors.black54, dark: AlanyaColors.craie2);
+
+    // Deux sections, comme WhatsApp : ce qui reste à voir d'abord, le reste
+    // ensuite, chacune de la plus récente à la plus ancienne. Le serveur ne
+    // fait que remonter les non-vus en tête — à l'intérieur, il rend l'ordre
+    // d'ajout des contacts, qui ne veut rien dire pour qui regarde.
+    final nonVus = others.where((g) => g.hasUnviewed).toList()
+      ..sort(_parRecence);
+    final dejaVus = others.where((g) => !g.hasUnviewed).toList()
+      ..sort(_parRecence);
+    // La visionneuse enchaîne d'une personne à la suivante DANS L'ORDRE qu'on
+    // lui passe : ce doit être exactement celui affiché, sections comprises.
+    final ordonnes = <StatusGroup>[...nonVus, ...dejaVus];
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Status"),
+        title: Text(tr(context, 'status')),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _menuNouveauStatut,
+        backgroundColor: themed(context,
+            light: AlanyaColors.forest, dark: AlanyaColors.terracottaNuit),
+        tooltip: tr(context, 'status_new'),
+        child: const Icon(Icons.add, color: Colors.white),
       ),
       body: MotifBackground(
         overlayOpacity: 0.92,
@@ -1508,27 +2308,43 @@ class _StatusTabState extends State<_StatusTab> {
           child: ListView(
             children: [
               _myStatusTile(me),
+              // Ce qui attend encore le réseau. Absent quand il n'y a rien :
+              // un compteur à zéro n'apprend rien et occupe une ligne.
+              if (_enAttente > 0)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Row(children: [
+                    Icon(Icons.schedule, size: 15, color: muted),
+                    const SizedBox(width: 6),
+                    Text(
+                      tr(context, 'statut_en_attente_n', {'n': '$_enAttente'}),
+                      style: TextStyle(fontSize: 12.5, color: muted),
+                    ),
+                  ]),
+                ),
               if (_error)
-                const Padding(
-                  padding: EdgeInsets.all(24),
+                Padding(
+                  padding: const EdgeInsets.all(24),
                   child: Center(
                       child:
-                          Text("Erreur de chargement. Tire pour réessayer.")),
+                          Text(tr(context, 'home_load_error'))),
                 ),
-              if (others.isNotEmpty) ...[
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                  child: Text("Récents",
-                      style:
-                          TextStyle(color: muted, fontWeight: FontWeight.bold)),
-                ),
-                ...others.map((g) => _statusTile(g, isMine: false)),
-              ] else if (!_error && _feed != null && me == null)
+              if (nonVus.isNotEmpty) ...[
+                _enteteSection(tr(context, 'status_recent'), muted),
+                for (var i = 0; i < nonVus.length; i++)
+                  _statusTile(ordonnes, i),
+              ],
+              if (dejaVus.isNotEmpty) ...[
+                _enteteSection(tr(context, 'status_seen'), muted),
+                for (var i = 0; i < dejaVus.length; i++)
+                  _statusTile(ordonnes, nonVus.length + i),
+              ],
+              if (others.isEmpty && !_error && _feed != null && me == null)
                 Padding(
                   padding: const EdgeInsets.all(24),
                   child: Center(
                     child: Text(
-                      "Aucun statut pour le moment.\nPublie le tien avec le bouton +.",
+                      tr(context, 'home_no_status'),
                       textAlign: TextAlign.center,
                       style: TextStyle(color: muted),
                     ),
@@ -1541,49 +2357,89 @@ class _StatusTabState extends State<_StatusTab> {
     );
   }
 
+  Widget _enteteSection(String titre, Color muted) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+        child: Text(titre,
+            style: TextStyle(color: muted, fontWeight: FontWeight.bold)),
+      );
+
   Widget _myStatusTile(StatusGroup? me) {
-    final has = me != null && me.statuses.isNotEmpty;
+    // Une variable locale `final` plutôt qu'un booléen : elle seule permet à
+    // l'analyse de promouvoir le type et d'écrire `mien.statuses` sans `!`.
+    final mien = (me != null && me.statuses.isNotEmpty) ? me : null;
     final user = context.read<AuthController>().user;
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     return ListTile(
-      leading: Stack(
-        children: [
-          AvatarCircle(
-            name: user?.pseudo ?? "?",
-            avatarUrl: user?.avatarUrl,
-            radius: 26,
-            backgroundColor: AlanyaColors.terracotta,
-          ),
-          Positioned(
-            right: 0,
-            bottom: 0,
-            child: Container(
-              width: 20,
-              height: 20,
-              decoration: BoxDecoration(
-                color: theme.brightness == Brightness.dark
-                    ? AlanyaColors.terracottaNuit
-                    : AlanyaColors.forest,
-                shape: BoxShape.circle,
-                border: Border.all(
-                    color: themed(context,
-                        light: Colors.white, dark: surfacesOf(context).fond),
-                    width: 2),
-              ),
-              child: const Icon(Icons.add, color: Colors.white, size: 12),
-            ),
-          ),
-        ],
+      leading: SizedBox(
+        width: _tailleVignetteStatut,
+        height: _tailleVignetteStatut,
+        child: Center(
+          child: mien != null
+              ? AnneauStatuts(
+                  // Mes propres statuts ne sont jamais marqués vus par le
+                  // serveur : l'anneau les montre donc tous en accent, et
+                  // compte simplement ce qui est encore en ligne.
+                  vus: mien.statuses.map((s) => s.viewed).toList(),
+                  couleurNonVu: isDark
+                      ? AlanyaColors.terracottaNuit
+                      : AlanyaColors.forest,
+                  couleurVu:
+                      isDark ? AlanyaColors.ligne : AlanyaColors.sand,
+                  child: AvatarCircle(
+                    name: user?.pseudo ?? "?",
+                    avatarUrl: user?.avatarUrl,
+                    radius: _rayonAvatarCercle,
+                    backgroundColor: AlanyaColors.terracotta,
+                  ),
+                )
+              // Sans statut en ligne, pas d'anneau : la pastille « + » dit
+              // qu'il n'y a rien et invite à publier, comme WhatsApp.
+              : Stack(
+                  children: [
+                    AvatarCircle(
+                      name: user?.pseudo ?? "?",
+                      avatarUrl: user?.avatarUrl,
+                      radius: 26,
+                      backgroundColor: AlanyaColors.terracotta,
+                    ),
+                    Positioned(
+                      right: 0,
+                      bottom: 0,
+                      child: Container(
+                        width: 20,
+                        height: 20,
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? AlanyaColors.terracottaNuit
+                              : AlanyaColors.forest,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                              color: themed(context,
+                                  light: Colors.white,
+                                  dark: surfacesOf(context).fond),
+                              width: 2),
+                        ),
+                        child:
+                            const Icon(Icons.add, color: Colors.white, size: 12),
+                      ),
+                    ),
+                  ],
+                ),
+        ),
       ),
-      title: const Text("Mon statut",
-          style: TextStyle(fontWeight: FontWeight.w600)),
-      subtitle: Text(
-          has ? "${me!.statuses.length} statut(s)" : "Appuie pour ajouter"),
-      onTap: has ? () => _openViewer(me!, isMine: true) : _openCreate,
-      trailing: has
+      title: Text(tr(context, 'status_mine'),
+          style: const TextStyle(fontWeight: FontWeight.w600)),
+      subtitle: Text(mien != null
+          ? horodatageStatut(_dernierStatut(mien), context)
+          : tr(context, 'status_tap_to_add')),
+      onTap: mien != null
+          ? () => _openViewer([mien], index: 0, isMine: true)
+          : _openCreate,
+      trailing: mien != null
           ? IconButton(
               icon: Icon(Icons.camera_alt,
-                  color: theme.brightness == Brightness.dark
+                  color: isDark
                       ? AlanyaColors.terracottaNuit
                       : AlanyaColors.terracotta),
               onPressed: _openCreate,
@@ -1592,32 +2448,64 @@ class _StatusTabState extends State<_StatusTab> {
     );
   }
 
-  Widget _statusTile(StatusGroup g, {required bool isMine}) {
+  Widget _statusTile(List<StatusGroup> groups, int index) {
+    final g = groups[index];
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final unviewedRing =
         isDark ? AlanyaColors.terracottaNuit : AlanyaColors.forest;
     final viewedRing = isDark ? AlanyaColors.ligne : AlanyaColors.sand;
     return ListTile(
-      leading: Container(
-        padding: const EdgeInsets.all(2),
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: Border.all(
-            color: g.hasUnviewed ? unviewedRing : viewedRing,
-            width: 2.5,
+      leading: SizedBox(
+        width: _tailleVignetteStatut,
+        height: _tailleVignetteStatut,
+        child: Center(
+          child: AnneauStatuts(
+            vus: g.statuses.map((s) => s.viewed).toList(),
+            couleurNonVu: unviewedRing,
+            couleurVu: viewedRing,
+            // La photo de profil, et non plus une initiale : la vignette
+            // ignorait `avatarUrl` alors que le serveur l'envoie depuis
+            // toujours.
+            child: AvatarCircle(
+              name: g.displayName,
+              avatarUrl: g.avatarUrl,
+              radius: _rayonAvatarCercle,
+              backgroundColor: AlanyaColors.gold,
+            ),
           ),
-        ),
-        child: CircleAvatar(
-          radius: 24,
-          backgroundColor: AlanyaColors.gold,
-          child: Text(g.displayName[0].toUpperCase(),
-              style: const TextStyle(color: Colors.white)),
         ),
       ),
       title: Text(g.displayName,
           style: const TextStyle(fontWeight: FontWeight.w600)),
-      subtitle: Text(g.hasUnviewed ? "Nouveau" : "Vu"),
-      onTap: () => _openViewer(g, isMine: isMine),
+      // L'heure remplace « Nouveau »/« Vu » : l'anneau et la section portent
+      // désormais cette information, la ligne peut dire quelque chose de plus.
+      subtitle: Text(horodatageStatut(_dernierStatut(g), context)),
+      onTap: () => _openViewer(groups, index: index, isMine: false),
+    );
+  }
+}
+
+/// L'assistant, ouvert EN PLEIN ÉCRAN depuis le bouton flottant.
+///
+/// 🔴 L'IA A QUITTÉ LA BARRE DU BAS le 25/08/2026, pour laisser sa place à
+/// l'onglet Collègues. Elle est désormais un bouton rond posé au-dessus du
+/// bouton d'écriture, comme Meta AI dans WhatsApp.
+///
+/// ⚠️ `_AiTab` ne porte PAS de `Scaffold` — il était conçu pour vivre dans un
+/// `IndexedStack`. C'est cette enveloppe qui lui en donne un, avec sa barre de
+/// retour ; l'ouvrir directement en route afficherait un écran sans aucun moyen
+/// d'en sortir.
+class AiScreen extends StatelessWidget {
+  const AiScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      // « Assistant Alanya » et non « IA » : c'est le nom du produit, celui que
+      // porte déjà l'en-tête d'une conversation partagée. Il ne se traduit pas,
+      // d'où la chaîne en clair plutôt qu'un libellé dans les neuf langues.
+      appBar: backAppBar(context, tr(context, 'home_assistant')),
+      body: const _AiTab(),
     );
   }
 }
@@ -1744,7 +2632,7 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("L'assistant n'a pas répondu")));
+            SnackBar(content: Text(tr(context, 'ai_no_answer'))));
       }
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -1772,9 +2660,9 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
           // --- Onglets Discussion / Mes Conversations ---
           TabBar(
             controller: _tabCtrl,
-            tabs: const [
-              Tab(text: "Discussion"),
-              Tab(text: "Mes Conversations"),
+            tabs: [
+              Tab(text: tr(context, 'ai_tab_chat')),
+              Tab(text: tr(context, 'ai_my_conversations')),
             ],
             labelColor: AlanyaColors.terracotta,
             unselectedLabelColor: AlanyaColors.craie2,
@@ -1801,16 +2689,16 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text("Supprimer cette conversation ?"),
+        title: Text(tr(context, 'home_delete_conversation_q')),
         content:
-            const Text("Les échanges de cette conversation seront supprimés."),
+            Text(tr(context, 'ai_delete_conversation_body')),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text("Annuler")),
+              child: Text(tr(context, 'cancel'))),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text("Supprimer")),
+              child: Text(tr(context, 'delete'))),
         ],
       ),
     );
@@ -1821,7 +2709,7 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Suppression impossible")),
+          SnackBar(content: Text(tr(context, 'delete_failed'))),
         );
       }
     }
@@ -1839,10 +2727,10 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
         maxChildSize: 0.9,
         builder: (_, scroll) => Column(
           children: [
-            const Padding(
-              padding: EdgeInsets.all(14),
-              child: Text("Mes conversations",
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            Padding(
+              padding: const EdgeInsets.all(14),
+              child: Text(tr(context, 'ai_my_conversations'),
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             ),
             const Divider(height: 1),
             Expanded(
@@ -1854,10 +2742,10 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
                   }
                   final threads = snap.data ?? const [];
                   if (threads.isEmpty) {
-                    return const Center(
+                    return Center(
                         child: Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Text("Aucune conversation. Pose une question !"),
+                      padding: const EdgeInsets.all(24),
+                      child: Text(tr(context, 'ai_empty')),
                     ));
                   }
                   return ListView.separated(
@@ -1906,14 +2794,14 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
   /// Partage la conversation (copie le texte dans le presse-papier).
   Future<void> _shareConversation() async {
     final text = _messages.map((m) {
-      final who = m.isUser ? "Moi" : "IA";
+      final who = m.isUser ? tr(context, 'home_me') : "IA";
       return "$who: ${m.content}";
     }).join("\n\n");
-    await Clipboard.setData(ClipboardData(text: "Assistant Alanya\n\n$text"));
+    await Clipboard.setData(ClipboardData(text: '${tr(context, 'home_assistant')}\n\n$text'));
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text("Conversation copiée dans le presse-papier")),
+        SnackBar(
+            content: Text(tr(context, 'ai_conversation_copied'))),
       );
     }
   }
@@ -1941,7 +2829,7 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
                     color: isDark ? AlanyaColors.ligne : AlanyaColors.sand),
           ),
           child: typing
-              ? Text("L'assistant écrit…",
+              ? Text(tr(context, 'ai_typing'),
                   style: TextStyle(
                       color: isDark ? AlanyaColors.craie2 : Colors.black54,
                       fontStyle: FontStyle.italic))
@@ -1972,7 +2860,7 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
                       const Icon(Icons.auto_awesome,
                           size: 56, color: AlanyaColors.gold),
                       const SizedBox(height: 12),
-                      Text("Pose-moi une question pour commencer.",
+                      Text(tr(context, 'ai_start_hint'),
                           textAlign: TextAlign.center,
                           style: TextStyle(
                               color: Theme.of(context).brightness ==
@@ -2014,15 +2902,15 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
                 backgroundColor: AlanyaColors.terracotta,
                 child: Icon(Icons.add, color: Colors.white),
               ),
-              title: const Text("Nouvelle conversation",
-                  style: TextStyle(fontWeight: FontWeight.bold)),
+              title: Text(tr(context, 'ai_new_conversation'),
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
               onTap: _newConversation,
             ),
             const Divider(height: 1),
             Expanded(
               child: threads.isEmpty
-                  ? const Center(
-                      child: Text("Aucune conversation. Pose une question !"))
+                  ? Center(
+                      child: Text(tr(context, 'ai_empty')))
                   : ListView.separated(
                       itemCount: threads.length,
                       separatorBuilder: (_, __) => const Divider(height: 1),
@@ -2044,21 +2932,21 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
                                 await repo.deleteThread(t.id);
                                 if (_threadId == t.id) _newConversation();
                               } else if (v == 'share') {
-                                final text = "Conversation: ${t.title}";
+                                final text = tr(context, 'ai_conversation_label', {'titre': t.title});
                                 await Clipboard.setData(
                                     ClipboardData(text: text));
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text("Lien copié")),
+                                  SnackBar(content: Text(tr(context, 'ai_link_copied'))),
                                 );
                               }
                             },
                             itemBuilder: (_) => [
-                              const PopupMenuItem(
-                                  value: 'share', child: Text("Partager")),
-                              const PopupMenuItem(
+                              PopupMenuItem(
+                                  value: 'share', child: Text(tr(context, 'share'))),
+                              PopupMenuItem(
                                   value: 'delete',
-                                  child: Text("Supprimer",
-                                      style: TextStyle(color: Colors.red))),
+                                  child: Text(tr(context, 'delete'),
+                                      style: const TextStyle(color: Colors.red))),
                             ],
                           ),
                           onTap: () => _openThread(t.id),
@@ -2084,12 +2972,12 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
             ListTile(
               leading: Icon(Icons.copy,
                   color: isDark ? AlanyaColors.craie2 : AlanyaColors.chocolate),
-              title: const Text("Copier"),
+              title: Text(tr(context, 'copy')),
               onTap: () {
                 Navigator.pop(ctx);
                 Clipboard.setData(ClipboardData(text: msg.content));
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Copié dans le presse-papier")),
+                  SnackBar(content: Text(tr(context, 'ai_copied'))),
                 );
               },
             ),
@@ -2097,19 +2985,19 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
               leading: Icon(Icons.share,
                   color:
                       isDark ? AlanyaColors.indigoLight : AlanyaColors.forest),
-              title: const Text("Partager"),
+              title: Text(tr(context, 'share')),
               onTap: () {
                 Navigator.pop(ctx);
                 Clipboard.setData(ClipboardData(text: msg.content));
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Message partagé (copié)")),
+                  SnackBar(content: Text(tr(context, 'ai_message_shared'))),
                 );
               },
             ),
             ListTile(
               leading: Icon(Icons.delete_outline,
                   color: isDark ? AlanyaColors.erreurNuit : Colors.red),
-              title: const Text("Supprimer ce message"),
+              title: Text(tr(context, 'ai_delete_message')),
               onTap: () {
                 Navigator.pop(ctx);
                 _deleteAiMessage(msg);
@@ -2130,9 +3018,9 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
     // toute la conversation. On supprime localement pour l'UX.
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: const Text("Message supprimé"),
+        content: Text(tr(context, 'ai_message_deleted')),
         action: SnackBarAction(
-          label: "Annuler",
+          label: tr(context, 'cancel'),
           textColor: Colors.white,
           onPressed: () {
             setState(() {
@@ -2161,10 +3049,10 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
                 maxLines: 4,
                 textInputAction: TextInputAction.send,
                 onSubmitted: (_) => _send(),
-                decoration: const InputDecoration(
-                  hintText: "Demande quelque chose à l'IA…",
+                decoration: InputDecoration(
+                  hintText: tr(context, 'ai_input_hint'),
                   contentPadding:
-                      EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 ),
               ),
             ),
@@ -2202,7 +3090,7 @@ class _Placeholder extends StatelessWidget {
               style:
                   const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
           const SizedBox(height: 4),
-          Text("$soon — bientôt",
+          Text(tr(context, 'home_soon', {'feature': soon}),
               style: TextStyle(
                   color: themed(context,
                       light: Colors.black54, dark: AlanyaColors.craie2))),

@@ -2,9 +2,9 @@ name: Build Android APK
 
 on:
   push:
-    branches: [main, backup/pre-harmonisation-2026-07-24, arena/019f9ff6-alanya, arena/019fa167-alanya, arena/019fbc55-alanya, arena/019fe0e6-alanya, feature/vocal-attente-loop]
+    branches: [main, backup/pre-harmonisation-2026-07-24, arena/01a09534-alanya, feature/vocal-attente-loop, integration/telecom-vocal, feat/chip-appel-callstyle]
   pull_request:
-    branches: [main, backup/pre-harmonisation-2026-07-24, arena/019f9ff6-alanya, arena/019fa167-alanya, arena/019fbc55-alanya, arena/019fe0e6-alanya, feature/vocal-attente-loop]
+    branches: [main, backup/pre-harmonisation-2026-07-24, arena/01a09534-alanya, feature/vocal-attente-loop, integration/telecom-vocal, feat/chip-appel-callstyle]
   workflow_dispatch:
 
 jobs:
@@ -16,6 +16,14 @@ jobs:
     # comme un plantage alors que c'est une interruption. 45 min laissent de
     # quoi absorber un cache froid sans masquer une vraie régression.
     timeout-minutes: 45
+
+    # `actions: write` est le SEUL droit ajouté, et il l'est pour la purge des
+    # artefacts ci-dessous. Dès qu'un bloc `permissions` est déclaré, il
+    # REMPLACE le jeu par défaut : `contents: read` doit donc y figurer, sans
+    # quoi le `checkout` n'aurait plus le droit de lire le dépôt.
+    permissions:
+      contents: read
+      actions: write
 
     steps:
       - name: Checkout code
@@ -39,8 +47,22 @@ jobs:
       # SDK Platform 31 / 33 » et « Install CMake 3.22.1 » du journal, qui se
       # payent en minutes à chaque fois. La clé suit les fichiers de build : ils
       # ne changent pas, le cache resservira.
-      - name: Cache Gradle
-        uses: actions/cache@v4
+      #
+      # 🔴 RESTORE ET SAVE SÉPARÉS, ET CE N'EST PAS DE LA COQUETTERIE.
+      #
+      # `actions/cache` ne sauvegarde pas quand le job échoue. Or l'échec le
+      # plus fréquent ici est justement un incident de TÉLÉCHARGEMENT : Maven
+      # Central répond 429 au bout de quelques artefacts. Tout ce qui avait été
+      # récupéré avant le refus était donc jeté, et la tentative suivante
+      # repartait d'un cache froid — donc retéléchargeait tout, donc se faisait
+      # limiter à nouveau. Le système s'enfermait dans son propre échec.
+      #
+      # Avec `save` en `if: always()`, chaque tentative CONSERVE ce qu'elle a
+      # réussi à prendre. Deux exécutions suffisent alors à reconstituer le
+      # cache, même en pleine période de limitation.
+      - name: Restaure le cache Gradle
+        id: cache-gradle
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/.gradle/caches
@@ -137,7 +159,71 @@ jobs:
           # La bulle retombe alors sur une vignette sobre (repère +
           # coordonnées) : c'est visible, mais ça ne casse rien.
           MAPTILER_KEY: ${{ secrets.MAPTILER_KEY }}
-        run: flutter build apk --release --dart-define=MAPTILER_KEY=$MAPTILER_KEY
+        #
+        # ━━ TROIS TENTATIVES, MAIS SEULEMENT POUR LE RÉSEAU ━━
+        #
+        # 🔴 L'INCIDENT EST RÉEL ET RÉCURRENT : Maven Central répond
+        # « 429 Too Many Requests » aux runners GitHub, dont l'adresse est
+        # partagée par des milliers de projets. Le build échoue alors en vingt
+        # secondes sur `Could not resolve org.jetbrains.kotlin:…`, sans que rien
+        # du code ne soit en cause. C'est déjà arrivé : `501aa8b` note « build
+        # passait après retry », et la configuration avait été rendue à
+        # l'identique faute d'avoir identifié la cause.
+        #
+        # ⚠️ ON NE REJOUE PAS UNE ERREUR DE COMPILATION, et c'est tout l'enjeu
+        # du filtre. Un build complet dure une quinzaine de minutes : trois
+        # tentatives dépasseraient le délai de 45 min du job et transformeraient
+        # une vraie régression en « job annulé », le pire des diagnostics. Un
+        # échec réseau, lui, tombe en quelques secondes — le rejouer est presque
+        # gratuit.
+        #
+        # On n'insiste donc QUE si le journal porte une signature de panne
+        # réseau. Tout le reste s'arrête au premier échec.
+        run: |
+          set -uo pipefail
+
+          tenter() {
+            flutter build apk --release --dart-define=MAPTILER_KEY="$MAPTILER_KEY" 2>&1 \
+              | tee journal-build.txt
+            return "${PIPESTATUS[0]}"
+          }
+
+          for essai in 1 2 3; do
+            if tenter; then
+              echo "Build réussi (tentative $essai)."
+              exit 0
+            fi
+
+            if ! grep -qE "Too Many Requests|Could not GET|Could not resolve all artifacts|Connection reset|Read timed out" journal-build.txt; then
+              echo "::error::Échec de compilation — ce n'est pas un incident réseau, on n'insiste pas."
+              exit 1
+            fi
+
+            if [ "$essai" -eq 3 ]; then
+              echo "::error::Trois refus de téléchargement d'affilée. Maven Central limite toujours ; relancer le job plus tard."
+              exit 1
+            fi
+
+            # Attente croissante : une limitation ne se lève pas dans la seconde.
+            attente=$((essai * 45))
+            echo "::warning::Artefacts refusés par le dépôt distant (tentative $essai/3). Nouvelle tentative dans ${attente} s."
+            sleep "$attente"
+          done
+
+      # ⚠️ `if: always()` — voir le commentaire du restore. Une tentative qui
+      # échoue a malgré tout téléchargé des artefacts : les garder évite que la
+      # suivante reparte à froid et se fasse limiter de la même façon.
+      #
+      # Sans effet quand la clé est déjà en cache : `cache/save` ne réécrit pas
+      # une entrée existante.
+      - name: Sauvegarde le cache Gradle
+        if: always() && steps.cache-gradle.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ steps.cache-gradle.outputs.cache-primary-key }}
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -145,3 +231,60 @@ jobs:
           name: alanya-apk
           path: build/app/outputs/flutter-apk/app-release.apk
           retention-days: 7
+
+      # Ne garder que les 5 APK les plus récents.
+      #
+      # 🔴 APRÈS L'ENVOI, ET JAMAIS AVANT. Purger d'abord aurait supprimé les
+      # anciens APK au tout début d'un build qui peut encore échouer — on se
+      # retrouverait sans rien à installer. Ici, on ne jette qu'une fois le
+      # nouveau déposé.
+      #
+      # `if: success()` est donc redondant avec l'ordre des étapes, mais il dit
+      # l'intention : cette étape n'a de sens que si l'APK est bien là.
+      #
+      # ⚠️ LE RUN COURANT EST EXCLU DU TRI, pas seulement compté : l'API liste
+      # les artefacts du dépôt entier, et rien ne garantit que celui qu'on vient
+      # de déposer y soit déjà visible. On garde donc les 4 plus récents des
+      # AUTRES runs — soit 5 APK en tout avec celui-ci.
+      #
+      # `retention-days: 7` reste le filet : si cette étape échoue un jour, les
+      # artefacts finissent quand même par expirer.
+      - name: Ne garder que les 5 derniers APK
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const A_GARDER = 5;
+            const { owner, repo } = context.repo;
+
+            const artefacts = await github.paginate(
+              github.rest.actions.listArtifactsForRepo,
+              { owner, repo, per_page: 100 },
+            );
+
+            const miens = artefacts
+              .filter((a) => a.name === 'alanya-apk'
+                          && !a.expired
+                          && a.workflow_run?.id !== context.runId)
+              // Du plus récent au plus ancien.
+              .sort((x, y) => new Date(y.created_at) - new Date(x.created_at));
+
+            const aJeter = miens.slice(A_GARDER - 1);
+            if (aJeter.length === 0) {
+              core.info(`Rien à purger : ${miens.length + 1} APK conserves.`);
+              return;
+            }
+
+            for (const a of aJeter) {
+              try {
+                await github.rest.actions.deleteArtifact(
+                  { owner, repo, artifact_id: a.id },
+                );
+                core.info(`supprimé : #${a.id} du ${a.created_at}`);
+              } catch (e) {
+                // Un artefact déjà expiré ou supprimé entre la liste et ici ne
+                // doit pas faire échouer un build par ailleurs réussi.
+                core.warning(`#${a.id} non supprimé : ${e.message}`);
+              }
+            }
+            core.info(`${aJeter.length} ancien(s) APK supprime(s).`);

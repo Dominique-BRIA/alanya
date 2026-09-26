@@ -2,7 +2,10 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:file_picker/file_picker.dart';
+import '../../core/galerie.dart';
+import '../../core/plafond_media.dart';
 import '../../theme/alanya_theme.dart';
+import '../../l10n/app_localizations.dart';
 
 /// Résultat de la sélection de médias.
 class MediaPickResult {
@@ -21,13 +24,46 @@ class MediaPickResult {
   /// l'icône, ce qui reste correct.
   final String? path;
 
+  /// L'image a été RÉDUITE avant l'envoi, et [path] mène encore à l'original.
+  ///
+  /// Sert à deux choses, toutes deux à l'écran d'envoi : annoncer le gain, et
+  /// rendre l'original accessible en un appui. Faux pour une vidéo, un GIF, un
+  /// PNG et pour toute image déjà assez petite — voir
+  /// `core/compression_image.dart`.
+  final bool compresse;
+
+  /// Poids de l'original, quand il a été réduit. `null` sinon.
+  ///
+  /// ⚠️ ON NE GARDE PAS LES OCTETS D'ORIGINE EN MÉMOIRE. Dix photos de 8 Mo
+  /// tenues en double sont 160 Mo dans un téléphone : l'original se relit
+  /// depuis [path] au moment où on le demande, et pas avant.
+  final int? tailleOriginale;
+
   const MediaPickResult({
     required this.bytes,
     required this.fileName,
     required this.mimeType,
     this.durationMs,
     this.path,
+    this.compresse = false,
+    this.tailleOriginale,
   });
+
+  MediaPickResult copieAvec({
+    Uint8List? bytes,
+    String? fileName,
+    String? mimeType,
+    bool? compresse,
+  }) =>
+      MediaPickResult(
+        bytes: bytes ?? this.bytes,
+        fileName: fileName ?? this.fileName,
+        mimeType: mimeType ?? this.mimeType,
+        durationMs: durationMs,
+        path: path,
+        compresse: compresse ?? this.compresse,
+        tailleOriginale: tailleOriginale,
+      );
 
   bool get estImage => mimeType.startsWith('image/');
   bool get estVideo => mimeType.startsWith('video/');
@@ -90,7 +126,11 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
 
   Future<void> _loadRecentMedia() async {
     final permission = await PhotoManager.requestPermissionExtend();
-    if (!permission.isAuth) {
+    // 🔴 `hasAccess` et NON `isAuth` : l'accès PARTIEL d'Android 14+ est un oui.
+    // Avec `isAuth`, choisir « Sélectionner des photos » faisait déclarer la
+    // permission refusée, la bande des récents restait vide et le bouton
+    // « Galerie » ouvrait le sélecteur du système. Voir `core/galerie.dart`.
+    if (!accesUtilisable(permission)) {
       if (mounted) setState(() { _loadingGallery = false; _permissionDenied = true; });
       return;
     }
@@ -98,6 +138,8 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
       final albums = await PhotoManager.getAssetPathList(
         type: RequestType.common,
         hasAll: true,
+        // Sans cet ordre, « récents » montrait les plus VIEILLES photos.
+        filterOption: ordreRecentDAbord,
       );
       if (albums.isEmpty) {
         if (mounted) setState(() => _loadingGallery = false);
@@ -177,8 +219,16 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
       );
       if (result == null || result.files.isEmpty || !mounted) return;
       final results = <MediaPickResult>[];
+      final tropGros = <String>[];
       for (final file in result.files) {
         if (file.bytes == null) continue;
+        // ⚠️ MÊME PLAFOND QUE LES DOCUMENTS, quinze lignes plus bas. Ce chemin
+        // ne sert que si l'accès à la galerie est refusé, ce qui l'avait fait
+        // oublier — mais il envoie exactement les mêmes fichiers.
+        if (depassePlafondMedia(file.bytes!.length)) {
+          tropGros.add(file.name);
+          continue;
+        }
         results.add(MediaPickResult(
           bytes: file.bytes!,
           fileName: file.name,
@@ -186,7 +236,13 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
           path: file.path,
         ));
       }
-      if (mounted && results.isNotEmpty) navigator.pop(results);
+      if (!mounted) return;
+      final avis = messageMediasEcartes(tropGros, context: context);
+      if (avis != null) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(avis)));
+      }
+      if (results.isNotEmpty) navigator.pop(results);
     } catch (_) {}
   }
 
@@ -208,10 +264,10 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
     final tropGros = <String>[];
     for (final file in result.files) {
       if (file.bytes == null) continue;
-      // ⚠️ Plafond du serveur (MEDIA_MAX_SIZE_MB, 50 par défaut) : sans ce
-      // contrôle, un fichier de 200 Mo était intégralement TÉLÉVERSÉ avant de
-      // se faire refuser par un 413. On le dit avant, en nommant le fichier.
-      if (file.bytes!.length > _maxOctets) {
+      // Le plafond et le message vivent dans `core/plafond_media.dart` : ce
+      // contrôle n'existait qu'ICI, et les trois autres chemins de sélection
+      // laissaient tout passer.
+      if (depassePlafondMedia(file.bytes!.length)) {
         tropGros.add(file.name);
         continue;
       }
@@ -223,18 +279,12 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
       ));
     }
     if (!mounted) return;
-    if (tropGros.isNotEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(tropGros.length == 1
-            ? "« ${tropGros.first} » dépasse 50 Mo et n'a pas été joint"
-            : "${tropGros.length} fichiers dépassent 50 Mo et n'ont pas été joints"),
-      ));
+    final avis = messageMediasEcartes(tropGros, context: context);
+    if (avis != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(avis)));
     }
     if (results.isNotEmpty) Navigator.pop(context, results);
   }
-
-  /// Taille maximale acceptée par le serveur, en octets.
-  static const int _maxOctets = 50 * 1024 * 1024;
 
   // ══ CONTACT — fiche de contact partagée (type de message CONTACT) ══
   //
@@ -341,31 +391,31 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
               children: [
                 _optionButton(
                   icon: Icons.photo_library,
-                  label: "Galerie",
+                  label: tr(context, 'gallery'),
                   color: AlanyaColors.forest,
                   onTap: _pickFullGallery,
                 ),
                 _optionButton(
                   icon: Icons.camera_alt,
-                  label: "Caméra",
+                  label: tr(context, 'camera_short'),
                   color: const Color(0xFFE53935),
                   onTap: _pickCamera,
                 ),
                 _optionButton(
                   icon: Icons.insert_drive_file,
-                  label: "Document",
+                  label: tr(context, 'document'),
                   color: const Color(0xFF7B1FA2),
                   onTap: _pickDocuments,
                 ),
                 _optionButton(
                   icon: Icons.person,
-                  label: "Contact",
+                  label: tr(context, 'contacts'),
                   color: const Color(0xFF2196F3),
                   onTap: _pickContact,
                 ),
                 _optionButton(
                   icon: Icons.location_on,
-                  label: "Position",
+                  label: tr(context, 'position'),
                   color: const Color(0xFF009688),
                   onTap: _pickLocation,
                 ),
@@ -380,9 +430,9 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             child: Row(
               children: [
-                const Text(
-                  "Récents",
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                Text(
+                  tr(context, 'status_recent'),
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
                 ),
                 const Spacer(),
                 if (_selectedIds.isNotEmpty)
@@ -395,7 +445,7 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
                         borderRadius: BorderRadius.circular(16),
                       ),
                       child: Text(
-                        "Envoyer (${_selectedIds.length})",
+                        tr(context, 'send_count', {'n': '${_selectedIds.length}'}),
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 13,
@@ -419,18 +469,18 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
                           children: [
                             Icon(Icons.folder_off, size: 48, color: AlanyaColors.grey400),
                             const SizedBox(height: 12),
-                            Text("Accès aux fichiers refusé",
+                            Text(tr(context, 'files_access_denied'),
                                 style: TextStyle(color: AlanyaColors.grey500, fontSize: 14)),
                             const SizedBox(height: 8),
                             TextButton(
                               onPressed: () => PhotoManager.openSetting(),
-                              child: const Text("Ouvrir les paramètres"),
+                              child: Text(tr(context, 'open_settings')),
                             ),
                           ],
                         ),
                       )
                     : _recentMedia.isEmpty
-                        ? Center(child: Text("Aucun média récent",
+                        ? Center(child: Text(tr(context, 'no_recent_media'),
                             style: TextStyle(color: AlanyaColors.grey400)))
                         : _buildGalleryGrid(),
           ),

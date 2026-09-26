@@ -4,8 +4,10 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../../core/compression_image.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/media/media_picker_sheet.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Ce que l'aperçu rend à l'écran de discussion.
 ///
@@ -17,7 +19,18 @@ import '../../../widgets/media/media_picker_sheet.dart';
 class MediaCaptionResult {
   final List<MediaPickResult> fichiers;
   final String? legende;
-  const MediaCaptionResult({required this.fichiers, this.legende});
+
+  /// Les `@` de la légende — `{userId, libelle}`, comme pour un texte.
+  ///
+  /// Une légende est un message comme un autre : elle peut désigner quelqu'un,
+  /// et le serveur la traite pareil.
+  final List<Map<String, String>> mentions;
+
+  const MediaCaptionResult({
+    required this.fichiers,
+    this.legende,
+    this.mentions = const [],
+  });
 }
 
 /// Aperçu des médias avant l'envoi, façon WhatsApp : balayage entre les médias,
@@ -29,13 +42,30 @@ class MediaCaptionResult {
 class MediaCaptionScreen extends StatefulWidget {
   final List<MediaPickResult> files;
 
-  const MediaCaptionScreen({super.key, required this.files});
+  /// Les membres du groupe, `id -> nom`. VIDE hors groupe : le `@` ne propose
+  /// alors rien, exactement comme dans le champ de discussion.
+  final Map<String, String> membres;
+
+  /// Mon identifiant — on ne se mentionne pas soi-même.
+  final String? monId;
+
+  const MediaCaptionScreen({
+    super.key,
+    required this.files,
+    this.membres = const {},
+    this.monId,
+  });
 
   static Future<MediaCaptionResult?> open(
-      BuildContext context, List<MediaPickResult> files) {
+    BuildContext context,
+    List<MediaPickResult> files, {
+    Map<String, String> membres = const {},
+    String? monId,
+  }) {
     return Navigator.of(context).push<MediaCaptionResult>(
       MaterialPageRoute(
-        builder: (_) => MediaCaptionScreen(files: files),
+        builder: (_) =>
+            MediaCaptionScreen(files: files, membres: membres, monId: monId),
       ),
     );
   }
@@ -120,7 +150,108 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
     Navigator.of(context).pop(MediaCaptionResult(
       fichiers: _fichiers,
       legende: legende.isEmpty ? null : legende,
+      // Réduites à celles encore présentes dans la légende : effacer
+      // « @Dominique » avant d'envoyer ne doit notifier personne. Même règle
+      // que dans le champ de discussion.
+      mentions: [
+        for (final m in _mentionsEnCours)
+          if (legende.contains("@${m["libelle"]}")) m,
+      ],
     ));
+  }
+
+  // ══════════════════════════════════════════════
+  // MENTIONS @ DANS LA LÉGENDE — groupes seulement
+  // ══════════════════════════════════════════════
+  //
+  // 🔴 UNE LÉGENDE EST UN MESSAGE COMME UN AUTRE. Le serveur la range dans le
+  // même `content`, et rien ne justifiait qu'on puisse mentionner quelqu'un en
+  // écrivant, mais pas en envoyant une photo — c'est même souvent là qu'on veut
+  // le faire (« @Jean regarde ça »).
+  //
+  // Miroir de `chat_screen.dart` : mêmes règles de détection, même filtre à
+  // l'envoi. Les deux écrans doivent produire les mêmes messages.
+
+  final List<Map<String, String>> _mentionsEnCours = [];
+  String? _requeteMention;
+  int _debutMention = -1;
+
+  void _majRequeteMention() {
+    if (widget.membres.isEmpty) return;
+    final sel = _captionCtrl.selection;
+    final texte = _captionCtrl.text;
+    if (!sel.isValid || !sel.isCollapsed || sel.start > texte.length) {
+      if (_requeteMention != null) setState(() => _requeteMention = null);
+      return;
+    }
+    final avant = texte.substring(0, sel.start);
+    final at = avant.lastIndexOf('@');
+    // Le `@` doit ouvrir un mot, et la requête s'arrête à la première espace.
+    if (at < 0 ||
+        (at > 0 && !RegExp(r'\s').hasMatch(avant[at - 1])) ||
+        avant.substring(at + 1).contains(RegExp(r'\s'))) {
+      if (_requeteMention != null) setState(() => _requeteMention = null);
+      return;
+    }
+    setState(() {
+      _requeteMention = avant.substring(at + 1);
+      _debutMention = at;
+    });
+  }
+
+  List<MapEntry<String, String>> _membresProposes() {
+    final requete = (_requeteMention ?? "").toLowerCase();
+    return widget.membres.entries
+        .where((e) => e.key != widget.monId && e.value.trim().isNotEmpty)
+        .where((e) => requete.isEmpty || e.value.toLowerCase().contains(requete))
+        .toList()
+      ..sort((a, b) => a.value.toLowerCase().compareTo(b.value.toLowerCase()));
+  }
+
+  void _insereMention(String userId, String nom) {
+    final texte = _captionCtrl.text;
+    final sel = _captionCtrl.selection;
+    final fin = sel.isValid ? sel.start : texte.length;
+    if (_debutMention < 0 || _debutMention > fin) return;
+    // L'espace finale évite que le curseur reste DANS la mention, ce qui
+    // rouvrirait la liste sur le nom qu'on vient de choisir.
+    final remplacement = "@$nom ";
+    _captionCtrl.value = TextEditingValue(
+      text: texte.replaceRange(_debutMention, fin, remplacement),
+      selection:
+          TextSelection.collapsed(offset: _debutMention + remplacement.length),
+    );
+    setState(() {
+      _requeteMention = null;
+      _debutMention = -1;
+      _mentionsEnCours.removeWhere((m) => m["userId"] == userId);
+      _mentionsEnCours.add({"userId": userId, "libelle": nom});
+    });
+  }
+
+  Widget _panneauMentions() {
+    if (widget.membres.isEmpty || _requeteMention == null) {
+      return const SizedBox.shrink();
+    }
+    final membres = _membresProposes();
+    if (membres.isEmpty) return const SizedBox.shrink();
+    return Container(
+      constraints: const BoxConstraints(maxHeight: 180),
+      color: const Color(0xFF1F2C34),
+      child: ListView.builder(
+        shrinkWrap: true,
+        padding: EdgeInsets.zero,
+        itemCount: membres.length,
+        itemBuilder: (_, i) {
+          final e = membres[i];
+          return ListTile(
+            dense: true,
+            title: Text(e.value, style: const TextStyle(color: Colors.white)),
+            onTap: () => _insereMention(e.key, e.value),
+          );
+        },
+      ),
+    );
   }
 
   @override
@@ -146,7 +277,7 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
         ),
         actions: [
           IconButton(
-            tooltip: "Retirer ce média",
+            tooltip: tr(context, 'remove_media'),
             icon: const Icon(Icons.delete_outline, color: Colors.white),
             onPressed: () => _retire(_index),
           ),
@@ -170,6 +301,8 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
               ),
             ),
             if (_fichiers.length > 1) _bandeau(),
+            ?_ligneCompression(),
+            _panneauMentions(),
             _composeur(),
           ],
         ),
@@ -274,6 +407,88 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
     );
   }
 
+  /// « Compressée · 4,2 Mo → 320 Ko · **Envoyer l'original** ».
+  ///
+  /// 🔴 DIRE CE QU'ON A FAIT, ET LAISSER LE REFUSER (rattrapage du web,
+  /// 31/08/2026). Réduire une photo sans le dire est une décision prise à la
+  /// place de quelqu'un : celui qui envoie une ordonnance, un reçu ou un plan
+  /// veut ses pixels, et il n'a aucun moyen de deviner qu'on les lui a retirés.
+  ///
+  /// ⚠️ L'ORIGINAL SE RELIT DEPUIS LE DISQUE, il n'est pas gardé en mémoire :
+  /// dix photos de 8 Mo tenues en double feraient tomber l'application. Le
+  /// chemin vient du sélecteur ; sans lui (envoi web, sélecteur système qui ne
+  /// rend que des octets) la ligne ne s'affiche pas, faute de pouvoir tenir sa
+  /// promesse.
+  Widget? _ligneCompression() {
+    final courant = _fichiers[_index];
+    if (!courant.compresse || courant.path == null) return null;
+    final avant = courant.tailleOriginale;
+    if (avant == null) return null;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+      child: Row(children: [
+        const Icon(Icons.compress, size: 14, color: Colors.white54),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(
+            "${poidsLisible(avant)} → ${poidsLisible(courant.bytes.length)}",
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Colors.white54, fontSize: 12),
+          ),
+        ),
+        const SizedBox(width: 10),
+        GestureDetector(
+          onTap: _restaureOriginal,
+          child: Text(
+            tr(context, 'send_original'),
+            style: TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                decoration: TextDecoration.underline),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  /// Remplace les octets réduits par ceux du fichier d'origine.
+  ///
+  /// Sans retour en arrière : reprendre la version réduite demanderait de la
+  /// garder en mémoire à côté de l'original, pour une hésitation. Celui qui
+  /// change d'avis ressort et resélectionne — c'est deux appuis, et ça ne coûte
+  /// la mémoire de personne.
+  Future<void> _restaureOriginal() async {
+    final courant = _fichiers[_index];
+    final chemin = courant.path;
+    if (chemin == null) return;
+    try {
+      final octets = await File(chemin).readAsBytes();
+      if (!mounted) return;
+      setState(() {
+        _fichiers[_index] = courant.copieAvec(
+          bytes: octets,
+          // Le nom et le type redeviennent ceux de l'original : le serveur
+          // choisit l'extension de stockage d'après le NOM, et des octets
+          // d'origine sous un nom `.jpg` seraient servis avec le mauvais
+          // en-tête. Même règle qu'à la compression, dans l'autre sens.
+          fileName: chemin.split(Platform.pathSeparator).last,
+          compresse: false,
+        );
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(tr(context, 'original_will_be_sent'))),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(tr(context, 'original_missing'))),
+      );
+    }
+  }
+
   Widget _composeur() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -289,6 +504,7 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
               ),
               child: TextField(
                 controller: _captionCtrl,
+                onChanged: (_) => _majRequeteMention(),
                 textCapitalization: TextCapitalization.sentences,
                 maxLines: 4,
                 minLines: 1,
@@ -296,8 +512,8 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
                 cursorColor: Colors.white,
                 decoration: InputDecoration(
                   hintText: _fichiers.length > 1
-                      ? "Légende (tous les médias)"
-                      : "Ajouter une légende…",
+                      ? tr(context, 'caption_all_media')
+                      : tr(context, 'status_add_caption'),
                   hintStyle:
                       const TextStyle(color: Colors.white54, fontSize: 15),
                   border: InputBorder.none,

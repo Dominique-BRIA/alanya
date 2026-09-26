@@ -20,6 +20,7 @@ import 'geo_service.dart';
 import '../core/call_ui_native.dart';
 import '../core/notification_settings.dart' as notif;
 import '../core/server_config.dart';
+import 'sonneries_livrees.dart';
 import '../core/token_storage.dart';
 
 /// Service de notifications push complet (FCM + notifications locales).
@@ -238,6 +239,44 @@ class PushService {
               AndroidFlutterLocalNotificationsPlugin>()
           ?.createNotificationChannel(channel);
 
+      /*
+       * UN CANAL PAR SON DE MESSAGE LIVRE.
+       *
+       * 🔴 SANS EUX, LA SONNERIE D'UNE LISTE N'EXISTE PAS HORS DE
+       * L'APPLICATION. Depuis Android 8 le son est porte par le CANAL, et un
+       * canal ne peut plus en changer apres sa creation : `sound:` pose sur la
+       * notification n'a aucun effet. Le canal `messages` ci-dessus jouait donc
+       * « Notification Alanya » pour tout le monde, quel que soit le reglage.
+       *
+       * 🔴 ILS SONT CREES AU LANCEMENT, ET NON A LA PREMIERE UTILISATION.
+       * Hors de l'application c'est FCM qui affiche l'annonce, en citant un
+       * `channelId` decide par le SERVEUR : un canal encore inexistant et
+       * Android 8+ n'affiche RIEN. Les creer d'avance est la seule facon de
+       * garantir qu'il est la quand le message arrive.
+       *
+       * ⚠️ `createNotificationChannel` EST IDEMPOTENT tant que l'identifiant
+       * ne change pas : rejoue a chaque lancement, il ne recree rien et n'ecrase
+       * aucun reglage que l'utilisateur aurait change dans Android.
+       */
+      for (final s in sonneriesLivrees) {
+        final ressource = ressourceAndroidDuSon(s.fichier);
+        if (ressource == null) continue;
+        await _localPlugin
+            .resolvePlatformSpecificImplementation<
+                AndroidFlutterLocalNotificationsPlugin>()
+            ?.createNotificationChannel(AndroidNotificationChannel(
+          canalMessagePour(s.fichier),
+          // Le libelle que l'utilisateur lit dans les reglages d'Android : le
+          // nom du son le rend reconnaissable, « Messages 3 » ne dirait rien.
+          'Messages — ${s.libelle}',
+          description: 'Nouveaux messages des listes reglees sur ce son',
+          importance: Importance.high,
+          enableVibration: true,
+          playSound: true,
+          sound: RawResourceAndroidNotificationSound(ressource),
+        ));
+      }
+
       // Canal dédié aux appels entrants (plein écran).
       await _localPlugin
           .resolvePlatformSpecificImplementation<
@@ -313,6 +352,79 @@ class PushService {
         onlyAlertOnce: true,
       ),
     );
+  }
+
+  // ── Transferts (envois, téléchargements, modèles de langue) ──────────────
+
+  /// Canal DISTINCT des messages, et volontairement discret.
+  ///
+  /// Une barre de progression qui vibre et sonne à chaque pour cent serait
+  /// insupportable : `Importance.low` la pose sans bruit ni bandeau, et
+  /// `onlyAlertOnce` garantit que les mises à jour suivantes ne réveillent rien.
+  /// Un canal séparé laisse en plus l'utilisateur la couper dans les réglages
+  /// Android sans perdre ses notifications de messages.
+  static const _canalTransferts = 'transferts';
+
+  /// L'identité d'un transfert donne celle de sa notification : deux
+  /// avancements du même fichier se REMPLACENT au lieu de s'empiler.
+  static int idTransfert(String id) => id.hashCode & 0x7fffffff;
+
+  /// Affiche (ou met à jour) la progression d'un transfert.
+  ///
+  /// [fraction] nulle = barre INDÉTERMINÉE. C'est le cas des modèles de langue,
+  /// dont ML Kit ne rend jamais l'avancement, et d'une réponse HTTP sans
+  /// `Content-Length`. Afficher 0 % dans ces cas ferait croire à un blocage.
+  Future<void> showTransfert({
+    required String id,
+    required String titre,
+    required String sousTitre,
+    double? fraction,
+    bool echoue = false,
+  }) async {
+    try {
+      final pourcent = fraction == null ? 0 : (fraction * 100).round().clamp(0, 100);
+      final details = AndroidNotificationDetails(
+        _canalTransferts,
+        'Transferts',
+        channelDescription:
+            "Progression des envois, téléchargements et installations de langues",
+        importance: Importance.low,
+        priority: Priority.low,
+        icon: '@mipmap/ic_launcher',
+        color: const Color(0xFFB85C38),
+        playSound: false,
+        onlyAlertOnce: true,
+        // Un transfert EN COURS n'est pas balayable : l'écarter laisserait
+        // l'utilisateur sans aucun moyen de savoir où il en est. Un ÉCHEC, si —
+        // il n'y a plus rien à suivre, seulement à constater.
+        ongoing: !echoue,
+        autoCancel: echoue,
+        showProgress: !echoue,
+        maxProgress: 100,
+        progress: pourcent,
+        indeterminate: !echoue && fraction == null,
+      );
+      await _localPlugin.show(
+        idTransfert(id),
+        titre,
+        sousTitre,
+        NotificationDetails(
+          android: details,
+          // iOS n'a pas de notification à progression : on n'en pose aucune
+          // plutôt qu'une alerte par pour cent.
+          iOS: null,
+        ),
+      );
+    } catch (_) {
+      // L'affichage ne doit jamais interrompre le transfert lui-même.
+    }
+  }
+
+  /// Retire la notification d'un transfert abouti ou abandonné.
+  Future<void> retireTransfert(String id) async {
+    try {
+      await _localPlugin.cancel(idTransfert(id));
+    } catch (_) {}
   }
 
   /// Charge utile du rappel, commune aux deux isolats.
@@ -454,6 +566,16 @@ class PushService {
       convId: message.data['convId']?.toString(),
       avatarUrl: message.data['avatarUrl']?.toString(),
       payload: message.data,
+      // 🔴 LE CANAL EST DECIDE PAR LE SERVEUR, et il faut savoir pourquoi :
+      // hors de l'application, c'est FCM qui affiche la notification sans passer
+      // par Dart. Le choix du son doit donc pouvoir se faire SANS code client —
+      // seul le serveur peut le porter dans les trois etats (au premier plan,
+      // en arriere-plan, application tuee), et une seule regle vaut mieux que
+      // deux qui divergeraient.
+      //
+      // ⚠️ Un serveur anterieur a ce champ n'envoie rien : on retombe alors
+      // sur le canal historique, soit le comportement d'avant.
+      canal: message.data['canal']?.toString() ?? canalMessageParDefaut,
     );
   }
 
@@ -530,6 +652,16 @@ class PushService {
   /// ce qu'Android offre de plus proche du bandeau interne de l'application :
   /// une notification système ne peut pas reproduire un widget Flutter, mais
   /// elle porte le même avatar, le même nom et la même couleur.
+  /// [canal] est l'identifiant du canal Android qui doit sonner — celui de la
+  /// LISTE DE CONTACTS de l'expediteur, quand elle a son propre son.
+  ///
+  /// 🔴 C'EST LE CANAL, ET LUI SEUL, QUI DECIDE DU SON. `sound:` ci-dessous
+  /// n'agit qu'a la toute premiere creation du canal ; ensuite Android l'ignore.
+  /// Passer le bon identifiant est donc la SEULE facon de changer le son d'une
+  /// notification.
+  ///
+  /// ⚠️ Le defaut garde le canal historique : une notification qui ne sait
+  /// rien de l'expediteur sonne comme avant, et non en silence.
   Future<void> show({
     required String title,
     required String body,
@@ -537,6 +669,7 @@ class PushService {
     String? convId,
     String? avatarUrl,
     Map<String, dynamic>? payload,
+    String canal = canalMessageParDefaut,
   }) async {
     // Les deux API n'acceptent pas le même type pour la même image : `Person`
     // veut une icône, `largeIcon` une bitmap. On télécharge une seule fois.
@@ -549,13 +682,16 @@ class PushService {
     );
 
     final details = AndroidNotificationDetails(
-      'messages',
+      canal,
       'Messages',
       channelDescription: 'Notifications des nouveaux messages et appels',
       importance: Importance.high,
       priority: Priority.high,
       icon: '@mipmap/ic_launcher',
       color: const Color(0xFFB85C38),
+      // ⚠️ SANS EFFET SI LE CANAL EXISTE DEJA, et c'est toujours le cas : les
+      // canaux sont crees au lancement. La ligne reste pour le tout premier
+      // affichage d'un canal que la creation aurait manque.
       sound: const RawResourceAndroidNotificationSound("notification"),
       playSound: true,
       largeIcon: avatar,

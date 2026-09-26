@@ -38,6 +38,11 @@
          lève une SecurityException et l'appel se coupe dès que l'application
          passe en arrière-plan. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
+    <!-- Même règle, pour les envois et téléchargements qui doivent survivre à la
+         fermeture de l'application. ⚠️ Depuis Android 15, un service `dataSync`
+         est plafonné à 6 h par jour cumulées : sans effet sur des transferts de
+         fichiers, rédhibitoire pour un usage continu. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <!-- Empêche la mise en veille de la puce Wi-Fi pendant un appel : c'est elle
          qui coupe les connexions WebRTC quand l'écran s'éteint. -->
@@ -129,6 +134,18 @@
             android:name=".CallForegroundService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+
+        <!-- Maintient les envois et téléchargements quand l'application quitte
+             l'écran, ou est balayée des tâches récentes.
+
+             ⚠️ Service DISTINCT de celui de `flutter_foreground_task`, qui n'en
+             expose qu'un seul et le déclare `foregroundServiceType="location"`
+             pour le relevé de position. Le réutiliser aurait lié les deux :
+             arrêter les transferts aurait arrêté la géolocalisation. -->
+        <service
+            android:name=".TransferForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <!-- Service de relevé de position, fourni par `flutter_foreground_task`.
 

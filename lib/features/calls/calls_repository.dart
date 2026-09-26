@@ -40,11 +40,40 @@ class AcceptCallResult {
   final bool isGroup;
   final String? groupName;
   final List<CallParticipantInfo> activeParticipants;
+
+  /// Cette conversation doit-elle être ENREGISTRÉE ?
+  ///
+  /// La réponse vient du serveur, qui lit `center.enregistrement` pour cet
+  /// agent. ⚠️ **Faux par défaut**, et c'est délibéré : un serveur plus ancien
+  /// n'envoie pas ce champ, et le défaut inverse ferait enregistrer des appels
+  /// que personne n'a autorisés.
+  final bool enregistrer;
+
+  /// L'entreprise qui recevra l'enregistrement. Nulle quand [enregistrer] est
+  /// faux.
+  final int? enregistrementCompanyId;
+
+  /// « VIDEO » ou « AUDIO » — le type de l'appel qu'on vient de rejoindre, ou
+  /// `null` chez un serveur antérieur à ce champ.
+  ///
+  /// 🔴 C'EST LE SEUL MOYEN DE CONNAÎTRE LE TYPE QUAND ON DÉCROCHE DEPUIS
+  /// L'ÉCRAN NATIF. Ce chemin-là n'a jamais vu la trame `incoming_call` : il ne
+  /// dispose que de l'identifiant d'appel. Sans ce champ, un invité qui rejoint
+  /// un appel vidéo y entrait en audio, caméra fermée.
+  ///
+  /// ⚠️ `null` ET NON « AUDIO » PAR DÉFAUT : il faut pouvoir distinguer « le
+  /// serveur dit audio » de « le serveur ne dit rien », pour retomber dans ce
+  /// second cas sur ce que l'écran natif, lui, savait déjà.
+  final String? type;
+
   AcceptCallResult({
     required this.id,
     required this.isGroup,
     required this.groupName,
     required this.activeParticipants,
+    this.enregistrer = false,
+    this.enregistrementCompanyId,
+    this.type,
   });
 }
 
@@ -165,6 +194,9 @@ class CallsRepository {
       isGroup: (data["isGroup"] as bool?) ?? false,
       groupName: data["groupName"] as String?,
       activeParticipants: parts,
+      enregistrer: (data["enregistrer"] as bool?) ?? false,
+      enregistrementCompanyId: (data["enregistrementCompanyId"] as num?)?.toInt(),
+      type: data["type"] as String?,
     );
   }
 

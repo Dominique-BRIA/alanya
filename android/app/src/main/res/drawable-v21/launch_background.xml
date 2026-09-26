@@ -1,7 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Modify this file to customize your launch splash screen -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:drawable="?android:colorBackground" />
+    <!--
+        🔴 BLANC EN DUR, et non `?android:colorBackground` (18/08/2026).
+
+        ⚠️ C'EST CE FICHIER-CI QUI SERT, pas `drawable/launch_background.xml` :
+        `drawable-v21` l'emporte des Android 5, donc sur tous les appareils
+        existants. La version sans qualificatif etait deja en blanc, ce qui
+        rendait le defaut d'autant plus deroutant a lire — le fichier « correct »
+        n'etait jamais celui qu'Android choisissait.
+
+        `?android:colorBackground` suit le theme systeme : noir des que le
+        telephone passe en mode sombre. Le user veut un fond blanc dans les deux
+        cas, et le splash n'est de toute facon pas une surface de l'application —
+        c'est l'ecran d'attente qui precede son lancement.
+    -->
+    <item android:drawable="@android:color/white" />
 
     <!-- You can insert your own image assets here -->
     <!-- <item>

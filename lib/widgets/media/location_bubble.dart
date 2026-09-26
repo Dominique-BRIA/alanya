@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../models/message_payload.dart';
 import '../../theme/alanya_theme.dart';
 import 'osm_static_map.dart';
+import '../../l10n/app_localizations.dart';
 
 /// Ouvre une position dans l'application de cartes du téléphone.
 ///
@@ -86,7 +87,7 @@ class LocationBubble extends StatelessWidget {
               const SizedBox(width: 4),
               Expanded(
                 child: Text(
-                  position.label ?? "Position partagée",
+                  position.label ?? tr(context, 'location_shared'),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -102,7 +103,11 @@ class LocationBubble extends StatelessWidget {
               // qu'on reçoit : une position à 1 200 m près ne désigne pas un
               // lieu, elle désigne un quartier.
               precision != null
-                  ? "Précision ${precision.round()} m · ${_coord(position)}"
+                  ? tr(context, 'location_accuracy', {
+                      'precision': '${precision.round()}',
+                      'lat': position.lat.toStringAsFixed(5),
+                      'lng': position.lng.toStringAsFixed(5),
+                    })
                   : _coord(position),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,

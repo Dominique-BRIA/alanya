@@ -48,7 +48,12 @@ MotifRefus? motifRefus({
 
 /// Le fil chiffré : ce que l'écran de conversation appelle.
 class E2eeFil {
-  E2eeFil(this._service, this._api);
+  E2eeFil(this._service, this._api, {this.monDeviceId = 1});
+
+  /// ⚠️ LE DÉPÔT EXIGE L APPAREIL EXPÉDITEUR : le serveur s en sert pour ne pas
+  /// nous renvoyer nos propres enveloppes, et pour que le destinataire sache
+  /// quelle session ouvrir.
+  final int monDeviceId;
 
   final E2eeService _service;
   final Future<Map<String, dynamic>> Function(
@@ -103,18 +108,44 @@ class E2eeFil {
     final enveloppes = <Map<String, dynamic>>[];
     for (final deviceId in appareils) {
       final e = await _service.chiffrer(pairId, deviceId, texte);
+      /*
+       * 🐛 `destinataireId` MANQUAIT. Le serveur refuse l'enveloppe sans lui —
+       * il ne peut pas deviner à QUI la remettre à partir du seul numéro
+       * d'appareil, qui n'est unique que par personne.
+       */
       enveloppes.add({
+        'destinataireId': pairId,
         'destinataireDevice': deviceId,
         'type': e.type,
         'corps': e.corps,
       });
     }
 
-    final r = await _api('POST', '/api/messages/chiffre', {
-      'conversationId': convId,
-      'enveloppes': enveloppes,
+    /*
+     * 🐛 J'AVAIS INVENTÉ `POST /api/messages/chiffre`. Cette route n'existe pas.
+     * Le vrai chemin est celui du web, et il tient en DEUX appels :
+     *
+     *   ① la ligne du fil, SANS contenu — le serveur la refuserait autrement ;
+     *   ② les enveloppes, rattachées à cette ligne.
+     *
+     * ⚠️ DANS CET ORDRE, ET PAS L'INVERSE. Une enveloppe sans message auquel se
+     * rattacher serait orpheline ; un message sans enveloppe s'afficherait vide
+     * chez le destinataire.
+     */
+    final message = await _api('POST', '/api/conversations/$convId/messages', {
+      'type': 'TEXT',
+      'chiffre': true,
     });
-    return r['id'] as String;
+    final messageId = message['id'] as String;
+
+    await _api('POST', '/api/e2ee/enveloppes', {
+      'convId': convId,
+      'deviceId': monDeviceId,
+      'enveloppes': enveloppes,
+      'messageId': messageId,
+    });
+
+    return messageId;
   }
 
   /* ══════════════ RECEVOIR ══════════════ */
@@ -144,23 +175,45 @@ class E2eeFil {
           e['type'] as int,
           e['corps'] as String,
         );
+        /*
+         * ⚠️ LES NOMS VIENNENT DU SERVEUR, PAS DE MON SOUVENIR : `convId` et
+         * `createdAt`, vérifiés dans la route. Une clé mal orthographiée ne se
+         * voit pas à la compilation — elle rend `null` à l'exécution.
+         */
         messages.add((
-          id: e['messageId'] as String,
-          convId: e['conversationId'] as String,
+          id: (e['messageId'] ?? e['id']) as String,
+          convId: e['convId'] as String,
           texte: texte,
-          quand: e['quand'] as int,
+          quand: DateTime.parse(e['createdAt'] as String).millisecondsSinceEpoch,
         ));
         aAcquitter.add(e['id'] as String);
-        noteEtat(e['conversationId'] as String, true);
+        noteEtat(e['convId'] as String, true);
       } catch (_) {
         illisibles++;
       }
     }
 
     if (aAcquitter.isNotEmpty) {
-      await _api('POST', '/api/e2ee/enveloppes/acquitter', {'ids': aAcquitter});
+      /*
+       * 🐛 J'AVAIS INVENTÉ `POST .../acquitter`. L'acquittement est un DELETE et
+       * les identifiants passent en PARAMÈTRE D'URL, séparés par des virgules —
+       * c'est le contrat que le serveur applique déjà au web.
+       */
+      final ids = aAcquitter.join(',');
+      await _api('DELETE', '/api/e2ee/enveloppes?ids=$ids', null);
     }
     return (messages: messages, illisibles: illisibles);
+  }
+
+  /// L'état du chiffrement d'une conversation, tel que le serveur le donne.
+  ///
+  /// 🔴 ON NE LE DEVINE PAS DU CONTENU : un message ancien, arrivé en clair
+  /// avant l'activation, ferait conclure que le fil ne l'est pas.
+  Future<bool> etat(String convId) async {
+    final r = await _api('GET', '/api/conversations/$convId/e2ee', null);
+    final actif = r['e2eeActif'] == true;
+    noteEtat(convId, actif);
+    return actif;
   }
 
   /* ══════════════ ACTIVER ══════════════ */

@@ -8,6 +8,7 @@ import '../../core/data_saver_service.dart';
 import '../../core/media_cache.dart';
 import '../../theme/alanya_theme.dart';
 import 'shimmer_box.dart';
+import '../../l10n/app_localizations.dart';
 
 /// GET avec retry (réseau faible) : ré-essaie sur erreur réseau ou 5xx, avec un
 /// petit backoff. Les erreurs 4xx (auth, introuvable) ne sont pas ré-essayées.
@@ -261,7 +262,7 @@ class _CachedMediaState extends State<CachedMedia> {
           children: [
             Icon(Icons.download_rounded, color: AlanyaColors.terracotta, size: 30),
             const SizedBox(height: 4),
-            Text('Toucher pour télécharger',
+            Text(tr(context, 'tap_to_download'),
                 style: TextStyle(fontSize: 11, color: AlanyaColors.grey500)),
           ],
         ),

@@ -86,6 +86,24 @@ class ApiClient {
     return _decode(res);
   }
 
+  /// PUT — REMPLACE la ressource, là où `patch` la modifie en partie.
+  ///
+  /// La distinction n'est pas cosmétique : l'audience des statuts envoie son
+  /// état complet (mode + liste), et c'est ce qui rend l'enregistrement
+  /// rejouable. Un PATCH aurait laissé croire à un envoi partiel.
+  Future<Map<String, dynamic>> put(
+    String path,
+    Map<String, dynamic> body, {
+    String? bearer,
+  }) async {
+    final res = await http.put(
+      Uri.parse("$baseUrl$path"),
+      headers: _headers(bearer),
+      body: jsonEncode(body),
+    );
+    return _decode(res);
+  }
+
   Future<Map<String, dynamic>> delete(String path,
       {String? bearer, Map<String, dynamic>? body}) async {
     final res = await http.delete(
@@ -125,6 +143,41 @@ class ApiClient {
     request.files.add(http.MultipartFile.fromBytes(
       "file",
       bytes,
+      filename: filename,
+      contentType: MediaType.parse(mimeType),
+    ));
+    final streamed = await request.send();
+    final res = await http.Response.fromStream(streamed);
+    return _decode(res);
+  }
+
+  /// Comme [uploadBytes], mais lit le fichier EN FLUX depuis le disque plutôt
+  /// que de le charger entièrement en mémoire.
+  ///
+  /// 🔴 **POURQUOI.** Un enregistrement d'appel non compressé pèse ~11 Mo par
+  /// minute ; un appel de 30 min tenu en `Uint8List` (comme le fait
+  /// [uploadBytes]) menace l'OOM. `MultipartFile.fromPath` envoie le fichier
+  /// morceau par morceau, sans jamais le tenir en entier — c'est la seule voie
+  /// tenable pour un flux dont on ne borne pas la durée.
+  Future<Map<String, dynamic>> uploadFile(
+    String path,
+    String filePath,
+    String filename,
+    String mimeType, {
+    String? bearer,
+    Map<String, String>? fields,
+    void Function(int envoyes, int total)? onProgress,
+  }) async {
+    final request = _RequeteMultipartSuivie(
+      "POST",
+      Uri.parse("$baseUrl$path"),
+      onProgress: onProgress,
+    );
+    if (bearer != null) request.headers["Authorization"] = "Bearer $bearer";
+    if (fields != null) request.fields.addAll(fields);
+    request.files.add(await http.MultipartFile.fromPath(
+      "file",
+      filePath,
       filename: filename,
       contentType: MediaType.parse(mimeType),
     ));

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:permission_handler/permission_handler.dart' show openAppSettings;
+import '../../../l10n/app_localizations.dart';
+import 'package:permission_handler/permission_handler.dart'
+    show openAppSettings;
 import 'package:provider/provider.dart';
 
 import '../../../core/api_client.dart';
@@ -43,7 +45,7 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
       _scanning = true;
       _result = null;
       _selected.clear();
-      _statusMsg = "Démarrage…";
+      _statusMsg = tr(context, 'sync_starting');
     });
 
     final result = await _service.sync(
@@ -72,12 +74,14 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
 
   Future<void> _importSelected() async {
     final toAdd = _result?.matches
-            .where((m) => _selected[m.alanyaUser.publicNumber] == true && !m.alanyaUser.alreadyContact)
+            .where((m) =>
+                _selected[m.alanyaUser.publicNumber] == true &&
+                !m.alanyaUser.alreadyContact)
             .toList() ??
         [];
 
     if (toAdd.isEmpty) {
-      showAppSnackBar("Aucun contact sélectionné");
+      showAppSnackBar(tr(context, 'sync_none_selected'));
       return;
     }
 
@@ -91,7 +95,9 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
       try {
         await repo.add(
           match.alanyaUser.publicNumber,
-          alias: match.phoneName != match.alanyaUser.publicNumber ? match.phoneName : null,
+          alias: match.phoneName != match.alanyaUser.publicNumber
+              ? match.phoneName
+              : null,
         );
         added++;
       } on ApiException catch (e) {
@@ -109,8 +115,8 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
     setState(() => _importing = false);
 
     final msg = errors == 0
-        ? "$added contact${added > 1 ? 's' : ''} ajouté${added > 1 ? 's' : ''} ✓"
-        : "$added ajouté${added > 1 ? 's' : ''}, $errors erreur${errors > 1 ? 's' : ''}";
+        ? trN(context, 'sync_added', added)
+        : tr(context, 'sync_added_with_errors', {'a': '$added', 'e': '$errors'});
 
     showAppSnackBar(msg);
     if (added > 0) Navigator.of(context).pop(true);
@@ -119,7 +125,7 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: backAppBar(context, "Importer depuis le téléphone"),
+      appBar: backAppBar(context, tr(context, 'import_from_phone')),
       body: SafeArea(child: _body()),
       bottomNavigationBar: _bottomBar(),
     );
@@ -136,36 +142,39 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
         return _messageView(
           icon: Icons.contacts_outlined,
           color: Colors.orange,
-          title: "Permission refusée",
-          subtitle: "Alanya a besoin d'accéder à ton répertoire pour trouver tes amis.\nVa dans les Paramètres → Applications → Alanya → Autorisations.",
+          title: tr(context, 'sync_perm_denied'),
+          subtitle:
+              tr(context, 'sync_perm_body'),
           action: _settingsButton(),
         );
       case PhoneSyncStatus.empty:
         return _messageView(
           icon: Icons.person_off_outlined,
-          title: "Répertoire vide",
-          subtitle: "Ton répertoire téléphonique ne contient aucun contact.",
+          title: tr(context, 'sync_book_empty'),
+          subtitle: tr(context, 'sync_book_empty_body'),
         );
       case PhoneSyncStatus.noAlanyaNumbers:
         return _messageView(
           icon: Icons.search_off,
-          title: "Aucun Alanya ID détecté",
-          subtitle: "Aucun de tes contacts n'a d'Alanya ID dans son répertoire.\nUn Alanya ID est un identifiant à 6 ou 8 chiffres (ex : 123456 ou 12345678).",
+          title: tr(context, 'sync_no_id'),
+          subtitle:
+              tr(context, 'sync_no_id_body'),
           action: _retryButton(),
         );
       case PhoneSyncStatus.noMatches:
         return _messageView(
           icon: Icons.group_off_outlined,
-          title: "Aucun contact sur Alanya",
-          subtitle: "${result.totalScanned} numéro${result.totalScanned > 1 ? 's' : ''} vérifié${result.totalScanned > 1 ? 's' : ''}.\nAucun de tes contacts n'a encore de compte Alanya.",
+          title: tr(context, 'sync_no_match'),
+          subtitle:
+              trN(context, 'sync_scanned_none', result.totalScanned),
           action: _retryButton(),
         );
       case PhoneSyncStatus.error:
         return _messageView(
           icon: Icons.cloud_off,
           color: dangerOf(context),
-          title: "Erreur",
-          subtitle: result.errorMessage ?? "Erreur inconnue.",
+          title: tr(context, 'error'),
+          subtitle: result.errorMessage ?? tr(context, 'error_unknown'),
           action: _retryButton(),
         );
       case PhoneSyncStatus.success:
@@ -189,21 +198,25 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
               child: Icon(Icons.contacts, size: 56, color: positiveOf(context)),
             ),
             const SizedBox(height: 24),
-            const Text(
-              "Trouve tes amis sur Alanya",
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            Text(
+              tr(context, 'sync_title'),
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 12),
             Text(
-              "Alanya va scanner ton répertoire téléphonique, y repérer les Alanya ID (6 ou 8 chiffres) et vérifier lesquels ont un compte.",
-              style: TextStyle(color: mutedOf(context, Colors.black54), height: 1.5),
+              tr(context, 'sync_explain'),
+              style: TextStyle(
+                  color: mutedOf(context, Colors.black54), height: 1.5),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
             Text(
-              "Aucune donnée n'est stockée. Seuls les numéros à 6 ou 8 chiffres sont envoyés au serveur.",
-              style: TextStyle(color: faintOf(context, Colors.black38), fontSize: 12, height: 1.5),
+              tr(context, 'sync_privacy'),
+              style: TextStyle(
+                  color: faintOf(context, Colors.black38),
+                  fontSize: 12,
+                  height: 1.5),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 32),
@@ -212,7 +225,7 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
               child: ElevatedButton.icon(
                 onPressed: _scan,
                 icon: const Icon(Icons.search),
-                label: const Text("Scanner mon répertoire"),
+                label: Text(tr(context, 'sync_scan')),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: positiveOf(context),
                   padding: const EdgeInsets.symmetric(vertical: 14),
@@ -258,7 +271,8 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
           decoration: BoxDecoration(
             color: positiveOf(context).withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: positiveOf(context).withValues(alpha: 0.2)),
+            border:
+                Border.all(color: positiveOf(context).withValues(alpha: 0.2)),
           ),
           child: Row(
             children: [
@@ -269,19 +283,21 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      "${matches.length} contact${matches.length > 1 ? 's' : ''} sur Alanya",
+                      trN(context, 'sync_matches', matches.length),
                       style: const TextStyle(fontWeight: FontWeight.w600),
                     ),
                     Text(
-                      "$newOnes nouveau${newOnes > 1 ? 'x' : ''} · ${result.totalScanned} numéros scannés",
-                      style: TextStyle(color: mutedOf(context, Colors.black54), fontSize: 13),
+                      trN(context, 'sync_new_scanned', newOnes, {'total': '${result.totalScanned}'}),
+                      style: TextStyle(
+                          color: mutedOf(context, Colors.black54),
+                          fontSize: 13),
                     ),
                   ],
                 ),
               ),
               TextButton(
                 onPressed: _scan,
-                child: const Text("Rescanner"),
+                child: Text(tr(context, 'sync_rescan')),
               ),
             ],
           ),
@@ -307,10 +323,15 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
 
     return ListTile(
       leading: CircleAvatar(
-        backgroundColor: isAlready ? themed(context, light: Colors.grey.shade300, dark: surfacesOf(context).surfaceHaute) : AlanyaColors.gold,
+        backgroundColor: isAlready
+            ? themed(context,
+                light: Colors.grey.shade300,
+                dark: surfacesOf(context).surfaceHaute)
+            : AlanyaColors.gold,
         child: Text(
           displayName.isNotEmpty ? displayName[0].toUpperCase() : "?",
-          style: TextStyle(color: isAlready ? mutedOf(context, Colors.grey) : Colors.white),
+          style: TextStyle(
+              color: isAlready ? mutedOf(context, Colors.grey) : Colors.white),
         ),
       ),
       title: Text(
@@ -323,16 +344,17 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text("Alanya ID : ${formatAlanyaId(user.publicNumber)}",
+          Text(tr(context, 'home_alanya_id', {'id': formatAlanyaId(user.publicNumber)}),
               style: alanyaIdStyleOf(context)),
           if (match.phoneName != displayName)
             Text(
-              "Dans ton répertoire : ${match.phoneName}",
-              style: TextStyle(fontSize: 11, color: faintOf(context, Colors.black38)),
+              tr(context, 'sync_in_book', {'nom': match.phoneName}),
+              style: TextStyle(
+                  fontSize: 11, color: faintOf(context, Colors.black38)),
             ),
           if (isAlready)
             Text(
-              "Déjà dans ton répertoire Alanya",
+              tr(context, 'sync_already'),
               style: TextStyle(fontSize: 12, color: positiveOf(context)),
             ),
         ],
@@ -344,7 +366,8 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
               activeColor: positiveOf(context),
               onChanged: _importing
                   ? null
-                  : (v) => setState(() => _selected[user.publicNumber] = v ?? false),
+                  : (v) =>
+                      setState(() => _selected[user.publicNumber] = v ?? false),
             ),
       onTap: isAlready || _importing
           ? null
@@ -356,8 +379,7 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
     final result = _result;
     if (result == null || !result.isSuccess || _scanning) return null;
 
-    final selectedCount =
-        _selected.values.where((v) => v).length;
+    final selectedCount = _selected.values.where((v) => v).length;
 
     return SafeArea(
       child: Padding(
@@ -365,7 +387,8 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
         child: SizedBox(
           width: double.infinity,
           child: ElevatedButton(
-            onPressed: (_importing || selectedCount == 0) ? null : _importSelected,
+            onPressed:
+                (_importing || selectedCount == 0) ? null : _importSelected,
             style: ElevatedButton.styleFrom(
               backgroundColor: positiveOf(context),
               padding: const EdgeInsets.symmetric(vertical: 14),
@@ -374,12 +397,13 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
                 ? const SizedBox(
                     height: 20,
                     width: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white),
                   )
                 : Text(
                     selectedCount == 0
-                        ? "Sélectionne des contacts"
-                        : "Ajouter $selectedCount contact${selectedCount > 1 ? 's' : ''}",
+                        ? tr(context, 'sync_select')
+                        : trN(context, 'sync_add_n', selectedCount),
                     style: const TextStyle(fontSize: 16),
                   ),
           ),
@@ -401,14 +425,17 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 64, color: color ?? faintOf(context, Colors.black26)),
+            Icon(icon,
+                size: 64, color: color ?? faintOf(context, Colors.black26)),
             const SizedBox(height: 16),
             Text(title,
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                style:
+                    const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
                 textAlign: TextAlign.center),
             const SizedBox(height: 8),
             Text(subtitle,
-                style: TextStyle(color: mutedOf(context, Colors.black54), height: 1.5),
+                style: TextStyle(
+                    color: mutedOf(context, Colors.black54), height: 1.5),
                 textAlign: TextAlign.center),
             if (action != null) ...[const SizedBox(height: 20), action],
           ],
@@ -420,14 +447,14 @@ class _PhoneSyncScreenState extends State<PhoneSyncScreen> {
   Widget _retryButton() => ElevatedButton.icon(
         onPressed: _scan,
         icon: const Icon(Icons.refresh),
-        label: const Text("Réessayer"),
+        label: Text(tr(context, 'retry')),
         style: ElevatedButton.styleFrom(backgroundColor: accentOf(context)),
       );
 
   Widget _settingsButton() => ElevatedButton.icon(
         onPressed: () => openAppSettings(),
         icon: const Icon(Icons.settings),
-        label: const Text("Ouvrir les paramètres"),
+        label: Text(tr(context, 'open_settings')),
         style: ElevatedButton.styleFrom(backgroundColor: accentOf(context)),
       );
 }

@@ -1,13 +1,20 @@
-import 'dart:typed_data';
-
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
-import '../../../core/api_client.dart';
+import '../../../core/app_snackbar.dart';
+import '../../../core/plafond_media.dart';
+import '../../../core/compression_image.dart' show imageBordMax, imageQualite;
 import '../../../theme/alanya_theme.dart';
+import '../../../widgets/media/media_picker_sheet.dart' show MediaPickResult;
+import '../../chat/screens/media_gallery_picker_screen.dart';
 import '../../media/media_repository.dart';
+import '../publication_statuts.dart';
 import '../status_repository.dart';
+import '../widgets/choix_emoji.dart';
+import 'editeur_media_statut_screen.dart';
+import 'status_viewer_screen.dart' show dureeVideoStatutMax;
+import '../../../l10n/app_localizations.dart';
 
 /// Convertit un hex (#RRGGBB) en Color opaque.
 Color colorFromHex(String hex) {
@@ -15,9 +22,19 @@ Color colorFromHex(String hex) {
   return Color(int.parse("FF$h", radix: 16));
 }
 
+/// Par où l'on entre dans la composition d'un statut.
+///
+/// Le bouton « + » de l'onglet Status propose les quatre, et l'écran ouvre
+/// directement la bonne source : sans ça, choisir « Appareil photo » aurait
+/// affiché l'éditeur de texte avant d'ouvrir la caméra, ce qui donne
+/// l'impression de s'être trompé de bouton.
+enum SourceStatut { texte, galerie, cameraPhoto, cameraVideo }
+
 /// Composition d'un statut texte sur fond coloré (style WhatsApp).
 class CreateStatusScreen extends StatefulWidget {
-  const CreateStatusScreen({super.key});
+  const CreateStatusScreen({super.key, this.source = SourceStatut.texte});
+
+  final SourceStatut source;
 
   @override
   State<CreateStatusScreen> createState() => _CreateStatusScreenState();
@@ -37,7 +54,27 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
 
   final _textCtrl = TextEditingController();
   int _colorIndex = 0;
-  bool _publishing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.source == SourceStatut.texte) return;
+    // Après la première trame : ouvrir un sélecteur depuis `initState` pousse
+    // une route sur un Navigator encore en train de bâtir celle-ci.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      switch (widget.source) {
+        case SourceStatut.galerie:
+          _pickAndPublishMedia();
+        case SourceStatut.cameraPhoto:
+          _capturer(video: false);
+        case SourceStatut.cameraVideo:
+          _capturer(video: true);
+        case SourceStatut.texte:
+          break;
+      }
+    });
+  }
 
   @override
   void dispose() {
@@ -45,75 +82,198 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
     super.dispose();
   }
 
+  /// Prise de vue, photo ou vidéo.
+  ///
+  /// ⚠️ LES BORNES SONT POSÉES À LA CAPTURE, pas après.
+  /// - Photo : `image_picker` sait réduire pendant la prise, aux MÊMES bornes
+  ///   que la galerie (`core/compression_image.dart`) — le fichier n'existe
+  ///   donc jamais en pleine définition du capteur, ce qui est plus sobre que
+  ///   de recompresser ensuite. Même chemin que la caméra de la discussion.
+  /// - Vidéo : `maxDuration` coupe à l'enregistrement. Sans lui, on filmerait
+  ///   dix minutes pour se faire refuser à l'envoi, la visionneuse ne lisant
+  ///   qu'une minute.
+  Future<void> _capturer({required bool video}) async {
+    XFile? fichier;
+    try {
+      final picker = ImagePicker();
+      fichier = video
+          ? await picker.pickVideo(
+              source: ImageSource.camera,
+              maxDuration: dureeVideoStatutMax,
+            )
+          : await picker.pickImage(
+              source: ImageSource.camera,
+              maxWidth: imageBordMax.toDouble(),
+              maxHeight: imageBordMax.toDouble(),
+              imageQuality: imageQualite,
+            );
+    } catch (_) {
+      _snack(tr(context, 'status_camera_unavailable'));
+      _refermeSiEntreeMedia();
+      return;
+    }
+    // Renoncer à la prise de vue doit ramener à la liste, pas à l'éditeur de
+    // texte — même raison que pour le sélecteur.
+    if (fichier == null || !mounted) {
+      _refermeSiEntreeMedia();
+      return;
+    }
+
+    final octets = await fichier.readAsBytes();
+    if (!mounted) return;
+    /*
+     * ⚠️ LA DURÉE NE BORNE PAS LE POIDS. `maxDuration` coupe à une minute, mais
+     * une minute filmée en haute définition dépasse largement le plafond du
+     * serveur sur un téléphone récent. Le refus arrivait donc après le
+     * téléversement complet, sur un 413 que rien n'annonçait.
+     */
+    if (depassePlafondMedia(octets.length)) {
+      _snack(tr(context, 'status_video_limit', {'n': '$plafondMediaMo'}));
+      _refermeSiEntreeMedia();
+      return;
+    }
+    await _editerPuisPublier([
+      MediaPickResult(
+        bytes: octets,
+        fileName: fichier.name,
+        mimeType: video ? 'video/mp4' : 'image/jpeg',
+        path: fichier.path,
+      ),
+    ]);
+  }
+
   Future<void> _publish() async {
     final text = _textCtrl.text.trim();
     if (text.isEmpty) {
-      _snack("Écris quelque chose");
+      _snack(tr(context, 'status_write_something'));
       return;
     }
-    setState(() => _publishing = true);
-    final repo = context.read<StatusRepository>();
-    final nav = Navigator.of(context);
+    // Même traitement que les médias : l'écran rend la main tout de suite,
+    // l'envoi se poursuit derrière. Plus rien ne tourne sur le bouton.
+    PublicationStatuts.instance.publierTexte(
+      text,
+      _palette[_colorIndex],
+      statuts: context.read<StatusRepository>(),
+      surEchec: () => showAppSnackBar(tr(context, 'status_publish_failed')),
+    );
+    Navigator.of(context).pop(true);
+  }
+
+  /// Sélectionne des médias, les téléverse, puis publie un statut par média.
+  ///
+  /// 🔴 PASSE PAR LE SÉLECTEUR DE LA DISCUSSION, ET C'EST TOUT L'INTÉRÊT.
+  ///
+  /// L'ancien chemin ouvrait `FilePicker` et envoyait les octets D'ORIGINE :
+  /// 3 à 8 Mo pour une photo de téléphone, affichée dans un écran qui n'en
+  /// montre qu'un dixième. `MediaGalleryPickerScreen` applique déjà la règle
+  /// de `core/compression_image.dart` — miroir du web, bord long 1600 px,
+  /// qualité 82, et retour aux octets d'origine à la moindre incertitude.
+  /// Écrire une seconde compression ici aurait fait deux règles à tenir
+  /// accordées.
+  ///
+  /// Il corrige au passage un défaut du chemin précédent : le type était
+  /// deviné sur l'extension, et seuls `.mov` et `.mp4` étaient reconnus — un
+  /// PNG, un WebP ou un GIF partaient étiquetés `image/jpeg`.
+  Future<void> _pickAndPublishMedia() async {
+    List<MediaPickResult>? choisis;
     try {
-      await repo.createText(text, _palette[_colorIndex]);
-      nav.pop(true);
-    } on ApiException catch (e) {
-      _snack(e.message);
+      choisis = await MediaGalleryPickerScreen.open(context);
     } catch (_) {
-      _snack("Publication impossible");
-    } finally {
-      if (mounted) setState(() => _publishing = false);
+      _snack(tr(context, 'status_media_unavailable'));
+      _refermeSiEntreeMedia();
+      return;
+    }
+    if (choisis == null || choisis.isEmpty || !mounted) {
+      _refermeSiEntreeMedia();
+      return;
+    }
+    await _editerPuisPublier(choisis);
+  }
+
+  /// Referme l'écran quand on y est entré PAR UN MÉDIA et qu'on renonce.
+  ///
+  /// 🔴 DÉFAUT SIGNALÉ SUR DEVICE (04/09/2026) : « je mets une photo en statut,
+  /// à la fin l'écran de mettre un texte s'ouvre ». Choisir « Galerie » ou
+  /// « Appareil photo » pousse cet écran — donc l'éditeur de TEXTE — puis
+  /// ouvre le sélecteur par-dessus. Renoncer au sélecteur ou à l'éditeur
+  /// laissait l'utilisateur devant un écran de texte qu'il n'avait pas demandé.
+  void _refermeSiEntreeMedia() {
+    if (widget.source == SourceStatut.texte) return;
+    if (mounted && Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
     }
   }
 
-  /// Sélectionne une image ou vidéo depuis la galerie, l'upload, puis publie
-  /// le statut média.
-  Future<void> _pickAndPublishMedia() async {
-    FilePickerResult? result;
-    try {
-      result = await FilePicker.platform.pickFiles(
-        type: FileType.media,
-        withData: true,
-      );
-    } catch (_) {
-      _snack("Sélection de média indisponible sur cette plateforme");
+  /// Fait passer CHAQUE média par l'éditeur, puis publie ce qui en ressort.
+  ///
+  /// Un média dont on quitte l'éditeur par le retour est simplement écarté :
+  /// c'est le geste d'annulation, il ne doit pas interrompre les autres.
+  Future<void> _editerPuisPublier(List<MediaPickResult> choisis) async {
+    // ⚠️ Une vidéo plus longue que la visionneuse ne sert à rien : elle serait
+    // coupée à `dureeVideoStatutMax` à la lecture, APRÈS avoir été téléversée
+    // en entier. On le dit avant l'envoi plutôt que de faire payer la donnée.
+    if (choisis.any(
+        (m) => (m.durationMs ?? 0) > dureeVideoStatutMax.inMilliseconds)) {
+      _snack(tr(context,
+          'status_video_limit', {'n': '${dureeVideoStatutMax.inSeconds}'}));
+      _refermeSiEntreeMedia();
       return;
     }
-    if (result == null || result.files.isEmpty) return;
 
-    final file = result.files.first;
-    final bytes = file.bytes;
-    if (bytes == null) return;
-
-    final mime = file.name.toLowerCase().endsWith('.mov') ||
-            file.name.toLowerCase().endsWith('.mp4')
-        ? 'video/mp4'
-        : 'image/jpeg';
-
-    final isVideo = mime.startsWith('video/');
-
-    setState(() => _publishing = true);
-    final media = context.read<MediaRepository>();
-    final repo = context.read<StatusRepository>();
-    final nav = Navigator.of(context);
-    try {
-      final uploaded = await media.upload(
-        Uint8List.fromList(bytes),
-        file.name,
-        mime,
-      );
-      await repo.createMedia(
-        uploaded.id,
-        isVideo ? 'VIDEO' : 'IMAGE',
-      );
-      nav.pop(true);
-    } on ApiException catch (e) {
-      _snack(e.message);
-    } catch (_) {
-      _snack("Publication du média impossible");
-    } finally {
-      if (mounted) setState(() => _publishing = false);
+    // L'édition se fait AVANT toute compression et tout envoi : rien ne part
+    // sur le réseau tant que l'utilisateur n'a pas validé chaque média.
+    final prets = <MediaEdite>[];
+    for (final m in choisis) {
+      if (!mounted) return;
+      final edite = await EditeurMediaStatutScreen.ouvrir(context, m);
+      if (edite != null) prets.add(edite);
     }
+    if (prets.isEmpty || !mounted) {
+      _refermeSiEntreeMedia();
+      return;
+    }
+
+    /*
+     * 🔴 L'ÉCRAN REND LA MAIN TOUT DE SUITE — l'envoi continue sans lui.
+     *
+     * Trois défauts signalés sur device tenaient à la même cause : la
+     * publication se faisait ICI. Il fallait regarder l'écran tourner jusqu'au
+     * bout ; l'indicateur s'affichait sur le bouton d'envoi du statut TEXTE,
+     * resté derrière ; et quitter l'application pendant un transcodage perdait
+     * l'envoi.
+     *
+     * `PublicationStatuts` passe par `CentreTransferts`, qui démarre le service
+     * Android de premier plan : c'est LUI qui empêche Android de tuer le
+     * processus quand on sort de l'application. La progression se lit dans la
+     * notification, comme pour un envoi de fichier.
+     */
+    PublicationStatuts.instance.publierMedias(
+      prets,
+      media: context.read<MediaRepository>(),
+      statuts: context.read<StatusRepository>(),
+    );
+    if (mounted) Navigator.of(context).pop(true);
+  }
+
+  /// Insère un emoji À L'ENDROIT DU CURSEUR, pas à la fin.
+  ///
+  /// ⚠️ Un emoji ne demande AUCUN changement serveur : c'est du texte, il part
+  /// dans la même colonne que le reste. C'est aussi pourquoi il fonctionne, là
+  /// où le style du texte demanderait une colonne que `statut` n'a pas.
+  Future<void> _insererEmoji() async {
+    final emoji = await choisirEmoji(context);
+    if (emoji == null || !mounted) return;
+    final texte = _textCtrl.text;
+    final selection = _textCtrl.selection;
+    // Une sélection peut être invalide tant que le champ n'a jamais eu le
+    // focus : on écrit alors à la fin.
+    final debut = selection.start < 0 ? texte.length : selection.start;
+    final fin = selection.end < 0 ? texte.length : selection.end;
+    final nouveau = texte.replaceRange(debut, fin, emoji);
+    _textCtrl.value = TextEditingValue(
+      text: nouveau,
+      selection: TextSelection.collapsed(offset: debut + emoji.length),
+    );
   }
 
   void _snack(String m) =>
@@ -135,15 +295,20 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
                 onPressed: () => Navigator.of(context).pop(),
               )
             : null,
-        title: const Text("Nouveau statut"),
+        title: Text(tr(context, 'status_new')),
         actions: [
           IconButton(
-            tooltip: "Publier une photo ou vidéo",
-            icon: const Icon(Icons.photo_camera_outlined),
-            onPressed: _publishing ? null : _pickAndPublishMedia,
+            tooltip: tr(context, 'status_emoji'),
+            icon: const Icon(Icons.emoji_emotions_outlined),
+            onPressed: _insererEmoji,
           ),
           IconButton(
-            tooltip: "Changer la couleur",
+            tooltip: tr(context, 'status_add_photo'),
+            icon: const Icon(Icons.photo_camera_outlined),
+            onPressed: _pickAndPublishMedia,
+          ),
+          IconButton(
+            tooltip: tr(context, 'status_change_color'),
             icon: const Icon(Icons.palette),
             onPressed: () =>
                 setState(() => _colorIndex = (_colorIndex + 1) % _palette.length),
@@ -169,12 +334,27 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
                     fontWeight: FontWeight.w600,
                   ),
                   decoration: InputDecoration(
+                    /*
+                     * 🔴 LES QUATRE ÉTATS, PAS SEULEMENT `border`.
+                     *
+                     * Le thème global pose un `OutlineInputBorder` sur
+                     * `enabledBorder` ET `focusedBorder` : `border` seul ne les
+                     * remplace pas, et le cadre terre cuite réapparaissait
+                     * autour du texte dès que le champ prenait le focus
+                     * (signalé sur device le 04/09/2026). Un statut se compose
+                     * en plein écran — aucun cadre n'a de sens ici.
+                     */
                     border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    disabledBorder: InputBorder.none,
+                    errorBorder: InputBorder.none,
+                    focusedErrorBorder: InputBorder.none,
                     // Contour-matériel (résout le fond blanc hérité du thème global).
                     filled: true,
                     fillColor: Colors.transparent,
                     counterStyle: const TextStyle(color: Colors.white70),
-                    hintText: "Tape ton statut…",
+                    hintText: tr(context, 'status_type_hint'),
                     hintStyle: const TextStyle(color: Colors.white60, fontSize: 24),
                   ),
                 ),
@@ -212,12 +392,12 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
                     ),
                   ),
                   const SizedBox(width: 12),
+                  // Plus aucun indicateur ici : la publication ne bloque plus
+                  // l ecran, elle se poursuit en arriere-plan.
                   FloatingActionButton(
                     backgroundColor: Colors.white,
-                    onPressed: _publishing ? null : _publish,
-                    child: _publishing
-                        ? const CircularProgressIndicator(color: AlanyaColors.terracotta)
-                        : Icon(Icons.send, color: bg),
+                    onPressed: _publish,
+                    child: Icon(Icons.send, color: bg),
                   ),
                 ],
               ),

@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:convert';
+import 'services/e2ee/e2ee_fournisseur.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -5,11 +8,13 @@ import 'package:media_store_plus/media_store_plus.dart';
 import 'package:provider/provider.dart';
 
 import 'core/api_client.dart';
+import 'core/centre_transferts.dart';
 import 'core/authed_api.dart';
 import 'core/connectivity_service.dart';
 import 'core/data_saver_service.dart';
 import 'core/debug_overlay.dart';
 import 'core/geo_service.dart';
+import 'core/traduction_auto.dart';
 import 'core/notification_settings.dart';
 import 'core/locale_controller.dart';
 import 'core/outbox.dart';
@@ -17,6 +22,8 @@ import 'core/presence_store.dart';
 import 'core/device_registry.dart';
 import 'core/push_service.dart';
 import 'core/realtime_client.dart';
+import 'core/service_transferts.dart';
+import 'core/sonneries_listes.dart';
 import 'core/theme_controller.dart';
 import 'core/token_storage.dart';
 import 'features/auth/auth_controller.dart';
@@ -28,12 +35,23 @@ import 'features/calls/call_banner.dart';
 import 'features/calls/call_controller.dart';
 import 'features/calls/call_listener.dart';
 import 'features/calls/calls_repository.dart';
+import 'features/calls/repondeur_repository.dart';
+import 'features/calls/enregistrements_repository.dart';
+import 'features/calls/plaintes_repository.dart';
 import 'features/chat/chat_repository.dart';
+import 'features/settings/export_medias_repository.dart';
+import 'features/chat/envoi_media_store.dart';
+import 'features/status/publication_statuts.dart';
+import 'core/pays_repository.dart';
+import 'features/collegues/collegues_repository.dart';
+import 'features/entreprises/entreprises_repository.dart';
+import 'features/contacts/contact_lists_repository.dart';
 import 'features/contacts/contacts_repository.dart';
 import 'features/home/home_screen.dart';
 import 'widgets/offline_banner.dart';
 import 'widgets/biometric_gate.dart';
 import 'features/media/media_repository.dart';
+import 'features/settings/ringtones_repository.dart';
 import 'features/blocked/blocked_repository.dart';
 import 'features/meetings/meeting_banner.dart';
 import 'features/meetings/meeting_controller.dart';
@@ -62,6 +80,26 @@ void main() async {
   final realtime = RealtimeClient(storage);
 
   await PushService.instance.tryInitialize(api: api, storage: storage);
+  // Les transferts s'annoncent dans les notifications. Le lien se fait ICI et
+  // non dans le magasin : lui ne doit connaître ni l'écran ni le système, c'est
+  // ce qui lui permet de servir aussi bien un envoi qu'un modèle de langue.
+  // Et ils SURVIVENT à la fermeture de l'application : un service de premier
+  // plan tient le processus — donc l'isolat Dart, donc la requête — en vie.
+  // Une barre de progression montre l'avancement, elle ne le produit pas.
+  ServiceTransferts.brancher();
+  CentreTransferts.instance.surChangement = (transfert, {required retire}) {
+    if (retire) {
+      PushService.instance.retireTransfert(transfert.id);
+      return;
+    }
+    PushService.instance.showTransfert(
+      id: transfert.id,
+      titre: transfert.titreNotification,
+      sousTitre: transfert.sousTitreNotification,
+      fraction: transfert.fraction,
+      echoue: transfert.echoue,
+    );
+  };
   // Registre des appareils : simple câblage, aucun appel réseau ici.
   // L'enregistrement a lieu à l'authentification (voir AuthController).
   DeviceRegistry.instance.init(api: api, storage: storage);
@@ -70,6 +108,43 @@ void main() async {
   GeoService.instance.init(authedApi);
   await DataSaverService.instance.load();
   await NotificationSettings.instance.load();
+  await TraductionAuto.instance.load();
+
+  /*
+   * 🔴 LA PILE DE CHIFFREMENT EST MONTÉE ICI, et son absence expliquait
+   * pourquoi AUCUN écran de chiffrement n'apparaissait : les widgets
+   * existaient, les services aussi, mais rien ne les reliait.
+   *
+   * ⚠️ LIÉE AU COMPTE, PAS À L'APPLICATION : le coffre préfixe ses clés par
+   * l'identifiant. Deux comptes sur le même téléphone ne doivent jamais
+   * partager une identité Signal, sinon les messages de l'un s'ouvriraient
+   * chez l'autre.
+   *
+   * ⚠️ NULLE SI PERSONNE N'EST CONNECTÉ. Les écrans le gèrent en masquant ce
+   * qui touche au chiffrement, plutôt qu'en plantant.
+   */
+  String? idCompte;
+  try {
+    final brut = await storage.userJson;
+    if (brut != null) {
+      final u = jsonDecode(brut) as Map<String, dynamic>;
+      idCompte = (u['alanyaID'] ?? u['id'] ?? u['userId'])?.toString();
+    }
+  } catch (_) {
+    idCompte = null;
+  }
+
+  /*
+   * 🐛 LA PUBLICATION DES CLÉS MANQUAIT — cause du « il n y a pas les clés »
+   * quand le correspondant est hors ligne. Sans publication il n a AUCUNE clé
+   * sur le serveur, et sa présence n y change rien.
+   *
+   * ⚠️ LANCÉE SANS ATTENDRE : l application ne doit pas rester noire pendant un
+   * aller-retour réseau. On ne peut de toute façon pas recevoir avant d avoir
+   * publié.
+   */
+  final pileE2ee = idCompte == null ? null : PileE2ee.pour(authedApi, idCompte);
+  unawaited(pileE2ee?.demarrer() ?? Future<void>.value());
 
   runApp(
     MultiProvider(
@@ -82,12 +157,53 @@ void main() async {
         Provider<AuthedApi>.value(value: authedApi),
         Provider<ContactsRepository>.value(
             value: ContactsRepository(authedApi)),
+        // Table de reference des pays, lue a l inscription.
+        // Route PUBLIQUE : elle doit repondre avant toute session.
+        Provider<PaysRepository>.value(value: PaysRepository(api)),
+        // Annuaire des collegues — reserve aux agents, le serveur le controle.
+        Provider<ColleguesRepository>.value(value: ColleguesRepository(authedApi)),
+        // Annuaire public des entreprises — la route ne refuse personne.
+        Provider<EntreprisesRepository>.value(value: EntreprisesRepository(authedApi)),
+        Provider<ContactListsRepository>.value(
+            value: ContactListsRepository(authedApi)),
+        // La sonnerie d'un appelant se lit dans SES listes de contacts, et la
+        // rangée de filtres des conversations affiche les MÊMES listes. Ce
+        // service en est la source unique : il les garde en mémoire — un appel
+        // ne doit jamais attendre le réseau pour sonner — et prévient ce qui les
+        // affiche dès qu'elles changent.
+        //
+        // ⚠️ `ChangeNotifierProvider` et non `Provider` : avec ce dernier, un
+        // `context.watch` ne serait jamais rebâti et la rangée resterait figée
+        // — exactement le défaut que ce lot corrige.
+        ChangeNotifierProvider<SonneriesDeListes>.value(
+            value: SonneriesDeListes(
+                ContactListsRepository(authedApi), api, storage)),
         Provider<ChatRepository>.value(value: ChatRepository(authedApi)),
+        Provider<ExportMediasRepository>.value(
+            value: ExportMediasRepository(authedApi)),
+        if (idCompte != null)
+          Provider<PileE2ee>.value(value: pileE2ee!),
         Provider<AccountRepository>.value(value: AccountRepository(authedApi)),
         Provider<StatusRepository>.value(value: StatusRepository(authedApi)),
         Provider<AiRepository>.value(value: AiRepository(authedApi)),
         Provider<MediaRepository>.value(value: MediaRepository(authedApi)),
+        // Le catalogue de sonneries s'appuie sur le téléversement de médias :
+        // l'import se fait en deux temps, fichier puis inscription.
+        Provider<RingtonesRepository>.value(
+            value: RingtonesRepository(authedApi, MediaRepository(authedApi))),
         Provider<CallsRepository>.value(value: CallsRepository(authedApi)),
+        // Plaintes vocales laissées sur la touche 0 d'un centre vocal.
+        Provider<PlaintesRepository>.value(
+            value: PlaintesRepository(authedApi)),
+        // Enregistrement des conversations d'agent : deux pistes téléversées,
+        // le serveur les mélange.
+        Provider<EnregistrementsRepository>.value(
+            value: EnregistrementsRepository(
+                authedApi, MediaRepository(authedApi))),
+        // Le repondeur, vu par l'APPELANT : lire l'accueil de celui qu'on
+        // vient d'appeler, et lui laisser un message.
+        Provider<RepondeurRepository>.value(
+            value: RepondeurRepository(authedApi)),
         Provider<MeetingsRepository>.value(
             value: MeetingsRepository(authedApi)),
         Provider<BlockedRepository>.value(value: BlockedRepository(authedApi)),
@@ -104,6 +220,37 @@ void main() async {
         ChangeNotifierProvider<ConnectivityService>(
           create: (ctx) => ConnectivityService(ctx.read<RealtimeClient>()),
         ),
+        /*
+         * REPREND LES ENVOIS DE MEDIAS INTERROMPUS PAR UNE FERMETURE.
+         *
+         * ⚠️ `lazy: false` EST LE POINT ENTIER DE CE BLOC. Un provider paresseux
+         * n'est construit qu'a sa premiere lecture — or personne ne lit ce
+         * magasin par le `context` : les ecrans passent par son singleton. Il ne
+         * serait donc JAMAIS construit, et les envois relus du disque
+         * n'existeraient pas.
+         */
+        Provider<EnvoiMediaStore>(
+          lazy: false,
+          create: (ctx) => EnvoiMediaStore.instance
+            ..brancher(
+              media: ctx.read<MediaRepository>(),
+              chat: ctx.read<ChatRepository>(),
+              rt: ctx.read<RealtimeClient>(),
+              conn: ctx.read<ConnectivityService>(),
+            ),
+        ),
+        // Même raison, même `lazy: false` : ce publieur est un singleton que
+        // personne ne lit par le `context`, et les statuts relus du disque ne
+        // repartiraient jamais sans ce branchement.
+        Provider<PublicationStatuts>(
+          lazy: false,
+          create: (ctx) => PublicationStatuts.instance
+            ..brancher(
+              media: ctx.read<MediaRepository>(),
+              statuts: ctx.read<StatusRepository>(),
+              conn: ctx.read<ConnectivityService>(),
+            ),
+        ),
         ChangeNotifierProvider<Outbox>(
           create: (ctx) => Outbox(
             ctx.read<ChatRepository>(),
@@ -114,6 +261,9 @@ void main() async {
           create: (ctx) => CallController(
             ctx.read<CallsRepository>(),
             ctx.read<RealtimeClient>(),
+            ctx.read<SonneriesDeListes>(),
+            ctx.read<EnregistrementsRepository>(),
+            ctx.read<RepondeurRepository>(),
           ),
         ),
         ChangeNotifierProvider<MeetingController>(

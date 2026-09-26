@@ -3,8 +3,13 @@ description: "Alanya — application de messagerie instantanée."
 publish_to: "none"
 version: 0.1.0+1
 
+# La borne basse n'est plus décorative : les paquets ML Kit de la traduction
+# sur l'appareil exigent Dart ^3.12.0 et Flutter >= 3.44.0. L'écrire ici fait
+# échouer `pub get` avec un message clair sur une CI restée en arrière, au lieu
+# d'un échec de résolution illisible.
 environment:
-  sdk: ">=3.3.0 <4.0.0"
+  sdk: ">=3.12.0 <4.0.0"
+  flutter: ">=3.44.0"
 
 dependencies:
   flutter:
@@ -72,6 +77,21 @@ dependencies:
   # et les deux gros boutons. L'écrire en Kotlin aurait demandé de reprendre la
   # construction de la notification et sa réception dans l'isolate d'arrière-plan.
   flutter_callkit_incoming: ^3.1.3
+  # Module natif local : ConnectionService Telecom « self-managed ».
+  #
+  # ⚠️ C'EST LUI QUI REND LA SONNERIE FIABLE, et flutter_callkit_incoming n'est
+  # plus qu'un repli. Tant qu'une `Connection` Telecom vit, Android LIE le
+  # processus de l'application et ne peut plus le geler — c'est la seule façon
+  # de tenir une sonnerie quand l'application est tuée.
+  #
+  # Le paquet, lui, démarre sa sonnerie à l'affichage de la notification
+  # (`CallkitNotificationManager.kt:1033`) au lieu d'attendre le rappel
+  # `onShowIncomingCallUi()` de Telecom, qu'il n'implémente pas. Sa sonnerie
+  # entre donc en course avec Telecom, qui réclame le focus audio de sonnerie
+  # et la coupe : mesuré à 2,21 s sur TECNO KL5. Ce module démarre le son dans
+  # ce rappel, et nulle part ailleurs.
+  alanya_telecom:
+    path: alanya_telecom
   # Base de données locale (cache des messages hors ligne)
   sqflite: ^2.4.1
   path: ^1.9.0
@@ -80,6 +100,59 @@ dependencies:
   # n'est sollicité que pour les comptes concernés, jamais pour un particulier.
   geolocator: ^14.0.2
   flutter_foreground_task: ^10.0.0
+  # Traduction SUR L'APPAREIL (ML Kit). Remplace les serveurs publics
+  # LibreTranslate / MyMemory, à qui le contenu des messages était envoyé en
+  # clair. Les modèles sont téléchargés une fois puis utilisés hors ligne :
+  # rien ne sort du téléphone, et rien n'est facturé.
+  #
+  # ⚠️ Les modèles NE SONT PAS dans l'APK — comptez quelques dizaines de Mo par
+  # langue, téléchargés à la demande, et il en faut DEUX pour un couple. Le
+  # téléchargement doit donc partir d'un geste de l'utilisateur (voir
+  # `lib/core/traduction_appareil.dart`).
+  #
+  # ⚠️ Ces deux paquets exigent `flutter >= 3.44.0` / Dart `^3.12.0` — d'où la
+  # contrainte `environment` relevée ci-dessus. Les trois CI sont épinglées à
+  # 3.44.6, elles passent ; ne pas y revenir en arrière.
+  google_mlkit_translation: ^0.15.1
+  google_mlkit_language_id: ^0.15.1
+  # Transcodage vidéo AVANT envoi (statuts). Les photos étaient déjà réduites
+  # par `core/compression_image.dart` ; les vidéos partaient en pleine
+  # définition — 20 Mo la minute en 1080p, pour un statut vu sur un écran de
+  # téléphone pendant 60 s au plus.
+  #
+  # ⚠️ CHOISI POUR CE QU'IL N'EMBARQUE PAS : 100 % natif (MediaCodec), donc pas
+  # de FFmpeg — ni les ~20 Mo d'APK, ni la question de licence qui va avec.
+  # ffmpeg_kit_flutter, l'autre voie, a été retiré par ses auteurs.
+  #
+  # ⚠️ Contraintes vérifiées contre les TROIS CI (toutes à Flutter 3.44.6) :
+  # le paquet demande `sdk >=3.0.0` / `flutter >=2.0.0`, et son module Android
+  # déclare bien un `namespace` — sans lui, AGP 8.11 refuse de bâtir. minSdk 21
+  # (l'app est à 24). Son Kotlin a été COMPILÉ ICI contre notre chaîne
+  # (Kotlin 2.2.20 / AGP 8.11.1 / Gradle 8.14.3) : `:video_compress:
+  # compileDebugKotlin` passe, avec trois avertissements de nullité.
+  #
+  # ⚠️ Défaut connu de la 3.1.4 : le drapeau interne « compression en cours »
+  # n'est pas remis à zéro quand le transcodage échoue. La règle de
+  # `core/compression_video.dart` en tient compte — les suivantes repartent
+  # simplement sans compression, jamais en erreur.
+  video_compress: ^3.1.4
+
+  # LE NOM DU FUSEAU, ET NON SON DÉCALAGE.
+  #
+  # 🔴 DART NE SAIT PAS LE DONNER. `DateTime.now().timeZoneName` rend une
+  # ABRÉVIATION — « CEST », « WAT » — que `Intl` côté serveur refuse : il lui
+  # faut un nom de zone IANA (« Africa/Douala »). Une abréviation passerait le
+  # contrôle en se faisant remplacer par UTC, et les plages programmées
+  # s'ouvriraient une heure à côté sans que rien ne le signale.
+  #
+  # ⚠️ ET SURTOUT PAS UN DÉCALAGE EN MINUTES : il fige l'heure d'été du jour où
+  # la plage a été posée. Une programmation faite en janvier se décalerait d'une
+  # heure en avril, deux fois par an, dans un sens que personne ne relie à sa
+  # cause.
+  #
+  # Le module Android de la 4.x déclare son `namespace` — sans lui, AGP 8.11
+  # refuse de bâtir, comme pour les autres greffons de ce fichier.
+  flutter_timezone: ^4.1.1
 
 
 dev_dependencies:

@@ -36,11 +36,39 @@ class ChatRepository {
         .toList();
   }
 
-  Future<Message> sendText(String convId, String content, {String? replyToId}) async {
+  /// [mentions] : les comptes visés par un `@`, chacun `{userId, libelle}`.
+  ///
+  /// ⚠️ CE CHEMIN EST LE REPLI du WebSocket, et il doit se comporter comme lui :
+  /// une mention retenue en temps réel et perdue ici ferait dépendre la
+  /// notification de l'état du réseau au moment de l'envoi.
+  /// [statutCite] : l'identifiant du statut auquel ce message répond.
+  ///
+  /// ⚠️ SEUL L'IDENTIFIANT PART. L'aperçu (texte, image, couleur) est recopié
+  /// par le serveur après contrôle de visibilité — sans quoi n'importe quel
+  /// client pourrait fabriquer une citation d'un statut qu'il n'a jamais vu.
+  /// [tempId] : l'identifiant que la file d'envois donne à ce message.
+  ///
+  /// 🔴 SANS LUI, UN REJEU CRÉE UN DOUBLON. `OutboxStore` ne retire son entrée
+  /// qu'une fois la réponse reçue : si la coupure tombe APRÈS que le serveur a
+  /// écrit le message mais AVANT que la réponse n'arrive, l'envoi est compté
+  /// comme échoué et rejoué — le message part alors deux fois. Transmis, cet
+  /// identifiant permet au serveur de reconnaître le rejeu et de renvoyer le
+  /// message d'origine au lieu d'en écrire un second.
+  ///
+  /// ⚠️ Un serveur plus ancien l'ignore simplement : le champ est facultatif
+  /// des deux côtés, et son absence ramène au comportement d'avant.
+  Future<Message> sendText(String convId, String content,
+      {String? replyToId,
+      List<Map<String, String>>? mentions,
+      String? statutCite,
+      String? tempId}) async {
     final data = await _api.post("/api/conversations/$convId/messages", {
       "content": content,
       "type": "TEXT",
       if (replyToId != null) "replyToId": replyToId,
+      if (statutCite != null) "statutCite": statutCite,
+      if (mentions != null && mentions.isNotEmpty) "mentions": mentions,
+      if (tempId != null) "tempId": tempId,
     });
     return Message.fromJson(data);
   }
@@ -67,6 +95,23 @@ class ChatRepository {
   /// F8 : Épingler/désépingler une conversation.
   Future<void> pinConversation(String convId, bool pinned) async {
     await _api.patch("/api/conversations/$convId/pin", {"pinned": pinned});
+  }
+
+  /// Coupe ou rétablit les notifications de cette conversation, POUR MOI.
+  ///
+  /// ⚠️ ÊTRE EN SOURDINE, C'EST NE PAS ÊTRE DÉRANGÉ — pas cesser de recevoir.
+  /// Le serveur écarte le destinataire de la poussée ; les messages arrivent,
+  /// le compteur de non lus monte, le temps réel continue.
+  ///
+  /// Rend l'état RETENU PAR LE SERVEUR, et non celui qu'on espérait : c'est lui
+  /// que l'écran doit afficher. Même règle que le web, dont la fiche de
+  /// conversation basculait un état local sans rien envoyer nulle part.
+  Future<bool> definirSourdine(String convId, bool sourdine) async {
+    final data = await _api.post(
+      "/api/conversations/$convId/sourdine",
+      {"sourdine": sourdine},
+    );
+    return (data["sourdine"] as bool?) ?? sourdine;
   }
 
   /// F9 : Archiver/désarchiver une conversation.
@@ -212,11 +257,16 @@ class ChatRepository {
     return Message.fromJson(data);
   }
 
-  Future<Message> sendMultiMedia(String convId, List<String> mediaIds, String msgType, {String? replyToId, String? content}) async {
+  /// [mentions] : les `@` de la légende — même règle que pour un texte.
+  Future<Message> sendMultiMedia(String convId, List<String> mediaIds, String msgType,
+      {String? replyToId,
+      String? content,
+      List<Map<String, String>>? mentions}) async {
     final data = await _api.post("/api/conversations/$convId/messages", {
       "type": msgType, "mediaIds": mediaIds,
       if (content != null && content.isNotEmpty) "content": content,
       if (replyToId != null) "replyToId": replyToId,
+      if (mentions != null && mentions.isNotEmpty) "mentions": mentions,
     });
     return Message.fromJson(data as Map<String, dynamic>);
   }

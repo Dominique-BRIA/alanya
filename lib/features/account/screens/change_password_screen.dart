@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../services/e2ee/e2ee_fournisseur.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/api_client.dart';
@@ -6,6 +7,7 @@ import '../../../core/app_snackbar.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../account_repository.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Écran de changement de mot de passe (utilisateur connecté).
 class ChangePasswordScreen extends StatefulWidget {
@@ -42,7 +44,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
       return;
     }
     if (next.length < 8) {
-      setState(() => _error = "Le nouveau mot de passe doit faire au moins 8 caractères.");
+      setState(() => _error = tr(context, 'password_too_short'));
       return;
     }
     if (next != confirm) {
@@ -56,13 +58,29 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
     });
     try {
       await context.read<AccountRepository>().changePassword(current, next);
+
+      /*
+       * 🐛 LA SAUVEGARDE DOIT SUIVRE, SINON ELLE CASSE EN SILENCE. Sa serrure
+       * garde l'ANCIEN mot de passe tant qu'on ne la ré-enveloppe pas :
+       * l'ouverture automatique échouerait à la connexion suivante, et
+       * l'utilisateur le découvrirait au pire moment — en changeant d'appareil.
+       *
+       * ⚠️ APRÈS le changement, jamais avant : si l'API refuse, il n'y a rien à
+       * ré-envelopper, et on aurait posé une serrure pour un mot de passe que le
+       * compte n'a pas.
+       *
+       * ⚠️ RIEN N'EST RECHIFFRÉ : on ré-enveloppe 32 octets.
+       */
+      if (context.mounted) {
+        await context.e2ee?.sauvegarde.suivreChangementMotDePasse(next);
+      }
       if (!mounted) return;
-      showAppSnackBar("Mot de passe modifié");
+      showAppSnackBar(tr(context, 'password_changed'));
       Navigator.of(context).pop();
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
-      if (mounted) setState(() => _error = "Une erreur est survenue. Réessaie.");
+      if (mounted) setState(() => _error = tr(context, 'error_occurred_retry'));
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -77,27 +95,27 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
         children: [
           _field(
             controller: _current,
-            label: "Mot de passe actuel",
+            label: tr(context, 'current_password'),
             obscure: _obscureCurrent,
             onToggle: () => setState(() => _obscureCurrent = !_obscureCurrent),
           ),
           const SizedBox(height: 16),
           _field(
             controller: _new,
-            label: "Nouveau mot de passe",
+            label: tr(context, 'recovery_id_new_password'),
             obscure: _obscureNew,
             onToggle: () => setState(() => _obscureNew = !_obscureNew),
           ),
           const SizedBox(height: 16),
           _field(
             controller: _confirm,
-            label: "Confirmer le nouveau mot de passe",
+            label: tr(context, 'confirm_new_password'),
             obscure: _obscureNew,
             onToggle: () => setState(() => _obscureNew = !_obscureNew),
           ),
           const SizedBox(height: 8),
           Text(
-            "Au moins 8 caractères.",
+            tr(context, 'password_min_8'),
             style: TextStyle(
                 fontSize: 12,
                 color: themed(context,
@@ -123,7 +141,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                         strokeWidth: 2,
                         valueColor: AlwaysStoppedAnimation<Color>(Colors.white)),
                   )
-                : const Text("Enregistrer"),
+                : Text(tr(context, 'save')),
           ),
         ],
       ),

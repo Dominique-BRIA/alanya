@@ -117,11 +117,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
         statusMsg: res.statusMsg,
         avatarUrl: res.avatarUrl,
       );
-      _snack("Photo de profil mise à jour");
+      _snack(tr(context, 'profile_photo_updated'));
     } on ApiException catch (e) {
       _snack("Erreur ${e.statusCode} : ${e.message}");
     } catch (e) {
-      _snack("Échec de l'envoi de la photo : $e");
+      _snack(tr(context, 'avatar_upload_failed', {'erreur': '$e'}));
     } finally {
       if (mounted) setState(() => _uploadingAvatar = false);
     }

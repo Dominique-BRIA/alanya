@@ -19,13 +19,30 @@
 ///                               "accuracy":12.5,"label":"Douala"}}
 ///
 /// La PHOTO d'un contact du répertoire n'est jamais dans la charge : elle est
-/// envoyée comme média du message (`media.first`), `content` étant plafonné à
-/// 8000 caractères par la validation serveur.
+/// envoyée comme média du message (`media.first`).
 library;
 
 import 'dart:convert';
 
 const int versionCharge = 1;
+
+/// Longueur maximale d'un message, en caractères.
+///
+/// 🔴 CE N'EST PAS UN CHOIX D'INTERFACE, c'est la taille de la colonne :
+/// `message.content` est un `VARCHAR(500)` depuis le 25/08/2026. Le serveur
+/// COUPE ce qui dépasse (`tronqueContenu` dans `message-payload.mjs`), donc
+/// sans cette borne à la saisie l'utilisateur écrit un texte, l'envoie, et en
+/// voit arriver une version raccourcie sans que rien ne l'ait prévenu.
+///
+/// ⚠️ Elle compte les MARQUEURS de mise en forme. `*gras*` occupe 6 caractères
+/// en base, pas 4 : c'est le texte brut qui est stocké, et c'est donc lui qu'il
+/// faut mesurer, sinon la borne de l'écran serait plus permissive que la
+/// colonne.
+///
+/// ⚠️ MIROIR de `LONGUEUR_MAX_CONTENU` côté serveur et de la constante du même
+/// nom dans `STAGE-WEB/src/services/message-payload.ts`. La changer ici seul ne
+/// changerait rien : c'est la base qui tranche.
+const int longueurMaxContenu = 500;
 
 /// Un contact partagé dans une discussion.
 class SharedContact {
@@ -214,4 +231,69 @@ String? apercuStructure(String type, String? content) {
     return label != null ? "📍 $label" : "📍 Position partagée";
   }
   return null;
+}
+
+/// L'aperçu D'UNE LIGNE d'un message, quel que soit son type.
+///
+/// 🔴 **UN SEUL ENDROIT DÉCIDE À QUOI RESSEMBLE CET APERÇU.** Il en existait
+/// QUATRE, tous différents : la citation d'une réponse, le bandeau du message
+/// épinglé, la barre au-dessus du champ de saisie, et le dernier message de la
+/// liste des conversations. Les deux derniers lisaient `content` EN PREMIER,
+/// donc affichaient la charge JSON brute d'un CONTACT ou d'une LOCATION —
+/// signalé par le user le 18/08/2026. Les deux autres appelaient bien
+/// [apercuStructure], mais ne s'accordaient pas sur les fichiers.
+///
+/// Divergence typique : `IMAGE` donnait « Photo » ici et la légende là ; un
+/// fichier sans légende donnait « 📎 nom.pdf » d'un côté et une chaîne VIDE de
+/// l'autre, `content` valant `""` plutôt que `null` pour un média sans texte.
+///
+/// ⚠️ Volontairement SANS `BuildContext` ni traduction, comme [apercuStructure]
+/// dont il est le prolongement : ce fichier ne dépend de rien, ce qui le rend
+/// exécutable et donc vérifiable (`flutter test`). Le prix est que les libellés
+/// restent en français, ce qui est déjà le cas côté serveur pour
+/// `conversation.lastMessage`.
+///
+/// [nettoyerTexte] retire les marqueurs de mise en forme (`*gras*`). Passé par
+/// l'appelant plutôt qu'importé ici, toujours pour garder le fichier isolé.
+String apercuMessage(
+  String type,
+  String? content, {
+  String? nomFichier,
+  String Function(String texte)? nettoyerTexte,
+}) {
+  final structure = apercuStructure(type, content);
+  if (structure != null) return structure;
+
+  // ⚠️ `""` ET `null` traitent le même cas — « ce message n'a pas de texte ».
+  // Un média sans légende arrive tantôt de l'un, tantôt de l'autre selon le
+  // chemin d'écriture, et ne les confondre qu'à moitié faisait afficher une
+  // ligne vide dans la barre de réponse.
+  final brut = (content ?? "").trim();
+  final texte =
+      brut.isEmpty ? "" : (nettoyerTexte == null ? brut : nettoyerTexte(brut));
+
+  switch (type) {
+    case "IMAGE":
+      return texte.isEmpty ? "📷 Photo" : "📷 $texte";
+    case "VIDEO":
+      return texte.isEmpty ? "🎥 Vidéo" : "🎥 $texte";
+    case "AUDIO":
+      // Pas de légende attendue sur un vocal : le libellé prime, et une
+      // éventuelle transcription n'a pas sa place sur une ligne.
+      return "🎤 Message vocal";
+    case "FILE":
+      // Pour un document, c'est le NOM DU FICHIER qui identifie, pas la
+      // légende — c'est aussi ce que montre WhatsApp. La légende ne sert de
+      // repli que si le nom manque.
+      final nom = (nomFichier ?? "").trim();
+      if (nom.isNotEmpty) return "📎 $nom";
+      return texte.isEmpty ? "📎 Fichier" : "📎 $texte";
+    case "TEXT":
+      return texte;
+    default:
+      // Un type que ce client ne connaît pas encore — le serveur en a ajouté
+      // deux en août 2026. Montrer le texte s'il y en a vaut mieux que le nom
+      // technique du type, qui ne dit rien à personne.
+      return texte.isEmpty ? "[$type]" : texte;
+  }
 }

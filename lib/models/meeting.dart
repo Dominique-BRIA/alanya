@@ -1,3 +1,5 @@
+import '../core/alanya_id_formatter.dart';
+
 /// Participant d'une réunion — correspond à la table « participant » du PDF.
 class MeetingParticipant {
   final int id; // ID (PK)
@@ -24,7 +26,11 @@ class MeetingParticipant {
     this.duree,
   });
 
-  String get displayName => pseudo ?? publicNumber ?? "Inconnu";
+  /// Repli FORMATE — voir la note detaillee sur `Contact.displayName`.
+  String get displayName =>
+      pseudo ??
+      (publicNumber == null ? null : formatAlanyaId(publicNumber!)) ??
+      "Inconnu";
   bool get isConnected => connecte == 1;
 
   factory MeetingParticipant.fromJson(Map<String, dynamic> j) =>
@@ -105,7 +111,11 @@ class MeetingOrganizer {
     this.avatarUrl,
   });
 
-  String get displayName => pseudo ?? publicNumber ?? "Inconnu";
+  /// Repli FORMATE — voir la note detaillee sur `Contact.displayName`.
+  String get displayName =>
+      pseudo ??
+      (publicNumber == null ? null : formatAlanyaId(publicNumber!)) ??
+      "Inconnu";
 
   factory MeetingOrganizer.fromJson(Map<String, dynamic> j) => MeetingOrganizer(
         id: j["id"] as String,
