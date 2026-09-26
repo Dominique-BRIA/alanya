@@ -197,19 +197,12 @@ class E2eeService {
       if (deviceId <= 0) continue;
       final adresse = SignalProtocolAddress(pairId, deviceId);
 
-      // Si une session active et utilisable existe déjà avec cet appareil,
+      // Si une session active existe déjà avec cet appareil,
       // on n'a pas besoin de renégocier avec le serveur : le double ratchet
       // est en place et les messages ordinaires (type 1) peuvent partir.
       if (await coffre.containsSession(adresse)) {
-        try {
-          final session = await coffre.loadSession(adresse);
-          if (session.hasUsableSession()) {
-            ouverts.add(deviceId);
-            continue;
-          }
-        } catch (_) {
-          // Session locale corrompue : on reconstruira depuis le bundle.
-        }
+        ouverts.add(deviceId);
+        continue;
       }
 
       try {

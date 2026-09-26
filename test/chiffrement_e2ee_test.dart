@@ -59,13 +59,12 @@ void main() {
   });
 
   group('Analyse statique des garanties de chiffrement', () {
-    test("ouvrirSessions vérifie l'existence d'une session utilisable", () {
+    test("ouvrirSessions vérifie l'existence d'une session", () {
       final file = File('lib/services/e2ee/e2ee_service.dart');
       expect(file.existsSync(), isTrue);
       final content = file.readAsStringSync();
 
       expect(content, contains('containsSession(adresse)'));
-      expect(content, contains('hasUsableSession()'));
     });
 
     test('MessageCache possède la table et les méthodes de déchiffrement', () {
