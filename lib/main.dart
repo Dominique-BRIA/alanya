@@ -166,13 +166,10 @@ void main() async {
             value: SonneriesDeListes(
                 ContactListsRepository(authedApi), api, storage)),
         Provider<ChatRepository>.value(value: ChatRepository(authedApi)),
-<<<<<<< HEAD
         Provider<ExportMediasRepository>.value(
             value: ExportMediasRepository(authedApi)),
-=======
         if (idCompte != null)
           Provider<PileE2ee>.value(value: PileE2ee.pour(authedApi, idCompte)),
->>>>>>> 4242c04 (Les écrans de chiffrement deviennent visibles sur le mobile)
         Provider<AccountRepository>.value(value: AccountRepository(authedApi)),
         Provider<StatusRepository>.value(value: StatusRepository(authedApi)),
         Provider<AiRepository>.value(value: AiRepository(authedApi)),

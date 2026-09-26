@@ -1,11 +1,8 @@
 import 'package:flutter/material.dart';
-<<<<<<< HEAD
 import '../../../l10n/app_localizations.dart';
-=======
 import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
 import '../../../services/e2ee/e2ee_fournisseur.dart';
 import '../../../widgets/e2ee/e2ee_widgets.dart';
->>>>>>> 4242c04 (Les écrans de chiffrement deviennent visibles sur le mobile)
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';

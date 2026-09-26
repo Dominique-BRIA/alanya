@@ -3675,13 +3675,6 @@ class _ChatScreenState extends State<ChatScreen>
         ]),
       ),
       actions: [
-<<<<<<< HEAD
-        // Avec une personne, la place de la loupe revient à la traduction :
-        // la recherche descend dans le menu ⋮ plus bas, elle n'est pas perdue.
-        // Un groupe garde sa loupe — il n'a pas les deux boutons d'appel, la
-        // barre y a de la place.
-        if (widget.isGroup)
-=======
         /*
          * 🔴 LE BOUCLIER DU CHIFFREMENT. Un BOUCLIER et non un cadenas : le
          * cadenas sert déjà au verrou de conversation, et il le décrit mieux —
@@ -3699,12 +3692,11 @@ class _ChatScreenState extends State<ChatScreen>
             activable: true,
             onAppui: _ouvrirChiffrement,
           ),
-        IconButton(
-            tooltip: "Rechercher",
-            icon: const Icon(Icons.search),
-            onPressed: _openSearch),
-        if (!widget.isGroup) ...[
->>>>>>> 4242c04 (Les écrans de chiffrement deviennent visibles sur le mobile)
+        // Avec une personne, la place de la loupe revient à la traduction :
+        // la recherche descend dans le menu ⋮ plus bas, elle n'est pas perdue.
+        // Un groupe garde sa loupe — il n'a pas les deux boutons d'appel, la
+        // barre y a de la place.
+        if (widget.isGroup)
           IconButton(
               tooltip: tr(context, 'search'),
               icon: const Icon(Icons.search),

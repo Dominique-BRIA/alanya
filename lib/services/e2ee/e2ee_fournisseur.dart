@@ -29,6 +29,38 @@ class PileE2ee {
   final E2eeService service;
   final E2eeFil fil;
 
+
+  /// Prépare cet appareil et publie ses clés publiques.
+  ///
+  /// 🐛 CE DÉMARRAGE MANQUAIT, ET C'ÉTAIT LA CAUSE DU DÉFAUT SIGNALÉ : « quand
+  /// une personne n'est pas en ligne, aucun message ne part, on dit qu'il n'y a
+  /// pas les clés ».
+  ///
+  /// Rien n'appelait `publierMesCles()`. Le mobile n'avait donc JAMAIS publié
+  /// d'identité ni de pré-clés, et personne ne pouvait lui écrire — en ligne ou
+  /// non. La présence n'y était pour rien : les clés n'existaient pas.
+  ///
+  /// ⚠️ X3DH EXISTE PRÉCISÉMENT POUR ÉCRIRE À QUELQU'UN D'ABSENT. Si les clés
+  /// manquent quand le correspondant est hors ligne, ce n'est jamais le
+  /// protocole qui est en cause : ou elles n'ont pas été publiées, ou on les
+  /// retire à tort.
+  ///
+  /// ⚠️ APPELÉ À CHAQUE DÉMARRAGE, et c'est voulu : l'identité n'est créée
+  /// qu'une fois — `preparer` sort si elle existe — mais les PRÉ-CLÉS
+  /// s'épuisent, chacune ne servant qu'une fois. Les republier réapprovisionne.
+  ///
+  /// ⚠️ NE LÈVE JAMAIS. Un réseau coupé au lancement ne doit pas empêcher
+  /// l'application de s'ouvrir ; on réessaiera au démarrage suivant.
+  Future<void> demarrer() async {
+    try {
+      await coffre.preparer();
+      await service.publierMesCles(deviceId: await coffre.deviceId());
+    } catch (_) {
+      // Silencieux ici, mais pas invisible : sans clés publiées, l'écran de
+      // conversation dira « aucun appareil chiffré chez ce correspondant ».
+    }
+  }
+
   static PileE2ee pour(AuthedApi api, String compteId) {
     /*
      * ⚠️ L'ADAPTATEUR EXISTE PARCE QUE LES SERVICES NE CONNAISSENT PAS

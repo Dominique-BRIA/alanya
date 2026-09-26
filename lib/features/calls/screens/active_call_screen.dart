@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:provider/provider.dart';
 
+import '../../../l10n/app_localizations.dart';
 import '../../../core/app_snackbar.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../core/authed_api.dart';
