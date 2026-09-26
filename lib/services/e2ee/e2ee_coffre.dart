@@ -15,6 +15,7 @@
 library;
 
 import 'dart:convert';
+import 'dart:typed_data';
 import 'dart:math';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -262,6 +263,31 @@ class CoffreE2ee implements SignalProtocolStore {
   Future<bool> dejaPublie() async => (await _lire('publie')) == '1';
 
   Future<void> noterPublie() => _ecrire('publie', '1');
+
+
+  /* ══════════════ LA CLÉ MAÎTRESSE DE L'ARCHIVE ══════════════ */
+
+  /// Range la clé maîtresse de l'archive dans le coffre matériel.
+  ///
+  /// 🔴 C'EST CE QUI FERME LA BOUCLE. Une archive créée avec la seule clé de
+  /// récupération ne pourrait plus s'ouvrir à la connexion suivante : il n'y a
+  /// pas de serrure « mot de passe », et le mot de passe ne peut pas en poser
+  /// une sans d'abord OUVRIR l'archive. En gardant la clé maîtresse ici, la
+  /// connexion suivante l'ouvre directement et pose la serrure manquante.
+  ///
+  /// ⚠️ CE QUE CELA COÛTE, ET IL FAUT L'ASSUMER : le coffre contient déjà les
+  /// clés Signal et le cache. Mais l'archive porte l'historique d'AVANT cet
+  /// appareil — y ranger sa clé élargit ce qu'une compromission rapporte.
+  ///
+  /// ⚠️ CE QUI LE REND ACCEPTABLE : le coffre est adossé au MATÉRIEL, et
+  /// `oublier()` le vide à la déconnexion — la clé part avec.
+  Future<void> rangerMaitresse(Uint8List cle) =>
+      _ecrire('archive.maitresse', base64.encode(cle));
+
+  Future<Uint8List?> lireMaitresse() async {
+    final b = await _lire('archive.maitresse');
+    return b == null ? null : Uint8List.fromList(base64.decode(b));
+  }
 
   /* ══════════════ OUBLI ══════════════ */
 

@@ -65,8 +65,10 @@ class _LoginScreenState extends State<LoginScreen> {
        * d historique.
        */
       unawaited(
-        context.e2ee?.sauvegarde.aLaConnexion(_passwordCtrl.text) ??
-            Future<int>.value(0),
+        context.e2ee?.sauvegarde
+                .aLaConnexion(_passwordCtrl.text, context.e2ee!.coffre) ??
+            Future<({int illisibles, int restaures})>.value(
+                (restaures: 0, illisibles: 0)),
       );
       if (!mounted) return;
       Navigator.of(context).popUntil((r) => r.isFirst);

@@ -541,7 +541,7 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
     if (pile == null || convId == null) return;
 
     try {
-      final cle = await pile.sauvegarde.activerAvecCleRecuperation();
+      final cle = await pile.sauvegarde.activerAvecCleRecuperation(pile.coffre);
       await pile.fil.activer(convId);
       if (!mounted) return;
       setState(() => _chiffree = true);

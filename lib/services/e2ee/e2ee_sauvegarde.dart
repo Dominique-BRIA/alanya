@@ -17,6 +17,7 @@ library;
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'e2ee_coffre.dart';
 import 'e2ee_serrures.dart';
 
 typedef AppelApi = Future<Map<String, dynamic>> Function(
@@ -64,37 +65,75 @@ class E2eeSauvegarde {
 
   /* ══════════════ ACTIVER / OUVRIR ══════════════ */
 
-  /// À la connexion : ouvre l'archive si elle existe, la crée sinon.
+  /// À la connexion : ouvre l'archive, complète ses serrures, et restaure.
   ///
-  /// 🔴 LE MOT DE PASSE EST DÉJÀ LÀ — l'utilisateur vient de le taper. C'est le
-  /// seul moment du cycle de vie où ce secret existe sans qu'on ait à le
-  /// redemander, et c'est ce qui rend la serrure « mot de passe » utile malgré
-  /// sa limite.
+  /// 🔴 TROIS CHOSES, ET L'ORDRE COMPTE.
   ///
-  /// ⚠️ IL N'EST GARDÉ NULLE PART. Il traverse cette fonction et en sort.
+  ///   ① OUVRIR — par la clé maîtresse gardée sur l'appareil si elle y est,
+  ///      sinon par la serrure « mot de passe ». La première voie est celle qui
+  ///      permet d'ouvrir une archive créée avec la SEULE clé de récupération :
+  ///      sans elle, cette archive resterait fermée pour toujours sur cet
+  ///      appareil, et les nouveaux messages cesseraient d'être sauvegardés.
+  ///
+  ///   ② COMPLÉTER — si l'archive s'ouvre mais n'a pas de serrure « mot de
+  ///      passe », on en pose une MAINTENANT. C'est le seul moment du cycle de
+  ///      vie où ce secret existe, et poser une serrure ne demande que la clé
+  ///      maîtresse, qu'on vient d'obtenir.
+  ///
+  ///   ③ RESTAURER — l'historique revient tout seul. Sans cette étape, un
+  ///      téléphone neuf reste vide alors que l'archive est là : elle serait
+  ///      alimentée sans jamais être relue.
   ///
   /// ⚠️ NE LÈVE JAMAIS ET NE BLOQUE PAS LA CONNEXION : empêcher quelqu'un
   /// d'entrer parce qu'une sauvegarde a échoué serait bien pire que l'absence
   /// d'historique.
-  Future<int> aLaConnexion(String motDePasse) async {
+  ///
+  /// ⚠️ LE MOT DE PASSE N'EST GARDÉ NULLE PART. Il traverse cette fonction et
+  /// en sort.
+  Future<({int restaures, int illisibles})> aLaConnexion(
+    String motDePasse,
+    CoffreE2ee coffre,
+  ) async {
     try {
-      final coffre = await lireCoffre();
+      final etat = await lireCoffre();
 
-      if (coffre.serrures.isEmpty) {
-        if (coffre.refusee) return 0;
+      /* ── ① OUVRIR ────────────────────────────────────────────────── */
+      if (etat.serrures.isEmpty) {
+        if (etat.refusee) return (restaures: 0, illisibles: 0);
         final a = creerArchive({TypeSerrure.motdepasse: motDePasse});
         for (final s in a.serrures) {
           await _poser(s);
         }
         _maitresse = a.maitresse;
-        return 0;
+        await coffre.rangerMaitresse(a.maitresse);
+        return (restaures: 0, illisibles: 0);
       }
 
-      final mdp = coffre.serrures.where((s) => s.type == 'motdepasse');
-      if (mdp.isEmpty) return 0;
+      _maitresse = await coffre.lireMaitresse();
 
-      _maitresse = ouvrirArchive(motDePasse, mdp.first);
-      return 1;
+      if (_maitresse == null) {
+        final mdp = etat.serrures.where((s) => s.type == 'motdepasse');
+        if (mdp.isEmpty) {
+          /*
+           * ⚠️ ARCHIVE FERMÉE, ET ON NE PEUT RIEN FAIRE DE PLUS ICI. Elle n'a
+           * qu'une clé de récupération, et cet appareil ne l'a jamais eue.
+           * L'écran des réglages doit la demander — c'est la seule sortie, et
+           * elle appartient à l'utilisateur.
+           */
+          return (restaures: 0, illisibles: 0);
+        }
+        _maitresse = ouvrirArchive(motDePasse, mdp.first);
+        await coffre.rangerMaitresse(_maitresse!);
+      }
+
+      /* ── ② COMPLÉTER LES SERRURES ────────────────────────────────── */
+      if (!etat.serrures.any((s) => s.type == 'motdepasse')) {
+        await _poser(poserSerrure(_maitresse!, TypeSerrure.motdepasse, motDePasse));
+      }
+
+      /* ── ③ RESTAURER ─────────────────────────────────────────────── */
+      final r = await restaurer();
+      return (restaures: r.messages.length, illisibles: r.illisibles);
     } catch (_) {
       /*
        * ⚠️ UN ÉCHEC ICI VEUT DIRE « MAUVAIS MOT DE PASSE », et rien d'autre :
@@ -102,22 +141,75 @@ class E2eeSauvegarde {
        * changé sans que la serrure suive.
        */
       _maitresse = null;
-      return 0;
+      return (restaures: 0, illisibles: 0);
     }
+  }
+
+  /// Ouvre l'archive avec la clé de récupération, et pose la serrure manquante.
+  ///
+  /// 🔴 LA SEULE SORTIE quand une archive n'a QUE sa clé de récupération et que
+  /// l'appareil ne l'a jamais eue. C'est à l'utilisateur de la fournir : nous ne
+  /// l'avons jamais eue non plus, et c'est tout l'intérêt.
+  Future<bool> ouvrirParRecuperation(
+    String saisie,
+    CoffreE2ee coffre, {
+    String? motDePasse,
+  }) async {
+    try {
+      final etat = await lireCoffre();
+      final rec = etat.serrures.where((s) => s.type == 'recuperation');
+      if (rec.isEmpty) return false;
+
+      final cle = ouvrirArchive(normaliserCleRecuperation(saisie), rec.first);
+      _maitresse = cle;
+      await coffre.rangerMaitresse(cle);
+
+      /*
+       * ⚠️ ON EN PROFITE POUR POSER LA SERRURE DU MOT DE PASSE si on l'a : sans
+       * elle, la prochaine connexion sur un AUTRE appareil redemanderait les
+       * douze mots.
+       */
+      if (motDePasse != null &&
+          motDePasse.isNotEmpty &&
+          !etat.serrures.any((s) => s.type == 'motdepasse')) {
+        await _poser(poserSerrure(cle, TypeSerrure.motdepasse, motDePasse));
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Ajoute une clé de récupération à une archive déjà ouverte.
+  ///
+  /// ⚠️ RIEN N'EST RECHIFFRÉ : on ré-enveloppe 32 octets. Une archive de cent
+  /// mégaoctets gagne une serrure en quelques millisecondes.
+  Future<String?> ajouterCleRecuperation() async {
+    final cle = _maitresse;
+    if (cle == null) return null;
+    final mots = tirerCleRecuperation();
+    await _poser(poserSerrure(cle, TypeSerrure.recuperation, mots));
+    return mots;
   }
 
 
   /// Crée l'archive protégée par une CLÉ DE RÉCUPÉRATION, et la rend.
   ///
-  /// 🔴 C'EST LE SEUL SECRET DE CETTE ARCHIVE tant qu'aucun autre n'est ajouté.
-  /// Le mot de passe n'existe qu'à la connexion ; on ne peut donc pas poser sa
-  /// serrure ici, et l'appelant DOIT montrer ces douze mots à l'utilisateur.
+  /// 🔴 C'EST LE SEUL SECRET DE CETTE ARCHIVE au moment où elle naît. Le mot de
+  /// passe n'existe qu'à la connexion ; on ne peut donc pas poser sa serrure
+  /// ici, et l'appelant DOIT montrer ces douze mots à l'utilisateur.
+  ///
+  /// 🔴 LA CLÉ MAÎTRESSE EST RANGÉE SUR L'APPAREIL. Sans cela, cette archive
+  /// resterait fermée dès la prochaine connexion — il n'y aurait aucune serrure
+  /// que le mot de passe puisse ouvrir — et les nouveaux messages cesseraient
+  /// d'être sauvegardés sans que rien ne le signale. La connexion suivante s'en
+  /// sert pour poser la serrure manquante, sans rien demander.
   ///
   /// ⚠️ SI UNE ARCHIVE EXISTE DÉJÀ, ON N'EN CRÉE PAS UNE SECONDE : on poserait
-  /// sinon une archive orpheline, et l'ancienne deviendrait illisible.
-  Future<String> activerAvecCleRecuperation() async {
-    final coffre = await lireCoffre();
-    if (coffre.serrures.isNotEmpty) {
+  /// une archive orpheline, et l'ancienne deviendrait illisible.
+  Future<String> activerAvecCleRecuperation(CoffreE2ee coffre) async {
+    final etat = await lireCoffre();
+    if (etat.serrures.isNotEmpty) {
       throw StateError('Une sauvegarde existe déjà sur ce compte.');
     }
 
@@ -127,6 +219,7 @@ class E2eeSauvegarde {
       await _poser(s);
     }
     _maitresse = a.maitresse;
+    await coffre.rangerMaitresse(a.maitresse);
     return cle;
   }
 
