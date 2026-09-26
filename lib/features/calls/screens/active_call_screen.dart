@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../../../core/app_snackbar.dart';
 import '../../../core/authed_api.dart';
 import '../../../core/push_service.dart';
+import '../../../l10n/app_localizations.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
 import '../../../widgets/call_rating_sheet.dart';
