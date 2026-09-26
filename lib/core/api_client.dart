@@ -55,21 +55,59 @@ class ApiClient {
 
   static String get _defaultBaseUrl => ServerConfig.apiBase;
 
+  /*
+   * 🔴 LE DÉLAI MAXIMAL D'UNE REQUÊTE JSON — il n'y en avait AUCUN.
+   *
+   * `package:http` ne borne rien par défaut : un serveur qui accepte la
+   * connexion puis se tait laisse le `Future` en suspens pour toujours. C'est
+   * exactement le défaut signalé sur l'écran de conversation, à un étage plus
+   * bas : là-bas l'attente sans borne bloquait un écran, ici elle bloque le
+   * bouton « Se connecter », dont le `finally` ne tourne jamais — la roue reste,
+   * et le user ne peut même plus retenter.
+   *
+   * ⚠️ 20 SECONDES, ET NON 5. DNS + poignée de main TLS sur une radio 3G
+   * camerounaise chargée se paie déjà plusieurs secondes, et un délai trop court
+   * transformerait une connexion lente en échec annoncé — un mensonge de plus,
+   * dans l'autre sens. Vingt secondes, c'est au-delà de tout réseau qui
+   * fonctionne encore, et bien en-deçà d'une attente qu'on croirait sans fin.
+   *
+   * ⚠️ LES UPLOADS SONT EXCLUS, exprès : un média de cinquante Mo sur une
+   * liaison lente met légitimement plus de vingt secondes, et il a déjà une
+   * barre de progression pour dire qu'il avance. Borner ce qui annonce sa
+   * progression, c'est couper un envoi qui n'est pas perdu.
+   */
+  static const Duration borneJson = Duration(seconds: 20);
+
+  /// Fait partir une demande et lui met un plafond.
+  ///
+  /// ⚠️ UNE SEULE FONCTION POUR TOUTES LES REQUÊTES JSON : la borne doit être
+  /// visible en un endroit, pas répartie en cinq `.timeout()` qu'un prochain
+  /// ajout d'une méthode oublierait de recopier.
+  Future<http.Response> _envoi(Future<http.Response> Function() demande) =>
+      demande().timeout(
+        borneJson,
+        onTimeout: () => throw TimeoutException(
+          "le serveur n'a pas répondu en ${borneJson.inSeconds} s",
+          borneJson,
+        ),
+      );
+
   Future<Map<String, dynamic>> post(
     String path,
     Map<String, dynamic> body, {
     String? bearer,
   }) async {
-    final res = await http.post(
-      Uri.parse("$baseUrl$path"),
-      headers: _headers(bearer),
-      body: jsonEncode(body),
-    );
+    final res = await _envoi(() => http.post(
+          Uri.parse("$baseUrl$path"),
+          headers: _headers(bearer),
+          body: jsonEncode(body),
+        ));
     return _decode(res);
   }
 
   Future<Map<String, dynamic>> get(String path, {String? bearer}) async {
-    final res = await http.get(Uri.parse("$baseUrl$path"), headers: _headers(bearer));
+    final res = await _envoi(() =>
+        http.get(Uri.parse("$baseUrl$path"), headers: _headers(bearer)));
     return _decode(res);
   }
 
@@ -78,11 +116,11 @@ class ApiClient {
     Map<String, dynamic> body, {
     String? bearer,
   }) async {
-    final res = await http.patch(
-      Uri.parse("$baseUrl$path"),
-      headers: _headers(bearer),
-      body: jsonEncode(body),
-    );
+    final res = await _envoi(() => http.patch(
+          Uri.parse("$baseUrl$path"),
+          headers: _headers(bearer),
+          body: jsonEncode(body),
+        ));
     return _decode(res);
   }
 
@@ -96,21 +134,21 @@ class ApiClient {
     Map<String, dynamic> body, {
     String? bearer,
   }) async {
-    final res = await http.put(
-      Uri.parse("$baseUrl$path"),
-      headers: _headers(bearer),
-      body: jsonEncode(body),
-    );
+    final res = await _envoi(() => http.put(
+          Uri.parse("$baseUrl$path"),
+          headers: _headers(bearer),
+          body: jsonEncode(body),
+        ));
     return _decode(res);
   }
 
   Future<Map<String, dynamic>> delete(String path,
       {String? bearer, Map<String, dynamic>? body}) async {
-    final res = await http.delete(
-      Uri.parse("$baseUrl$path"),
-      headers: _headers(bearer),
-      body: body != null ? jsonEncode(body) : null,
-    );
+    final res = await _envoi(() => http.delete(
+          Uri.parse("$baseUrl$path"),
+          headers: _headers(bearer),
+          body: body != null ? jsonEncode(body) : null,
+        ));
     return _decode(res);
   }
 

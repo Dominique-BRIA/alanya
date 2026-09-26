@@ -11,6 +11,7 @@ import '../../../core/pays_repository.dart';
 import '../auth_repository.dart';
 import '../../../widgets/saisie_pays_numero.dart';
 import 'fin_inscription_screen.dart';
+import '../../../core/nature_echec.dart';
 
 /* 🔴 LA LISTE DE PAYS CODÉE EN DUR A ÉTÉ RETIRÉE LE 25/08/2026.
  *
@@ -72,7 +73,12 @@ class _SetupScreenState extends State<SetupScreen> {
   /// « 1 = Cameroun » quand la table dit « 1 = Afrique du Sud » : chaque compte
   /// créé ici enregistrait un pays faux. Voir `core/pays_repository.dart`.
   List<Pays> _pays = const [];
-  bool _paysErreur = false;
+  /// La table de référence des pays n'est pas arrivée — et voici SON TEXTE, là où
+  /// un booléen ne pouvait qu'accuser le réseau. Elle se rangeait sous
+  /// « Impossible de contacter le serveur » alors qu'elle répond parfois en HTML,
+  /// en retard, ou dans un format inattendu : cette ligne d'aide se lit PENDANT
+  /// qu'on choisit un pays, elle doit dire qui est en cause.
+  String? _paysMessage;
 
   /// Le pays choisi, ou `null`. C'est lui qui donne l'indicatif au numéro.
   Pays? get _paysChoisi => paysParId(_pays, _selectedPaysId);
@@ -88,11 +94,12 @@ class _SetupScreenState extends State<SetupScreen> {
       final liste = await context.read<PaysRepository>().liste();
       if (!mounted) return;
       setState(() => _pays = liste);
-    } catch (_) {
+    } catch (e) {
       // On ne bloque pas l'inscription : le champ reste vide et son texte
       // d'aide le dit. Mieux vaut un compte sans pays qu'un parcours interrompu
       // au dernier écran par une table de référence indisponible.
-      if (mounted) setState(() => _paysErreur = true);
+      traceEchecConnexion(e);
+      if (mounted) setState(() => _paysMessage = cleEchecDe(e));
     }
   }
 
@@ -187,8 +194,11 @@ class _SetupScreenState extends State<SetupScreen> {
       Navigator.of(context).popUntil((r) => r.isFirst);
     } on ApiException catch (e) {
       showAppSnackBar(e.message);
-    } catch (_) {
-      showAppSnackBar(tr(context, 'server_unreachable'));
+    } catch (e) {
+      // 🔴 CLASSÉ, et non accusé en bloc : voir `core/nature_echec.dart` et le
+      // commentaire de `login_screen`, qui porte l'explication complète.
+      traceEchecConnexion(e);
+      showAppSnackBar(tr(context, cleEchecDe(e)));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -272,11 +282,11 @@ class _SetupScreenState extends State<SetupScreen> {
                 ),
                 // Tant que la table de référence n'arrive pas, on le dit :
                 // un sélecteur muet ressemble à une panne.
-                if (_paysErreur || _pays.isEmpty) ...[
+                if (_paysMessage != null || _pays.isEmpty) ...[
                   const SizedBox(height: 8),
                   Text(
                     tr(context,
-                        _paysErreur ? 'server_unreachable' : 'loading'),
+                        _paysMessage ?? 'loading'),
                     style: TextStyle(
                         fontSize: 12,
                         color: mutedOf(context, Colors.black54)),

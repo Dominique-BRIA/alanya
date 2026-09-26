@@ -12,6 +12,7 @@ import '../auth_repository.dart';
 import 'forgot_password_screen.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../core/alanya_id_formatter.dart';
+import '../../../core/nature_echec.dart';
 
 /// Connexion par email OU numéro public (6 ou 8 chiffres) + mot de passe.
 class LoginScreen extends StatefulWidget {
@@ -74,8 +75,23 @@ class _LoginScreenState extends State<LoginScreen> {
       Navigator.of(context).popUntil((r) => r.isFirst);
     } on ApiException catch (e) {
       showAppSnackBar(e.message);
-    } catch (_) {
-      showAppSnackBar(tr(context, 'server_unreachable'));
+    } catch (e) {
+      /*
+       * 🔴 CLASSÉ, et non « serveur injoignable » par défaut. Ce `catch` avalait
+       * un certificat refusé, une réponse 200 que `AuthUser.fromJson` ne sait pas
+       * lire, une écriture de coffre qui échoue — et renvoyait tout le monde au
+       * même « Impossible de contacter le serveur », pendant que le serveur, lui,
+       * répondait très bien.
+       *
+       * ⚠️ LE JOURNAL PORTE LE DÉTAIL, le texte montré reste court. Sans la
+       * ligne de `traceEchecConnexion`, un défaut de chaîne de certificats se
+       * diagnostiquerait par ouï-dire : c'est elle qui dit `CERTIFICATE_VERIFY_FAILED`.
+       *
+       * Les quatre autres écrans du parcours font exactement la même chose, et
+       * pointent ici plutôt que de recopier ce commentaire.
+       */
+      traceEchecConnexion(e);
+      showAppSnackBar(tr(context, cleEchecDe(e)));
     } finally {
       if (mounted) setState(() => _loading = false);
     }

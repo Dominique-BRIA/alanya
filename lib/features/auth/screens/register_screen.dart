@@ -9,6 +9,7 @@ import '../../../widgets/back_app_bar.dart';
 import '../auth_repository.dart';
 import 'otp_screen.dart';
 import 'setup_screen.dart';
+import '../../../core/nature_echec.dart';
 
 /// Étape 1 : saisie de l'email pour recevoir le code de confirmation.
 class RegisterScreen extends StatefulWidget {
@@ -41,8 +42,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
       );
     } on ApiException catch (e) {
       showAppSnackBar(e.message);
-    } catch (_) {
-      showAppSnackBar(tr(context, 'server_unreachable'));
+    } catch (e) {
+      // 🔴 CLASSÉ, et non accusé en bloc : voir `core/nature_echec.dart` et le
+      // commentaire de `login_screen`, qui porte l'explication complète.
+      traceEchecConnexion(e);
+      showAppSnackBar(tr(context, cleEchecDe(e)));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -82,7 +86,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
         // Serveur plus ancien, qui ne connaît pas encore l'inscription sans
         // adresse : on le dit plutôt que d'enchaîner sur un écran vide et de
         // laisser un compte sans aucun moyen de reprise.
-        showAppSnackBar(tr(context, 'server_unreachable'));
+        //
+        // ⚠️ « LE SERVEUR N'A PAS RÉPONDU » SERAIT FAUX, et le piéger ici vaut
+        // la peine : il a répondu, c'est sa réponse qui ne porte pas le champ.
+        // Un compte créé dans cet état existe — l'accuser, c'est faire retenter
+        // une inscription qui a déjà réussi.
+        showAppSnackBar(tr(context, 'unexpected_answer'));
         return;
       }
       await Navigator.of(context).push(
@@ -98,8 +107,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
       );
     } on ApiException catch (e) {
       showAppSnackBar(e.message);
-    } catch (_) {
-      showAppSnackBar(tr(context, 'server_unreachable'));
+    } catch (e) {
+      // 🔴 CLASSÉ, et non accusé en bloc : voir `core/nature_echec.dart` et le
+      // commentaire de `login_screen`, qui porte l'explication complète.
+      traceEchecConnexion(e);
+      showAppSnackBar(tr(context, cleEchecDe(e)));
     } finally {
       if (mounted) setState(() => _loading = false);
     }

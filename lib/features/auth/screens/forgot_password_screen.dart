@@ -10,6 +10,7 @@ import '../../../widgets/back_app_bar.dart';
 import '../../../widgets/motif_background.dart';
 import '../auth_repository.dart';
 import 'nouveau_mot_de_passe_screen.dart';
+import '../../../core/nature_echec.dart';
 
 /// Écran de réinitialisation de mot de passe (Mot de passe oublié).
 ///
@@ -120,8 +121,12 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
       );
     } on ApiException catch (e) {
       _onError(e.message);
-    } catch (_) {
-      _onError(tr(context, 'network_error_retry'));
+    } catch (e) {
+      // 🔴 « Erreur réseau, réessayez » était la MÊME accusation aveugle, sous
+      // une autre clé : un certificat refusé ou une réponse au format changé ne
+      // se réparent pas en retentant, et le texte d'ici le laissait croire.
+      traceEchecConnexion(e);
+      _onError(tr(context, cleEchecDe(e)));
     }
   }
 
@@ -144,8 +149,11 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
       showAppSnackBar(tr(context, 'forgot_code_sent'));
     } on ApiException catch (e) {
       _onError(e.message);
-    } catch (_) {
-      _onError(tr(context, 'network_error_retry'));
+    } catch (e) {
+      // 🔴 Classé, et non accusé en bloc : voir `_verifierPuisContinuer`
+      // ci-dessus et `core/nature_echec.dart`.
+      traceEchecConnexion(e);
+      _onError(tr(context, cleEchecDe(e)));
     }
   }
 
@@ -177,8 +185,11 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
       Navigator.of(context).popUntil((route) => route.isFirst);
     } on ApiException catch (e) {
       _onError(e.message);
-    } catch (_) {
-      _onError(tr(context, 'network_error_retry'));
+    } catch (e) {
+      // 🔴 Classé, et non accusé en bloc : voir `_verifierPuisContinuer`
+      // ci-dessus et `core/nature_echec.dart`.
+      traceEchecConnexion(e);
+      _onError(tr(context, cleEchecDe(e)));
     }
   }
 
