@@ -6,10 +6,8 @@ import 'package:provider/provider.dart';
 
 import '../../../l10n/app_localizations.dart';
 import '../../../core/app_snackbar.dart';
-import '../../../l10n/app_localizations.dart';
 import '../../../core/authed_api.dart';
 import '../../../core/push_service.dart';
-import '../../../l10n/app_localizations.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
 import '../../../widgets/call_rating_sheet.dart';
@@ -21,7 +19,6 @@ import '../widgets/call_avatar_waves.dart';
 import '../widgets/ivr_panel.dart';
 import '../widgets/plainte_recorder.dart';
 import '../widgets/queue_status_sheet.dart';
-import '../../../l10n/app_localizations.dart';
 
 class ActiveCallScreen extends StatefulWidget {
   const ActiveCallScreen({super.key, this.incoming = false});

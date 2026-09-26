@@ -1205,7 +1205,20 @@ class _ChatScreenState extends State<ChatScreen>
     // _myId est désormais un getter (toujours à jour) — plus besoin de le figer ici.
     _baseUrl = context.read<ApiClient>().baseUrl;
     initMediaIntegration(_baseUrl);
-    _token = await context.read<TokenStorage>().accessToken;
+    /*
+     * 🔴 LE CACHE D'ABORD, LE JETON ENSUITE — et l'ordre n'est pas cosmétique.
+     *
+     * 🐛 `accessToken` LIT LE COFFRE SÉCURISÉ, qui passe par le canal de
+     * plateforme. Quand ce canal est occupé — et il l'était, par les cinquante
+     * écritures de pré-clés au démarrage — cette lecture ne revient pas, et
+     * l'écran reste en chargement INFINI alors que les messages sont là, dans le
+     * cache local, disponibles immédiatement.
+     *
+     * ⚠️ AUCUN AFFICHAGE NE DOIT DÉPENDRE D'UNE LECTURE DE COFFRE SÉCURISÉ. Le
+     * jeton ne sert qu'aux appels réseau qui suivent ; les messages déjà connus
+     * n'en ont pas besoin. Les faire attendre derrière lui, c'était accepter que
+     * n'importe quelle lenteur du coffre vide l'écran.
+     */
     final cached = await MessageCache.getConv(widget.convId);
     if (cached.isNotEmpty && mounted) {
       setState(() {
@@ -1218,6 +1231,11 @@ class _ChatScreenState extends State<ChatScreen>
       }
       _scrollToBottom(immediat: true);
     }
+
+    // Le jeton n'est nécessaire qu'à partir d'ici, pour le réseau.
+    if (!mounted) return;
+    _token = await context.read<TokenStorage>().accessToken;
+
     try {
       final repo = context.read<ChatRepository>();
       final msgs = await repo.getMessages(widget.convId);
