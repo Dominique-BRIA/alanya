@@ -48,7 +48,12 @@ MotifRefus? motifRefus({
 
 /// Le fil chiffré : ce que l'écran de conversation appelle.
 class E2eeFil {
-  E2eeFil(this._service, this._api);
+  E2eeFil(this._service, this._api, {this.monDeviceId = 1});
+
+  /// ⚠️ LE DÉPÔT EXIGE L APPAREIL EXPÉDITEUR : le serveur s en sert pour ne pas
+  /// nous renvoyer nos propres enveloppes, et pour que le destinataire sache
+  /// quelle session ouvrir.
+  final int monDeviceId;
 
   final E2eeService _service;
   final Future<Map<String, dynamic>> Function(
@@ -110,11 +115,31 @@ class E2eeFil {
       });
     }
 
-    final r = await _api('POST', '/api/messages/chiffre', {
-      'conversationId': convId,
-      'enveloppes': enveloppes,
+    /*
+     * 🐛 J'AVAIS INVENTÉ `POST /api/messages/chiffre`. Cette route n'existe pas.
+     * Le vrai chemin est celui du web, et il tient en DEUX appels :
+     *
+     *   ① la ligne du fil, SANS contenu — le serveur la refuserait autrement ;
+     *   ② les enveloppes, rattachées à cette ligne.
+     *
+     * ⚠️ DANS CET ORDRE, ET PAS L'INVERSE. Une enveloppe sans message auquel se
+     * rattacher serait orpheline ; un message sans enveloppe s'afficherait vide
+     * chez le destinataire.
+     */
+    final message = await _api('POST', '/api/conversations/$convId/messages', {
+      'type': 'TEXT',
+      'chiffre': true,
     });
-    return r['id'] as String;
+    final messageId = message['id'] as String;
+
+    await _api('POST', '/api/e2ee/enveloppes', {
+      'convId': convId,
+      'deviceId': monDeviceId,
+      'enveloppes': enveloppes,
+      'messageId': messageId,
+    });
+
+    return messageId;
   }
 
   /* ══════════════ RECEVOIR ══════════════ */
