@@ -128,28 +128,48 @@ class _EntreprisesTabState extends State<EntreprisesTab> {
     super.dispose();
   }
 
+  /*
+   * 🔴 CHAQUE DEMANDE PREND UN NUMÉRO ; SEULE LA DERNIÈRE A LE DROIT D'ÉCRIRE.
+   *
+   * 🐛 `_chercher` se protégeait déjà, en comparant le texte courant à celui
+   * qu'il avait envoyé. Ces deux chemins-ci ne se protégeaient pas : toucher le
+   * type A puis le type B lance deux requêtes, et si celle de A revient après
+   * celle de B, l'écran affiche les entreprises de A sous l'en-tête de B. Rien
+   * ne le signale — les deux réponses sont valides, seul leur ordre est faux.
+   *
+   * ⚠️ MOINS PROBABLE QUE POUR LA RECHERCHE, PAS IMPOSSIBLE. La recherche part à
+   * chaque frappe ; ceci part à chaque toucher. Sur un réseau lent, deux
+   * touchers rapprochés suffisent.
+   *
+   * ⚠️ `mounted` NE SUFFIT PAS. Il dit que l'écran vit encore, pas que la réponse
+   * est celle qu'on attend.
+   */
+  int _demande = 0;
+
   Future<void> _charger() async {
+    final mien = ++_demande;
     setState(() => _erreur = false);
     try {
       final liste = await context.read<EntreprisesRepository>().types(idPays: _paysChoisi);
-      if (!mounted) return;
+      if (!mounted || _demande != mien) return;
       setState(() => _types = liste);
     } catch (_) {
-      if (mounted) setState(() => _erreur = true);
+      if (mounted && _demande == mien) setState(() => _erreur = true);
     }
   }
 
   Future<void> _ouvrirType(TypeEntreprise t) async {
+    final mien = ++_demande;
     setState(() {
       _typeOuvert = t;
       _entreprises = null;
     });
     try {
       final liste = await context.read<EntreprisesRepository>().duType(t.id, idPays: _paysChoisi);
-      if (!mounted) return;
+      if (!mounted || _demande != mien) return;
       setState(() => _entreprises = liste);
     } catch (_) {
-      if (mounted) setState(() => _entreprises = const []);
+      if (mounted && _demande == mien) setState(() => _entreprises = const []);
     }
   }
 
