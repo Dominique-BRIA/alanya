@@ -1222,6 +1222,58 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
+  /// Recolle le texte que NOUS connaissons sur les lignes que le serveur rend
+  /// vides.
+  ///
+  /// 🔴 SANS ÇA, NOS PROPRES MESSAGES CHIFFRÉS S'EFFAÇAIENT À CHAQUE
+  /// RECHARGEMENT.
+  ///
+  /// 🐛 Le chemin était : on envoie, on range le clair dans le cache local, et
+  /// au rechargement suivant `putConv` ÉCRASE tout le cache avec ce que rend le
+  /// serveur — c'est-à-dire des lignes SANS TEXTE, puisqu'il n'en a pas.
+  ///
+  /// ⚠️ ET `_releverChiffres()` NE PEUT PAS LE RATTRAPER : il remplit à partir
+  /// des enveloppes qui nous sont ADRESSÉES, et on ne s'en envoie pas à
+  /// soi-même. Le texte de nos propres messages n'existe donc nulle part
+  /// ailleurs que dans ce cache et dans l'archive.
+  ///
+  /// 🔴 ON NE REMPLACE JAMAIS UN TEXTE QUE LE SERVEUR DONNE. On ne comble que
+  /// le vide : une conversation ordinaire passe ici sans rien changer, et une
+  /// modification faite ailleurs n'est pas écrasée par notre copie périmée.
+  List<Message> _garderLeClairConnu(List<Message> duServeur, List<Message> connus) {
+    final textes = <String, String>{
+      for (final m in [...connus, ..._messages])
+        if ((m.content ?? '').isNotEmpty) m.id: m.content!,
+    };
+    if (textes.isEmpty) return duServeur;
+
+    return [
+      for (final m in duServeur)
+        if ((m.content ?? '').isNotEmpty || textes[m.id] == null)
+          m
+        else
+          Message(
+            id: m.id,
+            convId: m.convId,
+            senderId: m.senderId,
+            content: textes[m.id],
+            type: m.type,
+            status: m.status,
+            replyToId: m.replyToId,
+            media: m.media,
+            createdAt: m.createdAt,
+            deletedAt: m.deletedAt,
+            editedAt: m.editedAt,
+            expiresAt: m.expiresAt,
+            replyTo: m.replyTo,
+            reactions: m.reactions,
+            starred: m.starred,
+            mentions: m.mentions,
+            statutCite: m.statutCite,
+          ),
+    ];
+  }
+
   Future<void> _load() async {
     // _myId est désormais un getter (toujours à jour) — plus besoin de le figer ici.
     _baseUrl = context.read<ApiClient>().baseUrl;
@@ -1280,7 +1332,7 @@ class _ChatScreenState extends State<ChatScreen>
       final repo = context.read<ChatRepository>();
       final msgs = await repo.getMessages(widget.convId);
       if (!mounted) return;
-      final reversed = msgs.reversed.toList();
+      final reversed = _garderLeClairConnu(msgs.reversed.toList(), cached);
       await MessageCache.putConv(widget.convId, reversed);
       setState(() {
         _messages = reversed;
@@ -2001,6 +2053,31 @@ class _ChatScreenState extends State<ChatScreen>
          * ne garde que la ligne sans texte.
          */
         _cacheMsg(envoye);
+        /*
+         * 🔴 ET DANS L'ARCHIVE, SANS QUOI IL NE SURVIT PAS À CET APPAREIL.
+         *
+         * 🐛 Le mobile archivait ce qu'il REÇOIT et jamais ce qu'il ENVOIE. Nos
+         * propres messages n'existaient donc que dans le cache local : perdus
+         * à la réinstallation, absents du téléphone suivant, invisibles depuis
+         * le web.
+         *
+         * ⚠️ AUCUNE ENVELOPPE NE NOUS EST ADRESSÉE — on ne s'écrit pas à
+         * soi-même. L'archive est le SEUL chemin par lequel un message envoyé
+         * atteint nos autres appareils. Ce n'est pas une sauvegarde de
+         * confort : c'est la moitié manquante de la conversation.
+         *
+         * ⚠️ SANS ATTENDRE, ET SANS BLOQUER : le message est parti, il est
+         * remis. Échouer l'archive ne doit pas le faire paraître échoué.
+         */
+        unawaited(pile.sauvegarde.deposer([
+          {
+            'id': id,
+            'convId': widget.convId,
+            'expediteurId': _myId ?? '',
+            'texte': text,
+            'quand': envoye.createdAt.toIso8601String(),
+          },
+        ]));
         _inputCtrl.clear();
         _mentionsEnCours.clear();
         setState(() {
