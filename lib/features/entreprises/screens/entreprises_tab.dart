@@ -108,17 +108,31 @@ class _EntreprisesTabState extends State<EntreprisesTab> {
   /// Les trois vues en dépendent : les types, les entreprises d'un type ouvert,
   /// et la recherche en cours. N'en rafraîchir qu'une laisserait les autres
   /// afficher le pays précédent sans que rien ne le dise.
+  /*
+   * ⚠️ UN SEUL NUMÉRO POUR TOUTE LA SÉQUENCE, et c'est une correction.
+   *
+   * 🐛 Chaque étape prenait le SIEN. Changer de pays pendant qu'une application
+   * était en cours donnait alors : la première séquence invalidait la seconde en
+   * incrémentant au milieu, et la vue finissait sur le pays ABANDONNÉ. Les trois
+   * étapes forment une seule intention — elles doivent partager un seul numéro.
+   *
+   * On revérifie ENTRE les étapes : une séquence périmée doit s'arrêter là où
+   * elle en est, pas finir de poser un pays que personne ne regarde plus.
+   */
   Future<void> _appliquePays(int? idPays) async {
+    final mien = ++_demande;
     setState(() {
       _paysChoisi = idPays;
       _types = null;
       _entreprises = null;
     });
-    await _charger();
+    await _charger(jeton: mien);
+    if (!mounted || _demande != mien) return;
     final ouvert = _typeOuvert;
-    if (ouvert != null) await _ouvrirType(ouvert);
+    if (ouvert != null) await _ouvrirType(ouvert, jeton: mien);
+    if (!mounted || _demande != mien) return;
     final q = _rechercheCtrl.text.trim();
-    if (q.isNotEmpty) await _chercher(q);
+    if (q.isNotEmpty) await _chercher(q, jeton: mien);
   }
 
   @override
@@ -146,8 +160,10 @@ class _EntreprisesTabState extends State<EntreprisesTab> {
    */
   int _demande = 0;
 
-  Future<void> _charger() async {
-    final mien = ++_demande;
+  /// [jeton] est fourni quand l'appel fait partie d'une séquence plus large —
+  /// voir `_appliquePays`. Sans lui, l'appel est une intention à lui seul.
+  Future<void> _charger({int? jeton}) async {
+    final mien = jeton ?? ++_demande;
     setState(() => _erreur = false);
     try {
       final liste = await context.read<EntreprisesRepository>().types(idPays: _paysChoisi);
@@ -158,8 +174,8 @@ class _EntreprisesTabState extends State<EntreprisesTab> {
     }
   }
 
-  Future<void> _ouvrirType(TypeEntreprise t) async {
-    final mien = ++_demande;
+  Future<void> _ouvrirType(TypeEntreprise t, {int? jeton}) async {
+    final mien = jeton ?? ++_demande;
     setState(() {
       _typeOuvert = t;
       _entreprises = null;
@@ -192,12 +208,17 @@ class _EntreprisesTabState extends State<EntreprisesTab> {
     _debounce = Timer(const Duration(milliseconds: 350), () => _chercher(q));
   }
 
-  Future<void> _chercher(String q) async {
+  Future<void> _chercher(String q, {int? jeton}) async {
+    final mien = jeton ?? ++_demande;
     try {
       final trouves = await context.read<EntreprisesRepository>().chercher(q, idPays: _paysChoisi);
-      if (!mounted) return;
+      if (!mounted || _demande != mien) return;
       // La saisie a pu changer pendant l'aller-retour : on ne pose le résultat
       // que s'il correspond ENCORE à ce qui est écrit.
+      //
+      // ⚠️ DEUX CONTRÔLES, ET LES DEUX SERVENT. Le texte écarte une frappe
+      // dépassée ; le numéro écarte un CHANGEMENT DE PAYS survenu pendant
+      // l'aller-retour, que le texte ne voit pas — il n'a pas bougé.
       if (_rechercheCtrl.text.trim() != q) return;
       setState(() {
         _resultats = trouves;
