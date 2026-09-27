@@ -106,6 +106,12 @@ class PileE2ee {
       if (!await coffre.dejaPublie()) {
         await service.publierMesCles(deviceId: deviceId);
         await coffre.noterPublie();
+        /*
+         * ⚠️ MÊME À LA PREMIÈRE PUBLICATION, ON REPREND L'ARCHIVE. C'est
+         * précisément le cas d'un téléphone neuf : il n'a aucun historique, et
+         * c'est là que la reprise sert le plus.
+         */
+        await sauvegarde.reprendreAuDemarrage(coffre);
         return;
       }
 
@@ -125,6 +131,19 @@ class PileE2ee {
        * coût ordinaire du démarrage reste une requête.
        */
       await service.reapprovisionnerSiNecessaire(deviceId: deviceId);
+
+      /*
+       * 🔴 ET ON REPREND L'ARCHIVE, À CHAQUE LANCEMENT.
+       *
+       * 🐛 `aLaConnexion` ne tourne qu'à la CONNEXION. Quelqu'un qui reste
+       * connecté — le cas normal sur un téléphone — n'y repasse jamais. Les
+       * messages échangés depuis un autre appareil restaient donc dans
+       * l'archive, intacts et hors d'atteinte.
+       *
+       * ⚠️ LE MOT DE PASSE N'EST PAS DEMANDÉ : la clé maîtresse dort déjà dans
+       * le coffre sécurisé. C'est ce qui rend ce rattrapage silencieux.
+       */
+      await sauvegarde.reprendreAuDemarrage(coffre);
     } catch (e) {
       /*
        * ⚠️ ON NE LÈVE TOUJOURS PAS — l'application doit s'ouvrir. Mais on

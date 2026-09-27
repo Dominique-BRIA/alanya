@@ -2090,7 +2090,14 @@ class _ChatScreenState extends State<ChatScreen>
             'convId': widget.convId,
             'expediteurId': _myId ?? '',
             'texte': text,
-            'quand': envoye.createdAt.toIso8601String(),
+            /*
+             * ⚠️ EN MILLISECONDES, COMME LE WEB — et comme la relève juste
+             * au-dessus. J'écrivais une date ISO ici : l'archive aurait porté
+             * DEUX formats pour le même champ, et la restauration serait
+             * retombée sur « maintenant » pour la moitié des messages, qui se
+             * seraient tous empilés à la date du jour.
+             */
+            'quand': envoye.createdAt.millisecondsSinceEpoch,
           },
         ]));
         _inputCtrl.clear();

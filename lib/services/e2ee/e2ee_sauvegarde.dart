@@ -413,7 +413,21 @@ class E2eeSauvegarde {
         final texte = m['texte'] as String?;
         if (id == null || convId == null || texte == null) continue;
 
-        final quand = DateTime.tryParse('${m['quand']}') ?? DateTime.now();
+        /*
+         * 🔴 DEUX FORMATS COEXISTENT DANS L'ARCHIVE, ET IL FAUT LES DEUX.
+         *
+         * Le web écrit `quand` en MILLISECONDES depuis 1970 ; d'anciens blocs
+         * peuvent porter une date ISO. Ne lire que l'une des deux ferait
+         * retomber l'autre sur « maintenant » — et toute une conversation
+         * restaurée se serait empilée à la date du jour, dans le désordre.
+         *
+         * ⚠️ L'ORDRE COMPTE : on essaie le nombre d'abord. `DateTime.tryParse`
+         * accepte certaines suites de chiffres et rendrait une date absurde.
+         */
+        final brut = m['quand'];
+        final quand = brut is num
+            ? DateTime.fromMillisecondsSinceEpoch(brut.toInt())
+            : DateTime.tryParse('$brut') ?? DateTime.now();
         await MessageCache.upsert(
           Message(
             id: id,
@@ -431,6 +445,45 @@ class E2eeSauvegarde {
       } catch (_) {
         // Ligne illisible : on passe à la suivante.
       }
+    }
+  }
+
+  /// Reprend l'archive au démarrage, sans rien demander.
+  ///
+  /// 🔴 `aLaConnexion` NE TOURNE QU'À LA CONNEXION, et c'était le trou.
+  /// Quelqu'un qui reste connecté — le cas normal — ne repasse jamais par cet
+  /// écran. Les messages arrivés entre-temps sur un AUTRE appareil restaient
+  /// donc dans l'archive, intacts, sans que rien n'aille les chercher.
+  ///
+  /// ⚠️ LE MOT DE PASSE N'EST PAS NÉCESSAIRE ICI : la clé maîtresse est déjà
+  /// dans le coffre sécurisé depuis la première ouverture. C'est ce qui permet
+  /// de le faire à chaque lancement, en silence.
+  ///
+  /// ⚠️ ON NE REFAIT RIEN SI L'ARCHIVE N'A PAS GROSSI. Déchiffrer deux mille
+  /// blocs à chaque lancement coûterait cher pour rien ; on retient le nombre
+  /// de blocs déjà repris. Les écritures étant de toute façon idempotentes,
+  /// se tromper ici ne coûte qu'un tour de travail, jamais une donnée.
+  ///
+  /// ⚠️ NE LÈVE JAMAIS : c'est un rattrapage de fond, pas un préalable.
+  Future<int> reprendreAuDemarrage(CoffreE2ee coffre) async {
+    try {
+      _maitresse ??= await coffre.lireMaitresse();
+      if (_maitresse == null) return 0;
+
+      final r = await _api('GET', '/api/e2ee/archive', null);
+      final blocs = (r['blocs'] as List? ?? const []).length;
+      if (blocs == 0) return 0;
+
+      final dejaVus = int.tryParse(await coffre.lireBlocsRepris() ?? '') ?? -1;
+      if (blocs == dejaVus) return 0;
+
+      final restaure = await restaurer();
+      await _ecrireDansLeCache(restaure.messages);
+      await coffre.noterBlocsRepris(blocs);
+      return restaure.messages.length;
+    } catch (_) {
+      // Réseau coupé, archive fermée : on réessaiera au lancement suivant.
+      return 0;
     }
   }
 

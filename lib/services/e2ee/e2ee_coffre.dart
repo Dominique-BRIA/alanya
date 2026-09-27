@@ -375,6 +375,14 @@ class CoffreE2ee implements SignalProtocolStore {
   Future<void> rangerMaitresse(Uint8List cle) =>
       _ecrire('archive.maitresse', base64.encode(cle));
 
+  /// Combien de blocs d'archive ont déjà été repris sur cet appareil.
+  ///
+  /// ⚠️ UN NOMBRE, PAS UNE DATE. Les blocs ne se modifient jamais et ne se
+  /// suppriment pas : leur nombre ne peut que croître, ce qui en fait un
+  /// repère suffisant et impossible à fausser par une horloge déréglée.
+  Future<String?> lireBlocsRepris() => _lire('archive.blocs');
+  Future<void> noterBlocsRepris(int n) => _ecrire('archive.blocs', '$n');
+
   Future<Uint8List?> lireMaitresse() async {
     final b = await _lire('archive.maitresse');
     return b == null ? null : Uint8List.fromList(base64.decode(b));
