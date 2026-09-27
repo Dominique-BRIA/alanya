@@ -28,6 +28,28 @@ import 'e2ee_coffre.dart';
 const int lotPreKeys = 50;
 const int seuilReappro = 10;
 
+/// Lit une liste dans une réponse du serveur, en NOMMANT ce qui manque.
+///
+/// 🔴 UN `as List` NU DIT « Null n'est pas List<dynamic> » ET RIEN D'AUTRE.
+/// Ni quel champ, ni quelle route, ni quel appel. C'est le message qui s'est
+/// affiché en production — impossible à relier à quoi que ce soit sans lire le
+/// code ligne à ligne.
+///
+/// ⚠️ LES NOMS DE CHAMPS SONT LE TROU QUE `outils/contrat_routes.py` NE
+/// COUVRE PAS : il vérifie le verbe et le chemin, pas le contenu. Tant que ce
+/// contrôle n'existe pas, le moins qu'on doive faire est d'échouer en disant
+/// QUOI.
+List<Map<String, dynamic>> listeDe(Map<String, dynamic> reponse, String champ) {
+  final v = reponse[champ];
+  if (v is! List) {
+    throw StateError(
+      "Le serveur n'a pas rendu « $champ » "
+      '(reçu : ${v.runtimeType}, champs présents : ${reponse.keys.join(", ")})',
+    );
+  }
+  return v.cast<Map<String, dynamic>>();
+}
+
 class E2eeService {
   E2eeService(this.coffre, this.api);
 
@@ -158,7 +180,17 @@ class E2eeService {
   /// sinon l'un des deux ne le lira jamais.
   Future<List<int>> ouvrirSessions(String pairId) async {
     final r = await api('GET', '/api/e2ee/cles/$pairId', null);
-    final paquets = (r['appareils'] as List).cast<Map<String, dynamic>>();
+    /*
+     * 🐛 LE CHAMP S'APPELLE `paquets`, PAS `appareils`. On lisait le mauvais
+     * nom : la valeur était `null`, et le `as List` levait un
+     * `_TypeError: type 'Null' is not a subtype of type 'List<dynamic>'` —
+     * illisible pour qui le reçoit, et muet sur ce qui manque.
+     *
+     * ⚠️ `GET /api/e2ee/cles` (mes appareils) rend bien `appareils` ; c'est
+     * `GET /api/e2ee/cles/<compte>` (le paquet d'un correspondant) qui rend
+     * `paquets`. Deux routes voisines, deux noms — et rien pour le rappeler.
+     */
+    final paquets = listeDe(r, 'paquets');
     final ouverts = <int>[];
 
     for (final p in paquets) {

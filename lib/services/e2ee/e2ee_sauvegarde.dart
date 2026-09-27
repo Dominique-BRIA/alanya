@@ -21,6 +21,7 @@ import 'e2ee_coffre.dart';
 import 'e2ee_serrures.dart';
 import '../../core/message_cache.dart';
 import '../../models/message.dart';
+import 'e2ee_service.dart';
 
 typedef AppelApi = Future<Map<String, dynamic>> Function(
   String methode,
@@ -377,7 +378,7 @@ class E2eeSauvegarde {
           illisibles++;
           continue;
         }
-        for (final m in (charge['messages'] as List).cast<Map<String, dynamic>>()) {
+        for (final m in listeDe(charge, 'messages')) {
           // Du plus ancien au plus récent : une correction déposée plus tard
           // l'emporte sur la version d'origine.
           vus[m['id'] as String] = m;

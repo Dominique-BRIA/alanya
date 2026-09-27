@@ -161,7 +161,7 @@ class E2eeFil {
   /// continue : un message perdu vaut mieux qu'un fil entier qui ne charge plus.
   Future<({List<MessageClair> messages, int illisibles})> relever() async {
     final r = await _api('GET', '/api/e2ee/enveloppes', null);
-    final brutes = (r['enveloppes'] as List).cast<Map<String, dynamic>>();
+    final brutes = listeDe(r, 'enveloppes');
 
     final messages = <MessageClair>[];
     final aAcquitter = <String>[];
