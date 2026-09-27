@@ -4050,59 +4050,7 @@ class _ChatScreenState extends State<ChatScreen>
   // ══════════════════════════════════════════════
   // APPBAR
   // ══════════════════════════════════════════════
-  /// Le fil est-il chiffré ?
-  ///
-  /// ⚠️ TENU LOCALEMENT ET MIS À JOUR PAR LE SERVEUR. Le deviner depuis le
-  /// contenu des messages donnerait un bouclier qui clignote au premier message
-  /// non chiffré arrivé d'un appareil plus ancien.
-  bool _chiffrementActif = false;
 
-  /// Active le chiffrement, ou ouvre la vérification s'il l'est déjà.
-  ///
-  /// 🔴 UNE FOIS CHIFFRÉ, LE BOUTON MÈNE À LA VÉRIFICATION. Le chiffrement ne se
-  /// défait pas : laisser un bouton inerte à l'endroit exact où l'on va chercher
-  /// « l'état du chiffrement » serait une place gâchée.
-  Future<void> _ouvrirChiffrement() async {
-    final pile = context.e2ee;
-    final pair = widget.otherUserId;
-    /*
-     * ⚠️ SANS CORRESPONDANT IDENTIFIÉ, RIEN À FAIRE. Un fil sans `otherUserId`
-     * est un groupe ou une conversation incomplète : le bouton est déjà masqué
-     * dans ces cas, ce contrôle est le filet.
-     */
-    if (pile == null || pair == null) return;
-
-    if (!_chiffrementActif) {
-      try {
-        await pile.fil.activer(widget.convId);
-        if (mounted) setState(() => _chiffrementActif = true);
-      } catch (_) {
-        if (mounted) showAppSnackBar("Le chiffrement n'a pas pu être activé.");
-      }
-      return;
-    }
-
-    try {
-      final code = await pile.service.codeSecurite(
-        monId: pair,
-        pairId: pair,
-        adressePair: SignalProtocolAddress(pair, 1),
-      );
-      if (!mounted) return;
-      await Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => EcranVerification(
-          code: code,
-          nomPair: widget.title,
-          verifie: false,
-          onBasculer: () => Navigator.of(context).pop(),
-        ),
-      ));
-    } catch (_) {
-      if (mounted) {
-        showAppSnackBar("Aucune clé connue — échangez d'abord un message.");
-      }
-    }
-  }
 
   PreferredSizeWidget _whatsappAppBar() {
     return AppBar(

@@ -740,32 +740,36 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
         throw StateError("Ce contact n’a aucun appareil chiffré.");
       }
 
-      final code = await pile.service.codeSecurite(
-        /*
-         * 🔴 `monId` RECEVAIT L'IDENTIFIANT DU CORRESPONDANT. Le code combine
-         * DEUX moitiés — ma clé avec mon identifiant, la sienne avec le sien.
-         * Lui passer deux fois le même produisait un code qui n'aurait JAMAIS
-         * corresp0ndu à celui du web, et la vérification aurait semblé échouer
-         * alors que rien n'était attaqué.
-         */
-        monId: monId,
-        pairId: widget.userId,
-        /*
-         * ⚠️ L'APPAREIL ÉTAIT CODÉ EN DUR À `1`. Les numéros d'appareil sont
-         * tirés au sort à l'installation : chercher l'identité à l'adresse
-         * `<compte>.1` ne trouvait rien, d'où le « aucune clé connue ».
-         *
-         * ⚠️ N'IMPORTE LEQUEL DE SES APPAREILS CONVIENT : la clé d'identité
-         * est celle de la PERSONNE, la même sur tous ses appareils. C'est ce
-         * qui permet de comparer un code unique avec quelqu'un qui a un
-         * téléphone et un navigateur.
-         */
-        adressePair: SignalProtocolAddress(widget.userId, appareils.first),
-      );
+      /*
+       * 🔴 UN CODE PAR APPAREIL, comme le web. Le mobile n'en montrait qu'UN,
+       * celui du premier appareil de la liste.
+       *
+       * ⚠️ LE CODE COMPARE DEUX CLÉS D'IDENTITÉ, et le correspondant en a une
+       * par appareil. N'en afficher qu'une laissait les autres invisibles — et
+       * c'est précisément un appareil qu'on n'aurait pas remarqué qui serait
+       * celui d'un intrus.
+       *
+       * ⚠️ ET DEUX PERSONNES POUVAIENT COMPARER DEUX APPAREILS DIFFÉRENTS : le
+       * web les listait tous, le mobile en prenait un. Les codes ne
+       * correspondaient pas, et rien n'expliquait pourquoi — le pire message
+       * possible sur un écran dont tout l'objet est de dire « c'est bien lui ».
+       */
+      final codes = <CodeAppareil>[];
+      for (final appareil in appareils) {
+        codes.add(CodeAppareil(
+          deviceId: appareil,
+          code: await pile.service.codeSecurite(
+            monId: monId,
+            pairId: widget.userId,
+            adressePair: SignalProtocolAddress(widget.userId, appareil),
+          ),
+        ));
+      }
+
       if (!mounted) return;
       await Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => EcranVerification(
-          code: code,
+          codes: codes,
           nomPair: widget.name,
           verifie: false,
           onBasculer: () => Navigator.of(context).pop(),
