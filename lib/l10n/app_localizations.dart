@@ -12,6 +12,7 @@ class AppLocalizations {
   String get(String key) => _localizedValues[languageCode]?[key] ?? _localizedValues['fr']?[key] ?? key;
   static const _localizedValues = <String, Map<String, String>>{
 'fr': {
+'e2ee_texte_indisponible': 'Message chiffré — indisponible sur cet appareil.',
 'e2ee_medias_clairs': 'Les fichiers joints ne sont pas encore chiffrés.',
 'unexpected_error': 'Une erreur inattendue est survenue.',
 'exp_titre': 'Exportation des médias',
@@ -1199,6 +1200,7 @@ class AppLocalizations {
 'ivr_complaint_service': 'Service plainte',
 },
 'en': {
+'e2ee_texte_indisponible': 'Encrypted message — unavailable on this device.',
 'e2ee_medias_clairs': 'Attachments are not encrypted yet.',
 'unexpected_error': 'An unexpected error occurred.',
 'exp_titre': 'Media export',
@@ -2386,6 +2388,7 @@ class AppLocalizations {
 'ivr_complaint_service': 'Complaint service',
 },
 'es': {
+'e2ee_texte_indisponible': 'Mensaje cifrado: no disponible en este dispositivo.',
 'e2ee_medias_clairs': 'Los archivos adjuntos aún no están cifrados.',
 'unexpected_error': 'Se ha producido un error inesperado.',
 'exp_titre': 'Exportación de medios',
@@ -3573,6 +3576,7 @@ class AppLocalizations {
 'ivr_complaint_service': 'Servicio de reclamaciones',
 },
 'de': {
+'e2ee_texte_indisponible': 'Verschlüsselte Nachricht — auf diesem Gerät nicht verfügbar.',
 'e2ee_medias_clairs': 'Anhänge sind noch nicht verschlüsselt.',
 'unexpected_error': 'Ein unerwarteter Fehler ist aufgetreten.',
 'exp_titre': 'Medienexport',
@@ -4760,6 +4764,7 @@ class AppLocalizations {
 'ivr_complaint_service': 'Beschwerdedienst',
 },
 'pt': {
+'e2ee_texte_indisponible': 'Mensagem cifrada — indisponível neste dispositivo.',
 'e2ee_medias_clairs': 'Os anexos ainda não estão cifrados.',
 'unexpected_error': 'Ocorreu um erro inesperado.',
 'exp_titre': 'Exportação de media',
@@ -5947,6 +5952,7 @@ class AppLocalizations {
 'ivr_complaint_service': 'Serviço de reclamações',
 },
 'ru': {
+'e2ee_texte_indisponible': 'Зашифрованное сообщение — недоступно на этом устройстве.',
 'e2ee_medias_clairs': 'Вложения пока не шифруются.',
 'unexpected_error': 'Произошла непредвиденная ошибка.',
 'exp_titre': 'Экспорт медиа',
@@ -7134,6 +7140,7 @@ class AppLocalizations {
 'ivr_complaint_service': 'Служба жалоб',
 },
 'zh': {
+'e2ee_texte_indisponible': '加密消息 — 本设备上不可用。',
 'e2ee_medias_clairs': '附件尚未加密。',
 'unexpected_error': '发生意外错误。',
 'exp_titre': '媒体导出',
@@ -8321,6 +8328,7 @@ class AppLocalizations {
 'ivr_complaint_service': '投诉服务',
 },
 'sv': {
+'e2ee_texte_indisponible': 'Krypterat meddelande — inte tillgängligt på den här enheten.',
 'e2ee_medias_clairs': 'Bilagor är ännu inte krypterade.',
 'unexpected_error': 'Ett oväntat fel inträffade.',
 'exp_titre': 'Medieexport',
@@ -9508,6 +9516,7 @@ class AppLocalizations {
 'ivr_complaint_service': 'Klagomålstjänst',
 },
 'no': {
+'e2ee_texte_indisponible': 'Kryptert melding — ikke tilgjengelig på denne enheten.',
 'e2ee_medias_clairs': 'Vedlegg er ennå ikke kryptert.',
 'unexpected_error': 'Det oppstod en uventet feil.',
 'exp_titre': 'Medieeksport',

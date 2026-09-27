@@ -19,6 +19,8 @@ import 'dart:typed_data';
 
 import 'e2ee_coffre.dart';
 import 'e2ee_serrures.dart';
+import '../../core/message_cache.dart';
+import '../../models/message.dart';
 
 typedef AppelApi = Future<Map<String, dynamic>> Function(
   String methode,
@@ -133,6 +135,24 @@ class E2eeSauvegarde {
 
       /* ── ③ RESTAURER ─────────────────────────────────────────────── */
       final r = await restaurer();
+      /*
+       * 🔴 ET ON LES ÉCRIT. C'EST TOUT CE QUI MANQUAIT, ET C'ÉTAIT TOUT.
+       *
+       * 🐛 L'archive était ouverte, déchiffrée, ses messages rendus — puis
+       * JETÉS. Cette fonction n'en gardait que le NOMBRE. Aucune ligne, dans
+       * tout le mobile, n'écrivait le contenu restauré quelque part.
+       *
+       * ⚠️ LE SYMPTÔME ÉTAIT SPECTACULAIRE ET LA CAUSE MINUSCULE : sur un
+       * second appareil du même compte, toutes les bulles chiffrées restaient
+       * vides alors que le web affichait la conversation entière. Le
+       * chiffrement marchait ; c'est la dernière ligne du parcours qui
+       * manquait.
+       *
+       * ⚠️ `upsert`, PAS `putConv` : le second REMPLACE une conversation
+       * entière, et effacerait les messages en clair d'avant le chiffrement.
+       * On ajoute, on ne substitue pas.
+       */
+      await _ecrireDansLeCache(r.messages);
       return (restaures: r.messages.length, illisibles: r.illisibles);
     } catch (_) {
       /*
@@ -374,4 +394,43 @@ class E2eeSauvegarde {
     await _api('DELETE', '/api/e2ee/archive', null);
     refermer();
   }
+  /// Range dans le cache local ce que l'archive vient de rendre.
+  ///
+  /// ⚠️ UN MESSAGE MAL FORMÉ N'ARRÊTE PAS LES AUTRES. Une archive écrite par un
+  /// client plus ancien peut porter un champ de moins ; refuser le lot entier
+  /// pour une ligne ferait perdre toute une conversation.
+  ///
+  /// ⚠️ ON NE SAIT PAS TOUJOURS QUI A ÉCRIT. Les archives posées avant que
+  /// l'expéditeur ne soit enregistré n'ont pas ce champ : la bulle s'affichera
+  /// alors du côté des messages reçus. Mieux vaut un message du mauvais côté
+  /// qu'un message absent.
+  Future<void> _ecrireDansLeCache(List<Map<String, dynamic>> messages) async {
+    for (final m in messages) {
+      try {
+        final id = m['id'] as String?;
+        final convId = m['convId'] as String?;
+        final texte = m['texte'] as String?;
+        if (id == null || convId == null || texte == null) continue;
+
+        final quand = DateTime.tryParse('${m['quand']}') ?? DateTime.now();
+        await MessageCache.upsert(
+          Message(
+            id: id,
+            convId: convId,
+            senderId: (m['expediteurId'] as String?) ?? '',
+            content: texte,
+            type: 'TEXT',
+            status: 'SENT',
+            replyToId: null,
+            media: const [],
+            createdAt: quand,
+          ),
+          convId,
+        );
+      } catch (_) {
+        // Ligne illisible : on passe à la suivante.
+      }
+    }
+  }
+
 }

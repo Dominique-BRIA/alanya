@@ -5279,7 +5279,38 @@ class _ChatScreenState extends State<ChatScreen>
                 style: TextStyle(fontSize: 10, color: onSubColor))
           ]),
         ],
-        if (!isTranslating && translated == null && m.type == 'TEXT')
+        /*
+         * 🔴 UNE BULLE SANS TEXTE DOIT DIRE POURQUOI.
+         *
+         * 🐛 Elle n'affichait RIEN — et comme le pense-bête « Traduire » se
+         * pose sous tout message TEXT, c'est LUI qu'on lisait à la place du
+         * message. Sur un second appareil, une conversation entière se lisait
+         * « Traduire, Traduire, Traduire ».
+         *
+         * ⚠️ C'EST UN ÉTAT LÉGITIME, PAS UNE PANNE : le texte d'un message
+         * chiffré ne vit que chez les appareils à qui une enveloppe était
+         * adressée, plus l'archive. Un téléphone ajouté après coup n'a ni
+         * l'une ni l'autre pour les messages d'avant.
+         *
+         * ⚠️ ET ON RETIRE « TRADUIRE » : proposer de traduire le vide est une
+         * promesse qu'on ne peut pas tenir.
+         */
+        if (m.type == 'TEXT' && (m.content ?? '').isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              tr(context, 'e2ee_texte_indisponible'),
+              style: TextStyle(
+                fontSize: 11,
+                color: onSubColor.withOpacity(0.85),
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ),
+        if (!isTranslating &&
+            translated == null &&
+            m.type == 'TEXT' &&
+            (m.content ?? '').isNotEmpty)
           Padding(
               padding: const EdgeInsets.only(top: 2),
               child: Text(tr(context, 'translate'),
