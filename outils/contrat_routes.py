@@ -72,11 +72,17 @@ def appels_du_mobile():
             if not f.endswith(".dart"):
                 continue
             p = os.path.join(dossier, f)
-            for n, l in enumerate(io.open(p, encoding="utf-8").read().split("\n"), 1):
-                for verbe, chemin in re.findall(
-                    r"api\(\s*'(GET|POST|PUT|PATCH|DELETE)'\s*,\s*'([^']+)'", l
-                ):
-                    appels.append((p, n, verbe, chemin))
+            src = io.open(p, encoding="utf-8").read()
+            # ⚠️ SUR LE FICHIER ENTIER, PAS LIGNE A LIGNE. Un appel coupe en
+            # deux lignes echappait a la lecture ligne par ligne, et le compte
+            # d'appels BAISSAIT en silence : le controle couvrait moins sans
+            # le dire. Un garde-fou qui retrecit sans prevenir est pire qu'un
+            # garde-fou absent, parce qu'il rassure.
+            for m in re.finditer(
+                r"api\(\s*'(GET|POST|PUT|PATCH|DELETE)'\s*,\s*'([^']+)'", src
+            ):
+                n = src.count("\n", 0, m.start()) + 1
+                appels.append((p, n, m.group(1), m.group(2)))
     return appels
 
 

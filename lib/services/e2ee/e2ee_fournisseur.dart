@@ -188,7 +188,7 @@ class PileE2ee {
     final coffre = CoffreE2ee(compteId);
     final service = E2eeService(coffre, appel);
     return PileE2ee._(
-        compteId, coffre, service, E2eeFil(service, appel), E2eeSauvegarde(appel));
+        compteId, coffre, service, E2eeFil(service, appel, coffre.deviceId), E2eeSauvegarde(appel));
   }
 }
 

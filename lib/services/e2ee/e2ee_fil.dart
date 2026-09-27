@@ -48,12 +48,25 @@ MotifRefus? motifRefus({
 
 /// Le fil chiffré : ce que l'écran de conversation appelle.
 class E2eeFil {
-  E2eeFil(this._service, this._api, {this.monDeviceId = 1});
+  E2eeFil(this._service, this._api, this._monDeviceId);
 
-  /// ⚠️ LE DÉPÔT EXIGE L APPAREIL EXPÉDITEUR : le serveur s en sert pour ne pas
-  /// nous renvoyer nos propres enveloppes, et pour que le destinataire sache
-  /// quelle session ouvrir.
-  final int monDeviceId;
+  /// L'appareil que NOUS sommes, tel qu'il a été publié.
+  ///
+  /// 🔴 C'ÉTAIT `{this.monDeviceId = 1}` — UNE VALEUR PAR DÉFAUT, ET PERSONNE
+  /// NE LA REMPLAÇAIT. `PileE2ee.pour` construisait `E2eeFil(service, appel)`
+  /// sans rien passer : tout le mobile se déclarait donc appareil n° 1, alors
+  /// que son identifiant réel est tiré au sort à l'installation.
+  ///
+  /// 🐛 Conséquence sur la RELÈVE : les enveloppes sont rangées par
+  /// `destinataireDevice`, c'est-à-dire par le numéro PUBLIÉ. En demander
+  /// celles de l'appareil 1 n'aurait rien rendu, même une fois le paramètre
+  /// ajouté.
+  ///
+  /// ⚠️ UNE FONCTION, PAS UN NOMBRE : le numéro vit dans le coffre sécurisé et
+  /// se lit de façon asynchrone, alors que la pile se construit d'un trait.
+  /// C'est ce qui avait fait choisir une valeur par défaut — et une valeur par
+  /// défaut qui décide à votre place finit toujours par décider mal.
+  final Future<int> Function() _monDeviceId;
 
   final E2eeService _service;
   final Future<Map<String, dynamic>> Function(
@@ -140,7 +153,7 @@ class E2eeFil {
 
     await _api('POST', '/api/e2ee/enveloppes', {
       'convId': convId,
-      'deviceId': monDeviceId,
+      'deviceId': await _monDeviceId(),
       'enveloppes': enveloppes,
       'messageId': messageId,
     });
@@ -160,7 +173,20 @@ class E2eeFil {
   /// ⚠️ UNE ENVELOPPE ILLISIBLE NE BLOQUE PAS LES AUTRES. On la compte et on
   /// continue : un message perdu vaut mieux qu'un fil entier qui ne charge plus.
   Future<({List<MessageClair> messages, int illisibles})> relever() async {
-    final r = await _api('GET', '/api/e2ee/enveloppes', null);
+    /*
+     * 🔴 `deviceId` EST OBLIGATOIRE, ET IL MANQUAIT.
+     *
+     * 🐛 Le serveur répondait `400 « deviceId » est requis`. L'exception
+     * remontait dans `_releverChiffres`, qui la rattrape en silence : le mobile
+     * n'a donc JAMAIS relevé une seule enveloppe. Les messages reçus
+     * arrivaient par le temps réel, sans texte, et le restaient.
+     *
+     * ⚠️ `outils/contrat_routes.py` NE POUVAIT PAS LE VOIR : il compare le
+     * verbe et le CHEMIN, et la chaîne de requête n'en fait pas partie. Un
+     * paramètre obligatoire absent ressemble à un appel parfaitement valide.
+     */
+    final r = await _api(
+      'GET', '/api/e2ee/enveloppes?deviceId=${await _monDeviceId()}', null);
     final brutes = listeDe(r, 'enveloppes');
 
     final messages = <MessageClair>[];

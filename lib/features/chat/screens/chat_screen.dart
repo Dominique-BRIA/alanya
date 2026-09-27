@@ -2054,6 +2054,21 @@ class _ChatScreenState extends State<ChatScreen>
          */
         _cacheMsg(envoye);
         /*
+         * 🔴 ET DANS LE CACHE PERSISTANT — `_cacheMsg` N'ÉCRIT RIEN SUR LE
+         * DISQUE.
+         *
+         * 🐛 Son nom trompe : il ne remplit que `_replySnapshots`, la table des
+         * APERÇUS DE RÉPONSE, en mémoire. Je l'ai pris pour le cache local, et
+         * notre propre message chiffré n'était donc rangé NULLE PART : au
+         * rechargement, la ligne revenait du serveur sans texte, et
+         * `_garderLeClairConnu` n'avait rien à recoller.
+         *
+         * ⚠️ UN NOM QUI PROMET PLUS QUE LA FONCTION, c'est le même motif que le
+         * commentaire qui décrit une intention : la relecture suivante passe à
+         * côté sans ralentir.
+         */
+        unawaited(MessageCache.upsert(envoye, widget.convId));
+        /*
          * 🔴 ET DANS L'ARCHIVE, SANS QUOI IL NE SURVIT PAS À CET APPAREIL.
          *
          * 🐛 Le mobile archivait ce qu'il REÇOIT et jamais ce qu'il ENVOIE. Nos
