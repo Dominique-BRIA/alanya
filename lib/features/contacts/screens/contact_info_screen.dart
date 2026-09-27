@@ -27,6 +27,7 @@ import '../../chat/chat_repository.dart';
 import '../../chat/screens/shared_content_screen.dart';
 import '../contacts_repository.dart';
 import '../../../core/erreur_lisible.dart';
+import '../../auth/auth_controller.dart';
 
 /// Écran "Info Contact" — design premium glassmorphism, mode sombre prioritaire.
 ///
@@ -693,12 +694,47 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
 
   Future<void> _ouvrirVerification() async {
     final pile = context.e2ee;
-    if (pile == null) return;
+    final monId = context.read<AuthController>().user?.id;
+    if (pile == null || monId == null) return;
     try {
+      /*
+       * 🔴 ON OUVRE LA SESSION NOUS-MÊMES PLUTÔT QUE D'EXIGER UN ÉCHANGE.
+       *
+       * 🐛 Le code réclamait la clé du correspondant dans le coffre local, et
+       * disait « échangez d'abord un message chiffré » quand elle manquait.
+       * Or vérifier AVANT d'écrire est précisément à quoi sert un code de
+       * sécurité : exiger l'échange d'abord retourne l'outil contre son usage.
+       *
+       * `ouvrirSessions` va chercher le paquet de pré-clés, vérifie sa
+       * signature et range l'identité — exactement ce que ferait le premier
+       * envoi, sans envoyer.
+       */
+      final appareils = await pile.service.ouvrirSessions(widget.userId);
+      if (appareils.isEmpty) {
+        throw StateError("Ce contact n’a aucun appareil chiffré.");
+      }
+
       final code = await pile.service.codeSecurite(
-        monId: widget.userId,
+        /*
+         * 🔴 `monId` RECEVAIT L'IDENTIFIANT DU CORRESPONDANT. Le code combine
+         * DEUX moitiés — ma clé avec mon identifiant, la sienne avec le sien.
+         * Lui passer deux fois le même produisait un code qui n'aurait JAMAIS
+         * corresp0ndu à celui du web, et la vérification aurait semblé échouer
+         * alors que rien n'était attaqué.
+         */
+        monId: monId,
         pairId: widget.userId,
-        adressePair: SignalProtocolAddress(widget.userId, 1),
+        /*
+         * ⚠️ L'APPAREIL ÉTAIT CODÉ EN DUR À `1`. Les numéros d'appareil sont
+         * tirés au sort à l'installation : chercher l'identité à l'adresse
+         * `<compte>.1` ne trouvait rien, d'où le « aucune clé connue ».
+         *
+         * ⚠️ N'IMPORTE LEQUEL DE SES APPAREILS CONVIENT : la clé d'identité
+         * est celle de la PERSONNE, la même sur tous ses appareils. C'est ce
+         * qui permet de comparer un code unique avec quelqu'un qui a un
+         * téléphone et un navigateur.
+         */
+        adressePair: SignalProtocolAddress(widget.userId, appareils.first),
       );
       if (!mounted) return;
       await Navigator.of(context).push(MaterialPageRoute(
@@ -709,11 +745,11 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
           onBasculer: () => Navigator.of(context).pop(),
         ),
       ));
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
-      showAppSnackBar(
-        "Aucune clé connue pour ce contact — échangez d'abord un message chiffré.",
-      );
+      // ⚠️ On nomme la panne au lieu d'affirmer une cause : trois fois cette
+      // semaine, la cause devinée était la mauvaise.
+      showAppSnackBar(messageDErreur(context, e));
     }
   }
 

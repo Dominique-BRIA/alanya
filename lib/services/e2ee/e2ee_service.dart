@@ -208,8 +208,37 @@ class E2eeService {
     final e = await chiffreur.encrypt(
       Uint8List.fromList(utf8.encode(texte)),
     );
-    return (type: e.getType(), corps: base64.encode(e.serialize()));
+    return (type: _typeSurLeFil(e.getType()), corps: base64.encode(e.serialize()));
   }
+
+  /// Traduit le type de la bibliothèque Dart vers celui du FIL.
+  ///
+  /// 🔴 LES DEUX BIBLIOTHÈQUES NE NUMÉROTENT PAS PAREIL, ET PERSONNE NE L'AVAIT
+  /// REMARQUÉ :
+  ///
+  /// ```
+  ///   libsignal_protocol_dart   whisperType = 2   prekeyType = 3
+  ///   libsignal-protocol-ts     WHISPER     = 1   PREKEY     = 3
+  /// ```
+  ///
+  /// 🐛 Le mobile posait donc **2** sur le fil pour un message ordinaire. Le
+  /// serveur n'accepte que 1 ou 3 et répondait 400 « enveloppe mal formée » :
+  /// le PREMIER message d'une session passait (type 3), tous les suivants
+  /// tombaient.
+  ///
+  /// ⚠️ LE BANC D'INTEROPÉRABILITÉ NE POUVAIT PAS LE VOIR. Son faux serveur
+  /// RELAYAIT le nombre sans le valider, et le web traite tout ce qui n'est pas
+  /// 3 comme un message ordinaire — donc 2 fonctionnait entre les deux
+  /// bibliothèques. Seul le vrai serveur, qui contrôle, refusait.
+  ///
+  /// 🔴 C'EST LE FIL QUI FAIT FOI, PAS LA BIBLIOTHÈQUE. Le format d'échange est
+  /// celui du web et du serveur ; chaque client traduit à sa frontière. Aligner
+  /// le serveur sur le Dart aurait cassé le web, et l'inverse était impossible.
+  ///
+  /// ⚠️ LA RÉCEPTION N'A RIEN À TRADUIRE : `dechiffrer` ne teste que « est-ce
+  /// 3 ? », ce qui vaut des deux côtés.
+  static int _typeSurLeFil(int type) =>
+      type == CiphertextMessage.prekeyType ? 3 : 1;
 
   /// Déchiffre une enveloppe.
   ///

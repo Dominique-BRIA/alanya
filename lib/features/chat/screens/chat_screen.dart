@@ -87,6 +87,7 @@ import '../chat_media_integration.dart';
 import '../../../widgets/media/gps_preview.dart';
 import 'media_gallery_viewer.dart';
 import '../../../widgets/media/media_picker_sheet.dart';
+import '../../../core/erreur_lisible.dart';
 
 class ChatScreen extends StatefulWidget {
   static String? activeConvId;
@@ -947,6 +948,26 @@ class _ChatScreenState extends State<ChatScreen>
         }
       }
       _scrollToBottom();
+      /*
+       * 🔴 UN MESSAGE CHIFFRÉ ARRIVE VIDE, ET IL FAUT ALLER CHERCHER SON TEXTE.
+       *
+       * 🐛 `_releverChiffres()` n'était appelé qu'à l'ouverture de l'écran. Une
+       * enveloppe déposée APRÈS n'était donc jamais relevée : la ligne du fil
+       * arrivait par le temps réel, sans texte — le serveur n'en a pas — et la
+       * bulle restait vide jusqu'à ce qu'on sorte et revienne.
+       *
+       * ⚠️ LE TEMPS RÉEL PORTE LA LIGNE, PAS LE CONTENU. C'est exactement ce
+       * que le chiffrement de bout en bout implique : le serveur relaie une
+       * enveloppe qu'il ne peut pas ouvrir. Tout écran qui affiche un message
+       * chiffré doit donc faire DEUX pas, et non un.
+       *
+       * ⚠️ SEULEMENT SI LE FIL EST CHIFFRÉ : une conversation ordinaire n'a
+       * aucune enveloppe à relever, et l'appel coûterait une requête par
+       * message reçu.
+       */
+      if (_filChiffre && (msg.content ?? '').isEmpty) {
+        unawaited(_releverChiffres());
+      }
       // Le message vient d'arriver : on le traduit sans attendre la prochaine
       // ouverture du fil. La passe ne reprend que ce qui n'est pas déjà traduit.
       _traduitAutomatiquement();
@@ -1929,6 +1950,73 @@ class _ChatScreenState extends State<ChatScreen>
     _emitTyping(false); // on arrête l'indicateur dès l'envoi
     final rt = context.read<RealtimeClient>();
     final replyId = _replyTo?.id;
+
+    /*
+     * 🔴 LE CHEMIN CHIFFRÉ PASSE AVANT TOUT LE RESTE, ET IL MANQUAIT.
+     *
+     * 🐛 `E2eeFil.envoyer` était ÉCRIT MAIS APPELÉ PAR PERSONNE : `grep
+     * '.envoyer('` ne rendait rien. Dans une conversation chiffrée, le mobile
+     * empruntait donc le chemin ordinaire — celui d'en dessous.
+     *
+     * ⚠️ LE SERVEUR REFUSE, ET C'EST TANT MIEUX : `envoi.ts` rend
+     * `CONVERSATION_CHIFFREE` dès qu'un texte en clair vise une conversation
+     * marquée `e2eeActif`. Mais la branche WebSocket juste en dessous n'attend
+     * AUCUNE réponse : la bulle optimiste s'affichait avec sa coche, le serveur
+     * jetait le message, et il disparaissait au rechargement suivant.
+     *
+     * 🔴 ET LE TEXTE EN CLAIR PARTAIT QUAND MÊME SUR LE FIL. Le serveur ne
+     * l'écrit pas en base, mais il le reçoit — dans une conversation dont
+     * l'écran affiche « chiffré de bout en bout ». C'est la raison la plus
+     * forte de brancher ceci ici, avant la branche temps réel.
+     *
+     * ⚠️ ON NE RETOMBE JAMAIS EN CLAIR SI LE CHIFFREMENT ÉCHOUE : on le dit.
+     * Un repli silencieux est exactement ce qu'un attaquant cherche à
+     * provoquer.
+     */
+    final pile = context.e2ee;
+    final pair = widget.otherUserId;
+    if (_filChiffre && pile != null && pair != null) {
+      setState(() => _sending = true);
+      try {
+        final id = await pile.fil
+            .envoyer(convId: widget.convId, pairId: pair, texte: text);
+        if (!mounted) return;
+        final envoye = Message(
+          id: id,
+          convId: widget.convId,
+          senderId: _myId ?? "",
+          content: text,
+          type: "TEXT",
+          status: "SENT",
+          // ⚠️ Le chemin chiffré ne porte pas encore les réponses citées : la
+          // citation voyagerait en clair. On ne fait pas semblant.
+          replyToId: null,
+          media: const [],
+          createdAt: DateTime.now(),
+        );
+        /*
+         * ⚠️ LE CLAIR VA DANS LE CACHE LOCAL, comme sur le web — décision du
+         * 21/09. Sans lui, NOTRE PROPRE message rede-viendrait vide au
+         * rechargement : aucune enveloppe ne nous est adressée, et le serveur
+         * ne garde que la ligne sans texte.
+         */
+        _cacheMsg(envoye);
+        _inputCtrl.clear();
+        _mentionsEnCours.clear();
+        setState(() {
+          _messages = [..._messages, envoye];
+          _rebuildCombined();
+          _replyTo = null;
+        });
+        _scrollToBottom();
+      } catch (e) {
+        if (mounted) _showError(messageDErreur(context, e));
+      } finally {
+        if (mounted) setState(() => _sending = false);
+      }
+      return;
+    }
+
     if (rt.connected) {
       final tempId = "tmp-${DateTime.now().microsecondsSinceEpoch}";
       final replyMsg = _replyTo;
