@@ -39,7 +39,33 @@ import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
 /// ⚠️ ET CE SERAIT SILENCIEUX. C'est ce qui rend le défaut grave : rien
 /// n'avertirait, ni ici ni en face. Mieux vaut une erreur qui remonte — le
 /// démarrage la rattrape et le chiffrement reste simplement indisponible.
-const _options = AndroidOptions(resetOnError: false);
+///
+/// 🔴 ET UN ESPACE DE NOM À NOUS, SANS QUOI `resetOnError: false` NOUS BLOQUE.
+///
+/// 🐛 Ce coffre partageait l'espace par défaut avec les jetons — donc avec
+/// leurs données héritées d'`EncryptedSharedPreferences`. La migration de ces
+/// données échouait (« Migration failed after algorithm change »), et comme on
+/// refuse d'effacer en silence, CHAQUE lecture levait.
+///
+/// ⚠️ `preparer()` ÉCHOUAIT DONC AVANT TOUT APPEL RÉSEAU, et `demarrer()`
+/// rattrapait sans rien dire : aucune clé publiée, aucune trace. Le serveur
+/// répondait ensuite, à juste titre, « un participant n'a pas publié ses clés »
+/// — et ce participant, c'était nous.
+///
+/// ⚠️ LES DEUX RÉGLAGES SE TIENNENT : refuser l'effacement n'est tenable que
+/// dans un espace dont on maîtrise le contenu. Les mélanger revenait à laisser
+/// les jetons décider du sort des clés Signal.
+///
+/// ⚠️ CE QUE LE CHANGEMENT D'ESPACE COÛTE, ET POURQUOI C'EST ACCEPTABLE : ce
+/// qui était rangé sous l'ancien espace devient inaccessible. Or aucun téléphone
+/// n'y avait d'identité Signal utilisable — la publication échouait depuis
+/// toujours — et la clé maîtresse de l'archive se retrouve à la connexion par
+/// la serrure du mot de passe. Il n'y a donc rien à perdre, et une panne
+/// entière à éviter.
+const _options = AndroidOptions(
+  storageNamespace: 'alanya_e2ee',
+  resetOnError: false,
+);
 
 /// Les magasins que la bibliothèque Signal exige, adossés au coffre matériel.
 ///

@@ -70,7 +70,30 @@ class PileE2ee {
   ///
   /// ⚠️ NE LÈVE JAMAIS. Un réseau coupé au lancement ne doit pas empêcher
   /// l'application de s'ouvrir ; on réessaiera au démarrage suivant.
+  /// Pourquoi la préparation a échoué, s'il y a lieu.
+  ///
+  /// 🔴 CE CHAMP EXISTE PARCE QUE LE SILENCE A COÛTÉ DEUX JOURS. `demarrer()`
+  /// rattrape tout — et c'est juste : un réseau coupé au lancement ne doit pas
+  /// empêcher l'application de s'ouvrir. Mais il ne gardait RIEN.
+  ///
+  /// Le symptôme visible était alors le message du serveur, « un participant
+  /// n'a pas encore publié ses clés », qui désigne le correspondant dans
+  /// l'esprit de qui le lit. La vraie cause était ici, et personne ne pouvait
+  /// la voir.
+  ///
+  /// ⚠️ RATTRAPER SANS GARDER, C'EST EFFACER LA SEULE TRACE. Un `catch` qui
+  /// ne retient pas ce qu'il attrape ne rend pas l'application robuste : il la
+  /// rend muette.
+  Object? echecDemarrage;
+
   Future<void> demarrer() async {
+    /*
+     * ⚠️ REMIS À ZÉRO ICI, ET NON À LA FIN : la branche « première
+     * publication » sort par un `return`, et une remise à zéro placée après
+     * aurait laissé traîner l'échec d'un démarrage précédent — en accusant
+     * une panne déjà réparée.
+     */
+    echecDemarrage = null;
     try {
       await coffre.preparer();
       final deviceId = await coffre.deviceId();
@@ -102,9 +125,13 @@ class PileE2ee {
        * coût ordinaire du démarrage reste une requête.
        */
       await service.reapprovisionnerSiNecessaire(deviceId: deviceId);
-    } catch (_) {
-      // Silencieux ici, mais pas invisible : sans clés publiées, l'écran de
-      // conversation dira « aucun appareil chiffré chez ce correspondant ».
+    } catch (e) {
+      /*
+       * ⚠️ ON NE LÈVE TOUJOURS PAS — l'application doit s'ouvrir. Mais on
+       * RETIENT, pour que l'écran qui bute sur l'absence de clés puisse dire
+       * ce qui a réellement échoué au lieu de laisser accuser l'autre.
+       */
+      echecDemarrage = e;
     }
   }
 

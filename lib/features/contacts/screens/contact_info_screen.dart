@@ -570,7 +570,25 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
        * n'avait pas publié ses clés, pas le correspondant. Le message envoyait
        * chercher exactement du mauvais côté.
        */
-      showAppSnackBar(messageDErreur(context, e));
+      /*
+       * 🔴 NOTRE PROPRE ÉCHEC PASSE AVANT CELUI DU SERVEUR.
+       *
+       * Quand la préparation de cet appareil a échoué au démarrage, le serveur
+       * répond « un participant n'a pas encore publié ses clés » — c'est exact,
+       * mais celui qui le lit comprend « mon correspondant », et va le relancer
+       * pour rien.
+       *
+       * ⚠️ LE PARTICIPANT SANS CLÉS, C'EST NOUS, et nous sommes les seuls à
+       * pouvoir le savoir : le serveur ne voit qu'une identité absente, pas la
+       * raison de son absence.
+       */
+      final echec = pile.echecDemarrage;
+      showAppSnackBar(
+        echec == null
+            ? messageDErreur(context, e)
+            : "Ce téléphone n'a pas pu préparer ses clés de chiffrement : "
+                "${messageDErreur(context, echec)}",
+      );
     }
   }
 
