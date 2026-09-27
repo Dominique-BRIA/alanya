@@ -254,6 +254,43 @@ class CoffreE2ee implements SignalProtocolStore {
   @override
   Future<List<int>> getSubDeviceSessions(String name) async => const [];
 
+  /// Le numéro d'appareil que nous avons ANNONCÉ la dernière fois.
+  ///
+  /// 🔴 IL EXISTE POUR RATTRAPER UNE ERREUR PASSÉE. Les enveloppes ont
+  /// longtemps annoncé l'appareil `1` — une valeur par défaut que personne ne
+  /// remplaçait — alors que l'identité était publiée sous un numéro tiré au
+  /// sort. Le correspondant a donc rangé sa session sous `<compte>.1`.
+  ///
+  /// ⚠️ CORRIGER L'ANNONCE NE SUFFIT PAS, ET C'EST TOUT LE PROBLÈME. Nos
+  /// messages suivants disent venir d'une adresse où le correspondant n'a
+  /// AUCUNE session, et un message ordinaire ne peut pas en ouvrir une : seul
+  /// un message de type 3 le fait. La conversation se bloquerait dans un sens,
+  /// en silence, et pour toujours.
+  Future<String?> lireAppareilAnnonce() => _lire('appareil.annonce');
+  Future<void> noterAppareilAnnonce(int n) => _ecrire('appareil.annonce', '$n');
+
+  /// Efface TOUTES les sessions, pour que les suivantes se rouvrent à neuf.
+  ///
+  /// ⚠️ ON NE PERD AUCUN MESSAGE DÉJÀ LU : le clair est déjà dans le cache et
+  /// dans l'archive. Ce qu'on perd, c'est l'état du ratchet — et c'est
+  /// précisément ce qu'on veut jeter.
+  ///
+  /// ⚠️ L'IDENTITÉ N'EST PAS TOUCHÉE. La recréer ferait apparaître un
+  /// avertissement de changement de clé chez tous les correspondants — une
+  /// alerte de sécurité pour une opération de maintenance.
+  Future<int> effacerToutesLesSessions() async {
+    final tout = await _magasin.readAll(aOptions: _options);
+    final prefixe = _cle('session.');
+    var n = 0;
+    for (final k in tout.keys) {
+      if (k.startsWith(prefixe)) {
+        await _magasin.delete(key: k);
+        n++;
+      }
+    }
+    return n;
+  }
+
   /* ══════════════ PRÉ-CLÉS ══════════════ */
 
   /// 🔴 TOUTES LES PRÉ-CLÉS DANS UNE SEULE ENTRÉE, et c'est un correctif de

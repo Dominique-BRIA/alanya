@@ -99,6 +99,34 @@ class PileE2ee {
       final deviceId = await coffre.deviceId();
 
       /*
+       * 🔴 RATTRAPAGE D'UNE FOIS : NOS MESSAGES DISAIENT VENIR DE L'APPAREIL 1.
+       *
+       * 🐛 `E2eeFil` avait `monDeviceId = 1` en valeur par défaut, que personne
+       * ne remplaçait. Les enveloppes annonçaient donc l'appareil 1 alors que
+       * notre identité était publiée sous un numéro tiré au sort : le
+       * correspondant a rangé sa session sous `<compte>.1`.
+       *
+       * ⚠️ CORRIGER L'ANNONCE NE SUFFIT PAS. Nos messages suivants disent
+       * venir d'une adresse où il n'a AUCUNE session, et un message ordinaire
+       * ne peut pas en ouvrir une — seul un message de type 3 le fait. Il
+       * verrait des bulles vides, pour toujours, sans rien pour l'expliquer.
+       *
+       * 🔴 ON JETTE DONC NOS SESSIONS UNE FOIS. Le prochain message vers chaque
+       * correspondant repartira d'un échange X3DH complet, sous la BONNE
+       * adresse. On ne perd aucun texte : le clair vit dans le cache et dans
+       * l'archive. On ne perd que l'état du ratchet, et c'est ce qu'on veut.
+       *
+       * ⚠️ L'IDENTITÉ N'EST PAS TOUCHÉE : la recréer déclencherait un
+       * avertissement de changement de clé chez tout le monde — une alerte de
+       * sécurité pour une opération de maintenance.
+       */
+      final annonce = int.tryParse(await coffre.lireAppareilAnnonce() ?? '');
+      if (annonce != deviceId) {
+        await coffre.effacerToutesLesSessions();
+        await coffre.noterAppareilAnnonce(deviceId);
+      }
+
+      /*
        * ⚠️ UNE SEULE PUBLICATION COMPLÈTE. L'identité ne change pas, et
        * republier cinquante pré-clés à chaque ouverture coûte cher pour rien —
        * c'est ce qui bloquait le démarrage.
