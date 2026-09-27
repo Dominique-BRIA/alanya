@@ -1403,6 +1403,7 @@ class _ChatScreenState extends State<ChatScreen>
     unawaited(_lireEtatChiffrement());
     unawaited(_verifierChangementDeCle());
     unawaited(_releverChiffres());
+    unawaited(_completerParArchive());
 
     // Charge aussi les appels de cette conversation pour les afficher façon WhatsApp
     _loadCalls();
@@ -1704,6 +1705,48 @@ class _ChatScreenState extends State<ChatScreen>
         },
       ).build(context) as MaterialBanner,
     );
+  }
+
+  /// Va chercher dans l'archive ce qui manque à CETTE conversation.
+  ///
+  /// 🔴 L'ARCHIVE ÉTAIT LÀ, ET IL FALLAIT ALLER LA CHERCHER À LA MAIN — dans
+  /// Paramètres, puis Sauvegarde chiffrée. Ça marchait, et c'est bien le
+  /// problème : la donnée existait, le chemin existait, et seul un geste manuel
+  /// les reliait.
+  ///
+  /// ⚠️ ON NE LE FAIT QUE S'IL MANQUE QUELQUE CHOSE. Une conversation dont
+  /// toutes les bulles ont leur texte n'a rien à restaurer, et déchiffrer
+  /// l'archive entière à chaque ouverture coûterait cher pour rien.
+  ///
+  /// ⚠️ `force: true` — le raccourci du démarrage compare le NOMBRE de blocs
+  /// de l'archive, ce qui ne dit rien de notre cache local. Ici on SAIT qu'il
+  /// manque quelque chose : c'est plus sûr que le raccourci.
+  ///
+  /// ⚠️ ET ON RELIT LE CACHE APRÈS. Restaurer sans relire ne changerait rien à
+  /// l'écran déjà affiché — c'est exactement ce qui obligeait à ressortir de la
+  /// conversation et à y revenir.
+  Future<void> _completerParArchive() async {
+    final pile = context.e2ee;
+    if (pile == null || !_filChiffre) return;
+
+    final manque =
+        _messages.any((m) => m.type == 'TEXT' && (m.content ?? '').isEmpty);
+    if (!manque) return;
+
+    try {
+      final n =
+          await pile.sauvegarde.reprendreAuDemarrage(pile.coffre, force: true);
+      if (n == 0 || !mounted) return;
+
+      final cache = await MessageCache.getConv(widget.convId);
+      if (cache.isEmpty || !mounted) return;
+      setState(() {
+        _messages = _garderLeClairConnu(_messages, cache);
+        _rebuildCombined();
+      });
+    } catch (_) {
+      // Archive fermée ou réseau coupé : l'écran dit déjà « indisponible ».
+    }
   }
 
   Future<void> _releverChiffres() async {

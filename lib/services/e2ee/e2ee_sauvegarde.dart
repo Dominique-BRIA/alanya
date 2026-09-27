@@ -517,7 +517,7 @@ class E2eeSauvegarde {
   /// se tromper ici ne coûte qu'un tour de travail, jamais une donnée.
   ///
   /// ⚠️ NE LÈVE JAMAIS : c'est un rattrapage de fond, pas un préalable.
-  Future<int> reprendreAuDemarrage(CoffreE2ee coffre) async {
+  Future<int> reprendreAuDemarrage(CoffreE2ee coffre, {bool force = false}) async {
     try {
       _maitresse ??= await coffre.lireMaitresse();
       if (_maitresse == null) return 0;
@@ -526,8 +526,18 @@ class E2eeSauvegarde {
       final blocs = (r['blocs'] as List? ?? const []).length;
       if (blocs == 0) return 0;
 
+      /*
+       * ⚠️ `force` CONTOURNE CE RACCOURCI, ET IL LE FAUT. Le compte de blocs
+       * dit si l'ARCHIVE a bougé ; il ne dit rien du cache LOCAL, qui peut
+       * avoir été vidé, remplacé par les lignes sans texte du serveur, ou
+       * n'avoir jamais reçu ce que l'archive contient.
+       *
+       * 🔴 UN RACCOURCI QUI SUPPOSE L'ÉTAT DE L'AUTRE CÔTÉ finit par se
+       * tromper. Celui-ci économise un déchiffrement au démarrage ; il ne doit
+       * pas pouvoir empêcher une conversation ouverte de se remplir.
+       */
       final dejaVus = int.tryParse(await coffre.lireBlocsRepris() ?? '') ?? -1;
-      if (blocs == dejaVus) return 0;
+      if (!force && blocs == dejaVus) return 0;
 
       final restaure = await restaurer();
       await coffre.noterBlocsRepris(blocs);
