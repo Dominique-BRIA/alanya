@@ -216,6 +216,31 @@ class E2eeFil {
         noteEtat(e['convId'] as String, true);
       } catch (_) {
         illisibles++;
+        /*
+         * 🔴 UNE ENVELOPPE ILLISIBLE VEUT DIRE QUE LES DEUX SESSIONS ONT
+         * DIVERGÉ — et sans geste de notre part, ÇA NE SE RÉPARE JAMAIS.
+         *
+         * Le correspondant continue d'écrire avec SA session ; la nôtre ne
+         * correspond plus. Chaque message suivant échouera pareil, en
+         * silence, pour toujours.
+         *
+         * ⚠️ ON EFFACE DONC LA NÔTRE. Elle ne sert plus à rien, et son
+         * absence force notre PROCHAIN envoi à repartir d'un X3DH complet —
+         * un message de type 3, que le correspondant adopte. Les deux côtés
+         * se retrouvent alors sur la même session.
+         *
+         * ⚠️ LE MESSAGE EN COURS RESTE PERDU : sa clé n'existe plus. On
+         * répare la SUITE, pas le passé — et c'est pour cela que l'écran doit
+         * le dire au lieu d'afficher une bulle vide.
+         */
+        try {
+          await _service.oublierSession(
+            e['expediteurId'] as String,
+            e['expediteurDevice'] as int,
+          );
+        } catch (_) {
+          // Le nettoyage ne doit pas empêcher de relever les suivantes.
+        }
       }
     }
 

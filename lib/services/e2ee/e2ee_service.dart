@@ -195,6 +195,33 @@ class E2eeService {
 
     for (final p in paquets) {
       final adresse = SignalProtocolAddress(pairId, p['deviceId'] as int);
+
+      /*
+       * 🔴 UNE SESSION QUI EXISTE NE SE REFAIT PAS. C'ÉTAIT LE CAS, À CHAQUE
+       * ENVOI, ET C'EST UNE FAUTE DE PROTOCOLE.
+       *
+       * 🐛 `processPreKeyBundle` REMPLACE la session. On l'appelait sans
+       * regarder s'il y en avait une : chaque message repartait donc d'un
+       * X3DH neuf, consommait une pré-clé du correspondant, et surtout
+       * ORPHELINAIT la session que lui avait de son côté.
+       *
+       * ⚠️ UNE SESSION SIGNAL EST UN ÉTAT À DEUX. Un seul des deux ne peut pas
+       * la refaire dans son coin : ses messages ordinaires deviennent
+       * indéchiffrables pour l'autre, en silence et définitivement.
+       *
+       * 🐛 C'est ce qui s'est produit en ouvrant l'écran de vérification : il
+       * appelle `ouvrirSessions` pour pouvoir calculer le code, ce qui
+       * remplaçait la session — et les messages suivants du correspondant,
+       * chiffrés avec l'ancienne, n'étaient plus lisibles.
+       *
+       * ⚠️ LE RATCHET EST FAIT POUR DURER. Le refaire à chaque message annule
+       * ce qu'il apporte et coûte une pré-clé à chaque fois.
+       */
+      if (await coffre.containsSession(adresse)) {
+        ouverts.add(p['deviceId'] as int);
+        continue;
+      }
+
       final signee = p['prekeySignee'] as Map<String, dynamic>;
       final unique = p['prekeyUnique'] as Map<String, dynamic>?;
 
@@ -226,6 +253,15 @@ class E2eeService {
     }
     return ouverts;
   }
+
+  /// Jette la session d'un correspondant pour que la prochaine reparte à neuf.
+  ///
+  /// ⚠️ À N'APPELER QUE SUR UN ÉCHEC DE DÉCHIFFREMENT. Une session qui marche
+  /// ne se jette pas : la refaire coûte une pré-clé au correspondant et
+  /// orpheline la sienne. C'est exactement la faute qu'on vient de corriger
+  /// dans `ouvrirSessions`.
+  Future<void> oublierSession(String pairId, int deviceId) =>
+      coffre.deleteSession(SignalProtocolAddress(pairId, deviceId));
 
   /* ══════════════ CHIFFRER / DÉCHIFFRER ══════════════ */
 

@@ -1712,6 +1712,27 @@ class _ChatScreenState extends State<ChatScreen>
 
     try {
       final r = await pile.fil.relever();
+
+      /*
+       * 🔴 UN ÉCHEC DE DÉCHIFFREMENT SE DIT. IL ÉTAIT COMPTÉ ET JAMAIS MONTRÉ.
+       *
+       * `relever()` rend `illisibles` depuis le premier jour, et personne ne
+       * le regardait. Une enveloppe qu'on n'arrive pas à ouvrir produisait
+       * donc exactement le même écran qu'une enveloppe absente : une bulle
+       * vide. Deux situations opposées — « je ne l'ai pas reçue » et « je
+       * l'ai reçue et je n'ai pas pu la lire » — rendues indistinguables.
+       *
+       * ⚠️ C'EST CE SILENCE QUI A COÛTÉ LE PLUS DE TOURS cette semaine. On
+       * nomme, et on dit le geste qui répare : la session vient d'être jetée,
+       * le prochain message envoyé d'ici remettra les deux côtés d'accord.
+       */
+      if (r.illisibles > 0 && mounted) {
+        showAppSnackBar(
+          '${r.illisibles} message(s) chiffré(s) illisible(s) — la session a '
+          'été réinitialisée. Envoyez un message pour la rétablir.',
+        );
+      }
+
       if (r.messages.isEmpty || !mounted) return;
 
       final textes = <String, String>{
