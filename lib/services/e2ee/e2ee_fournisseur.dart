@@ -147,15 +147,41 @@ class PileE2ee {
       String chemin,
       Map<String, dynamic>? corps,
     ) {
+      /*
+       * 🔴 CE `switch` A COÛTÉ UNE PANNE ENTIÈRE, ET C'EST SON `default` QUI
+       * L'A CAUSÉE.
+       *
+       * 🐛 `PUT` n'avait pas de cas. Il tombait donc dans le `default`, qui
+       * envoyait un `PATCH` — sur une route qui n'en expose pas. Réponse : 405,
+       * et aucune clé publiée.
+       *
+       * ⚠️ LE DÉFAUT N'ÉTAIT PAS L'OUBLI, C'ÉTAIT LE `default`. Un oubli se
+       * voit : le code ne compile pas, ou il lève. Ici, l'oubli avait une
+       * porte de sortie qui prenait silencieusement une AUTRE décision — et
+       * qui l'a prise pendant des semaines.
+       *
+       * 🔴 UN `default` QUI DEVINE EST PIRE QU'UNE ERREUR. On lève désormais :
+       * un verbe non prévu doit s'arrêter ici, bruyamment, pas partir sur le
+       * réseau déguisé en autre chose.
+       *
+       * ⚠️ ET LE CONTRÔLE DE ROUTES NE POUVAIT PAS LE VOIR : il comparait le
+       * verbe ÉCRIT dans l'appel à celui qu'expose la route, pas le verbe
+       * RÉELLEMENT ÉMIS. `outils/contrat_routes.py` vérifie maintenant aussi
+       * que chaque verbe utilisé a son cas ici.
+       */
       switch (methode) {
         case 'GET':
           return api.get(chemin);
         case 'POST':
           return api.post(chemin, corps ?? const {});
+        case 'PUT':
+          return api.put(chemin, corps ?? const {});
+        case 'PATCH':
+          return api.patch(chemin, corps ?? const {});
         case 'DELETE':
           return api.delete(chemin, body: corps);
         default:
-          return api.patch(chemin, corps ?? const {});
+          throw ArgumentError('Verbe HTTP non pris en charge : $methode');
       }
     }
 

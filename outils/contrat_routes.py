@@ -16,10 +16,20 @@ ne pouvait lui écrire — en ligne ou non.
 Trois filets, et le défaut passait entre les trois. C'est exactement le genre
 de trou qu'un contrôle statique ferme pour presque rien.
 
-⚠️ CE SCRIPT NE VÉRIFIE QUE LE VERBE ET LE CHEMIN. Les noms de champs du corps
-lui échappent — c'était la deuxième erreur du même appel. Un contrôle plus fin
-demanderait de lire le corps des deux côtés ; celui-ci attrape déjà la classe
-de défaut la plus coûteuse.
+🔴 ET IL VÉRIFIE AUSSI L'ADAPTATEUR, depuis qu'il nous a échappé une fois.
+
+Le verbe ÉCRIT dans l'appel n'est pas forcément le verbe ÉMIS. `PileE2ee.pour`
+traduit la chaîne en méthode du client HTTP, et son `switch` n'avait pas de cas
+`PUT` : la chaîne partait dans le `default`, qui envoyait un `PATCH`. Le
+contrôle comparait `PUT` à la route, trouvait `PUT` accepté, et disait vert —
+pendant que le téléphone recevait 405.
+
+⚠️ UN CONTRÔLE QUI S'ARRÊTE AVANT LA TRADUCTION NE CONTRÔLE QUE L'INTENTION.
+C'est la même erreur que le banc d'interopérabilité, un cran plus bas.
+
+⚠️ CE SCRIPT NE VÉRIFIE PAS LES NOMS DE CHAMPS DU CORPS — c'était la deuxième
+erreur du même appel. Un contrôle plus fin demanderait de lire le corps des
+deux côtés ; celui-ci attrape déjà les deux classes les plus coûteuses.
 
 Usage :
     python outils/contrat_routes.py [chemin/vers/backend-alanya]
@@ -94,6 +104,23 @@ def correspond(appele, declare):
     return True
 
 
+ADAPTATEUR = "lib/services/e2ee/e2ee_fournisseur.dart"
+
+
+def verbes_traduits():
+    """Les verbes que l'adaptateur sait vraiment émettre.
+
+    ⚠️ ON LIT LES `case`, PAS LE `default`. Un `default` qui devine n'est pas
+    une prise en charge : c'est ce qui a transformé un `PUT` en `PATCH`.
+    """
+    src = io.open(ADAPTATEUR, encoding="utf-8").read()
+    debut = src.find("switch (methode)")
+    if debut < 0:
+        return None
+    bloc = src[debut:debut + 900]
+    return set(re.findall(r"case '([A-Z]+)'", bloc))
+
+
 def main():
     racine = sys.argv[1] if len(sys.argv) > 1 else os.path.join("..", "backend-alanya")
     if not os.path.isdir(os.path.join(racine, "src", "app", "api")):
@@ -124,6 +151,18 @@ def main():
             print("VERBE REFUSE    %s %s" % (verbe, chemin))
             print("                la route accepte : %s" % ", ".join(sorted(verbes)))
             print("                %s:%d" % (fichier, ligne))
+            faux += 1
+
+    traduits = verbes_traduits()
+    if traduits is None:
+        print("ECHEC : `switch (methode)` introuvable dans " + ADAPTATEUR)
+        return 1
+    for fichier, ligne, verbe, chemin in appels:
+        if verbe not in traduits:
+            print("VERBE NON TRADUIT  %s %s" % (verbe, chemin))
+            print("                   l'adaptateur ne connaît que : %s"
+                  % ", ".join(sorted(traduits)))
+            print("                   %s:%d" % (fichier, ligne))
             faux += 1
 
     print("appels inspectes : %d - incoherences : %d" % (len(appels), faux))
