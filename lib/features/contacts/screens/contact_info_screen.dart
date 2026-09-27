@@ -26,6 +26,7 @@ import '../../calls/ouvrir_appel_en_cours.dart';
 import '../../chat/chat_repository.dart';
 import '../../chat/screens/shared_content_screen.dart';
 import '../contacts_repository.dart';
+import '../../../core/erreur_lisible.dart';
 
 /// Écran "Info Contact" — design premium glassmorphism, mode sombre prioritaire.
 ///
@@ -550,17 +551,26 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
       if (!mounted) return;
       setState(() => _chiffree = true);
       if (cle != null) await _montrerCleRecuperation(cle);
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       /*
-       * ⚠️ ON N'ACCUSE PAS LE MOT DE PASSE. L'échec vient le plus souvent d'un
-       * correspondant qui n'a pas encore ouvert l'application sur un appareil à
-       * jour — affirmer la mauvaise cause fait chercher au mauvais endroit.
+       * 🔴 ON RÉPÈTE CE QUE LE SERVEUR A DIT, on ne devine plus.
+       *
+       * 🐛 L'ancien message énumérait deux causes possibles — « vérifiez
+       * votre mot de passe, et que votre correspondant a ouvert l'application
+       * récemment » — en espérant tomber juste. Il tombait à côté.
+       *
+       * Le serveur, lui, SAIT : il répond `CLES_MANQUANTES` avec « un
+       * participant n'a pas encore publié ses clés », ou `HORS_PERIMETRE`, ou
+       * `GROUPE_NON_SUPPORTE`. Trois raisons distinctes, trois gestes
+       * différents — et toutes les trois étaient aplaties en une phrase qui
+       * désignait le correspondant.
+       *
+       * ⚠️ LE CAS RÉEL RENCONTRÉ LE 27/09/2026 : c'était CE TÉLÉPHONE qui
+       * n'avait pas publié ses clés, pas le correspondant. Le message envoyait
+       * chercher exactement du mauvais côté.
        */
-      showAppSnackBar(
-        "Le chiffrement n'a pas pu être activé. Vérifiez votre mot de passe, et "
-        "que votre correspondant a ouvert l'application récemment.",
-      );
+      showAppSnackBar(messageDErreur(context, e));
     }
   }
 

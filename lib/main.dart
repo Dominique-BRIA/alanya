@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'services/e2ee/e2ee_fournisseur.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -110,42 +109,6 @@ void main() async {
   await NotificationSettings.instance.load();
   await TraductionAuto.instance.load();
 
-  /*
-   * 🔴 LA PILE DE CHIFFREMENT EST MONTÉE ICI, et son absence expliquait
-   * pourquoi AUCUN écran de chiffrement n'apparaissait : les widgets
-   * existaient, les services aussi, mais rien ne les reliait.
-   *
-   * ⚠️ LIÉE AU COMPTE, PAS À L'APPLICATION : le coffre préfixe ses clés par
-   * l'identifiant. Deux comptes sur le même téléphone ne doivent jamais
-   * partager une identité Signal, sinon les messages de l'un s'ouvriraient
-   * chez l'autre.
-   *
-   * ⚠️ NULLE SI PERSONNE N'EST CONNECTÉ. Les écrans le gèrent en masquant ce
-   * qui touche au chiffrement, plutôt qu'en plantant.
-   */
-  String? idCompte;
-  try {
-    final brut = await storage.userJson;
-    if (brut != null) {
-      final u = jsonDecode(brut) as Map<String, dynamic>;
-      idCompte = (u['alanyaID'] ?? u['id'] ?? u['userId'])?.toString();
-    }
-  } catch (_) {
-    idCompte = null;
-  }
-
-  /*
-   * 🐛 LA PUBLICATION DES CLÉS MANQUAIT — cause du « il n y a pas les clés »
-   * quand le correspondant est hors ligne. Sans publication il n a AUCUNE clé
-   * sur le serveur, et sa présence n y change rien.
-   *
-   * ⚠️ LANCÉE SANS ATTENDRE : l application ne doit pas rester noire pendant un
-   * aller-retour réseau. On ne peut de toute façon pas recevoir avant d avoir
-   * publié.
-   */
-  final pileE2ee = idCompte == null ? null : PileE2ee.pour(authedApi, idCompte);
-  unawaited(pileE2ee?.demarrer() ?? Future<void>.value());
-
   runApp(
     MultiProvider(
       providers: [
@@ -181,8 +144,6 @@ void main() async {
         Provider<ChatRepository>.value(value: ChatRepository(authedApi)),
         Provider<ExportMediasRepository>.value(
             value: ExportMediasRepository(authedApi)),
-        if (idCompte != null)
-          Provider<PileE2ee>.value(value: pileE2ee!),
         Provider<AccountRepository>.value(value: AccountRepository(authedApi)),
         Provider<StatusRepository>.value(value: StatusRepository(authedApi)),
         Provider<AiRepository>.value(value: AiRepository(authedApi)),
@@ -279,6 +240,51 @@ void main() async {
             storage,
             realtime: ctx.read<RealtimeClient>(),
           )..bootstrap(),
+        ),
+        /*
+         * 🔴 LA PILE DE CHIFFREMENT SUIT LE COMPTE CONNECTÉ, elle n'est plus
+         * figée au démarrage.
+         *
+         * 🐛 DEFAUT SIGNALÉ LE 27/09/2026 : « je me connecte, j'ouvre l'info
+         * contact, je ne vois pas Vérifier le code de sécurité ; il faut
+         * relancer l'application ».
+         *
+         * L'identifiant du compte était lu UNE FOIS, avant `runApp`, dans le
+         * profil déjà rangé. Application ouverte déconnectée : cet identifiant
+         * valait `null`, le fournisseur n'était donc PAS ENREGISTRÉ, et il ne
+         * pouvait pas apparaître plus tard. Se connecter n'y changeait rien —
+         * seul un redémarrage relisait le profil.
+         *
+         * ⚠️ TOUT CE QUI TOUCHE AU CHIFFREMENT DISPARAISSAIT DE L'INTERFACE,
+         * et silencieusement : les écrans testent `context.e2ee != null` pour
+         * ne pas planter avant la connexion, donc l'absence ressemblait à une
+         * fonctionnalité désactivée.
+         *
+         * 🔴 LA PILE EST LIÉE AU COMPTE, PAS À L'APPLICATION. Le coffre préfixe
+         * ses clés par l'identifiant : la reconstruire quand le compte change
+         * n'est pas une commodité, c'est ce qui empêche les messages de l'un de
+         * s'ouvrir chez l'autre.
+         *
+         * ⚠️ ON GARDE LA PRÉCÉDENTE TANT QUE LE COMPTE NE CHANGE PAS. Sans ce
+         * test, chaque `notifyListeners` d'`AuthController` — il y en a à
+         * chaque changement de profil — rebâtirait la pile et relancerait une
+         * publication de clés.
+         */
+        ProxyProvider<AuthController, PileE2ee?>(
+          update: (_, auth, precedente) {
+            final id = auth.user?.id;
+            if (id == null) return null;
+            if (precedente != null && precedente.compteId == id) {
+              return precedente;
+            }
+            final pile = PileE2ee.pour(authedApi, id);
+            /*
+             * ⚠️ SANS ATTENDRE : `update` est appelé pendant la construction de
+             * l'arbre. Y attendre le réseau figerait l'affichage.
+             */
+            unawaited(pile.demarrer());
+            return pile;
+          },
         ),
       ],
       child: const AlanyaApp(),

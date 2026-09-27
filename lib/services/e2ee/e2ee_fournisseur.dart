@@ -25,8 +25,15 @@ import 'e2ee_trousseau.dart';
 /// l'identifiant : deux comptes sur le même téléphone ne doivent jamais partager
 /// une identité Signal, sinon les messages de l'un s'ouvriraient chez l'autre.
 class PileE2ee {
-  PileE2ee._(this.coffre, this.service, this.fil, this.sauvegarde)
+  PileE2ee._(this.compteId, this.coffre, this.service, this.fil, this.sauvegarde)
       : trousseau = Trousseau(coffre);
+
+  /// Le compte auquel cette pile appartient.
+  ///
+  /// 🔴 IL SERT À SAVOIR QUAND LA REBÂTIR. Le fournisseur suit l état
+  /// d authentification, qui notifie souvent ; sans cette comparaison, chaque
+  /// changement de profil reconstruirait la pile et republierait des clés.
+  final String compteId;
 
   final CoffreE2ee coffre;
   final E2eeService service;
@@ -127,7 +134,8 @@ class PileE2ee {
 
     final coffre = CoffreE2ee(compteId);
     final service = E2eeService(coffre, appel);
-    return PileE2ee._(coffre, service, E2eeFil(service, appel), E2eeSauvegarde(appel));
+    return PileE2ee._(
+        compteId, coffre, service, E2eeFil(service, appel), E2eeSauvegarde(appel));
   }
 }
 
@@ -139,7 +147,7 @@ class PileE2ee {
 extension E2eeContexte on BuildContext {
   PileE2ee? get e2ee {
     try {
-      return read<PileE2ee>();
+      return read<PileE2ee?>();
     } catch (_) {
       return null;
     }
