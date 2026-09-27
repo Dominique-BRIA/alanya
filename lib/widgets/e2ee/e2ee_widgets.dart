@@ -13,6 +13,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../../services/e2ee/e2ee_service.dart';
 
 /// Le bouclier de la barre de conversation — ticket 4.11.
@@ -88,7 +89,11 @@ class BanniereChiffrement extends StatelessWidget {
         color: const Color(0xFFFFF4E8),
         borderRadius: BorderRadius.circular(10),
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           const Icon(Icons.verified_user, size: 15, color: Color(0xFFB85C38)),
@@ -110,6 +115,40 @@ class BanniereChiffrement extends StatelessWidget {
             const Text(' vérifié',
                 style: TextStyle(fontSize: 11.5, color: Color(0xFF2C6B34))),
           ],
+        ],
+          ),
+          /*
+           * 🔴 LES PIÈCES JOINTES NE SONT PAS CHIFFRÉES, ET IL FAUT LE DIRE ICI.
+           *
+           * 🐛 Le web l'annonçait, le mobile non — il n'avait même pas la
+           * phrase. Un fil marqué « chiffré de bout en bout » y transportait des
+           * fichiers qui ne l'étaient pas, sans que rien ne le signale.
+           *
+           * ⚠️ C'EST PIRE QU'UN MANQUE, C'EST UNE PROMESSE FAUSSE. Quelqu'un qui
+           * lit la première ligne envoie sa photo en croyant qu'elle est
+           * protégée comme son texte. Le chiffrement des médias est remis —
+           * décision du 21/09 — mais le silence, lui, ne se décide pas : il
+           * trompe.
+           *
+           * ⚠️ JUSTE EN DESSOUS, PAS AILLEURS. Dans un écran de réglages,
+           * personne ne la lirait au moment qui compte : celui où l'on joint un
+           * fichier.
+           */
+          const SizedBox(height: 4),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.info_outline, size: 13, color: Color(0xFF9A6B4E)),
+              const SizedBox(width: 7),
+              Flexible(
+                child: Text(
+                  tr(context, 'e2ee_medias_clairs'),
+                  style: const TextStyle(
+                      fontSize: 11.5, color: Color(0xFF9A6B4E)),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );

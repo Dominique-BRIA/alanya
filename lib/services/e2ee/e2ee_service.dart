@@ -11,6 +11,7 @@
 library;
 
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
@@ -49,35 +50,103 @@ class E2eeService {
   /// 🔴 SEULES DES CLÉS PUBLIQUES SORTENT D'ICI. Si une clé privée passait par
   /// cette fonction, tout l'édifice serait faux — c'est le contrôle à faire en
   /// relecture avant tout autre.
+  /// ⚠️ LES IDENTIFIANTS SONT TIRÉS AU SORT, ET CE N'EST PAS COSMÉTIQUE.
+  ///
+  /// 🐛 Ils partaient de zéro : `generatePreKeys(0, 50)` rendait toujours
+  /// 0…50. Republier un lot produisait donc EXACTEMENT les mêmes numéros, et
+  /// le serveur les écarte (`skipDuplicates`) — sans erreur, sans message. Le
+  /// stock ne se serait jamais reconstitué, et rien ne l'aurait dit.
+  ///
+  /// La borne reprend celle du web : le protocole veut un entier moyen, pas un
+  /// entier 64 bits.
+  int _idAuHasard() => Random.secure().nextInt(100000) + 1;
+
   Future<void> publierMesCles({required int deviceId}) async {
     await coffre.preparer();
 
     final identite = await coffre.identiteLocale();
-    final signee = generateSignedPreKey(identite, 0);
+    final signee = generateSignedPreKey(identite, _idAuHasard());
     await coffre.storeSignedPreKey(signee.id, signee);
 
-    final uniques = generatePreKeys(0, lotPreKeys);
+    final uniques = generatePreKeys(_idAuHasard(), lotPreKeys);
     for (final p in uniques) {
       await coffre.storePreKey(p.id, p);
     }
 
-    await api('POST', '/api/e2ee/cles', {
+    /*
+     * 🔴 `PUT`, ET NON `POST` — ET C'EST LA CAUSE D'UNE PANNE ENTIÈRE.
+     *
+     * 🐛 La route `/api/e2ee/cles` n'exporte que `GET`, `PUT` et `DELETE`. Un
+     * `POST` recevait donc 405, et le mobile n'a JAMAIS publié la moindre clé.
+     * Personne ne pouvait lui écrire — en ligne ou non.
+     *
+     * ⚠️ ET LES NOMS DE CHAMPS DIVERGEAIENT AUSSI : le serveur lit `prekeys`
+     * et `id`, pas `prekeysUniques` et `prekeyId`. Trois erreurs sur le même
+     * appel, dont aucune n'était visible : `dart analyze` ne connaît pas les
+     * routes, et le banc d'interopérabilité branche une fausse fonction
+     * réseau — il éprouve le PROTOCOLE, jamais le CONTRAT HTTP.
+     */
+    await api('PUT', '/api/e2ee/cles', {
       'deviceId': deviceId,
       'registrationId': await coffre.getLocalRegistrationId(),
       'cleIdentite': base64.encode(identite.getPublicKey().serialize()),
       'prekeySignee': {
-        'prekeyId': signee.id,
+        'id': signee.id,
         'clePublique': base64.encode(signee.getKeyPair().publicKey.serialize()),
         'signature': base64.encode(signee.signature),
       },
-      'prekeysUniques': uniques
+      'prekeys': uniques
           .map((p) => {
-                'prekeyId': p.id,
+                'id': p.id,
                 'clePublique':
                     base64.encode(p.getKeyPair().publicKey.serialize()),
               })
           .toList(),
     });
+  }
+
+  /// Republie un lot si le SERVEUR dit que le stock est bas.
+  ///
+  /// 🐛 LE SERVEUR RÉCLAMAIT DÉJÀ, ET LE MOBILE N'ÉCOUTAIT PAS.
+  /// `GET /api/e2ee/cles` rend `reapproNecessaire` depuis le premier jour ; le
+  /// web s'en sert, le mobile l'ignorait.
+  ///
+  /// ⚠️ CE QUE ÇA DONNAIT : les 50 pré-clés à usage unique s'épuisent au fil
+  /// des nouveaux correspondants, et le jour où il n'en reste plus, PLUS
+  /// PERSONNE ne peut ouvrir de conversation avec cet appareil. Panne muette :
+  /// rien ne casse chez celui qui la subit, ce sont les AUTRES qui n'arrivent
+  /// plus à lui écrire.
+  ///
+  /// ⚠️ C'EST LE SERVEUR QUI RÉCLAME, PAS LE CLIENT QUI DEVINE. Deux appareils
+  /// consomment le même stock : un client qui compterait tout seul se
+  /// tromperait dès le second.
+  ///
+  /// ⚠️ NE LÈVE JAMAIS. C'est un entretien de fond ; l'échouer ne doit pas
+  /// empêcher d'envoyer le message qu'on est en train d'écrire.
+  Future<bool> reapprovisionnerSiNecessaire({required int deviceId}) async {
+    try {
+      final etat = await api('GET', '/api/e2ee/cles', null);
+      final appareils = (etat['appareils'] as List?) ?? const [];
+      for (final a in appareils) {
+        final m = a as Map<String, dynamic>;
+        if (m['deviceId'] != deviceId) continue;
+        if (m['reapproNecessaire'] != true) return false;
+        /*
+         * ⚠️ ON REPASSE PAR `publierMesCles`, ON NE DUPLIQUE PAS. Elle publie
+         * un lot neuf ET fait tourner la pré-clé signée. Un second chemin
+         * « juste pour les pré-clés » divergerait le jour où l'un changerait.
+         *
+         * ⚠️ ELLE NE REGÉNÈRE PAS L'IDENTITÉ : `preparer()` sort si elle
+         * existe. C'est ce qui rend ce rappel sans danger.
+         */
+        await publierMesCles(deviceId: deviceId);
+        return true;
+      }
+      return false;
+    } catch (_) {
+      // Réseau coupé, serveur ancien : on réessaiera au prochain démarrage.
+      return false;
+    }
   }
 
   /* ══════════════ OUVRIR UNE SESSION ══════════════ */

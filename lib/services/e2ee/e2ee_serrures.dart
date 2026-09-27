@@ -187,12 +187,60 @@ Serrure poserSerrure(
 /// ⚠️ LÈVE SI LE SECRET EST MAUVAIS, et c'est AES-GCM qui le dit. Il n'y a pas
 /// de cas où la clé serait bonne et le déchiffrement échouerait : chercher une
 /// autre cause fait perdre du temps.
+/// Les réglages servis par le serveur — mais seulement s'ils sont les nôtres.
+///
+/// 🔴 LE CLIENT OBÉISSAIT AU SERVEUR SUR LA DÉRIVATION. `algo` et `parametres`
+/// sont écrits par nous à la pose, puis RELUS TELS QUELS à l'ouverture : une
+/// base modifiée pouvait donc choisir la fonction que le téléphone allait
+/// exécuter.
+///
+/// ⚠️ CE N'EST PAS UNE DIVULGATION DE CLÉ, et il faut le dire honnêtement : le
+/// paquet reste chiffré sous la vraie KEK. Ce qu'on évite, c'est le déni de
+/// service — `memoireKio: 4000000` réclame quatre gigaoctets à un téléphone,
+/// qui tombe — et le déclassement le jour où un algorithme plus faible sera
+/// accepté pour lire d'anciennes serrures.
+///
+/// 🔴 ON NE FAIT JAMAIS TOURNER UNE DÉRIVATION DONT UN TIERS CHOISIT LES
+/// PARAMÈTRES. La règle vaut même sans attaque visible.
+///
+/// ⚠️ ON COMPARE À `reglagePour`, déjà la vérité à la pose : une seconde liste
+/// divergerait. Même contrôle, mêmes mots que sur le web.
+Map<String, dynamic> _reglagesSurs(Serrure s) {
+  /*
+   * ⚠️ UN TYPE INCONNU EST REFUSÉ, PAS DEVINÉ. `Serrure.type` est une chaîne
+   * venue du serveur : s'il en invente une, on ne sait pas quels réglages
+   * appliquer, et « au plus proche » serait exactement le déclassement qu'on
+   * cherche à empêcher.
+   */
+  final type = TypeSerrure.values.where((t) => t.name == s.type).firstOrNull;
+  if (type == null) {
+    throw StateError('Serrure refusée : type inconnu « ${s.type} ».');
+  }
+  final attendu = reglagePour(type);
+  if (s.algo != attendu.algo) {
+    throw StateError(
+      'Serrure refusée : le serveur annonce « ${s.algo} » là où cette serrure '
+      "s'écrit en « ${attendu.algo} ».",
+    );
+  }
+  final recu = jsonDecode(s.parametres);
+  if (recu is! Map ||
+      recu.length != attendu.parametres.length ||
+      attendu.parametres.entries.any((e) => recu[e.key] != e.value)) {
+    throw StateError(
+      'Serrure refusée : les paramètres de dérivation ne sont pas ceux '
+      'attendus pour ce type de serrure.',
+    );
+  }
+  return Map<String, dynamic>.from(attendu.parametres);
+}
+
 Uint8List ouvrirArchive(String secret, Serrure s) {
   final kek = _kek(
     secret,
     Uint8List.fromList(base64.decode(s.sel)),
     s.algo,
-    jsonDecode(s.parametres) as Map<String, dynamic>,
+    _reglagesSurs(s),
   );
   return _gcm(
     kek,

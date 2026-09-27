@@ -60,6 +60,7 @@ class CoffreE2ee implements SignalProtocolStore {
   Future<String?> _lire(String k) => _magasin.read(key: _cle(k));
   Future<void> _ecrire(String k, String v) =>
       _magasin.write(key: _cle(k), value: v);
+  Future<void> _effacer(String k) => _magasin.delete(key: _cle(k));
 
   /* ══════════════ IDENTITÉ ══════════════ */
 
@@ -95,17 +96,48 @@ class CoffreE2ee implements SignalProtocolStore {
     return b == null ? null : IdentityKey.fromBytes(base64.decode(b), 0);
   }
 
+  /// 🔴 L'ALERTE VIT DANS LE COFFRE, ET NON PLUS EN MÉMOIRE.
+  ///
+  /// Elle a vécu dans un `Set` de cette classe. Le raisonnement tenait : une
+  /// alerte qui réapparaît à chaque ouverture cesse d'être lue.
+  ///
+  /// ⚠️ MAIS `isTrustedIdentity` REND TOUJOURS `true` : quand on détecte le
+  /// changement, la nouvelle clé est DÉJÀ ÉCRITE. Rien ne pourra le redétecter
+  /// ensuite. L'application fermée avant d'avoir ouvert la conversation, et
+  /// l'avertissement était perdu POUR TOUJOURS — sur un téléphone, qui se
+  /// ferme et se rouvre vingt fois par jour.
+  ///
+  /// 🔴 UNE SUBSTITUTION DE CLÉ RÉUSSIE POUVAIT DONC PASSER INAPERÇUE. C'est le
+  /// seul signal capable de révéler une interposition.
+  ///
+  /// ⚠️ L'ACCUSÉ DE LECTURE CONCILIE LES DEUX : l'alerte persiste tant qu'elle
+  /// n'a pas été vue, puis disparaît définitivement. Elle ne se répète jamais,
+  /// et ne se perd jamais.
+  static const _prefixeChangee = 'cle-changee.';
+
+  /// La clé de ce correspondant a-t-elle changé sans qu'on l'ait dit ?
+  Future<bool> cleAChange(String compte) async =>
+      (await _lire('$_prefixeChangee$compte')) != null;
+
+  /// L'utilisateur a pris acte. ⚠️ CELA NE VALIDE RIEN : seul un code de
+  /// sécurité comparé de vive voix dirait que la nouvelle clé est la bonne.
+  Future<void> oublierAvertissement(String compte) =>
+      _effacer('$_prefixeChangee$compte');
+
+  /// ⚠️ ON N'ÉCRASE PAS UNE ALERTE DÉJÀ POSÉE. Deux changements de suite sans
+  /// que personne n'ait rien vu, ce n'est pas deux alertes : c'est la même, et
+  /// c'est sa PREMIÈRE date qui renseigne.
+  Future<void> _noterChangement(String compte) async {
+    final k = '$_prefixeChangee$compte';
+    if (await _lire(k) != null) return;
+    await _ecrire(k, DateTime.now().toIso8601String());
+  }
+
   /// Range la clé d'un correspondant, et dit si elle a CHANGÉ.
   ///
   /// 🔴 LE `true` EST CE QUI DÉCLENCHE L'AVERTISSEMENT À L'ÉCRAN. Un changement
   /// de clé est soit une réinstallation, soit une interposition — on ne peut pas
   /// les distinguer, donc on le dit sans bloquer, comme sur le web.
-  @override
-  /// ⚠️ LE `true` NE DOIT PAS SE PERDRE. C'est le SEUL signal qu'une clé a
-  /// changé, et personne ne le rattrapera plus tard : la nouvelle clé est déjà
-  /// rangée. On le note donc ici pour que l'écran puisse le lire.
-  final Set<String> correspondantsChanges = {};
-
   @override
   Future<bool> saveIdentity(SignalProtocolAddress address, IdentityKey? id) async {
     if (id == null) return false;
@@ -114,7 +146,16 @@ class CoffreE2ee implements SignalProtocolStore {
     final apres = base64.encode(id.serialize());
     await _ecrire(k, apres);
     final change = avant != null && avant != apres;
-    if (change) correspondantsChanges.add(address.getName());
+    /*
+     * 🔴 ICI, ET NULLE PART AILLEURS. Une ligne plus haut, l'ancienne clé vient
+     * d'être écrasée : ne pas le noter maintenant, c'est ne plus jamais pouvoir
+     * le savoir.
+     *
+     * ⚠️ `getName()` REND LE COMPTE, PAS L'ADRESSE `compte.appareil` — c'est
+     * de la personne qu'on parle à l'écran, et son numéro d'appareil ne lui
+     * dirait rien.
+     */
+    if (change) await _noterChangement(address.getName());
     return change;
   }
 

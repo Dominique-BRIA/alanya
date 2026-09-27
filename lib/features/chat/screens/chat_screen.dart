@@ -1557,7 +1557,16 @@ class _ChatScreenState extends State<ChatScreen>
     final pile = context.e2ee;
     final pair = widget.otherUserId;
     if (pile == null || pair == null) return;
-    if (!pile.coffre.correspondantsChanges.remove(pair)) return;
+    /*
+     * 🔴 ON LIT, ON NE CONSOMME PLUS. L'ancien `Set.remove()` faisait les deux
+     * d'un coup : lire l'alerte SUFFISAIT à la faire disparaître, même si
+     * l'écran se refermait avant d'avoir rien affiché.
+     *
+     * ⚠️ L'ALERTE NE S'ÉTEINT QUE SUR UN GESTE : c'est ce que veut dire un
+     * accusé de LECTURE. Tant que personne n'a touché « Vérifier » ou
+     * « Ignorer », elle revient à la prochaine ouverture.
+     */
+    if (!await pile.coffre.cleAChange(pair)) return;
     if (!mounted) return;
 
     /*
@@ -1570,13 +1579,22 @@ class _ChatScreenState extends State<ChatScreen>
         nomPair: widget.title,
         onVerifier: () {
           ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
+          unawaited(pile.coffre.oublierAvertissement(pair));
           showAppSnackBar(
             'Ouvrez les infos du contact, puis « Chiffrement », pour comparer '
             'le code de sécurité.',
           );
         },
-        onIgnorer: () =>
-            ScaffoldMessenger.of(context).hideCurrentMaterialBanner(),
+        /*
+         * ⚠️ « IGNORER » ÉTEINT L'ALERTE AUSSI, ET DÉFINITIVEMENT. C'est un
+         * accusé de lecture, pas un accord : rien ici ne dit que la nouvelle
+         * clé est la bonne. Mais la personne l'a VUE, et la lui resservir
+         * chaque jour lui apprendrait à la balayer sans la lire.
+         */
+        onIgnorer: () {
+          ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
+          unawaited(pile.coffre.oublierAvertissement(pair));
+        },
       ).build(context) as MaterialBanner,
     );
   }

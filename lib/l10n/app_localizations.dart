@@ -12,6 +12,7 @@ class AppLocalizations {
   String get(String key) => _localizedValues[languageCode]?[key] ?? _localizedValues['fr']?[key] ?? key;
   static const _localizedValues = <String, Map<String, String>>{
 'fr': {
+'e2ee_medias_clairs': 'Les fichiers joints ne sont pas encore chiffrés.',
 'unexpected_error': 'Une erreur inattendue est survenue.',
 'exp_titre': 'Exportation des médias',
 'exp_sub': 'Rassemblez vos photos, vidéos, vocaux et documents reçus dans une seule archive.',
@@ -1198,6 +1199,7 @@ class AppLocalizations {
 'ivr_complaint_service': 'Service plainte',
 },
 'en': {
+'e2ee_medias_clairs': 'Attachments are not encrypted yet.',
 'unexpected_error': 'An unexpected error occurred.',
 'exp_titre': 'Media export',
 'exp_sub': 'Gather the photos, videos, voice notes and documents you received into a single archive.',
@@ -2384,6 +2386,7 @@ class AppLocalizations {
 'ivr_complaint_service': 'Complaint service',
 },
 'es': {
+'e2ee_medias_clairs': 'Los archivos adjuntos aún no están cifrados.',
 'unexpected_error': 'Se ha producido un error inesperado.',
 'exp_titre': 'Exportación de medios',
 'exp_sub': 'Reúna las fotos, vídeos, notas de voz y documentos recibidos en un único archivo.',
@@ -3570,6 +3573,7 @@ class AppLocalizations {
 'ivr_complaint_service': 'Servicio de reclamaciones',
 },
 'de': {
+'e2ee_medias_clairs': 'Anhänge sind noch nicht verschlüsselt.',
 'unexpected_error': 'Ein unerwarteter Fehler ist aufgetreten.',
 'exp_titre': 'Medienexport',
 'exp_sub': 'Fassen Sie empfangene Fotos, Videos, Sprachnachrichten und Dokumente in einem Archiv zusammen.',
@@ -4756,6 +4760,7 @@ class AppLocalizations {
 'ivr_complaint_service': 'Beschwerdedienst',
 },
 'pt': {
+'e2ee_medias_clairs': 'Os anexos ainda não estão cifrados.',
 'unexpected_error': 'Ocorreu um erro inesperado.',
 'exp_titre': 'Exportação de media',
 'exp_sub': 'Reúna as fotos, vídeos, mensagens de voz e documentos recebidos num único arquivo.',
@@ -5942,6 +5947,7 @@ class AppLocalizations {
 'ivr_complaint_service': 'Serviço de reclamações',
 },
 'ru': {
+'e2ee_medias_clairs': 'Вложения пока не шифруются.',
 'unexpected_error': 'Произошла непредвиденная ошибка.',
 'exp_titre': 'Экспорт медиа',
 'exp_sub': 'Соберите полученные фото, видео, голосовые и документы в один архив.',
@@ -7128,6 +7134,7 @@ class AppLocalizations {
 'ivr_complaint_service': 'Служба жалоб',
 },
 'zh': {
+'e2ee_medias_clairs': '附件尚未加密。',
 'unexpected_error': '发生意外错误。',
 'exp_titre': '媒体导出',
 'exp_sub': '把收到的照片、视频、语音和文档整理成一个压缩包。',
@@ -8314,6 +8321,7 @@ class AppLocalizations {
 'ivr_complaint_service': '投诉服务',
 },
 'sv': {
+'e2ee_medias_clairs': 'Bilagor är ännu inte krypterade.',
 'unexpected_error': 'Ett oväntat fel inträffade.',
 'exp_titre': 'Medieexport',
 'exp_sub': 'Samla mottagna foton, videor, röstmeddelanden och dokument i ett enda arkiv.',
@@ -9500,6 +9508,7 @@ class AppLocalizations {
 'ivr_complaint_service': 'Klagomålstjänst',
 },
 'no': {
+'e2ee_medias_clairs': 'Vedlegg er ennå ikke kryptert.',
 'unexpected_error': 'Det oppstod en uventet feil.',
 'exp_titre': 'Medieeksport',
 'exp_sub': 'Samle mottatte bilder, videoer, talemeldinger og dokumenter i ett arkiv.',

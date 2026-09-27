@@ -66,15 +66,35 @@ class PileE2ee {
   Future<void> demarrer() async {
     try {
       await coffre.preparer();
+      final deviceId = await coffre.deviceId();
+
       /*
-       * ⚠️ UNE SEULE PUBLICATION. L identité ne change pas, et republier
-       * cinquante pré-clés à chaque ouverture coûte cher pour rien — c est ce
-       * qui bloquait le démarrage. Le stock se réapprovisionnera quand il
-       * baissera, pas à chaque lancement.
+       * ⚠️ UNE SEULE PUBLICATION COMPLÈTE. L'identité ne change pas, et
+       * republier cinquante pré-clés à chaque ouverture coûte cher pour rien —
+       * c'est ce qui bloquait le démarrage.
        */
-      if (await coffre.dejaPublie()) return;
-      await service.publierMesCles(deviceId: await coffre.deviceId());
-      await coffre.noterPublie();
+      if (!await coffre.dejaPublie()) {
+        await service.publierMesCles(deviceId: deviceId);
+        await coffre.noterPublie();
+        return;
+      }
+
+      /*
+       * 🔴 ET ENSUITE, ON DEMANDE AU SERVEUR S'IL EN FAUT D'AUTRES.
+       *
+       * 🐛 CE RAPPEL MANQUAIT, et le commentaire qui occupait cette place
+       * AFFIRMAIT LE CONTRAIRE : « le stock se réapprovisionnera quand il
+       * baissera ». Rien ne l'implémentait. Les 50 pré-clés à usage unique
+       * s'épuisaient, et au 51ᵉ correspondant plus personne ne pouvait ouvrir
+       * de conversation avec ce téléphone — en silence.
+       *
+       * ⚠️ UN COMMENTAIRE QUI DÉCRIT UNE INTENTION COMME UN FAIT est pire que
+       * pas de commentaire : il fait passer la relecture suivante à côté.
+       *
+       * ⚠️ UN SEUL APPEL, ET IL NE PUBLIE QUE SI LE SERVEUR LE DEMANDE : le
+       * coût ordinaire du démarrage reste une requête.
+       */
+      await service.reapprovisionnerSiNecessaire(deviceId: deviceId);
     } catch (_) {
       // Silencieux ici, mais pas invisible : sans clés publiées, l'écran de
       // conversation dira « aucun appareil chiffré chez ce correspondant ».
