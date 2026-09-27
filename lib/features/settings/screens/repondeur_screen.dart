@@ -484,7 +484,19 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
      * confonde, et assez peu pour que tout se décale d'un jour.
      */
     final jour = loc.narrowWeekdays[plage.jour % 7];
-    final base = '$jour · ${_heure(plage.debutMin)} – ${_heure(plage.finMin)}';
+    /*
+     * 🔴 « lun · 21:00 – 06:00 » SE LIRAIT COMME UNE ERREUR. C'est la forme
+     * qu'on affichait, et elle est illisible dès qu'une plage traverse minuit :
+     * on y voit une fin qui précède son début sur une seule journée, donc une
+     * saisie ratée.
+     *
+     * On nomme donc les DEUX jours. Le modulo referme la semaine — une nuit du
+     * dimanche se termine un lundi.
+     */
+    final base = plage.finMin > plage.debutMin
+        ? '$jour · ${_heure(plage.debutMin)} – ${_heure(plage.finMin)}'
+        : '$jour ${_heure(plage.debutMin)} → '
+              '${loc.narrowWeekdays[(plage.jour + 1) % 7]} ${_heure(plage.finMin)}';
     /*
      * ⚠️ L'ACCUEIL PROPRE À LA PLAGE SE VOIT, sans quoi on ne saurait plus
      * lequel on a choisi — et le choix, fait une fois dans une feuille qui se
@@ -665,17 +677,29 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
     final debutMin = debut.hour * 60 + debut.minute;
     final finMin = fin.hour * 60 + fin.minute;
     /*
-     * ⚠️ REFUSÉ ICI AUSSI, et pas seulement par la route. Une plage qui finit
-     * avant de commencer ne s'ouvrirait jamais ; le serveur la refuse, mais son
-     * refus arriverait après l'aller-retour, alors que l'écran sait déjà.
+     * 🔴 UNE FIN AVANT LE DÉBUT SIGNIFIE « TRAVERSE MINUIT ».
      *
-     * ⚠️ ET AVEC SON PROPRE MESSAGE. Réutiliser « choisissez au moins un jour »
-     * aurait coûté une clé de moins et envoyé la personne vérifier ses jours,
-     * qui n'ont rien à voir avec le problème.
+     * 🐛 Ce test disait `finMin <= debutMin` et refusait donc « 21 h → 6 h »,
+     * signalé par le user le 26/09/2026. Une nuit est le cas le plus naturel
+     * qu'on puisse demander à un répondeur, et c'était le seul interdit.
+     *
+     * ⚠️ REFUSÉ ICI AUSSI, et pas seulement par la route : son refus arriverait
+     * après l'aller-retour, alors que l'écran sait déjà.
+     *
+     * ⚠️ SEULE L'ÉGALITÉ RESTE REFUSÉE. `21 h → 21 h` est ambigu — zéro minute,
+     * ou vingt-quatre heures ? Qui veut la journée entière saisit 0 h → 24 h.
      */
-    if (finMin <= debutMin) {
+    if (finMin == debutMin) {
       showAppSnackBar(tr(context, 'vm_prog_order'));
       return;
+    }
+    /*
+     * ⚠️ ON DIT CE QU'ON VA ENREGISTRER. Deux champs « de » et « à » suggèrent
+     * une seule journée : sans ce mot, la personne croit s'être trompée — c'est
+     * exactement ce qui a fait conclure à un problème de format.
+     */
+    if (finMin < debutMin) {
+      showAppSnackBar(tr(context, 'vm_prog_night'));
     }
 
     await _ecrirePlages(
@@ -710,15 +734,25 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
     // 0 = dimanche. `% 7` fait exactement la conversion.
     final jour = maintenant.weekday % 7;
     final minutes = maintenant.hour * 60 + maintenant.minute;
-    return _plages.any(
-      (p) =>
-          !p.expiree &&
-          p.jour == jour &&
-          // Début inclus, fin EXCLUE — sans quoi deux plages qui se touchent
-          // se disputeraient la minute de bascule.
-          minutes >= p.debutMin &&
-          minutes < p.finMin,
-    );
+    /*
+     * ⚠️ LA MÊME RÈGLE QUE `plageCouvreMaintenant` DU SERVEUR, y compris la nuit.
+     * Ce calcul-ci ne décide de rien — il n'allume qu'un libellé à l'écran — mais
+     * s'il diverge, l'écran annonce « programmation en cours » quand elle ne
+     * l'est pas, ou l'inverse. Un écran qui contredit le serveur coûte plus cher
+     * qu'un écran muet.
+     *
+     * Début inclus, fin EXCLUE — sans quoi deux plages qui se touchent se
+     * disputeraient la minute de bascule.
+     */
+    return _plages.any((p) {
+      if (p.expiree) return false;
+      if (p.finMin > p.debutMin) {
+        return p.jour == jour && minutes >= p.debutMin && minutes < p.finMin;
+      }
+      // Traverse minuit : la soirée du jour choisi, puis le matin du lendemain.
+      if (p.jour == jour && minutes >= p.debutMin) return true;
+      return jour == (p.jour + 1) % 7 && minutes < p.finMin;
+    });
   }
 
   /// Une entrée de la liste des trois cas.
