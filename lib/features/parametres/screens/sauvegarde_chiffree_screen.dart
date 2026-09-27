@@ -90,6 +90,40 @@ class _SauvegardeChiffreeScreenState extends State<SauvegardeChiffreeScreen> {
   /// 🔴 LA SEULE SORTIE quand l'archive vient d'un autre appareil. Les douze
   /// mots viennent de l'utilisateur : nous ne les avons jamais eus, et c'est
   /// tout l'intérêt.
+  /// Rouvre l'archive avec le mot de passe du compte, puis restaure.
+  ///
+  /// ⚠️ LE MÊME GESTE QUE LA CONNEXION FAIT TOUTE SEULE, offert ici parce que
+  /// personne ne se déconnecte pour récupérer son historique.
+  Future<void> _ouvrirParMotDePasse() => _avec(() async {
+        final pile = context.e2ee;
+        if (pile == null) return;
+
+        final saisie = await _demanderTexte(
+          titre: 'Ouvrir la sauvegarde',
+          explication:
+              'Saisissez le mot de passe de votre compte. Il ne quitte pas '
+              'cet appareil : il sert à ouvrir la serrure, rien de plus.',
+          champ: 'Mot de passe',
+        );
+        if (saisie == null || saisie.isEmpty) return;
+
+        final ok =
+            await pile.sauvegarde.ouvrirParMotDePasse(saisie, pile.coffre);
+        if (!mounted) return;
+        if (!ok) {
+          showAppSnackBar("Ce mot de passe n'ouvre pas la sauvegarde.");
+          return;
+        }
+        final r = await pile.sauvegarde.restaurer();
+        if (!mounted) return;
+        showAppSnackBar(
+          r.illisibles == 0
+              ? '${r.messages.length} message(s) restauré(s).'
+              : '${r.messages.length} message(s) restauré(s), '
+                  '${r.illisibles} bloc(s) illisible(s).',
+        );
+      });
+
   Future<void> _restaurerAvecCle() => _avec(() async {
         final pile = context.e2ee;
         if (pile == null) return;
@@ -348,6 +382,21 @@ class _SauvegardeChiffreeScreenState extends State<SauvegardeChiffreeScreen> {
                 OutlinedButton(
                   onPressed: _occupe ? null : _restaurerAvecCle,
                   child: const Text('Restaurer avec ma clé de récupération'),
+                ),
+                /*
+                 * 🔴 LA SORTIE LA PLUS ÉVIDENTE MANQUAIT. L'écran ne proposait que
+                 * les douze mots — sur un papier, quelque part — et le
+                 * trousseau, lié à un appareil qu'on n'a peut-être plus. Le mot
+                 * de passe, lui, est dans la tête de la personne.
+                 *
+                 * ⚠️ C'EST LE CHEMIN D'UN SECOND APPAREIL : l'archive vient du
+                 * navigateur, ce téléphone ne l'a jamais ouverte, et sans cela
+                 * tout l'historique restait fermé sans qu'on sache quoi faire.
+                 */
+                const SizedBox(height: 8),
+                OutlinedButton(
+                  onPressed: _occupe ? null : _ouvrirParMotDePasse,
+                  child: const Text('Ouvrir avec mon mot de passe'),
                 ),
                 if (_trousseauPossible) ...[
                   const SizedBox(height: 8),

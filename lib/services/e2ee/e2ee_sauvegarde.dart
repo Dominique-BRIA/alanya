@@ -153,7 +153,6 @@ class E2eeSauvegarde {
        * entière, et effacerait les messages en clair d'avant le chiffrement.
        * On ajoute, on ne substitue pas.
        */
-      await _ecrireDansLeCache(r.messages);
       return (restaures: r.messages.length, illisibles: r.illisibles);
     } catch (_) {
       /*
@@ -232,7 +231,45 @@ class E2eeSauvegarde {
     CoffreE2ee coffre,
   ) async {
     final etat = await lireCoffre();
-    if (etat.serrures.isNotEmpty) return null;
+    if (etat.serrures.isNotEmpty) {
+      /*
+       * 🔴 UNE ARCHIVE EXISTE : ON L'OUVRE. On ne la remplace pas, mais sortir
+       * sans rien faire était tout aussi mauvais.
+       *
+       * 🐛 C'ÉTAIT UN `return null` SEC, et voici ce qu'il coûtait. Quelqu'un
+       * qui avait déjà une archive — créée depuis le web — activait le
+       * chiffrement sur son téléphone, tapait son mot de passe... et la clé
+       * maîtresse n'était JAMAIS rangée sur l'appareil.
+       *
+       * Conséquence exacte, observée le 27/09 : les messages REÇUS revenaient
+       * (ils passent par les enveloppes) mais pas ceux qu'on avait ENVOYÉS, ni
+       * aucune conversation menée d'un navigateur à l'autre — tout ce qui
+       * dépend de l'archive, et rien d'autre.
+       *
+       * ⚠️ LE MOT DE PASSE VIENT D'ÊTRE TAPÉ, ET C'EST TOUT L'INTÉRÊT DE SA
+       * SERRURE. La demander puis ne pas s'en servir était le pire des deux
+       * mondes : on dérange la personne et on n'ouvre rien.
+       *
+       * ⚠️ ON REND TOUJOURS `null` : il n'y a pas de NOUVELLE clé de
+       * récupération à montrer, celle de l'archie d'origine reste la bonne.
+       */
+      final mdp = etat.serrures.where((s) => s.type == 'motdepasse');
+      if (mdp.isNotEmpty && _maitresse == null) {
+        try {
+          _maitresse = ouvrirArchive(motDePasse, mdp.first);
+          await coffre.rangerMaitresse(_maitresse!);
+        } catch (_) {
+          /*
+           * ⚠️ MOT DE PASSE QUI NE CORRESPOND PAS À LA SERRURE — le cas
+           * arrive quand il a changé depuis. Le chiffrement de la conversation
+           * s'active quand même : il ne dépend pas de l'archive. C'est
+           * l'historique qui restera fermé, et la clé de récupération est là
+           * pour ça.
+           */
+        }
+      }
+      return null;
+    }
 
     final cle = tirerCleRecuperation();
     final a = creerArchive({
@@ -387,7 +424,22 @@ class E2eeSauvegarde {
         illisibles++;
       }
     }
-    return (messages: vus.values.toList(), illisibles: illisibles);
+    /*
+     * 🔴 ON ÉCRIT ICI, ET NON CHEZ CHAQUE APPELANT.
+     *
+     * 🐛 L'écriture vivait dans `aLaConnexion`. L'écran de sauvegarde, lui,
+     * appelle `restaurer()` directement — pour la clé de récupération comme
+     * pour le trousseau. Il annonçait « 42 message(s) restauré(s) » et n'en
+     * rangeait AUCUN : deux chemins sur trois jetaient ce qu'ils venaient de
+     * déchiffrer.
+     *
+     * ⚠️ UNE OPÉRATION QUI N'EST COMPLÈTE QU'À CONDITION QUE L'APPELANT AJOUTE
+     * UNE LIGNE finira par rencontrer un appelant qui l'oublie. La remonter ici
+     * supprime la question.
+     */
+    final messages = vus.values.toList();
+    await _ecrireDansLeCache(messages);
+    return (messages: messages, illisibles: illisibles);
   }
 
   /// Supprime tout — blocs ET serrures — et mémorise le refus.
@@ -478,12 +530,36 @@ class E2eeSauvegarde {
       if (blocs == dejaVus) return 0;
 
       final restaure = await restaurer();
-      await _ecrireDansLeCache(restaure.messages);
       await coffre.noterBlocsRepris(blocs);
       return restaure.messages.length;
     } catch (_) {
       // Réseau coupé, archive fermée : on réessaiera au lancement suivant.
       return 0;
+    }
+  }
+
+  /// Rouvre l'archive avec le mot de passe du compte.
+  ///
+  /// 🔴 IL MANQUAIT, ET C'ÉTAIT LA SORTIE LA PLUS ÉVIDENTE. L'écran ne
+  /// proposait que les douze mots — qui sont sur un papier, quelque part — et
+  /// le trousseau, lié à un appareil qu'on n'a peut-être plus. Le mot de passe,
+  /// lui, est dans la tête de la personne, et sa serrure existe déjà.
+  ///
+  /// ⚠️ REND `false` SUR UN MAUVAIS MOT DE PASSE, sans autre explication :
+  /// AES-GCM authentifie, il n'y a pas de cas où la clé serait bonne et
+  /// l'ouverture échouerait.
+  Future<bool> ouvrirParMotDePasse(String motDePasse, CoffreE2ee coffre) async {
+    try {
+      final etat = await lireCoffre();
+      final mdp = etat.serrures.where((s) => s.type == 'motdepasse');
+      if (mdp.isEmpty) return false;
+
+      final cle = ouvrirArchive(motDePasse, mdp.first);
+      _maitresse = cle;
+      await coffre.rangerMaitresse(cle);
+      return true;
+    } catch (_) {
+      return false;
     }
   }
 
