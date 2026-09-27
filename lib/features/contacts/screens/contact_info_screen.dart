@@ -100,6 +100,32 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
     _loadMuted();
     _loadLangue();
     _loadSharedMedia();
+    _lireEtatChiffrement();
+  }
+
+  /// L'état réel du chiffrement, demandé au serveur.
+  ///
+  /// 🔴 `_chiffree` NE PARTAIT QUE DE `false` ET N'ÉTAIT JAMAIS LU. Il ne
+  /// passait à `true` qu'après une activation réussie DANS CETTE INSTANCE de
+  /// l'écran — donc jamais, en pratique, puisqu'on le rouvre à chaque fois.
+  ///
+  /// 🐛 Conséquence : « Vérifier le code de sécurité » menait à l'ACTIVATION,
+  /// qui réclame le mot de passe. À chaque ouverture, pour une conversation
+  /// déjà chiffrée depuis longtemps.
+  ///
+  /// ⚠️ UN ÉTAT QUI DÉCIDE D'UNE ACTION SE LIT, IL NE SE SUPPOSE PAS. Partir
+  /// de `false` revenait à affirmer « ce n'est pas chiffré » sans avoir
+  /// demandé — et à faire payer cette supposition à l'utilisateur.
+  Future<void> _lireEtatChiffrement() async {
+    final pile = context.e2ee;
+    final convId = widget.convId;
+    if (pile == null || convId == null) return;
+    try {
+      final r = await pile.fil.etat(convId);
+      if (mounted && r != _chiffree) setState(() => _chiffree = r);
+    } catch (_) {
+      // Sans réponse, on n'affirme rien de plus qu'avant.
+    }
   }
 
   Future<void> _loadLangue() async {

@@ -966,11 +966,45 @@ class _ChatScreenState extends State<ChatScreen>
        * message reçu.
        */
       if (_filChiffre && (msg.content ?? '').isEmpty) {
-        unawaited(_releverChiffres());
+        /*
+         * ⚠️ UN REPLI, ET IL DOIT ATTENDRE. `e2ee_arrivee` ci-dessous fait le
+         * travail dans le cas normal ; celui-ci ne sert que si le pont temps
+         * réel n'a pas pu prévenir — `previensDesPersonnes` rend `false` sans
+         * lever quand il est absent.
+         *
+         * ⚠️ RELEVER TOUT DE SUITE NE SERVIRAIT À RIEN : les enveloppes sont
+         * déposées après la ligne du fil. C'était le défaut de ma première
+         * correction — le bon appel, au mauvais moment.
+         */
+        Future<void>.delayed(const Duration(seconds: 2), () {
+          if (!mounted) return;
+          final toujoursVide = _messages
+              .any((x) => x.id == msg.id && (x.content ?? '').isEmpty);
+          if (toujoursVide) unawaited(_releverChiffres());
+        });
       }
       // Le message vient d'arriver : on le traduit sans attendre la prochaine
       // ouverture du fil. La passe ne reprend que ce qui n'est pas déjà traduit.
       _traduitAutomatiquement();
+    } else if (type == "e2ee_arrivee") {
+      /*
+       * 🔴 LE SIGNAL QUI DIT QUE LES ENVELOPPES SONT LÀ — ET LE MOBILE NE
+       * L'ÉCOUTAIT PAS.
+       *
+       * 🐛 Un message chiffré part en DEUX temps : la ligne du fil d'abord,
+       * les enveloppes ensuite. L'événement `message` arrive donc AVANT que le
+       * texte n'existe côté serveur : relever à ce moment-là ne trouve rien,
+       * et la bulle reste vide jusqu'à ce qu'on rouvre la conversation.
+       *
+       * Le serveur émet `e2ee_arrivee` APRÈS le dépôt, exactement pour ça. Le
+       * web l'écoute depuis toujours — `websocket-service.ts:490` — et c'est
+       * pourquoi l'affichage y était immédiat.
+       *
+       * ⚠️ DEUX ÉVÉNEMENTS POUR UN MESSAGE, C'EST LE PRIX DU BOUT EN BOUT : le
+       * serveur ne peut pas annoncer un contenu qu'il ne sait pas lire.
+       */
+      if (e["convId"] != widget.convId) return;
+      unawaited(_releverChiffres());
     } else if (type == "read") {
       if (e["convId"] != widget.convId) return;
       setState(() {
