@@ -6,6 +6,7 @@ import '../../../services/e2ee/e2ee_fournisseur.dart';
 import '../../../widgets/e2ee/e2ee_widgets.dart';
 import '../frontiere_chiffrement.dart';
 import '../fusion_releve.dart';
+import '../statut_envoi.dart';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -941,7 +942,9 @@ class _ChatScreenState extends State<ChatScreen>
         final idx =
             tempId != null ? _messages.indexWhere((m) => m.id == tempId) : -1;
         if (idx >= 0) {
-          _messages[idx] = msg;
+          // Un « lu » a pu se poser sur la bulle avant l'écho : il reste.
+          _messages[idx] = msg.avecStatut(statutFusionne(
+              affiche: _messages[idx].status, recu: msg.status));
         } else if (!_messages.any((m) => m.id == msg.id)) {
           _messages = [..._messages, msg];
         }
@@ -1044,8 +1047,13 @@ class _ChatScreenState extends State<ChatScreen>
                   : null);
           if (ms != null) _avanceLecture(lecteur, ms);
         }
+        // ⚠️ « EN ATTENTE » EST MARQUÉ LU, ET C'EST VOULU : le destinataire
+        // peut lire avant que le serveur nous ait répondu (voir
+        // `statutFusionne`). Un message en ÉCHEC, lui, n'est jamais parti.
         _messages = _messages
-            .map((m) => m.senderId == _myId && m.status != "READ"
+            .map((m) => m.senderId == _myId &&
+                    m.status != "READ" &&
+                    m.status != "FAILED"
                 ? Message(
                     id: m.id,
                     chiffre: m.chiffre,
@@ -2296,7 +2304,8 @@ class _ChatScreenState extends State<ChatScreen>
       setState(() {
         final i = _messages.indexWhere((m) => m.id == tempId);
         if (i >= 0) {
-          _messages[i] = msg;
+          _messages[i] = msg.avecStatut(
+              statutFusionne(affiche: _messages[i].status, recu: msg.status));
         } else if (!_messages.any((m) => m.id == msg.id)) {
           _messages = [..._messages, msg];
         }
@@ -2397,7 +2406,17 @@ class _ChatScreenState extends State<ChatScreen>
       setState(() {
         final i = _messages.indexWhere((m) => m.id == tempId);
         if (i >= 0) {
-          _messages[i] = envoye;
+          /*
+           * 🔴 LA RÉPONSE NE DOIT PAS EFFACER UN « LU » DÉJÀ REÇU.
+           *
+           * 🐛 Le serveur prévient le destinataire AVANT d'attendre Google
+           * pour la notification push, et ne nous répond qu'APRÈS. Un
+           * destinataire qui a la conversation ouverte a le temps de lire :
+           * la bulle passait « lu », puis cette ligne la remettait « envoyé »
+           * — pour toujours. Voir `statutFusionne`.
+           */
+          _messages[i] = envoye.avecStatut(
+              statutFusionne(affiche: _messages[i].status, recu: envoye.status));
         } else if (!_messages.any((m) => m.id == id)) {
           _messages = [..._messages, envoye];
         }

@@ -183,6 +183,30 @@ class Message {
   /// Vrai si le message a été supprimé pour tout le monde.
   bool get isDeleted => deletedAt != null;
 
+  /// Le même message, dans un autre état — tout le reste est gardé.
+  Message avecStatut(String nouveau) => nouveau == status
+      ? this
+      : Message(
+          id: id,
+          convId: convId,
+          senderId: senderId,
+          content: content,
+          type: type,
+          status: nouveau,
+          replyToId: replyToId,
+          media: media,
+          createdAt: createdAt,
+          deletedAt: deletedAt,
+          editedAt: editedAt,
+          expiresAt: expiresAt,
+          replyTo: replyTo,
+          reactions: reactions,
+          starred: starred,
+          mentions: mentions,
+          statutCite: statutCite,
+          chiffre: chiffre,
+        );
+
   factory Message.fromJson(Map<String, dynamic> j) => Message(
         id: j["id"] as String,
         convId: j["convId"] as String,
