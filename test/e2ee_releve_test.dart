@@ -346,6 +346,27 @@ void main() {
     });
   });
 
+  group('⑦ un appareil de plus chez un correspondant', () {
+    // Un serveur qui AJOUTE un appareil à Bob (dont il détient la clé) ferait
+    // chiffrer Alice pour lui : cela doit se voir, comme un changement de clé.
+    test('le second appareil de Bob alerte Alice ; un premier contact, non', () async {
+      await alice.fil.envoyer(convId: 'fil-ab', pairId: 'bob', texte: 'un');
+      expect(await alice.coffre.cleAChange('bob'), isFalse,
+          reason: 'le premier appareil d’un contact n’a rien remplacé');
+
+      final bob2 = Client('bob', serveur, stockage: 'bob-2');
+      await bob2.demarrer();
+      await alice.fil.envoyer(convId: 'fil-ab', pairId: 'bob', texte: 'deux');
+      expect(await alice.coffre.cleAChange('bob'), isTrue,
+          reason: 'un appareil ajouté chez Bob est passé sans alerte');
+
+      final carole = Client('carole', serveur);
+      await carole.demarrer();
+      await alice.fil.envoyer(convId: 'fil-ac', pairId: 'carole', texte: 'salut');
+      expect(await alice.coffre.cleAChange('carole'), isFalse);
+    });
+  });
+
   group('③ le rangement', () {
     test('reçoit les messages de TOUS les fils, avant tout acquittement', () async {
       final carole = Client('carole', serveur);

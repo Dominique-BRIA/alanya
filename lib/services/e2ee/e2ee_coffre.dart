@@ -153,6 +153,42 @@ class CoffreE2ee implements SignalProtocolStore {
   /// ⚠️ ON N'ÉCRASE PAS UNE ALERTE DÉJÀ POSÉE. Deux changements de suite sans
   /// que personne n'ait rien vu, ce n'est pas deux alertes : c'est la même, et
   /// c'est sa PREMIÈRE date qui renseigne.
+  /// Cet appareil est-il un appareil DE PLUS chez un correspondant déjà connu ?
+  ///
+  /// 🐛 SEUL LE CHANGEMENT DE CLÉ D'UN APPAREIL DÉJÀ VU ÉTAIT SIGNALÉ. Un
+  /// serveur qui voudrait lire les messages de Bob n'a pas besoin de changer sa
+  /// clé : il lui AJOUTE un appareil dont il détient la clé privée, et l'on
+  /// chiffre désormais aussi pour lui — sans alerte. Jumeau du web
+  /// (`saveIdentity` de `e2ee-store.ts`), prouvé par `test/e2ee_releve_test.dart` ⑦.
+  ///
+  /// ⚠️ PAS AU PREMIER CONTACT (rien n'est ajouté à quoi que ce soit), et PAS
+  /// POUR SOI : mes propres appareils s'ajoutent de mon fait (lot 5).
+  ///
+  /// ⚠️ UNE LISTE PAR CORRESPONDANT, tenue ici : le coffre sécurisé ne sait pas
+  /// énumérer ses clés sans tout relire. On ne relit tout qu'UNE fois par
+  /// correspondant, pour amorcer la liste d'une installation antérieure à ce
+  /// correctif — sinon son premier appareil de plus passerait inaperçu.
+  Future<bool> _appareilDePlus(SignalProtocolAddress address) async {
+    final compte = address.getName();
+    if (compte == _compte) return false;
+    final cleListe = 'appareilsConnus.$compte';
+    var connus = (jsonDecode(await _lire(cleListe) ?? 'null') as List?)
+        ?.cast<int>()
+        .toSet();
+    if (connus == null) {
+      final prefixe = _cle('identite.$compte.');
+      connus = {
+        for (final k in (await _magasin.readAll()).keys)
+          if (k.startsWith(prefixe)) int.tryParse(k.substring(prefixe.length)) ?? -1,
+      }..remove(-1);
+    }
+    final deviceId = address.getDeviceId();
+    final dePlus = connus.isNotEmpty && !connus.contains(deviceId);
+    connus.add(deviceId);
+    await _ecrire(cleListe, jsonEncode(connus.toList()));
+    return dePlus;
+  }
+
   Future<void> _noterChangement(String compte) async {
     final k = '$_prefixeChangee$compte';
     if (await _lire(k) != null) return;
@@ -170,6 +206,9 @@ class CoffreE2ee implements SignalProtocolStore {
     final k = 'identite.${address.toString()}';
     final avant = await _lire(k);
     final apres = base64.encode(id.serialize());
+    if (avant == null && await _appareilDePlus(address)) {
+      await _noterChangement(address.getName());
+    }
     await _ecrire(k, apres);
     final change = avant != null && avant != apres;
     /*
