@@ -548,6 +548,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 );
               },
             ),
+            // L'adresse e-mail, sous le pays (demande du user) — absente pour
+            // les comptes créés sans adresse.
+            if ((user.email ?? '').isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.email_outlined, size: 18, color: _muted),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        user.email!,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 15, color: _muted),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
           ],
         ],
       ),
