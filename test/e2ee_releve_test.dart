@@ -181,11 +181,12 @@ class FauxServeur {
 
 /// Un client complet : coffre, service et fil, comme dans `PileE2ee.pour`.
 class Client {
-  Client(this.compte, FauxServeur serveur)
-      : coffre = CoffreE2ee(compte) {
+  /// [stockage] : un second appareil du MÊME compte a son propre coffre.
+  Client(this.compte, FauxServeur serveur, {String? stockage})
+      : coffre = CoffreE2ee(stockage ?? compte) {
     final api = serveur.pour(compte);
     service = E2eeService(coffre, api);
-    fil = E2eeFil(service, api, coffre.deviceId);
+    fil = E2eeFil(service, api, coffre.deviceId, monCompte: compte);
   }
 
   final String compte;
@@ -322,6 +323,26 @@ void main() {
       expect(neufs.length, 100);
       expect(neufs.toSet().length, 100, reason: 'un numéro servi deux fois');
       expect(neufs.reduce((a, b) => a < b ? a : b) > avant.reduce((a, b) => a > b ? a : b), isTrue);
+    });
+  });
+
+  group('⑥ mes autres appareils', () {
+    // 🐛 On ne chiffrait que pour le correspondant : un message écrit depuis
+    // le téléphone n’arrivait jamais sur le navigateur du même compte.
+    test('mon message arrive aussi sur mon second appareil', () async {
+      final alice2 = Client('alice', serveur, stockage: 'alice-2');
+      await alice2.demarrer();
+      expect(await alice2.coffre.deviceId(), isNot(await alice.coffre.deviceId()));
+
+      await alice.fil.envoyer(convId: 'fil-ab', pairId: 'bob', texte: 'pour tous');
+
+      expect((await bob.fil.relever()).messages.map((m) => m.texte), ['pour tous']);
+      final r = await alice2.fil.relever();
+      expect(r.messages.map((m) => m.texte), ['pour tous'],
+          reason: 'aucune enveloppe pour mon autre appareil');
+      expect(r.messages.single.expediteurId, 'alice');
+      // Et l’appareil émetteur ne s’est rien envoyé à lui-même.
+      expect((await alice.fil.relever()).messages, isEmpty);
     });
   });
 

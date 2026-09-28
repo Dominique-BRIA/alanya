@@ -93,7 +93,11 @@ MotifRefus? motifRefus({
 
 /// Le fil chiffré : ce que l'écran de conversation appelle.
 class E2eeFil {
-  E2eeFil(this._service, this._api, this._monDeviceId);
+  E2eeFil(this._service, this._api, this._monDeviceId, {this.monCompte});
+
+  /// Mon compte — pour chiffrer aussi vers MES autres appareils. Sans lui,
+  /// seul le correspondant reçoit le message.
+  final String? monCompte;
 
   /// L'appareil que NOUS sommes, tel qu'il a été publié.
   ///
@@ -177,6 +181,34 @@ class E2eeFil {
         'type': e.type,
         'corps': e.corps,
       });
+    }
+
+    /*
+     * Et une enveloppe pour chacun de MES AUTRES appareils.
+     *
+     * 🐛 ON NE CHIFFRAIT QUE POUR LE CORRESPONDANT : un message écrit d'ici
+     * n'arrivait jamais sur le navigateur du même compte. Prouvé par
+     * `test/e2ee_releve_test.dart`, groupe ⑥. Jumeau du web.
+     *
+     * ⚠️ CET appareil est exclu, et un échec ici n'empêche pas l'envoi : le
+     * correspondant doit recevoir son message même si mon autre appareil est
+     * injoignable — celui-ci le rattrapera par l'archive.
+     */
+    final moi = monCompte;
+    if (moi != null && moi != pairId) {
+      try {
+        final miens =
+            await _service.ouvrirSessions(moi, exclure: await _monDeviceId());
+        for (final deviceId in miens) {
+          final e = await _service.chiffrer(moi, deviceId, texte);
+          enveloppes.add({
+            'destinataireId': moi,
+            'destinataireDevice': deviceId,
+            'type': e.type,
+            'corps': e.corps,
+          });
+        }
+      } catch (_) {}
     }
 
     /*

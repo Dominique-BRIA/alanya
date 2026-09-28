@@ -80,8 +80,9 @@ class E2eeService {
   Future<void> publierMesCles({required int deviceId}) =>
       _enSerie(() => _publierMesCles(deviceId: deviceId));
 
-  Future<List<int>> ouvrirSessions(String pairId) =>
-      _enSerie(() => _ouvrirSessions(pairId));
+  /// [exclure] : CET appareil, quand on vise son propre compte.
+  Future<List<int>> ouvrirSessions(String pairId, {int? exclure}) =>
+      _enSerie(() => _ouvrirSessions(pairId, exclure: exclure));
 
   Future<void> oublierSession(String pairId, int deviceId) =>
       _enSerie(() => _oublierSession(pairId, deviceId));
@@ -249,15 +250,23 @@ class E2eeService {
   ///   ② `?deviceIds=` : un paquet seulement pour ceux sans session, ou dont la
   ///     clé a changé — un appareil RÉINSTALLÉ garde son numéro, mais sa
   ///     session d'avant ne vaut plus rien (groupe ④, second test).
-  Future<List<int>> _ouvrirSessions(String pairId) async {
+  Future<List<int>> _ouvrirSessions(String pairId, {int? exclure}) async {
     final liste = await api('GET', '/api/e2ee/cles/$pairId?liste=1', null);
 
     // Serveur antérieur : il ignore `liste` et rend directement des paquets.
     if (liste['appareils'] is! List) {
-      return _ouvrirDepuisPaquets(pairId, liste, remplacer: false);
+      return _ouvrirDepuisPaquets(pairId, {
+        'paquets': listeDe(liste, 'paquets')
+            .where((p) => p['deviceId'] != exclure)
+            .toList(),
+      }, remplacer: false);
     }
 
-    final appareils = listeDe(liste, 'appareils');
+    // ⚠️ S’ouvrir une session vers soi-même consommerait une de ses propres
+    // pré-clés pour rien : cet appareil a déjà le texte.
+    final appareils = listeDe(liste, 'appareils')
+        .where((a) => a['deviceId'] != exclure)
+        .toList();
     final aOuvrir = <int>[];
     for (final a in appareils) {
       final adresse = SignalProtocolAddress(pairId, a['deviceId'] as int);
