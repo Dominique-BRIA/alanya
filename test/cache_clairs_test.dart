@@ -140,6 +140,36 @@ void main() {
     });
   });
 
+  group('dateCache / dateNormalisee (une seule forme de date)', () {
+    test('une date locale et sa forme UTC donnent la MÊME chaîne', () {
+      final instant = DateTime.utc(2026, 9, 28, 9, 14, 36, 123);
+      expect(dateCache(instant.toLocal()), dateCache(instant));
+      expect(dateCache(instant), '2026-09-28T09:14:36.123Z');
+    });
+
+    test('les microsecondes sont retirées : largeur constante', () {
+      final d = DateTime.utc(2026, 9, 28, 9, 14, 36, 123, 456);
+      expect(dateCache(d), '2026-09-28T09:14:36.123Z');
+    });
+
+    test(
+      'une ancienne ligne écrite en heure du téléphone est ramenée en UTC',
+      () {
+        final instant = DateTime.utc(2026, 9, 28, 9, 14, 36);
+        final brute = instant.toLocal().toIso8601String(); // sans « Z »
+        expect(brute.endsWith('Z'), isFalse);
+        expect(dateNormalisee(brute), dateCache(instant));
+      },
+    );
+
+    test('l’ordre des chaînes est celui des instants', () {
+      // Le défaut d'origine : « 10:14 » local passait après « 09:30Z ».
+      final releve = DateTime.utc(2026, 9, 28, 9, 14).toLocal();
+      final serveur = DateTime.utc(2026, 9, 28, 9, 30);
+      expect(dateCache(releve).compareTo(dateCache(serveur)), lessThan(0));
+    });
+  });
+
   group('texteAEcrire (upsert, page ancienne)', () {
     test('sans texte serveur : le texte connu reste', () {
       expect(texteAEcrire(_msg('a', 1), 'bonjour'), 'bonjour');

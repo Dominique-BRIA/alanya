@@ -49,7 +49,7 @@ class MessageCache {
        * Toute évolution future de ce cache passe désormais par `onUpgrade`, en
        * incrémentant `version`.
        */
-      version: 4,
+      version: 5,
       onUpgrade: (db, ancienne, nouvelle) async {
         if (ancienne < 2) await _creeTableTraductions(db);
         /*
@@ -77,6 +77,36 @@ class MessageCache {
           await db.execute(
               'ALTER TABLE messages ADD COLUMN chiffre INTEGER NOT NULL DEFAULT 0');
         }
+        /*
+         * v5 — L'EXPIRATION, ET UNE SEULE FORME DE DATE.
+         *
+         * `expires_at` : un message éphémère expiré doit quitter le cache. Tant
+         * que `putConv` vidait le fil à chaque ouverture, il partait avec le
+         * reste ; les textes chiffrés anciens étant désormais gardés, il
+         * resterait lisible pour toujours.
+         *
+         * Les dates : voir `dateCache`. Les lignes écrites en heure du
+         * téléphone sont réécrites en UTC, une par une — `DateTime.parse` sait
+         * les relire, SQLite ne le sait pas de façon sûre.
+         */
+        if (ancienne < 5) {
+          await db.execute('ALTER TABLE messages ADD COLUMN expires_at TEXT');
+          final locales = await db.query('messages',
+              columns: ['id', 'created_at', 'deleted_at'],
+              where: "created_at NOT LIKE '%Z' OR deleted_at NOT LIKE '%Z'");
+          for (final l in locales) {
+            final supprime = l['deleted_at'] as String?;
+            await db.update(
+              'messages',
+              {
+                'created_at': dateNormalisee(l['created_at'] as String),
+                'deleted_at': supprime == null ? null : dateNormalisee(supprime),
+              },
+              where: 'id = ?',
+              whereArgs: [l['id']],
+            );
+          }
+        }
       },
       onCreate: (db, _) async {
         await db.execute('''
@@ -93,7 +123,8 @@ class MessageCache {
             created_at TEXT NOT NULL,
             media_json TEXT,
             mentions_json TEXT,
-            chiffre INTEGER NOT NULL DEFAULT 0
+            chiffre INTEGER NOT NULL DEFAULT 0,
+            expires_at TEXT
           )
         ''');
         await db.execute(
@@ -242,8 +273,9 @@ class MessageCache {
           'reply_to_id': m.replyToId,
           'reply_to_snapshot':
               m.replyTo != null ? jsonEncode(_replyToJson(m.replyTo!)) : null,
-          'deleted_at': m.deletedAt?.toIso8601String(),
-          'created_at': m.createdAt.toIso8601String(),
+          'deleted_at': m.deletedAt == null ? null : dateCache(m.deletedAt!),
+          'created_at': dateCache(m.createdAt),
+          'expires_at': m.expiresAt == null ? null : dateCache(m.expiresAt!),
           'media_json': m.media.isNotEmpty ? jsonEncode(_mediaListToJson(m.media)) : null,
           'mentions_json': m.mentions.isNotEmpty
               ? jsonEncode(m.mentions.map((x) => x.toJson()).toList())
@@ -281,8 +313,9 @@ class MessageCache {
         'reply_to_id': m.replyToId,
         'reply_to_snapshot':
             m.replyTo != null ? jsonEncode(_replyToJson(m.replyTo!)) : null,
-        'deleted_at': m.deletedAt?.toIso8601String(),
-        'created_at': m.createdAt.toIso8601String(),
+        'deleted_at': m.deletedAt == null ? null : dateCache(m.deletedAt!),
+        'created_at': dateCache(m.createdAt),
+        'expires_at': m.expiresAt == null ? null : dateCache(m.expiresAt!),
         'media_json': m.media.isNotEmpty ? jsonEncode(_mediaListToJson(m.media)) : null,
           'mentions_json': m.mentions.isNotEmpty
               ? jsonEncode(m.mentions.map((x) => x.toJson()).toList())
@@ -298,35 +331,54 @@ class MessageCache {
   /// ⚠️ POUR LA LISTE DES CONVERSATIONS, fils chiffrés : le serveur n'a pas
   /// leur texte, l'appareil si — voir `dernier_message_local.dart`. Une seule
   /// requête pour toutes les conversations, pas une par ligne de la liste.
+  ///
+  /// 🐛 ELLE LISAIT TOUT : chaque message texte de chaque fil chiffré, trié,
+  /// pour n'en garder qu'un par fil — et la liste la relance toutes les cinq
+  /// secondes. Désormais une ligne par fil.
+  ///
+  /// ⚠️ `MAX(created_at)` AVEC DES COLONNES NUES : SQLite garantit que ces
+  /// colonnes viennent de la ligne qui porte le maximum (documenté, « bare
+  /// columns in aggregate queries », depuis la 3.7.11 ; Android 7 embarque la
+  /// 3.9). Ce n'est juste que parce que toutes les dates ont la même forme —
+  /// voir `dateCache`.
   static Future<Map<String, LastMessage>> derniersTextes(Iterable<String> convIds) async {
     final ids = convIds.toList();
     if (ids.isEmpty) return {};
     final db = await _database();
-    final lignes = await db.query(
-      'messages',
-      columns: ['id', 'conv_id', 'sender_id', 'content', 'type', 'created_at'],
-      where: 'conv_id IN (${List.filled(ids.length, '?').join(',')}) '
-          "AND content IS NOT NULL AND content != '' AND deleted_at IS NULL",
-      whereArgs: ids,
-      orderBy: 'created_at DESC',
+    await _purgerExpires(db);
+    final lignes = await db.rawQuery(
+      'SELECT id, conv_id, sender_id, content, type, MAX(created_at) AS created_at '
+      'FROM messages '
+      'WHERE conv_id IN (${List.filled(ids.length, '?').join(',')}) '
+      "AND content IS NOT NULL AND content != '' AND deleted_at IS NULL "
+      'GROUP BY conv_id',
+      ids,
     );
-    final parConv = <String, LastMessage>{};
-    for (final l in lignes) {
-      final conv = l['conv_id'] as String;
-      // Trié du plus récent au plus ancien : le premier vu est le dernier écrit.
-      parConv.putIfAbsent(
-        conv,
-        () => LastMessage(
+    return {
+      for (final l in lignes)
+        l['conv_id'] as String: LastMessage(
           id: l['id'] as String,
           content: l['content'] as String?,
           type: l['type'] as String,
           senderId: l['sender_id'] as String,
           createdAt: DateTime.parse(l['created_at'] as String),
         ),
-      );
-    }
-    return parConv;
+    };
   }
+
+  /// Retire du cache les messages éphémères arrivés à échéance.
+  ///
+  /// ⚠️ LE SERVEUR NE PRÉVIENT PAS : sa purge est silencieuse. Seule la date
+  /// d'expiration, rangée avec le message, permet de l'oublier ici.
+  ///
+  /// ⚠️ LIMITE : un message chiffré seulement RELEVÉ (fil jamais ouvert depuis)
+  /// n'a pas encore sa date — l'enveloppe ne la porte pas. Il la reçoit à
+  /// l'ouverture du fil, qui écrit la page du serveur.
+  static Future<void> _purgerExpires(Database db) => db.delete(
+        'messages',
+        where: 'expires_at IS NOT NULL AND expires_at <= ?',
+        whereArgs: [dateCache(DateTime.now())],
+      );
 
   /// Range le texte d'un message chiffré qu'on vient de relever — dans SON fil.
   ///
@@ -366,7 +418,7 @@ class MessageCache {
         'content': texte,
         'type': 'TEXT',
         'status': 'DELIVERED',
-        'created_at': quand.toIso8601String(),
+        'created_at': dateCache(quand),
         'chiffre': 1,
       },
       conflictAlgorithm: ConflictAlgorithm.ignore,
@@ -411,7 +463,7 @@ class MessageCache {
         {
           'content': null,
           'media_json': null,
-          'deleted_at': DateTime.now().toUtc().toIso8601String(),
+          'deleted_at': dateCache(DateTime.now()),
         },
         where: 'id = ?',
         whereArgs: [messageId],
@@ -423,6 +475,7 @@ class MessageCache {
   /// Récupère tous les messages d'une conversation (du plus ancien au plus récent).
   static Future<List<Message>> getConv(String convId) async {
     final db = await _database();
+    await _purgerExpires(db);
     final rows = await db.query(
       'messages',
       where: 'conv_id = ?',
@@ -497,6 +550,9 @@ class MessageCache {
       replyTo: replyTo,
       deletedAt: row['deleted_at'] != null
           ? DateTime.tryParse(row['deleted_at'] as String)
+          : null,
+      expiresAt: row['expires_at'] != null
+          ? DateTime.tryParse(row['expires_at'] as String)
           : null,
       media: media,
       createdAt: DateTime.parse(row['created_at'] as String),

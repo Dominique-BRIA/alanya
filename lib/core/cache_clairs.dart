@@ -13,6 +13,29 @@ library;
 
 import '../models/message.dart';
 
+/// La forme UNIQUE d'une date dans le cache : UTC, à la milliseconde.
+///
+/// 🐛 LE CACHE MÊLAIT DEUX FORMES. Une date du serveur y entrait en UTC
+/// (« …09:14:36.000Z ») ; une date locale — message relevé, message envoyé —
+/// en heure du téléphone, sans fuseau (« …10:14:36.000 » à Yaoundé, le même
+/// instant). SQLite compare des chaînes : trié par `created_at`, un message
+/// local passait une heure plus tard que sa place. Le dernier message d'un fil
+/// pouvait donc être le mauvais.
+///
+/// ⚠️ LA MILLISECONDE, PAS LA MICROSECONDE : `toIso8601String` n'écrit les
+/// microsecondes que si elles ne sont pas nulles. Deux largeurs différentes
+/// casseraient à nouveau l'ordre des chaînes (« .123Z » > « .123456Z »).
+String dateCache(DateTime d) => DateTime.fromMillisecondsSinceEpoch(
+  d.millisecondsSinceEpoch,
+  isUtc: true,
+).toIso8601String();
+
+/// Une date déjà en cache, remise dans la forme de [dateCache].
+///
+/// Une chaîne sans fuseau a été écrite en heure du téléphone : `DateTime.parse`
+/// la relit comme telle, ce qui rend le bon instant.
+String dateNormalisee(String brute) => dateCache(DateTime.parse(brute));
+
 /// Une ligne du cache, réduite à ce que la règle regarde.
 class LigneCache {
   const LigneCache({
@@ -79,8 +102,9 @@ PlanRemplacement planRemplacement(
   final idsPage = {for (final m in page) m.id};
   DateTime? debutPage;
   for (final m in page) {
-    if (debutPage == null || m.createdAt.isBefore(debutPage))
+    if (debutPage == null || m.createdAt.isBefore(debutPage)) {
       debutPage = m.createdAt;
+    }
   }
 
   final parId = {for (final l in existantes) l.id: l};
