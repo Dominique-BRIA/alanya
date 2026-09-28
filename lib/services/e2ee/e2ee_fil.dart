@@ -127,14 +127,62 @@ class E2eeFil {
   /// Les conversations qu'on sait chiffrées, pour ne pas redemander au serveur.
   final Map<String, bool> _chiffrees = {};
 
-  bool estChiffree(String convId) => _chiffrees[convId] ?? false;
-  void noteEtat(String convId, bool actif) => _chiffrees[convId] = actif;
+  /*
+   * ══════════════ UN FIL CHIFFRÉ LE RESTE — LE CLIENT S'EN SOUVIENT ══════════════
+   *
+   * 🐛 LE SERVEUR ÉTAIT SEUL JUGE, et sa réponse ne vivait qu'en mémoire. Un
+   * serveur compromis qui répondait « non chiffré » faisait repartir le texte
+   * en clair ; et à chaque lancement, l'écran repartait de « non chiffré » le
+   * temps que le serveur réponde. Prouvé par `test/e2ee_releve_test.dart` ⑧.
+   *
+   * 🔴 UN FIL VU CHIFFRÉ UNE FOIS NE REDESCEND JAMAIS : aucune route du serveur
+   * ne désactive le chiffrement d'un fil. Même règle que le web
+   * (`STAGE-WEB/src/services/e2ee-fil.ts`).
+   *
+   * ⚠️ DANS LE COFFRE, donc par compte, et effacé avec lui.
+   */
+  final Set<String> _memorises = {};
+  Future<void>? _chargement;
+
+  /// Charge la mémoire des fils chiffrés. Idempotente ; ne lève jamais.
+  Future<void> chargerMemoire() => _chargement ??= () async {
+        try {
+          _memorises.addAll(await _service.coffre.filsChiffres());
+        } catch (_) {
+          // Coffre muet : on garde la mémoire de la session, rien de pire.
+        }
+      }();
+
+  /// Connaît-on l'état de ce fil ? Tant que non, on n'envoie pas en clair.
+  bool etatConnu(String convId) =>
+      _chiffrees.containsKey(convId) || _memorises.contains(convId);
+
+  bool estChiffree(String convId) =>
+      _chiffrees[convId] == true || _memorises.contains(convId);
+
+  void noteEtat(String convId, bool actif) {
+    if (actif) {
+      _chiffrees[convId] = true;
+      if (_memorises.add(convId)) {
+        final fils = {..._memorises};
+        unawaited(_service.coffre.memoriserFilsChiffres(fils).catchError((_) {}));
+      }
+      return;
+    }
+    // ⚠️ « Non chiffré » après « chiffré » : ignoré, voir ci-dessus.
+    if (estChiffree(convId)) return;
+    _chiffrees[convId] = false;
+  }
 
   /// Combien de conversations chiffrées ce compte a-t-il ?
   ///
   /// ⚠️ SERT À SAVOIR S'IL Y A QUELQUE CHOSE À PERDRE avant une déconnexion —
   /// même usage que sur le web.
-  int conversationsChiffrees() => _chiffrees.values.where((a) => a).length;
+  int conversationsChiffrees() => {
+        ..._memorises,
+        for (final e in _chiffrees.entries)
+          if (e.value) e.key,
+      }.length;
 
   /* ══════════════ ENVOYER ══════════════ */
 
@@ -424,9 +472,9 @@ class E2eeFil {
   /// avant l'activation, ferait conclure que le fil ne l'est pas.
   Future<bool> etat(String convId) async {
     final r = await _api('GET', '/api/conversations/$convId/e2ee', null);
-    final actif = r['e2eeActif'] == true;
-    noteEtat(convId, actif);
-    return actif;
+    noteEtat(convId, r['e2eeActif'] == true);
+    // ⚠️ L'état RETENU, pas la réponse : un « non » ne défait pas un « oui ».
+    return estChiffree(convId);
   }
 
   /* ══════════════ ACTIVER ══════════════ */

@@ -939,8 +939,24 @@ class _ChatScreenState extends State<ChatScreen>
     if (!mounted) return;
     final type = e["type"];
     if (type == "message") {
-      final data = e["message"] as Map<String, dynamic>?;
-      if (data == null || data["convId"] != widget.convId) return;
+      final recu = e["message"] as Map<String, dynamic>?;
+      if (recu == null || recu["convId"] != widget.convId) return;
+      /*
+       * 🔴 DANS UN FIL CHIFFRÉ, UN TEXTE ARRIVÉ EN CLAIR NE S'AFFICHE PAS.
+       *
+       * Le serveur refuse tout texte en clair dans un fil chiffré ; un texte
+       * qui arrive quand même ne peut venir que de lui — erreur ou
+       * interposition. On le traite comme un message sans contenu : la relève
+       * ira chercher son enveloppe, s'il en a une, et c'est elle qui fait foi.
+       * Même règle que le web (`chat.tsx`, `e2ee-etat-memorise.mjs` ④).
+       *
+       * ⚠️ LE TEXTE SEULEMENT : les avis système portent un contenu légitime.
+       */
+      final data = _filChiffre &&
+              recu["type"] == "TEXT" &&
+              ((recu["content"] as String?) ?? '').isNotEmpty
+          ? {...recu, "content": null}
+          : recu;
       final msg = Message.fromJson(data);
       _cacheMsg(msg);
       final tempId = e["tempId"] as String?;
@@ -1734,6 +1750,15 @@ class _ChatScreenState extends State<ChatScreen>
   Future<void> _lireEtatChiffrement() async {
     final pile = context.e2ee;
     if (pile == null) return;
+    /*
+     * ⚠️ LA MÉMOIRE D'ABORD, LE SERVEUR ENSUITE. Un fil déjà vu chiffré
+     * s'affiche chiffré tout de suite, et le reste même si le serveur
+     * répond le contraire (voir `E2eeFil.noteEtat`).
+     */
+    await pile.fil.chargerMemoire();
+    if (mounted && pile.fil.estChiffree(widget.convId) && !_filChiffre) {
+      setState(() => _filChiffre = true);
+    }
     try {
       final r = await pile.fil.etat(widget.convId);
       if (mounted && r != _filChiffre) setState(() => _filChiffre = r);
@@ -2238,6 +2263,16 @@ class _ChatScreenState extends State<ChatScreen>
      * Un repli silencieux est exactement ce qu'un attaquant cherche à
      * provoquer.
      */
+    /*
+     * 🔴 ÉTAT INCONNU → ON DEMANDE AVANT D'ENVOYER. Un fil dont ni le serveur
+     * ni la mémoire n'ont encore rien dit partait en clair par défaut ; le
+     * serveur le refusait s'il était chiffré… après l'avoir reçu.
+     */
+    final pileAvant = context.e2ee;
+    if (pileAvant != null && !_filChiffre && !pileAvant.fil.etatConnu(widget.convId)) {
+      await _lireEtatChiffrement();
+      if (!mounted) return;
+    }
     final pile = context.e2ee;
     final pair = widget.otherUserId;
     if (_filChiffre && pile != null && pair != null) {

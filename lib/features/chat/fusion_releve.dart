@@ -31,14 +31,28 @@ import '../../services/e2ee/e2ee_fil.dart' show MessageClair;
   List<MessageClair> releves,
   String convId,
 ) {
-  final textes = {for (final m in releves) m.id: m.texte};
+  /*
+   * 🔴 LE TEXTE NE VA QU'À LA BULLE DE SON EXPÉDITEUR, DANS SON FIL.
+   *
+   * 🐛 L'identifiant du message vient du serveur, hors du chiffré : un serveur
+   * malveillant rattachait le texte de Bob à une bulle d'Alice. L'expéditeur,
+   * lui, est sûr — c'est sa session qui a déchiffré. Même règle que le web
+   * (`clairPour`, `e2ee-etat-memorise.mjs` ⑤).
+   */
+  final parId = {for (final m in releves) m.id: m};
+  String? texteDe(Message m) {
+    final r = parId[m.id];
+    if (r == null || r.expediteurId != m.senderId || r.convId != m.convId) return null;
+    return r.texte;
+  }
+
 
   // ① Les bulles déjà là, vides : on leur donne leur texte. On reconstruit,
   // faute de `copyWith` sur le modèle.
   final remplis = [
     for (final m in affiches)
       // ⚠️ Une bulle supprimée reste vide : l'enveloppe a pu arriver après.
-      if (textes[m.id] == null || (m.content ?? '').isNotEmpty || m.deletedAt != null)
+      if (texteDe(m) == null || (m.content ?? '').isNotEmpty || m.deletedAt != null)
         m
       else
         Message(
@@ -46,7 +60,7 @@ import '../../services/e2ee/e2ee_fil.dart' show MessageClair;
           chiffre: true,
           convId: m.convId,
           senderId: m.senderId,
-          content: textes[m.id],
+          content: texteDe(m),
           type: m.type,
           status: m.status,
           replyToId: m.replyToId,

@@ -117,19 +117,24 @@ class PileE2ee {
 
   Future<({List<MessageClair> messages, int illisibles})> _releverEtRangerSansDiffuser() =>
       fil.relever(ranger: (messages) async {
+        final ranges = <MessageClair>[];
         for (final m in messages) {
-          await MessageCache.rangeTexteDechiffre(
+          final range = await MessageCache.rangeTexteDechiffre(
             id: m.id,
             convId: m.convId,
             expediteurId: m.expediteurId,
             texte: m.texte,
             quand: DateTime.fromMillisecondsSinceEpoch(m.quand),
           );
+          // ⚠️ Un texte écarté (ligne d'un autre expéditeur, supprimée…) ne
+          // part pas dans l'archive : il y ressusciterait à la restauration.
+          if (range) ranges.add(m);
         }
+        if (ranges.isEmpty) return;
         // ⚠️ `deposer` ne lève jamais, et rend `false` sans archive ouverte :
         // l'archive peut manquer ce lot, le cache l'a déjà.
         await sauvegarde.deposer([
-          for (final m in messages)
+          for (final m in ranges)
             {
               'id': m.id,
               'convId': m.convId,
@@ -150,6 +155,8 @@ class PileE2ee {
     echecDemarrage = null;
     try {
       await coffre.preparer();
+      // La mémoire des fils chiffrés, avant tout écran : voir `E2eeFil.noteEtat`.
+      await fil.chargerMemoire();
       final deviceId = await coffre.deviceId();
 
       /*

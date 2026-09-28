@@ -367,6 +367,47 @@ void main() {
     });
   });
 
+  /*
+   * 🐛 LE SERVEUR ÉTAIT SEUL JUGE, ET SA RÉPONSE N'ÉTAIT GARDÉE QU'EN MÉMOIRE.
+   * Un serveur compromis qui répondait « non chiffré » faisait repartir le
+   * texte en clair ; et au redémarrage de l'application, l'écran repartait de
+   * « non chiffré » tant que le serveur n'avait pas répondu.
+   */
+  group('⑧ un fil vu chiffré le reste', () {
+    test('« non chiffré » après « chiffré » est ignoré', () async {
+      await alice.fil.chargerMemoire();
+      alice.fil.noteEtat('fil-ab', true);
+      alice.fil.noteEtat('fil-ab', false);
+      expect(alice.fil.estChiffree('fil-ab'), isTrue,
+          reason: 'le serveur a fait redescendre un fil chiffré');
+    });
+
+    test('la mémoire survit au redémarrage de l’application', () async {
+      await alice.fil.chargerMemoire();
+      alice.fil.noteEtat('fil-ab', true);
+      await Future<void>.delayed(Duration.zero);
+
+      final relance = Client('alice', serveur);
+      await relance.fil.chargerMemoire();
+      expect(relance.fil.estChiffree('fil-ab'), isTrue,
+          reason: 'après redémarrage, le fil repartait « non chiffré »');
+      expect(relance.fil.etatConnu('fil-ab'), isTrue);
+      expect(relance.fil.estChiffree('fil-inconnu'), isFalse);
+      expect(relance.fil.etatConnu('fil-inconnu'), isFalse,
+          reason: 'un fil jamais vu doit rester « inconnu », pas « clair »');
+    });
+
+    test('et la mémoire compte pour l’avertissement de déconnexion', () async {
+      await alice.fil.chargerMemoire();
+      alice.fil.noteEtat('fil-ab', true);
+      await Future<void>.delayed(Duration.zero);
+      final relance = Client('alice', serveur);
+      await relance.fil.chargerMemoire();
+      expect(relance.fil.conversationsChiffrees(), 1,
+          reason: 'après un démarrage à froid, rien ne signalait la perte');
+    });
+  });
+
   group('③ le rangement', () {
     test('reçoit les messages de TOUS les fils, avant tout acquittement', () async {
       final carole = Client('carole', serveur);

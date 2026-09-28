@@ -461,6 +461,23 @@ class CoffreE2ee implements SignalProtocolStore {
 
   Future<void> noterPublie() => _ecrire('publie', '1');
 
+  /// Les fils que ce compte a vus chiffrés — voir `E2eeFil.noteEtat`.
+  ///
+  /// ⚠️ DANS LE COFFRE, DONC PAR COMPTE : `_cle` préfixe par le compte, et
+  /// `oublier()` l'efface avec le reste.
+  Future<Set<String>> filsChiffres() async {
+    final brut = await _lire('fils-chiffres');
+    if (brut == null) return <String>{};
+    try {
+      return (jsonDecode(brut) as List).cast<String>().toSet();
+    } catch (_) {
+      return <String>{};
+    }
+  }
+
+  Future<void> memoriserFilsChiffres(Set<String> fils) =>
+      _ecrire('fils-chiffres', jsonEncode(fils.toList()));
+
 
   /* ══════════════ LA CLÉ MAÎTRESSE DE L'ARCHIVE ══════════════ */
 

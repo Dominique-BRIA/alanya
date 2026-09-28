@@ -424,7 +424,10 @@ class MessageCache {
   ///
   /// ⚠️ SINON UNE LIGNE MINIMALE, qui suffit : à l'ouverture du fil, la liste du
   /// serveur arrive sans texte et `_garderLeClairConnu` recolle celui-ci.
-  static Future<void> rangeTexteDechiffre({
+  /// Rend `true` si le texte a bien été rangé, `false` s'il a été écarté
+  /// (ligne d'un autre expéditeur ou d'un autre fil, supprimée, ou effacée) —
+  /// et alors il ne doit pas non plus partir dans l'archive.
+  static Future<bool> rangeTexteDechiffre({
     required String id,
     required String convId,
     required String expediteurId,
@@ -442,13 +445,20 @@ class MessageCache {
       'messages',
       // Un texte venu d’une enveloppe : le message est chiffré par définition.
       {'content': texte, 'chiffre': 1},
-      where: 'id = ? AND deleted_at IS NULL',
-      whereArgs: [id],
+      /*
+       * ⚠️ `sender_id` ET `conv_id` AUSSI : l'identifiant vient du serveur,
+       * hors du chiffré, alors que l'expéditeur est sûr (sa session a
+       * déchiffré). Une ligne d'un autre expéditeur ou d'un autre fil n'est pas
+       * touchée — et l'insertion qui suit est alors écartée par la clé.
+       */
+      where: 'id = ? AND deleted_at IS NULL AND sender_id = ? AND conv_id = ?',
+      whereArgs: [id, expediteurId, convId],
     );
-    if (modifiees > 0) return;
+    if (modifiees > 0) return true;
     /*
-     * ⚠️ `OR IGNORE` écarte une ligne déjà là (supprimée pour tous) ; le
-     * `NOT EXISTS` écarte une ligne effacée de cet appareil.
+     * ⚠️ `OR IGNORE` écarte une ligne déjà là (supprimée pour tous, ou d'un
+     * autre expéditeur) ; le `NOT EXISTS` écarte une ligne effacée de cet
+     * appareil.
      */
     await db.rawInsert(
       'INSERT OR IGNORE INTO messages '
@@ -457,6 +467,11 @@ class MessageCache {
       'WHERE NOT EXISTS (SELECT 1 FROM effaces WHERE message_id = ?)',
       [id, convId, expediteurId, texte, dateCache(quand), id],
     );
+    // L'insertion a-t-elle eu lieu ? `rawInsert` ne le dit pas de façon sûre
+    // avec `OR IGNORE` : on relit.
+    final l = await db.query('messages',
+        columns: ['content', 'sender_id'], where: 'id = ?', whereArgs: [id], limit: 1);
+    return l.isNotEmpty && l.first['content'] == texte && l.first['sender_id'] == expediteurId;
   }
 
   /// Range un message venu de l'archive chiffrée — sans rien défaire.
