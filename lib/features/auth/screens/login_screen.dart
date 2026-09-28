@@ -1,5 +1,5 @@
 import 'dart:async';
-import '../../../services/e2ee/e2ee_fournisseur.dart';
+import 'restauration_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../l10n/app_localizations.dart';
@@ -59,20 +59,23 @@ class _LoginScreenState extends State<LoginScreen> {
        * redemander, et c est ce qui permet d ouvrir la sauvegarde sans rien
        * demander de plus.
        *
-       * ⚠️ IL N EST GARDÉ NULLE PART : il traverse cet appel et en sort.
+       * ⚠️ IL N EST GARDÉ NULLE PART : il traverse l écran de restauration et
+       * en sort.
        *
-       * ⚠️ SANS ATTENDRE, ET SANS JAMAIS BLOQUER : empêcher quelqu un d entrer
-       * parce qu une sauvegarde a échoué serait bien pire que l absence
-       * d historique.
+       * 🐛 LA RESTAURATION TOURNAIT EN FOND, SANS RIEN MONTRER, et ses échecs
+       * étaient avalés (user, 28/09/2026 : « un nouvel appareil ne charge pas
+       * l archive »). Elle passe désormais par un écran qui montre sa
+       * progression et dit ce qui ne va pas — avec « Continuer en
+       * arrière-plan », pour ne jamais bloquer l entrée.
        */
-      unawaited(
-        context.e2ee?.sauvegarde
-                .aLaConnexion(_passwordCtrl.text, context.e2ee!.coffre) ??
-            Future<({int illisibles, int restaures})>.value(
-                (restaures: 0, illisibles: 0)),
-      );
       if (!mounted) return;
-      Navigator.of(context).popUntil((r) => r.isFirst);
+      // ⚠️ SANS ATTENDRE : ce futur ne se termine qu'à la fermeture de l'écran
+      // de restauration, bien après celle-ci.
+      unawaited(Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => RestaurationScreen(motDePasse: _passwordCtrl.text),
+        ),
+      ));
     } on ApiException catch (e) {
       showAppSnackBar(e.message);
     } catch (e) {

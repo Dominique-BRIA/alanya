@@ -18,6 +18,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show compute;
+
 import 'e2ee_coffre.dart';
 import 'e2ee_serrures.dart';
 import '../../core/message_cache.dart';
@@ -29,6 +31,42 @@ typedef AppelApi = Future<Map<String, dynamic>> Function(
   String chemin,
   Map<String, dynamic>? corps,
 );
+
+/* ══════════════ LA RESTAURATION, VUE DE L'ÉCRAN ══════════════ */
+
+/// Les étapes que l'écran de restauration montre, dans l'ordre.
+enum EtapeRestauration { ouverture, telechargement, dechiffrement, rangement }
+
+/// Où en est la restauration. [total] nul : on ne sait pas encore combien.
+class ProgressionRestauration {
+  const ProgressionRestauration(this.etape, this.fait, [this.total]);
+  final EtapeRestauration etape;
+  final int fait;
+  final int? total;
+}
+
+typedef SuiviRestauration = void Function(ProgressionRestauration p);
+
+/// Ce qu'a donné l'ouverture de l'archive à la connexion.
+///
+/// ⚠️ « FERMÉE » ET « ÉCHEC » NE SE CONFONDENT PAS. Fermée : l'archive existe
+/// mais ce mot de passe ne l'ouvre pas (il a changé, ou seule la clé de
+/// récupération la protège) — réessayer ne changera rien, il faut la clé.
+/// Échec : le réseau ou le serveur — réessayer peut marcher.
+enum IssueConnexion { rienARestaurer, restauree, fermee, echec }
+
+/// Ouvre une serrure par mot de passe HORS du fil de l'écran.
+///
+/// 🐛 ARGON2ID RÉCLAME 64 MIO ET TROIS PASSES : en Dart pur sur le fil de
+/// l'écran, le téléphone restait figé plusieurs secondes — barre de
+/// progression comprise. `compute` le fait tourner dans un isolat.
+Uint8List _ouvrirIsole((String, Serrure) a) => ouvrirArchive(a.$1, a.$2);
+
+Serrure _poserIsole((Uint8List, String) a) =>
+    poserSerrure(a.$1, TypeSerrure.motdepasse, a.$2);
+
+({Uint8List maitresse, List<Serrure> serrures}) _creerIsole(String mdp) =>
+    creerArchive({TypeSerrure.motdepasse: mdp});
 
 class E2eeSauvegarde {
   E2eeSauvegarde(this._api);
@@ -110,71 +148,95 @@ class E2eeSauvegarde {
     String motDePasse,
     CoffreE2ee coffre,
   ) async {
-    try {
-      final etat = await lireCoffre();
+    final r = await ouvrirEtRestaurer(motDePasse, coffre);
+    return (restaures: r.restaures, illisibles: r.illisibles);
+  }
 
-      /* ── ① OUVRIR ────────────────────────────────────────────────── */
-      if (etat.serrures.isEmpty) {
-        if (etat.refusee) return (restaures: 0, illisibles: 0);
-        final a = creerArchive({TypeSerrure.motdepasse: motDePasse});
+  /// [aLaConnexion], vu de l'écran de restauration : chaque étape est
+  /// annoncée à [suivi], et l'issue dit ce qui s'est passé.
+  ///
+  /// 🐛 « UN NOUVEL APPAREIL NE CHARGE PAS L'ARCHIVE » (user, 28/09/2026).
+  /// Tout se faisait en fond, et chaque échec était avalé : un mot de passe
+  /// changé, une archive protégée par la seule clé de récupération, une
+  /// coupure réseau donnaient le même résultat — rien, sans un mot.
+  ///
+  /// ⚠️ LES OPÉRATIONS ARGON2ID TOURNENT DANS UN ISOLAT (`compute`) : sur le
+  /// fil de l'écran, elles le figeaient plusieurs secondes.
+  Future<({IssueConnexion issue, int restaures, int illisibles})> ouvrirEtRestaurer(
+    String motDePasse,
+    CoffreE2ee coffre, {
+    SuiviRestauration? suivi,
+  }) async {
+    const rien = (issue: IssueConnexion.rienARestaurer, restaures: 0, illisibles: 0);
+    const echec = (issue: IssueConnexion.echec, restaures: 0, illisibles: 0);
+    const fermee = (issue: IssueConnexion.fermee, restaures: 0, illisibles: 0);
+
+    suivi?.call(const ProgressionRestauration(EtapeRestauration.ouverture, 0));
+
+    final ({List<Serrure> serrures, bool refusee}) etat;
+    try {
+      etat = await lireCoffre();
+    } catch (_) {
+      return echec;
+    }
+
+    /* ── ① OUVRIR ────────────────────────────────────────────────── */
+    if (etat.serrures.isEmpty) {
+      // Pas d'archive : on la crée, en silence (décision du 23/09/2026) —
+      // sauf si le compte l'a refusée. Rien à restaurer dans les deux cas.
+      if (etat.refusee) return rien;
+      try {
+        final a = await compute(_creerIsole, motDePasse);
         for (final s in a.serrures) {
           await _poser(s);
         }
         _maitresse = a.maitresse;
         await coffre.rangerMaitresse(a.maitresse);
-        return (restaures: 0, illisibles: 0);
+      } catch (_) {
+        return echec;
       }
+      return rien;
+    }
 
-      _maitresse = await coffre.lireMaitresse();
+    _maitresse = await coffre.lireMaitresse();
 
-      if (_maitresse == null) {
-        final mdp = etat.serrures.where((s) => s.type == 'motdepasse');
-        if (mdp.isEmpty) {
-          /*
-           * ⚠️ ARCHIVE FERMÉE, ET ON NE PEUT RIEN FAIRE DE PLUS ICI. Elle n'a
-           * qu'une clé de récupération, et cet appareil ne l'a jamais eue.
-           * L'écran des réglages doit la demander — c'est la seule sortie, et
-           * elle appartient à l'utilisateur.
-           */
-          return (restaures: 0, illisibles: 0);
-        }
-        _maitresse = ouvrirArchive(motDePasse, mdp.first);
-        await coffre.rangerMaitresse(_maitresse!);
-      }
-
-      /* ── ② COMPLÉTER LES SERRURES ────────────────────────────────── */
-      if (!etat.serrures.any((s) => s.type == 'motdepasse')) {
-        await _poser(poserSerrure(_maitresse!, TypeSerrure.motdepasse, motDePasse));
-      }
-
-      /* ── ③ RESTAURER ─────────────────────────────────────────────── */
-      final r = await restaurer();
+    if (_maitresse == null) {
+      final mdp = etat.serrures.where((s) => s.type == 'motdepasse');
       /*
-       * 🔴 ET ON LES ÉCRIT. C'EST TOUT CE QUI MANQUAIT, ET C'ÉTAIT TOUT.
-       *
-       * 🐛 L'archive était ouverte, déchiffrée, ses messages rendus — puis
-       * JETÉS. Cette fonction n'en gardait que le NOMBRE. Aucune ligne, dans
-       * tout le mobile, n'écrivait le contenu restauré quelque part.
-       *
-       * ⚠️ LE SYMPTÔME ÉTAIT SPECTACULAIRE ET LA CAUSE MINUSCULE : sur un
-       * second appareil du même compte, toutes les bulles chiffrées restaient
-       * vides alors que le web affichait la conversation entière. Le
-       * chiffrement marchait ; c'est la dernière ligne du parcours qui
-       * manquait.
-       *
-       * ⚠️ `upsert`, PAS `putConv` : le second REMPLACE une conversation
-       * entière, et effacerait les messages en clair d'avant le chiffrement.
-       * On ajoute, on ne substitue pas.
+       * ⚠️ ARCHIVE FERMÉE : elle n'a qu'une clé de récupération que cet
+       * appareil n'a jamais eue, ou ce mot de passe n'est plus le sien. C'est
+       * à l'utilisateur de donner la clé — l'écran le lui propose.
        */
-      return (restaures: r.messages.length, illisibles: r.illisibles);
+      if (mdp.isEmpty) return fermee;
+      try {
+        // AES-GCM authentifie : un échec ici veut dire « mauvais mot de passe ».
+        _maitresse = await compute(_ouvrirIsole, (motDePasse, mdp.first));
+      } catch (_) {
+        _maitresse = null;
+        return fermee;
+      }
+      await coffre.rangerMaitresse(_maitresse!);
+    }
+
+    /* ── ② COMPLÉTER LES SERRURES ────────────────────────────────── */
+    // Le seul moment où le mot de passe existe : on pose sa serrure s'il n'y
+    // en a pas. Un échec ici n'empêche pas de restaurer.
+    if (!etat.serrures.any((s) => s.type == 'motdepasse')) {
+      try {
+        await _poser(await compute(_poserIsole, (_maitresse!, motDePasse)));
+      } catch (_) {}
+    }
+
+    /* ── ③ RESTAURER ─────────────────────────────────────────────── */
+    try {
+      final r = await restaurer(suivi: suivi);
+      return (
+        issue: IssueConnexion.restauree,
+        restaures: r.messages.length,
+        illisibles: r.illisibles,
+      );
     } catch (_) {
-      /*
-       * ⚠️ UN ÉCHEC ICI VEUT DIRE « MAUVAIS MOT DE PASSE », et rien d'autre :
-       * AES-GCM authentifie. Le cas arrive quand le mot de passe du COMPTE a
-       * changé sans que la serrure suive.
-       */
-      _maitresse = null;
-      return (restaures: 0, illisibles: 0);
+      return echec;
     }
   }
 
@@ -412,9 +474,12 @@ class E2eeSauvegarde {
   ///
   /// ⚠️ 50 TOURS AU PLUS : un serveur qui rendrait toujours le même `suivant`
   /// ferait tourner la boucle sans fin. 50 pages = 100 000 blocs.
-  Future<List<Map<String, dynamic>>> lireTousLesBlocs() async {
+  Future<List<Map<String, dynamic>>> lireTousLesBlocs({SuiviRestauration? suivi}) async {
     final blocs = <Map<String, dynamic>>[];
     String? suivant;
+    // `totalArchive` n'est rendu qu'en première page, par un serveur récent
+    // (backend 5c1c7e0). Sans lui, la barre avance sans total connu.
+    int? total;
     for (var tour = 0; tour < 50; tour++) {
       final r = await _api(
         'GET',
@@ -423,23 +488,39 @@ class E2eeSauvegarde {
             : '/api/e2ee/archive?apres=${Uri.encodeQueryComponent(suivant)}',
         null,
       );
+      total ??= (r['totalArchive'] as num?)?.toInt();
       blocs.addAll((r['blocs'] as List? ?? const []).cast<Map<String, dynamic>>());
+      suivi?.call(ProgressionRestauration(
+          EtapeRestauration.telechargement, blocs.length, total));
       suivant = r['suivant'] as String?;
       if (suivant == null) break;
     }
     return blocs;
   }
 
-  Future<({List<Map<String, dynamic>> messages, int illisibles})> restaurer() async {
+  Future<({List<Map<String, dynamic>> messages, int illisibles})> restaurer({
+    SuiviRestauration? suivi,
+  }) async {
     final cle = _maitresse;
     if (cle == null) return (messages: <Map<String, dynamic>>[], illisibles: 0);
 
-    final blocs = await lireTousLesBlocs();
+    final blocs = await lireTousLesBlocs(suivi: suivi);
 
     final vus = <String, Map<String, dynamic>>{};
     var illisibles = 0;
 
-    for (final b in blocs) {
+    for (var i = 0; i < blocs.length; i++) {
+      final b = blocs[i];
+      /*
+       * ⚠️ UN TOUR DE BOUCLE TOUS LES 25 BLOCS : le déchiffrement est
+       * synchrone, et sans cette pause l'écran ne se redessinerait qu'à la
+       * fin — la barre sauterait de 0 à 100 %.
+       */
+      if (suivi != null && i % 25 == 0) {
+        suivi(ProgressionRestauration(
+            EtapeRestauration.dechiffrement, i, blocs.length));
+        await Future<void>.delayed(Duration.zero);
+      }
       try {
         final clair = dechiffrerAvec(
           cle,
@@ -478,7 +559,7 @@ class E2eeSauvegarde {
      * supprime la question.
      */
     final messages = vus.values.toList();
-    await _ecrireDansLeCache(messages);
+    await _ecrireDansLeCache(messages, suivi: suivi);
     final fils = {
       for (final m in messages)
         if (m['convId'] is String) m['convId'] as String,
@@ -502,8 +583,16 @@ class E2eeSauvegarde {
   /// l'expéditeur ne soit enregistré n'ont pas ce champ : la bulle s'affichera
   /// alors du côté des messages reçus. Mieux vaut un message du mauvais côté
   /// qu'un message absent.
-  Future<void> _ecrireDansLeCache(List<Map<String, dynamic>> messages) async {
-    for (final m in messages) {
+  Future<void> _ecrireDansLeCache(
+    List<Map<String, dynamic>> messages, {
+    SuiviRestauration? suivi,
+  }) async {
+    for (var i = 0; i < messages.length; i++) {
+      final m = messages[i];
+      if (suivi != null && i % 25 == 0) {
+        suivi(ProgressionRestauration(
+            EtapeRestauration.rangement, i, messages.length));
+      }
       try {
         final id = m['id'] as String?;
         final convId = m['convId'] as String?;
