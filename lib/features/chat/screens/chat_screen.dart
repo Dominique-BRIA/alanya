@@ -1642,6 +1642,24 @@ class _ChatScreenState extends State<ChatScreen>
   /// que le fil ne l'est pas — et la bannière clignoterait au défilement.
   bool _filChiffre = false;
 
+  /// Peut-on modifier ce message ?
+  ///
+  /// 🐛 « MODIFIER » ÉTAIT PROPOSÉ SUR UNE BULLE CHIFFRÉE, et le nouveau texte
+  /// partait EN CLAIR : écrit dans `message.content`, remonté dans l'aperçu de
+  /// la liste, diffusé aux participants. Le serveur le refuse désormais
+  /// (`CONVERSATION_CHIFFREE`) ; l'écran ne doit pas le proposer, d'autant qu'il
+  /// affiche la modification AVANT la réponse du serveur.
+  bool _peutModifier(Message m) =>
+      m.senderId == _myId && m.type == 'TEXT' && !_filChiffre;
+
+  /// Peut-on transférer ce message ?
+  ///
+  /// ⚠️ LE SERVEUR RECOPIE `content`, ET UN TEXTE CHIFFRÉ N'EN A PAS : il
+  /// produirait une bulle vide chez le destinataire. Les médias, eux, ne sont
+  /// pas chiffrés et restent transférables — même règle que
+  /// `backend-alanya/src/lib/e2ee-clair.mjs`.
+  bool _peutTransferer(Message m) => !(_filChiffre && m.type == 'TEXT');
+
   Future<void> _lireEtatChiffrement() async {
     final pile = context.e2ee;
     if (pile == null) return;
@@ -3570,8 +3588,16 @@ class _ChatScreenState extends State<ChatScreen>
         context: context,
         isScrollControlled: true,
         builder: (ctx) => _ForwardPicker(
-            conversations:
-                conversations.where((c) => c.id != widget.convId).toList(),
+            /*
+             * ⚠️ UN TEXTE N'ENTRE PAS EN CLAIR DANS UN FIL CHIFFRÉ : le serveur
+             * le refuse (`CONVERSATION_CHIFFREE`), et cet écran annoncerait
+             * pourtant « transféré ». On écarte donc ces fils d'avance. Un
+             * média sans légende, lui, peut y aller — il n'est pas chiffré.
+             */
+            conversations: conversations
+                .where((c) => c.id != widget.convId)
+                .where((c) => !(c.e2eeActif && (m.content ?? '').trim().isNotEmpty))
+                .toList(),
             title: tr(context, 'forward_to'))).then((result) {
       if (result != null) picked.addAll(result);
     });
@@ -3974,7 +4000,7 @@ class _ChatScreenState extends State<ChatScreen>
                       Navigator.pop(ctx);
                       _setReplyTo(m);
                     }),
-                if (m.senderId == _myId && m.type == 'TEXT')
+                if (_peutModifier(m))
                   ListTile(
                       leading: Icon(Icons.edit_outlined, color: _positive),
                       title: Text(tr(context, 'edit')),
@@ -3982,13 +4008,14 @@ class _ChatScreenState extends State<ChatScreen>
                         Navigator.pop(ctx);
                         _startEdit(m);
                       }),
-                ListTile(
-                    leading: Icon(Icons.forward, color: _positive),
-                    title: Text(tr(context, 'forward')),
-                    onTap: () {
-                      Navigator.pop(ctx);
-                      _forwardMessage(m);
-                    }),
+                if (_peutTransferer(m))
+                  ListTile(
+                      leading: Icon(Icons.forward, color: _positive),
+                      title: Text(tr(context, 'forward')),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _forwardMessage(m);
+                      }),
                 ListTile(
                     leading: Icon(Icons.copy, color: _iconNeutral),
                     title: Text(tr(context, 'copy')),
@@ -4276,13 +4303,14 @@ class _ChatScreenState extends State<ChatScreen>
               _clearSelection();
               _toggleStar(m);
             }),
-        IconButton(
-            tooltip: tr(context, 'forward'),
-            icon: const Icon(Icons.forward),
-            onPressed: () {
-              _clearSelection();
-              _forwardMessage(m);
-            }),
+        if (_peutTransferer(m))
+          IconButton(
+              tooltip: tr(context, 'forward'),
+              icon: const Icon(Icons.forward),
+              onPressed: () {
+                _clearSelection();
+                _forwardMessage(m);
+              }),
         IconButton(
             tooltip: tr(context, 'delete'),
             icon: const Icon(Icons.delete_outline),
@@ -4358,7 +4386,7 @@ class _ChatScreenState extends State<ChatScreen>
                   const SizedBox(width: 12),
                   Text(_pinnedMessageId == m.id ? tr(context, 'unpin_action') : tr(context, 'pin')),
                 ])),
-            if (mine && m.type == 'TEXT')
+            if (_peutModifier(m))
               PopupMenuItem(
                   value: 'edit',
                   child: Row(children: [

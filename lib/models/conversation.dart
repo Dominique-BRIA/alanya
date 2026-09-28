@@ -109,6 +109,14 @@ class Conversation {
   /// l'interrupteur part alors de « non ».
   final bool sourdine;
 
+  /// La conversation est-elle chiffrée de bout en bout ?
+  ///
+  /// ⚠️ LU ICI POUR LE TRANSFERT : un texte ne peut pas entrer en clair dans un
+  /// fil chiffré, et le serveur le refuse. Le sélecteur écarte donc ces fils
+  /// d’avance, plutôt que d’annoncer un transfert réussi qui ne l’est pas.
+  /// Facultatif dans la charge : absent, il vaut « non ».
+  final bool e2eeActif;
+
   Conversation({
     required this.id,
     required this.isGroup,
@@ -123,6 +131,7 @@ class Conversation {
     this.isPinned = false,
     this.isArchived = false,
     this.sourdine = false,
+    this.e2eeActif = false,
   });
 
   /// Copie avec la sourdine changée — le reste est intact.
@@ -144,6 +153,7 @@ class Conversation {
         isPinned: isPinned,
         isArchived: isArchived,
         sourdine: valeur,
+        e2eeActif: e2eeActif,
       );
 
   Map<String, String> get memberNames => {
@@ -172,5 +182,6 @@ class Conversation {
         isPinned: (j["isPinned"] as bool?) ?? false,
         isArchived: (j["isArchived"] as bool?) ?? false,
         sourdine: (j["sourdine"] as bool?) ?? false,
+        e2eeActif: (j["e2eeActif"] as bool?) ?? false,
       );
 }
