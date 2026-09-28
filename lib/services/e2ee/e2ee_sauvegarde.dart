@@ -510,6 +510,7 @@ class E2eeSauvegarde {
         await MessageCache.upsert(
           Message(
             id: id,
+            chiffre: true,
             convId: convId,
             senderId: (m['expediteurId'] as String?) ?? '',
             content: texte,

@@ -4,6 +4,7 @@ import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
 import '../../../services/e2ee/e2ee_fil.dart' show MessageClair;
 import '../../../services/e2ee/e2ee_fournisseur.dart';
 import '../../../widgets/e2ee/e2ee_widgets.dart';
+import '../frontiere_chiffrement.dart';
 import '../fusion_releve.dart';
 import 'dart:typed_data';
 
@@ -145,6 +146,10 @@ class _ChatScreenState extends State<ChatScreen>
   List<Message> _messages = [];
   List<CallRecord> _callsForConv = [];
   List<dynamic> _combined = [];
+  /// Indice du premier message chiffré dans `_combined` — là où se place la
+  /// bande « à partir d’ici, chiffré ». Recalculé avec `_combined`, pas à
+  /// chaque bulle affichée.
+  int? _frontiere;
   bool _loading = true;
 
   /// Barre de mise en forme dépliée par le bouton « A » du composeur.
@@ -1043,6 +1048,7 @@ class _ChatScreenState extends State<ChatScreen>
             .map((m) => m.senderId == _myId && m.status != "READ"
                 ? Message(
                     id: m.id,
+                    chiffre: m.chiffre,
                     convId: m.convId,
                     senderId: m.senderId,
                     content: m.content,
@@ -1071,6 +1077,7 @@ class _ChatScreenState extends State<ChatScreen>
                     _statusRank(newStatus) > _statusRank(m.status)
                 ? Message(
                     id: m.id,
+                    chiffre: m.chiffre,
                     convId: m.convId,
                     senderId: m.senderId,
                     content: m.content,
@@ -1101,6 +1108,7 @@ class _ChatScreenState extends State<ChatScreen>
               .map((m) => m.id == messageId
                   ? Message(
                       id: m.id,
+                      chiffre: m.chiffre,
                       convId: m.convId,
                       senderId: m.senderId,
                       content: null,
@@ -1295,6 +1303,7 @@ class _ChatScreenState extends State<ChatScreen>
         else
           Message(
             id: m.id,
+            chiffre: m.chiffre,
             convId: m.convId,
             senderId: m.senderId,
             content: textes[m.id],
@@ -1544,6 +1553,7 @@ class _ChatScreenState extends State<ChatScreen>
     all.sort((a, b) => _dateOfCombined(a).compareTo(_dateOfCombined(b)));
     final avant = _combined.length;
     _combined = _regroupeMedias(all);
+    _frontiere = indiceFrontiere(_combined);
     // 🔬 Trace temporaire : un changement du NOMBRE d'éléments déplace tout ce
     // qui suit dans une liste ancrée en haut. C'est l'un des deux suspects.
     if (avant != _combined.length) {
@@ -2179,6 +2189,7 @@ class _ChatScreenState extends State<ChatScreen>
           ..._messages,
           Message(
             id: tempId,
+            chiffre: true,
             convId: widget.convId,
             senderId: _myId ?? "",
             content: text,
@@ -2325,6 +2336,7 @@ class _ChatScreenState extends State<ChatScreen>
           .envoyer(convId: widget.convId, pairId: pair, texte: texte);
       final envoye = Message(
         id: id,
+        chiffre: true,
         convId: widget.convId,
         senderId: _myId ?? "",
         content: texte,
@@ -2401,6 +2413,7 @@ class _ChatScreenState extends State<ChatScreen>
           else
             Message(
               id: m.id,
+              chiffre: m.chiffre,
               convId: m.convId,
               senderId: m.senderId,
               content: m.content,
@@ -2442,6 +2455,7 @@ class _ChatScreenState extends State<ChatScreen>
   // ── Édition d'un message ──
   Message _withEdited(Message m, String content, DateTime editedAt) => Message(
       id: m.id,
+      chiffre: m.chiffre,
       convId: m.convId,
       senderId: m.senderId,
       content: content,
@@ -3658,6 +3672,7 @@ class _ChatScreenState extends State<ChatScreen>
               .map((msg) => msg.id == m.id
                   ? Message(
                       id: m.id,
+                      chiffre: m.chiffre,
                       convId: m.convId,
                       senderId: m.senderId,
                       content: null,
@@ -4621,23 +4636,21 @@ class _ChatScreenState extends State<ChatScreen>
                           reverse: true,
                           padding: const EdgeInsets.all(12),
                           /*
-                           * 🔴 +1 POUR LA BANNIÈRE « À PARTIR D'ICI, CHIFFRÉ ».
-                           * Elle dit une vérité qui se tairait autrement : les
-                           * messages ANTÉRIEURS restent lisibles par le serveur.
-                           * Laisser croire que l'activation protège
-                           * rétroactivement serait un mensonge par omission — le
-                           * plus dangereux, parce qu'il rassure.
+                           * 🔴 LA BANDE « À PARTIR D’ICI, CHIFFRÉ » SE PLACE JUSTE
+                           * AVANT LE PREMIER MESSAGE CHIFFRÉ — plus en tête du fil.
                            *
-                           * ⚠️ LA LISTE EST INVERSÉE : le dernier indice affiché
-                           * est le PLUS ANCIEN. La bannière y trouve donc sa
-                           * place, en tête du fil.
+                           * 🐛 ELLE ÉTAIT UN ÉLÉMENT DE PLUS (`+1`) au dernier indice
+                           * de la liste inversée, donc TOUT EN HAUT, au-dessus de
+                           * messages en clair (signalé par le user le 28/09/2026). Or
+                           * elle dit « à partir d’ici » : son « ici » est le premier
+                           * message chiffré. Même règle que le web ; pas de bande
+                           * s’il n’y en a encore aucun. Voir `indiceFrontiere`.
+                           *
+                           * ⚠️ Elle dit toujours la même vérité : les messages
+                           * ANTÉRIEURS restent lisibles par le serveur.
                            */
-                          itemCount: _combined.length + (_filChiffre ? 1 : 0),
+                          itemCount: _combined.length,
                           itemBuilder: (_, iAffichage) {
-                            if (_filChiffre &&
-                                iAffichage == _combined.length) {
-                              return const BanniereChiffrement();
-                            }
                             // L'ordre des données reste chronologique : seule la
                             // lecture s'inverse. Tout le reste de l'écran (dates,
                             // pagination, saut vers un message) continue de
@@ -4648,6 +4661,11 @@ class _ChatScreenState extends State<ChatScreen>
                             if (_needsDateSeparatorCombined(i)) {
                               widgets.add(
                                   _dateChip(_dateLabel(_dateOfCombined(item))));
+                            }
+                            // Après la date du jour, avant la bulle : la bande
+                            // introduit le premier message chiffré.
+                            if (_filChiffre && i == _frontiere) {
+                              widgets.add(const BanniereChiffrement());
                             }
                             if (item is Message) {
                               widgets.add(_bubble(item, item.senderId == myId));

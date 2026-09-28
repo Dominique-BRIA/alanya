@@ -148,6 +148,17 @@ class Message {
   /// Le statut auquel ce message répond, recopié par le serveur à l'envoi.
   final StatutCite? statutCite;
 
+  /// Le message est-il chiffré de bout en bout ?
+  ///
+  /// Le serveur le déduit de l’existence d’une enveloppe (`chiffre` dans
+  /// `GET …/messages`) ; localement, un message dont le texte vient d’une
+  /// enveloppe l’est par définition.
+  ///
+  /// ⚠️ C’EST LUI QUI PLACE LA BANDE « À PARTIR D’ICI, CHIFFRÉ » : juste avant
+  /// le PREMIER message chiffré, comme sur le web. Toute copie d’un message
+  /// doit le transmettre, sinon la bande glisse plus bas.
+  final bool chiffre;
+
   Message({
     required this.id,
     required this.convId,
@@ -166,6 +177,7 @@ class Message {
     this.starred = false,
     this.mentions = const [],
     this.statutCite,
+    this.chiffre = false,
   });
 
   /// Vrai si le message a été supprimé pour tout le monde.
@@ -185,6 +197,7 @@ class Message {
         statutCite: j["statutCite"] != null
             ? StatutCite.fromJson(j["statutCite"] as Map<String, dynamic>)
             : null,
+        chiffre: j["chiffre"] == true,
         deletedAt: j["deletedAt"] != null
             ? DateTime.tryParse(j["deletedAt"] as String)
             : null,

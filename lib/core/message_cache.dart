@@ -48,7 +48,7 @@ class MessageCache {
        * Toute évolution future de ce cache passe désormais par `onUpgrade`, en
        * incrémentant `version`.
        */
-      version: 3,
+      version: 4,
       onUpgrade: (db, ancienne, nouvelle) async {
         if (ancienne < 2) await _creeTableTraductions(db);
         /*
@@ -63,6 +63,18 @@ class MessageCache {
          */
         if (ancienne < 3) {
           await db.execute('ALTER TABLE messages ADD COLUMN mentions_json TEXT');
+        }
+        /*
+         * v4 — LE MESSAGE EST-IL CHIFFRÉ ?
+         *
+         * Sans cette colonne, un fil relu depuis le cache perdait l’indicateur,
+         * et la bande « à partir d’ici, chiffré » ne savait plus où se placer
+         * avant la réponse du serveur. Les lignes existantes valent 0 : elles
+         * se corrigent au premier chargement réseau du fil.
+         */
+        if (ancienne < 4) {
+          await db.execute(
+              'ALTER TABLE messages ADD COLUMN chiffre INTEGER NOT NULL DEFAULT 0');
         }
       },
       onCreate: (db, _) async {
@@ -79,7 +91,8 @@ class MessageCache {
             deleted_at TEXT,
             created_at TEXT NOT NULL,
             media_json TEXT,
-            mentions_json TEXT
+            mentions_json TEXT,
+            chiffre INTEGER NOT NULL DEFAULT 0
           )
         ''');
         await db.execute(
@@ -217,6 +230,7 @@ class MessageCache {
           'mentions_json': m.mentions.isNotEmpty
               ? jsonEncode(m.mentions.map((x) => x.toJson()).toList())
               : null,
+          'chiffre': m.chiffre ? 1 : 0,
         },
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
@@ -246,6 +260,7 @@ class MessageCache {
           'mentions_json': m.mentions.isNotEmpty
               ? jsonEncode(m.mentions.map((x) => x.toJson()).toList())
               : null,
+          'chiffre': m.chiffre ? 1 : 0,
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
@@ -309,7 +324,8 @@ class MessageCache {
     final db = await _database();
     final modifiees = await db.update(
       'messages',
-      {'content': texte},
+      // Un texte venu d’une enveloppe : le message est chiffré par définition.
+      {'content': texte, 'chiffre': 1},
       where: 'id = ?',
       whereArgs: [id],
     );
@@ -324,6 +340,7 @@ class MessageCache {
         'type': 'TEXT',
         'status': 'DELIVERED',
         'created_at': quand.toIso8601String(),
+        'chiffre': 1,
       },
       conflictAlgorithm: ConflictAlgorithm.ignore,
     );
@@ -427,6 +444,7 @@ class MessageCache {
       media: media,
       createdAt: DateTime.parse(row['created_at'] as String),
       mentions: mentions,
+      chiffre: row['chiffre'] == 1,
     );
   }
 }

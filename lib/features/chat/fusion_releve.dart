@@ -42,6 +42,7 @@ import '../../services/e2ee/e2ee_fil.dart' show MessageClair;
       else
         Message(
           id: m.id,
+          chiffre: true,
           convId: m.convId,
           senderId: m.senderId,
           content: textes[m.id],
@@ -68,6 +69,7 @@ import '../../services/e2ee/e2ee_fil.dart' show MessageClair;
       if (m.convId == convId && !dejaLa.contains(m.id))
         Message(
           id: m.id,
+          chiffre: true,
           convId: m.convId,
           senderId: m.expediteurId,
           content: m.texte,
