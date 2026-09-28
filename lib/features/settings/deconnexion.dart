@@ -14,6 +14,23 @@ import '../../services/e2ee/e2ee_fournisseur.dart';
 import '../../theme/alanya_theme.dart';
 import '../auth/auth_controller.dart';
 
+/// Se déconnecter en quittant CET appareil : identité de chiffrement retirée
+/// du serveur, coffre vidé, puis session fermée.
+///
+/// 🔴 LE SEUL CHEMIN DE DÉCONNEXION. Quatre écrans appelaient
+/// `AuthController.logout()` directement, et aucun ne vidait le coffre :
+/// l'identité privée, les sessions et la clé de l'archive restaient sur le
+/// téléphone. Voir `E2eeService.oublierCetAppareil`.
+///
+/// ⚠️ LA PILE ET LE CONTRÔLEUR SONT LUS AVANT TOUT `await` : l'écran qui
+/// appelle peut disparaître pendant le retrait.
+Future<void> seDeconnecter(BuildContext context) async {
+  final pile = context.e2ee;
+  final auth = context.read<AuthController>();
+  await pile?.service.oublierCetAppareil();
+  await auth.logout();
+}
+
 /// Avertit si des messages chiffrés vont être perdus ; `true` = continuer.
 ///
 /// 🔴 ON AVERTIT SI LA SAUVEGARDE MANQUE, et c'est le seul moment où cela sert
@@ -88,7 +105,7 @@ Future<void> confirmerDeconnexion(BuildContext context) async {
         TextButton(
           onPressed: () {
             Navigator.pop(context);
-            context.read<AuthController>().logout();
+            seDeconnecter(context);
           },
           child: Text(
             tr(context, 'set_logout_action'),

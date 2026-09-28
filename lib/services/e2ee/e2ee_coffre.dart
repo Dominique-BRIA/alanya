@@ -285,7 +285,8 @@ class CoffreE2ee implements SignalProtocolStore {
   @override
   Future<void> deleteAllSessions(String name) async {
     final tout = await _magasin.readAll(aOptions: _options);
-    for (final k in tout.keys) {
+    // Une copie des clés : voir `oublier()`.
+    for (final k in tout.keys.toList()) {
       if (k.startsWith(_cle('session.$name.'))) await _magasin.delete(key: k);
     }
   }
@@ -321,7 +322,8 @@ class CoffreE2ee implements SignalProtocolStore {
     final tout = await _magasin.readAll(aOptions: _options);
     final prefixe = _cle('session.');
     var n = 0;
-    for (final k in tout.keys) {
+    // Une copie des clés : voir `oublier()`.
+    for (final k in tout.keys.toList()) {
       if (k.startsWith(prefixe)) {
         await _magasin.delete(key: k);
         n++;
@@ -530,7 +532,10 @@ class CoffreE2ee implements SignalProtocolStore {
   /// échangé, alors que se déconnecter veut dire le contraire.
   Future<void> oublier() async {
     final tout = await _magasin.readAll(aOptions: _options);
-    for (final k in tout.keys) {
+    // ⚠️ UNE COPIE DES CLÉS : effacer en parcourant la table elle-même casse la
+    // boucle dès que `readAll` rend la table vivante (le stockage simulé des
+    // tests le fait) — et le coffre restait à moitié plein.
+    for (final k in tout.keys.toList()) {
       if (k.startsWith('e2ee/$_compte/')) await _magasin.delete(key: k);
     }
   }

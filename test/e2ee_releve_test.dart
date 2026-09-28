@@ -55,6 +55,10 @@ class FauxServeur {
         cles[moi]![c['deviceId'] as int] = {...c, 'prekeys': stock};
         return {'prekeysRestantes': stock.length};
       }
+      if (methode == 'DELETE' && p == '/api/e2ee/cles') {
+        cles[moi]?.remove(int.parse(uri.queryParameters['deviceId']!));
+        return {};
+      }
       if (methode == 'GET' && p == '/api/e2ee/cles') {
         return {
           'appareils': [
@@ -405,6 +409,49 @@ void main() {
       await relance.fil.chargerMemoire();
       expect(relance.fil.conversationsChiffrees(), 1,
           reason: 'après un démarrage à froid, rien ne signalait la perte');
+    });
+  });
+
+  /*
+   * 🐛 UN TÉLÉPHONE DISSOCIÉ PUIS RECONNECTÉ ÉTAIT MUET. La dissociation retire
+   * l'identité du serveur, mais le coffre gardait « publié » : au démarrage
+   * suivant, rien n'était republié, et le réapprovisionnement ne faisait rien
+   * pour un appareil absent de la liste. Les correspondants obtenaient
+   * « Aucun appareil chiffré ». Même chose après le balayage des trente jours.
+   */
+  group('⑨ un appareil que le serveur a oublié', () {
+    test('se republie au démarrage suivant, avec la MÊME identité', () async {
+      final id = await alice.coffre.deviceId();
+      final cleAvant = serveur.cles['alice']![id]!['cleIdentite'];
+      serveur.cles['alice']!.remove(id); // retirée côté serveur
+
+      final republie = await alice.service.reapprovisionnerSiNecessaire(deviceId: id);
+
+      expect(republie, isTrue, reason: 'un appareil absent du serveur restait muet');
+      expect(serveur.cles['alice']?[id]?['cleIdentite'], cleAvant,
+          reason: 'la republication ne doit pas changer l’identité');
+    });
+
+    test('quitter l’appareil retire l’identité du serveur ET vide le coffre', () async {
+      final id = await alice.coffre.deviceId();
+      await alice.fil.chargerMemoire();
+      alice.fil.noteEtat('fil-ab', true);
+      await Future<void>.delayed(Duration.zero);
+      await alice.coffre.noterPublie();
+
+      await alice.service.oublierCetAppareil();
+
+      expect(serveur.cles['alice']?[id], isNull, reason: 'identité restée servie');
+      expect(await alice.coffre.dejaPublie(), isFalse,
+          reason: 'le coffre disait encore « publié » : pas de republication');
+      expect(alice.coffre.identiteLocale(), throwsStateError,
+          reason: 'l’identité privée restait sur l’appareil');
+      expect(await alice.coffre.filsChiffres(), isEmpty);
+    });
+
+    test('témoin : un appareil connu et bien pourvu ne republie rien', () async {
+      final id = await alice.coffre.deviceId();
+      expect(await alice.service.reapprovisionnerSiNecessaire(deviceId: id), isFalse);
     });
   });
 

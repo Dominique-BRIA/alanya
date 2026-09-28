@@ -4,7 +4,7 @@ import 'package:provider/provider.dart';
 import '../../../core/api_client.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
-import '../../auth/auth_controller.dart';
+import '../../settings/deconnexion.dart';
 import '../account_repository.dart';
 import '../../../l10n/app_localizations.dart';
 
@@ -63,7 +63,8 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
       if (!mounted) return;
       // Compte supprimé : déconnexion locale (best-effort) puis retour à l'accueil.
       try {
-        await context.read<AuthController>().logout();
+        // Le compte n'existe plus : ses clés locales ne doivent pas lui survivre.
+        await seDeconnecter(context);
       } catch (_) {}
       if (!mounted) return;
       Navigator.of(context).popUntil((route) => route.isFirst);

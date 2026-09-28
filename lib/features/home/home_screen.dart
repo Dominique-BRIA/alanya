@@ -44,6 +44,7 @@ import '../settings/screens/settings_screen.dart';
 import '../settings/screens/devices_screen.dart';
 import '../ai/ai_repository.dart';
 import '../auth/auth_controller.dart';
+import '../settings/deconnexion.dart';
 import '../chat/chat_repository.dart';
 import '../../services/e2ee/e2ee_fournisseur.dart';
 import '../chat/screens/chat_screen.dart';
@@ -327,7 +328,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       builder: (_) => const AbandonedClientsScreen()),
                 );
               } else if (v == "logout") {
-                context.read<AuthController>().logout();
+                seDeconnecter(context);
               }
             },
             itemBuilder: (_) => [

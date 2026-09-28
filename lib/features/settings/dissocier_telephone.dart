@@ -85,14 +85,9 @@ Future<void> dissocierCeTelephone(BuildContext context) async {
     return;
   }
 
-  if (pile != null) {
-    try {
-      final numero = await pile.coffre.deviceId();
-      await pile.service.api('DELETE', '/api/e2ee/cles?deviceId=$numero', null);
-    } catch (_) {
-      // Le balayage des identités inactives (30 jours) prendra le relais.
-    }
-  }
+  // Identité retirée du serveur ET coffre vidé — sans quoi un téléphone
+  // reconnecté plus tard ne republiait jamais (voir `oublierCetAppareil`).
+  await pile?.service.oublierCetAppareil();
 
   final moi = await DeviceRegistry.instance.deviceId();
   for (final id in telephones) {

@@ -222,11 +222,49 @@ class E2eeService {
         await publierMesCles(deviceId: deviceId);
         return true;
       }
-      return false;
+      /*
+       * 🔴 ABSENT DE LA LISTE : LE SERVEUR NOUS A OUBLIÉS, ON SE REPUBLIE.
+       *
+       * 🐛 ON RENDAIT `false` SANS RIEN FAIRE. Or un appareil disparaît du
+       * serveur sans que le coffre le sache : dissociation, déconnexion à
+       * distance, balayage des trente jours de silence. Le coffre gardant
+       * « publié », plus rien ne republiait : les correspondants obtenaient
+       * « Aucun appareil chiffré », en silence. Prouvé par
+       * `test/e2ee_releve_test.dart` ⑨ le 29/09/2026.
+       *
+       * ⚠️ MÊME IDENTITÉ : `preparer()` ne la régénère pas si elle existe —
+       * aucune alerte « clé changée » chez les correspondants.
+       */
+      await publierMesCles(deviceId: deviceId);
+      return true;
     } catch (_) {
       // Réseau coupé, serveur ancien : on réessaiera au prochain démarrage.
       return false;
     }
+  }
+
+  /// Quitte cet appareil : retire son identité du serveur, puis vide le coffre.
+  ///
+  /// 🐛 `CoffreE2ee.oublier()` N'AVAIT AUCUN APPELANT. Les commentaires
+  /// affirmaient que la déconnexion vidait le coffre — l'avertissement de
+  /// déconnexion le disait même à l'utilisateur —, et rien ne le faisait :
+  /// l'identité privée, les sessions et la clé de l'archive restaient sur un
+  /// téléphone dissocié ou déconnecté. Même geste que le web
+  /// (`oublierCetAppareil`, `e2ee-service.ts`).
+  ///
+  /// ⚠️ LE SERVEUR D'ABORD, tant que le jeton vaut encore ; le coffre ensuite,
+  /// car il porte le numéro d'appareil à retirer.
+  ///
+  /// ⚠️ NE LÈVE JAMAIS : se déconnecter ne doit pas échouer parce que le
+  /// réseau est coupé. Le balayage des trente jours retirera l'identité.
+  Future<void> oublierCetAppareil() async {
+    try {
+      final numero = await coffre.deviceId();
+      await api('DELETE', '/api/e2ee/cles?deviceId=$numero', null);
+    } catch (_) {}
+    try {
+      await coffre.oublier();
+    } catch (_) {}
   }
 
   /* ══════════════ OUVRIR UNE SESSION ══════════════ */
