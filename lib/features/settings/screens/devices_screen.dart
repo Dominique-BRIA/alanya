@@ -7,12 +7,13 @@ import '../../../core/realtime_client.dart';
 import '../../../core/device_registry.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
+import '../dissocier_telephone.dart';
 
 /// Écran « Appareils connectés » : les sessions ouvertes sur le compte, avec
 /// déconnexion à distance.
 ///
-/// L'appareil courant est marqué et non déconnectable depuis cet écran — s'en
-/// déconnecter soi-même est le rôle du bouton « Se déconnecter » des réglages.
+/// L'appareil courant est marqué ; il ne se déconnecte pas d'ici — c'est le
+/// rôle de « Se déconnecter » des réglages — mais s'y DISSOCIE.
 class DevicesScreen extends StatefulWidget {
   const DevicesScreen({super.key});
 
@@ -253,10 +254,25 @@ class _DevicesScreenState extends State<DevicesScreen> {
                 fontSize: 12, color: mutedOf(context, Colors.black54)),
           ),
         ),
-        // L'appareil courant n'est pas déconnectable ici : ce serait une
-        // déconnexion déguisée, avec un libellé qui ne le dit pas.
+        /*
+         * La ligne de CE téléphone porte « Dissocier ce téléphone » — demande
+         * du user du 28/09/2026. Ce n'est pas une déconnexion déguisée : le
+         * libellé dit exactement ce que fait le geste, qui est le même que
+         * dans les Paramètres.
+         *
+         * Les autres lignes gardent « Déconnecter ». Ce sont des navigateurs,
+         * ou d'anciennes installations : le téléphone lié, c'est celui-ci —
+         * sinon on n'aurait pas pu s'y connecter depuis ce téléphone.
+         */
         trailing: courant
-            ? null
+            ? (a.typeDevice == 1 || a.typeDevice == 2)
+                ? IconButton(
+                    tooltip: tr(context, 'dissoc_title'),
+                    icon: Icon(Icons.phonelink_erase_outlined,
+                        size: 20, color: dangerOf(context)),
+                    onPressed: () => dissocierCeTelephone(context),
+                  )
+                : null
             : occupe
                 ? const SizedBox(
                     width: 18,

@@ -110,6 +110,10 @@ class AuthController extends ChangeNotifier {
   /// qui ferme les autres, et non un ménage volontaire.
   static const raisonEviction = "eviction";
 
+  /// Raison envoyée avec `session_revoked` quand le compte a été dissocié de
+  /// ce téléphone depuis un autre appareil (le web, le plus souvent).
+  static const raisonDissociation = "dissociation";
+
   StreamSubscription<Map<String, dynamic>>? _revocationSub;
 
   /// Déconnexion à distance : une autre session du compte a révoqué un
@@ -132,6 +136,14 @@ class AuthController extends ChangeNotifier {
       // annoncerait une intrusion à quelqu'un qui vient de ranger ses appareils.
       if (e["raison"] == raisonEviction) {
         messageDeconnexion = "Votre compte a été ouvert sur un autre appareil.";
+      }
+      // Sans ce message, le téléphone dissocié depuis le web retomberait sur
+      // l'écran de connexion sans explication — et son utilisateur, en
+      // voulant se reconnecter, découvrirait qu'il le peut : le compte est
+      // libre. Il doit savoir que c'était voulu.
+      if (e["raison"] == raisonDissociation) {
+        messageDeconnexion =
+            "Ce téléphone a été dissocié de votre compte depuis un autre appareil.";
       }
       await logout();
     });

@@ -184,6 +184,21 @@ class DeviceRegistry {
     await api.delete('/api/appareils/$appareilId', bearer: token);
   }
 
+  /// « Dissocier ce téléphone » : le compte n'est plus lié à aucun téléphone,
+  /// et un autre pourra s'y connecter.
+  ///
+  /// Renvoie les identifiants des téléphones que le serveur vient de couper, à
+  /// annoncer au temps réel : l'API ne peut pas le joindre elle-même.
+  Future<List<String>> dissocier() async {
+    final api = _api!, storage = _storage!;
+    final token = await storage.accessToken;
+    final data =
+        await api.post('/api/account/dissocier', const {}, bearer: token);
+    return ((data['telephones'] as List?) ?? const [])
+        .whereType<String>()
+        .toList();
+  }
+
   /// Vrai si cet appareil est celui depuis lequel on navigue.
   Future<bool> isCurrent(AppareilInfo a) async =>
       a.cookiesWebId != null && a.cookiesWebId == await deviceId();

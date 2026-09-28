@@ -20,6 +20,7 @@ import 'recuperation_screen.dart';
 import '../../blocked/screens/blocked_users_screen.dart';
 import '../../chat/screens/starred_messages_screen.dart';
 import '../deconnexion.dart';
+import '../dissocier_telephone.dart';
 import '../widgets/preferences_section.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -288,6 +289,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: tr(context, 'set_version', {'v': '1.0.0'}),
             trailing: _chevron(),
             onTap: () => _showAbout(),
+          ),
+          /*
+           * Un compte, un téléphone : tant que celui-ci n'est pas dissocié, un
+           * autre téléphone est refusé à la connexion. Une déconnexion
+           * ordinaire ne dissocie rien — d'où un geste à part, bien visible.
+           */
+          _settingsTile(
+            icon: Icons.phonelink_erase_outlined,
+            iconColor: _danger,
+            title: tr(context, 'dissoc_title'),
+            subtitle: tr(context, 'dissoc_sub'),
+            trailing: _chevron(),
+            onTap: () => dissocierCeTelephone(context),
           ),
           _settingsTile(
             icon: Icons.delete_forever_outlined,
