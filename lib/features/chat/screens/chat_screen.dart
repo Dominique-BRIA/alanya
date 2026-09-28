@@ -145,7 +145,6 @@ class _ChatScreenState extends State<ChatScreen>
   List<CallRecord> _callsForConv = [];
   List<dynamic> _combined = [];
   bool _loading = true;
-  bool _sending = false;
 
   /// Barre de mise en forme dépliée par le bouton « A » du composeur.
   bool _formatBarOpen = false;
@@ -2102,7 +2101,7 @@ class _ChatScreenState extends State<ChatScreen>
   // ══════════════════════════════════════════════
   Future<void> _send() async {
     final text = _inputCtrl.text.trim();
-    if (text.isEmpty || _sending) return;
+    if (text.isEmpty) return;
     // Les mentions encore présentes dans le texte — voir `_mentionsAEnvoyer`,
     // qui écarte celles que l'utilisateur a effacées après les avoir choisies.
     final mentions = _mentionsAEnvoyer(text);
@@ -2141,91 +2140,45 @@ class _ChatScreenState extends State<ChatScreen>
     final pile = context.e2ee;
     final pair = widget.otherUserId;
     if (_filChiffre && pile != null && pair != null) {
-      setState(() => _sending = true);
-      try {
-        final id = await pile.fil
-            .envoyer(convId: widget.convId, pairId: pair, texte: text);
-        if (!mounted) return;
-        final envoye = Message(
-          id: id,
-          convId: widget.convId,
-          senderId: _myId ?? "",
-          content: text,
-          type: "TEXT",
-          status: "SENT",
-          // ⚠️ Le chemin chiffré ne porte pas encore les réponses citées : la
-          // citation voyagerait en clair. On ne fait pas semblant.
-          replyToId: null,
-          media: const [],
-          createdAt: DateTime.now(),
-        );
-        /*
-         * ⚠️ LE CLAIR VA DANS LE CACHE LOCAL, comme sur le web — décision du
-         * 21/09. Sans lui, NOTRE PROPRE message rede-viendrait vide au
-         * rechargement : aucune enveloppe ne nous est adressée, et le serveur
-         * ne garde que la ligne sans texte.
-         */
-        _cacheMsg(envoye);
-        /*
-         * 🔴 ET DANS LE CACHE PERSISTANT — `_cacheMsg` N'ÉCRIT RIEN SUR LE
-         * DISQUE.
-         *
-         * 🐛 Son nom trompe : il ne remplit que `_replySnapshots`, la table des
-         * APERÇUS DE RÉPONSE, en mémoire. Je l'ai pris pour le cache local, et
-         * notre propre message chiffré n'était donc rangé NULLE PART : au
-         * rechargement, la ligne revenait du serveur sans texte, et
-         * `_garderLeClairConnu` n'avait rien à recoller.
-         *
-         * ⚠️ UN NOM QUI PROMET PLUS QUE LA FONCTION, c'est le même motif que le
-         * commentaire qui décrit une intention : la relecture suivante passe à
-         * côté sans ralentir.
-         */
-        unawaited(MessageCache.upsert(envoye, widget.convId));
-        /*
-         * 🔴 ET DANS L'ARCHIVE, SANS QUOI IL NE SURVIT PAS À CET APPAREIL.
-         *
-         * 🐛 Le mobile archivait ce qu'il REÇOIT et jamais ce qu'il ENVOIE. Nos
-         * propres messages n'existaient donc que dans le cache local : perdus
-         * à la réinstallation, absents du téléphone suivant, invisibles depuis
-         * le web.
-         *
-         * ⚠️ AUCUNE ENVELOPPE NE NOUS EST ADRESSÉE — on ne s'écrit pas à
-         * soi-même. L'archive est le SEUL chemin par lequel un message envoyé
-         * atteint nos autres appareils. Ce n'est pas une sauvegarde de
-         * confort : c'est la moitié manquante de la conversation.
-         *
-         * ⚠️ SANS ATTENDRE, ET SANS BLOQUER : le message est parti, il est
-         * remis. Échouer l'archive ne doit pas le faire paraître échoué.
-         */
-        unawaited(pile.sauvegarde.deposer([
-          {
-            'id': id,
-            'convId': widget.convId,
-            'expediteurId': _myId ?? '',
-            'texte': text,
-            /*
-             * ⚠️ EN MILLISECONDES, COMME LE WEB — et comme la relève juste
-             * au-dessus. J'écrivais une date ISO ici : l'archive aurait porté
-             * DEUX formats pour le même champ, et la restauration serait
-             * retombée sur « maintenant » pour la moitié des messages, qui se
-             * seraient tous empilés à la date du jour.
-             */
-            'quand': envoye.createdAt.millisecondsSinceEpoch,
-          },
-        ]));
-        _inputCtrl.clear();
-        _mentionsEnCours.clear();
-        setState(() {
-          _messages = [..._messages, envoye];
-          _rebuildCombined();
-          _replyTo = null;
-        });
-        _scrollToBottom();
-      } catch (e) {
-        if (mounted) _showError(messageDErreur(context, e));
-      } finally {
-        if (mounted) setState(() => _sending = false);
-      }
+      /*
+       * 🔴 LE CHAMP SE LIBÈRE TOUT DE SUITE, L’ENVOI SE FAIT EN FOND.
+       *
+       * 🐛 « QUAND ON CLIQUE SUR ENVOYER, ÇA PREND DU TEMPS ET ÇA BLOQUE LE
+       * CHAMP » (user, 28/09/2026). Le texte ne s’effaçait qu’APRÈS l’envoi
+       * chiffré complet — liste des appareils, ligne du fil, enveloppes : quatre
+       * à cinq allers-retours, soit deux secondes à 300 ms de latence — et
+       * `_sending` refusait tout autre envoi pendant ce temps.
+       *
+       * ⚠️ LA BULLE APPARAÎT « EN ATTENTE » (horloge) sous un identifiant
+       * provisoire, puis prend l’identifiant du serveur à la réussite, ou
+       * passe « échec » avec « Réessayer ». Le texte n’est jamais perdu.
+       */
+      final tempId = "tmp-${DateTime.now().microsecondsSinceEpoch}";
+      final quand = DateTime.now();
+      _inputCtrl.clear();
+      _mentionsEnCours.clear();
+      setState(() {
+        _messages = [
+          ..._messages,
+          Message(
+            id: tempId,
+            convId: widget.convId,
+            senderId: _myId ?? "",
+            content: text,
+            type: "TEXT",
+            status: "PENDING",
+            // ⚠️ Le chemin chiffré ne porte pas encore les réponses citées : la
+            // citation voyagerait en clair. On ne fait pas semblant.
+            replyToId: null,
+            media: const [],
+            createdAt: quand,
+          ),
+        ];
+        _rebuildCombined();
+        _replyTo = null;
+      });
+      _scrollToBottom();
+      _envoyerChiffreEnFond(pile, pair, text, tempId, quand);
       return;
     }
 
@@ -2263,54 +2216,205 @@ class _ChatScreenState extends State<ChatScreen>
       _scrollToBottom();
       return;
     }
+    /*
+     * ⚠️ TEMPS RÉEL COUPÉ : REPLI REST — ET LUI AUSSI LIBÈRE LE CHAMP TOUT DE
+     * SUITE. Il attendait la réponse du serveur avant d’effacer le texte, avec
+     * `_sending` qui refusait tout autre envoi : le même blocage que le chemin
+     * chiffré. La bulle part « en attente » ; la réponse la remplace.
+     *
+     * ⚠️ PANNE RÉSEAU → BOÎTE D’ENVOI, comme avant : la bulle garde son
+     * horloge et l’`Outbox` la renverra. Refus du serveur → bulle en échec.
+     */
+    final tempId = "out-${DateTime.now().microsecondsSinceEpoch}";
+    final optimistic = Message(
+        id: tempId,
+        convId: widget.convId,
+        senderId: _myId ?? "",
+        content: text,
+        type: "TEXT",
+        status: "PENDING",
+        replyToId: replyId,
+        replyTo: null,
+        media: const [],
+        createdAt: DateTime.now());
+    _inputCtrl.clear();
+    _mentionsEnCours.clear();
     setState(() {
-      _sending = true;
+      _messages = [..._messages, optimistic];
+      _rebuildCombined();
+      _replyTo = null;
     });
+    _scrollToBottom();
+    final repo = context.read<ChatRepository>();
+    final outbox = context.read<Outbox>();
     try {
-      final msg = await context
-          .read<ChatRepository>()
-          .sendText(widget.convId, text,
-              replyToId: replyId, mentions: mentions);
-      _mentionsEnCours.clear();
+      final msg = await repo.sendText(widget.convId, text,
+          replyToId: replyId, mentions: mentions);
       _cacheMsg(msg);
-      _inputCtrl.clear();
+      if (!mounted) return;
       setState(() {
-        _messages = [..._messages, msg];
+        final i = _messages.indexWhere((m) => m.id == tempId);
+        if (i >= 0) {
+          _messages[i] = msg;
+        } else if (!_messages.any((m) => m.id == msg.id)) {
+          _messages = [..._messages, msg];
+        }
         _rebuildCombined();
-        _replyTo = null;
       });
-      _scrollToBottom();
     } on ApiException catch (e) {
+      if (!mounted) return;
+      _marquerStatut(tempId, "FAILED");
       _showError(e.message);
     } catch (_) {
-      final tempId = "out-${DateTime.now().microsecondsSinceEpoch}";
-      final optimistic = Message(
-          id: tempId,
-          convId: widget.convId,
-          senderId: _myId ?? "",
-          content: text,
-          type: "TEXT",
-          status: "PENDING",
-          replyToId: replyId,
-          replyTo: null,
-          media: const [],
-          createdAt: DateTime.now());
       _cacheMsg(optimistic);
-      _inputCtrl.clear();
-      setState(() {
-        _messages = [..._messages, optimistic];
-        _rebuildCombined();
-        _replyTo = null;
-      });
-      _scrollToBottom();
-      await context.read<Outbox>().enqueue(
+      await outbox.enqueue(
           tempId: tempId,
           convId: widget.convId,
           content: text,
           replyToId: replyId);
-    } finally {
-      if (mounted) setState(() => _sending = false);
     }
+  }
+
+  /* ══════════════ L'ENVOI CHIFFRÉ, EN FOND ══════════════ */
+
+  /// La file des envois chiffrés de cet écran : un à la fois, dans l'ordre.
+  ///
+  /// ⚠️ SANS ELLE, deux messages tapés vite partiraient en parallèle, et le
+  /// second pourrait créer sa ligne sur le serveur AVANT le premier — le fil
+  /// les afficherait dans le désordre chez le correspondant.
+  Future<void> _fileEnvoisChiffres = Future<void>.value();
+
+  void _envoyerChiffreEnFond(
+    PileE2ee pile,
+    String pair,
+    String texte,
+    String tempId,
+    DateTime quand,
+  ) {
+    _fileEnvoisChiffres = _fileEnvoisChiffres
+        .then((_) => _envoyerChiffreMaintenant(pile, pair, texte, tempId, quand))
+        .catchError((_) {});
+  }
+
+  Future<void> _envoyerChiffreMaintenant(
+    PileE2ee pile,
+    String pair,
+    String texte,
+    String tempId,
+    DateTime quand,
+  ) async {
+    try {
+      final id = await pile.fil
+          .envoyer(convId: widget.convId, pairId: pair, texte: texte);
+      final envoye = Message(
+        id: id,
+        convId: widget.convId,
+        senderId: _myId ?? "",
+        content: texte,
+        type: "TEXT",
+        status: "SENT",
+        replyToId: null,
+        media: const [],
+        createdAt: quand,
+      );
+      /*
+       * ⚠️ LE CLAIR VA DANS LE CACHE LOCAL, comme sur le web — décision du
+       * 21/09. Sans lui, NOTRE PROPRE message redeviendrait vide au
+       * rechargement : aucune enveloppe ne nous est adressée, et le serveur ne
+       * garde que la ligne sans texte.
+       *
+       * 🐛 `_cacheMsg` N'ÉCRIT RIEN SUR LE DISQUE : son nom trompe, il ne
+       * remplit que la table des aperçus de réponse. D'où `MessageCache.upsert`
+       * en plus.
+       *
+       * ⚠️ AVANT le test `mounted` : si l'utilisateur a quitté l'écran pendant
+       * l'envoi, le message est parti — il doit être rangé quand même.
+       */
+      _cacheMsg(envoye);
+      unawaited(MessageCache.upsert(envoye, widget.convId));
+      /*
+       * 🔴 ET DANS L'ARCHIVE, SANS QUOI IL NE SURVIT PAS À CET APPAREIL. Le
+       * mobile archivait ce qu'il REÇOIT et jamais ce qu'il ENVOIE. Sans
+       * attendre : échouer l'archive ne doit pas faire paraître le message
+       * échoué.
+       *
+       * ⚠️ `quand` EN MILLISECONDES, comme le web et la relève : deux formats
+       * pour le même champ empileraient la moitié des messages à la date du
+       * jour à la restauration.
+       */
+      unawaited(pile.sauvegarde.deposer([
+        {
+          'id': id,
+          'convId': widget.convId,
+          'expediteurId': _myId ?? '',
+          'texte': texte,
+          'quand': quand.millisecondsSinceEpoch,
+        },
+      ]));
+      if (!mounted) return;
+      setState(() {
+        final i = _messages.indexWhere((m) => m.id == tempId);
+        if (i >= 0) {
+          _messages[i] = envoye;
+        } else if (!_messages.any((m) => m.id == id)) {
+          _messages = [..._messages, envoye];
+        }
+        _rebuildCombined();
+      });
+    } catch (e) {
+      /*
+       * ⚠️ ON NE RETOMBE JAMAIS EN CLAIR SI LE CHIFFREMENT ÉCHOUE : on le dit,
+       * et la bulle reste là, marquée en échec, avec son texte — « Réessayer »
+       * dans son menu. Un repli silencieux est exactement ce qu'un attaquant
+       * chercherait à provoquer.
+       */
+      if (!mounted) return;
+      _marquerStatut(tempId, "FAILED");
+      _showError(messageDErreur(context, e));
+    }
+  }
+
+  /// Change le statut d'une bulle, sans rien d'autre.
+  void _marquerStatut(String id, String statut) {
+    setState(() {
+      _messages = [
+        for (final m in _messages)
+          if (m.id != id)
+            m
+          else
+            Message(
+              id: m.id,
+              convId: m.convId,
+              senderId: m.senderId,
+              content: m.content,
+              type: m.type,
+              status: statut,
+              replyToId: m.replyToId,
+              replyTo: m.replyTo,
+              media: m.media,
+              createdAt: m.createdAt,
+            ),
+      ];
+      _rebuildCombined();
+    });
+  }
+
+  /// « Réessayer » sur une bulle chiffrée en échec : même texte, même bulle.
+  ///
+  /// ⚠️ FIL CHIFFRÉ SEULEMENT. En fil ordinaire, une panne réseau passe par
+  /// la boîte d’envoi, qui réessaie seule ; il ne reste en échec que ce que le
+  /// serveur a REFUSÉ, et le renvoyer échouerait pareil. Remettre le texte dans
+  /// le champ écraserait, en plus, ce que l’utilisateur est en train de taper.
+  bool _peutReessayer(Message m) =>
+      m.status == "FAILED" && _filChiffre && (m.content ?? '').isNotEmpty;
+
+  void _reessayerTexteChiffre(Message m) {
+    final pile = context.e2ee;
+    final pair = widget.otherUserId;
+    final texte = m.content;
+    if (!_peutReessayer(m) || pile == null || pair == null || texte == null) return;
+    _marquerStatut(m.id, "PENDING");
+    _envoyerChiffreEnFond(pile, pair, texte, m.id, m.createdAt);
   }
 
   void _setReplyTo(Message m) {
@@ -2389,6 +2493,9 @@ class _ChatScreenState extends State<ChatScreen>
   Widget _statusTicks(String status, Color baseColor) {
     if (status == "PENDING")
       return Icon(Icons.access_time, size: 13, color: baseColor);
+    // Envoi refusé ou chiffrement impossible : « Réessayer » dans le menu.
+    if (status == "FAILED")
+      return const Icon(Icons.error_outline, size: 15, color: Colors.redAccent);
     if (status == "READ")
       return const Icon(Icons.done_all, size: 15, color: AlanyaColors.tickRead);
     if (status == "DELIVERED")
@@ -3987,6 +4094,14 @@ class _ChatScreenState extends State<ChatScreen>
               if (!m.isDeleted) _reactionPickerRow(m, ctx),
               if (!m.isDeleted) const Divider(height: 1),
               if (!m.isDeleted) ...[
+                if (_peutReessayer(m))
+                  ListTile(
+                      leading: const Icon(Icons.refresh, color: Colors.redAccent),
+                      title: Text(tr(context, 'retry')),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _reessayerTexteChiffre(m);
+                      }),
                 ListTile(
                     leading: Icon(Icons.reply, color: _accent),
                     title: Text(tr(context, 'reply')),
@@ -6153,7 +6268,7 @@ class _ChatScreenState extends State<ChatScreen>
                           child: IconButton(
                               tooltip: tr(context, 'send'),
                               icon: const Icon(Icons.send, color: Colors.white),
-                              onPressed: _sending ? null : _send))
+                              onPressed: _send))
                       : _micButton(),
                 ]),
                 if (_emojiPanelOpen && !_recording) _emojiPanel(),
