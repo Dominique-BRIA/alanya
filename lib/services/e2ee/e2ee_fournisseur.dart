@@ -13,6 +13,7 @@ import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/authed_api.dart';
+import '../../core/message_cache.dart';
 import 'e2ee_coffre.dart';
 import 'e2ee_fil.dart';
 import 'e2ee_sauvegarde.dart';
@@ -85,6 +86,40 @@ class PileE2ee {
   /// ne retient pas ce qu'il attrape ne rend pas l'application robuste : il la
   /// rend muette.
   Object? echecDemarrage;
+
+  /// Relève les enveloppes et range CHAQUE message dans son fil, puis dans
+  /// l'archive — avant l'acquittement.
+  ///
+  /// 🔴 LE SEUL POINT D'ENTRÉE DES ÉCRANS. `fil.relever()` sans rangement rend
+  /// les messages de tous les fils et acquitte tout : un écran qui n'en garde
+  /// que les siens perd les autres. C'est ce que faisait `_releverChiffres`.
+  ///
+  /// ⚠️ L'ARCHIVE REÇOIT L'EXPÉDITEUR. Les dépôts du mobile l'omettaient,
+  /// alors que le web s'en sert pour attribuer un message restauré.
+  Future<({List<MessageClair> messages, int illisibles})> releverEtRanger() =>
+      fil.relever(ranger: (messages) async {
+        for (final m in messages) {
+          await MessageCache.rangeTexteDechiffre(
+            id: m.id,
+            convId: m.convId,
+            expediteurId: m.expediteurId,
+            texte: m.texte,
+            quand: DateTime.fromMillisecondsSinceEpoch(m.quand),
+          );
+        }
+        // ⚠️ `deposer` ne lève jamais, et rend `false` sans archive ouverte :
+        // l'archive peut manquer ce lot, le cache l'a déjà.
+        await sauvegarde.deposer([
+          for (final m in messages)
+            {
+              'id': m.id,
+              'convId': m.convId,
+              'expediteurId': m.expediteurId,
+              'texte': m.texte,
+              'quand': m.quand,
+            },
+        ]);
+      });
 
   Future<void> demarrer() async {
     /*

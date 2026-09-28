@@ -250,6 +250,49 @@ class MessageCache {
     );
   }
 
+  /// Range le texte d'un message chiffré qu'on vient de relever — dans SON fil.
+  ///
+  /// 🔴 C'EST LA SEULE COPIE DE CE TEXTE SUR L'APPAREIL. La relève va acquitter
+  /// l'enveloppe, et le cliquet a déjà consommé la clé : ce qui n'est pas rangé
+  /// ici est perdu.
+  ///
+  /// ⚠️ UNE MISE À JOUR D'ABORD, pas un `upsert` : si la ligne existe déjà
+  /// (elle est arrivée par le temps réel), on n'en change QUE le texte. Un
+  /// `upsert` la remplacerait entière et perdrait ce que la relève ne connaît
+  /// pas — statut, réponse citée, mentions.
+  ///
+  /// ⚠️ SINON UNE LIGNE MINIMALE, qui suffit : à l'ouverture du fil, la liste du
+  /// serveur arrive sans texte et `_garderLeClairConnu` recolle celui-ci.
+  static Future<void> rangeTexteDechiffre({
+    required String id,
+    required String convId,
+    required String expediteurId,
+    required String texte,
+    required DateTime quand,
+  }) async {
+    final db = await _database();
+    final modifiees = await db.update(
+      'messages',
+      {'content': texte},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    if (modifiees > 0) return;
+    await db.insert(
+      'messages',
+      {
+        'id': id,
+        'conv_id': convId,
+        'sender_id': expediteurId,
+        'content': texte,
+        'type': 'TEXT',
+        'status': 'DELIVERED',
+        'created_at': quand.toIso8601String(),
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+  }
+
   /// Met à jour le statut d'un message.
   static Future<void> updateStatus(String messageId, String status) async {
     final db = await _database();

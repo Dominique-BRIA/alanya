@@ -11,10 +11,55 @@
 /// lire.
 library;
 
+import 'dart:async';
+
+import 'package:flutter/services.dart' show PlatformException;
+import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart'
+    show DuplicateMessageException;
+
 import 'e2ee_service.dart';
 
 /// Un message tel que le fil le manipule, en clair.
-typedef MessageClair = ({String id, String convId, String texte, int quand});
+typedef MessageClair = ({
+  String id,
+  String convId,
+  String expediteurId,
+  String texte,
+  int quand,
+});
+
+/// Range des messages relevés — appelé AVANT leur acquittement.
+typedef Rangement = Future<void> Function(List<MessageClair> messages);
+
+/// Ce que vaut l'échec d'un déchiffrement.
+enum _Echec {
+  /// Le message a DÉJÀ été ouvert : rien de perdu, rien à réparer.
+  dejaLu,
+
+  /// Le stockage n'a pas répondu à temps : réessayer peut réussir.
+  passager,
+
+  /// Plus rien ne l'ouvrira jamais : réessayer ne sert à rien.
+  definitif,
+}
+
+/// Classe un échec de déchiffrement.
+///
+/// ⚠️ LA LISTE EST À L'ENVERS, ET C'EST VOULU. La bibliothèque n'exporte pas
+/// ses exceptions de message invalide (`InvalidMessageException`,
+/// `InvalidMacException`) : on ne peut pas les nommer. On nomme donc ce qui est
+/// PASSAGER — un délai dépassé, une panne du coffre sécurisé —, et tout le
+/// reste est définitif.
+///
+/// 🔴 UN DÉFINITIF TENU POUR PASSAGER, C'EST LA BOUCLE qu'on vient de fermer :
+/// l'enveloppe reste en tête de file et revient à chaque relève. Un passager
+/// tenu pour définitif, c'est un message perdu. D'où une liste courte et
+/// précise du côté passager.
+_Echec _natureDe(Object e) {
+  if (e is DuplicateMessageException) return _Echec.dejaLu;
+  if (e is TimeoutException || e is PlatformException) return _Echec.passager;
+  return _Echec.definitif;
+}
 
 /// Les types de compte couverts par le chiffrement.
 ///
@@ -172,7 +217,39 @@ class E2eeFil {
   ///
   /// ⚠️ UNE ENVELOPPE ILLISIBLE NE BLOQUE PAS LES AUTRES. On la compte et on
   /// continue : un message perdu vaut mieux qu'un fil entier qui ne charge plus.
-  Future<({List<MessageClair> messages, int illisibles})> relever() async {
+  ///
+  /// 🔴 [ranger] PASSE AVANT L'ACQUITTEMENT, ET IL REÇOIT TOUS LES FILS.
+  ///
+  /// 🐛 La relève ramène les enveloppes de TOUTES les conversations. L'écran ne
+  /// rangeait que celles du fil ouvert : le texte des autres était acquitté
+  /// puis jeté, et son fil affichait ensuite « indisponible sur cet appareil ».
+  /// Même défaut sur le web, prouvé le 28/09/2026
+  /// (`STAGE-WEB/scripts/e2ee-releve-multifil.mjs`).
+  ///
+  /// 🔴 LES RELÈVES PASSENT UNE PAR UNE.
+  ///
+  /// 🐛 L'écran en lance jusqu'à trois sans les attendre — ouverture du fil,
+  /// ligne du message, sonnette `e2ee_arrivee` —, et les deux dernières partent
+  /// pour le MÊME message. Tant que la première n'a pas acquitté, la seconde
+  /// ramène les mêmes enveloppes, les déchiffre une deuxième fois, échoue, et
+  /// l'échec effaçait la session : le message suivant du correspondant était
+  /// perdu. Prouvé par `test/e2ee_releve_test.dart`, groupe ①.
+  ///
+  /// ⚠️ UNE FILE, PAS UNE RELÈVE PARTAGÉE : un appel arrivé en cours de route
+  /// peut viser une enveloppe déposée après le départ de la relève en cours.
+  Future<({List<MessageClair> messages, int illisibles})> relever({
+    Rangement? ranger,
+  }) {
+    final tour = _fileReleves.then((_) => _releverMaintenant(ranger));
+    _fileReleves = tour.then((_) {}, onError: (_) {});
+    return tour;
+  }
+
+  Future<void> _fileReleves = Future<void>.value();
+
+  Future<({List<MessageClair> messages, int illisibles})> _releverMaintenant(
+    Rangement? ranger,
+  ) async {
     /*
      * 🔴 `deviceId` EST OBLIGATOIRE, ET IL MANQUAIT.
      *
@@ -192,6 +269,10 @@ class E2eeFil {
     final messages = <MessageClair>[];
     final aAcquitter = <String>[];
     var illisibles = 0;
+    // Une session n'est effacée qu'UNE fois par relève, même si plusieurs de
+    // ses enveloppes échouent : la seconde effacerait ce que la première a
+    // déjà remis à zéro, pour rien.
+    final sessionsOubliees = <String>{};
 
     for (final e in brutes) {
       try {
@@ -209,13 +290,42 @@ class E2eeFil {
         messages.add((
           id: (e['messageId'] ?? e['id']) as String,
           convId: e['convId'] as String,
+          expediteurId: e['expediteurId'] as String,
           texte: texte,
           quand: DateTime.parse(e['createdAt'] as String).millisecondsSinceEpoch,
         ));
         aAcquitter.add(e['id'] as String);
         noteEtat(e['convId'] as String, true);
-      } catch (_) {
+      } catch (erreur) {
+        final nature = _natureDe(erreur);
+
+        /*
+         * ⚠️ PASSAGER : ON GARDE L'ENVELOPPE, ET ON NE TOUCHE À RIEN. Le coffre
+         * n'a pas répondu à temps ; le message est intact, la prochaine relève
+         * le lira. Effacer la session ici détruirait une session saine.
+         */
+        if (nature == _Echec.passager) continue;
+
+        /*
+         * 🔴 DÉFINITIF OU DÉJÀ LU : ON ACQUITTE.
+         *
+         * 🐛 L'ENVELOPPE ILLISIBLE N'ÉTAIT JAMAIS ACQUITTÉE. Elle revenait à
+         * chaque relève, échouait de nouveau, et chaque échec effaçait la
+         * session — y compris celle que le correspondant venait de rétablir.
+         * La conversation restait cassée tant que l'enveloppe vivait sur le
+         * serveur, soit jusqu'à 90 jours. Prouvé par le groupe ② du test.
+         *
+         * ⚠️ LA GARDER NE SAUVAIT RIEN : un message dont la session ou la clé
+         * n'existe plus ne se lira pas mieux demain.
+         */
+        aAcquitter.add(e['id'] as String);
+
+        // Déjà ouvert par une relève précédente : ni perte, ni divergence.
+        if (nature == _Echec.dejaLu) continue;
+
         illisibles++;
+        final cle = '${e['expediteurId']}.${e['expediteurDevice']}';
+        if (!sessionsOubliees.add(cle)) continue;
         /*
          * 🔴 UNE ENVELOPPE ILLISIBLE VEUT DIRE QUE LES DEUX SESSIONS ONT
          * DIVERGÉ — et sans geste de notre part, ÇA NE SE RÉPARE JAMAIS.
@@ -242,6 +352,17 @@ class E2eeFil {
           // Le nettoyage ne doit pas empêcher de relever les suivantes.
         }
       }
+    }
+
+    if (ranger != null && messages.isNotEmpty) {
+      /*
+       * ⚠️ UN RANGEMENT RATÉ N'EMPÊCHE PAS L'ACQUITTEMENT. Garder l'enveloppe
+       * ne sauverait rien — elle ne se relirait plus — et la remettrait en
+       * tête de file. Le texte reste au moins dans ce que rend la relève.
+       */
+      try {
+        await ranger(messages);
+      } catch (_) {}
     }
 
     if (aAcquitter.isNotEmpty) {

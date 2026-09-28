@@ -1754,7 +1754,12 @@ class _ChatScreenState extends State<ChatScreen>
     if (pile == null) return;
 
     try {
-      final r = await pile.fil.relever();
+      /*
+       * 🔴 `releverEtRanger`, JAMAIS `fil.relever()` NU. La relève ramène les
+       * enveloppes de TOUS les fils ; ce passage ne rangeait que celles du fil
+       * ouvert, et le texte des autres était acquitté puis perdu.
+       */
+      final r = await pile.releverEtRanger();
 
       /*
        * 🔴 UN ÉCHEC DE DÉCHIFFREMENT SE DIT. IL ÉTAIT COMPTÉ ET JAMAIS MONTRÉ.
@@ -1811,22 +1816,20 @@ class _ChatScreenState extends State<ChatScreen>
         );
       }).toList();
 
-      await MessageCache.putConv(widget.convId, remplis);
+      /*
+       * ⚠️ NI CACHE NI ARCHIVE ICI : `releverEtRanger` les a DÉJÀ écrits, fil
+       * par fil, avant l'acquittement. Il ne reste qu'à remplir l'écran.
+       *
+       * 🐛 LE `putConv` QUI ÉTAIT ICI EFFAÇAIT CE RANGEMENT : il vide toutes
+       * les lignes du fil avant d'écrire la liste affichée. Un message relevé
+       * mais pas encore affiché — plus ancien que la page chargée, ou arrivé
+       * pendant le chargement — aurait disparu du cache à peine rangé.
+       */
       if (!mounted) return;
       setState(() {
         _messages = remplis;
         _rebuildCombined();
       });
-
-      /*
-       * 🔴 ET ON ARCHIVE CE QU'ON VIENT DE LIRE. L'enveloppe est acquittée, donc
-       * morte : si ce texte n'entre pas dans l'archive maintenant, il n'existera
-       * plus que dans le cache de CET appareil et disparaîtra avec lui.
-       */
-      await pile.sauvegarde.deposer([
-        for (final m in r.messages)
-          {'id': m.id, 'convId': m.convId, 'texte': m.texte, 'quand': m.quand},
-      ]);
     } catch (_) {
       // Silencieux : les messages en clair de la conversation restent affichés.
     }

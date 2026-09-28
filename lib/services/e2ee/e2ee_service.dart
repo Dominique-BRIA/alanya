@@ -53,6 +53,55 @@ List<Map<String, dynamic>> listeDe(Map<String, dynamic> reponse, String champ) {
 class E2eeService {
   E2eeService(this.coffre, this.api);
 
+  /* ══════════════ UN SEUL ACCÈS AU COFFRE À LA FOIS ══════════════ */
+
+  /// La file des opérations qui ÉCRIVENT dans le coffre.
+  ///
+  /// 🔴 LE COFFRE N'A AUCUN VERROU, ET IL EN FAUT UN. Il range ses pré-clés et
+  /// ses sessions sous forme de TABLES ENTIÈRES : chaque écriture relit la
+  /// table, la modifie, la réécrit. Deux opérations entrelacées — un envoi et
+  /// une relève sur le même correspondant, une relève et un réapprovisionnement
+  /// — écrivent chacune leur version, et la dernière efface l'autre : un cliquet
+  /// qui recule, ou cinquante pré-clés publiées dont la clé privée n'existe plus.
+  ///
+  /// ⚠️ LE WEB N'EN A PAS BESOIN : sa bibliothèque sérialise elle-même les
+  /// opérations par correspondant (`SessionLock`). Celle du mobile ne le fait
+  /// pas.
+  ///
+  /// ⚠️ AUCUNE DE CES MÉTHODES N'EN APPELLE UNE AUTRE : ce serait attendre son
+  /// propre tour, et ne jamais l'obtenir.
+  Future<void> _file = Future<void>.value();
+
+  Future<T> _enSerie<T>(Future<T> Function() operation) {
+    final tour = _file.then((_) => operation());
+    _file = tour.then((_) {}, onError: (_) {});
+    return tour;
+  }
+
+  Future<void> publierMesCles({required int deviceId}) =>
+      _enSerie(() => _publierMesCles(deviceId: deviceId));
+
+  Future<List<int>> ouvrirSessions(String pairId) =>
+      _enSerie(() => _ouvrirSessions(pairId));
+
+  Future<void> oublierSession(String pairId, int deviceId) =>
+      _enSerie(() => _oublierSession(pairId, deviceId));
+
+  Future<({int type, String corps})> chiffrer(
+    String pairId,
+    int deviceId,
+    String texte,
+  ) =>
+      _enSerie(() => _chiffrer(pairId, deviceId, texte));
+
+  Future<String> dechiffrer(
+    String pairId,
+    int deviceId,
+    int type,
+    String corpsB64,
+  ) =>
+      _enSerie(() => _dechiffrer(pairId, deviceId, type, corpsB64));
+
   final CoffreE2ee coffre;
 
   /// L'accès réseau, injecté — ce service ne connaît pas votre client HTTP.
@@ -83,7 +132,7 @@ class E2eeService {
   /// entier 64 bits.
   int _idAuHasard() => Random.secure().nextInt(100000) + 1;
 
-  Future<void> publierMesCles({required int deviceId}) async {
+  Future<void> _publierMesCles({required int deviceId}) async {
     await coffre.preparer();
 
     final identite = await coffre.identiteLocale();
@@ -178,7 +227,7 @@ class E2eeService {
   /// ⚠️ UNE SESSION PAR APPAREIL, PAS PAR PERSONNE. Bob peut avoir un téléphone
   /// et un navigateur ; un message doit être chiffré séparément pour chacun,
   /// sinon l'un des deux ne le lira jamais.
-  Future<List<int>> ouvrirSessions(String pairId) async {
+  Future<List<int>> _ouvrirSessions(String pairId) async {
     final r = await api('GET', '/api/e2ee/cles/$pairId', null);
     /*
      * 🐛 LE CHAMP S'APPELLE `paquets`, PAS `appareils`. On lisait le mauvais
@@ -260,13 +309,13 @@ class E2eeService {
   /// ne se jette pas : la refaire coûte une pré-clé au correspondant et
   /// orpheline la sienne. C'est exactement la faute qu'on vient de corriger
   /// dans `ouvrirSessions`.
-  Future<void> oublierSession(String pairId, int deviceId) =>
+  Future<void> _oublierSession(String pairId, int deviceId) =>
       coffre.deleteSession(SignalProtocolAddress(pairId, deviceId));
 
   /* ══════════════ CHIFFRER / DÉCHIFFRER ══════════════ */
 
   /// Chiffre un texte pour un appareil donné.
-  Future<({int type, String corps})> chiffrer(
+  Future<({int type, String corps})> _chiffrer(
     String pairId,
     int deviceId,
     String texte,
@@ -314,7 +363,7 @@ class E2eeService {
   /// session porte le matériel X3DH (type 3) et s'ouvre autrement que les
   /// suivants (type 1). Se tromper donne une erreur de déchiffrement qui fait
   /// chercher du côté des clés alors que le format seul est en cause.
-  Future<String> dechiffrer(
+  Future<String> _dechiffrer(
     String pairId,
     int deviceId,
     int type,
