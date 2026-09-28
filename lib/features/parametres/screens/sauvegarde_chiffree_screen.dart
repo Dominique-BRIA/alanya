@@ -373,10 +373,19 @@ class _SauvegardeChiffreeScreenState extends State<SauvegardeChiffreeScreen> {
                   ),
 
                 const SizedBox(height: 14),
-                if (active && !_a('recuperation'))
+                /*
+                 * ⚠️ « REMPLACER » EXISTE POUR LES CLÉS DE 60 BITS : jusqu'au
+                 * 28/09/2026 une clé valait 12 mots parmi 32, elle en vaut
+                 * désormais 12 parmi 2 048. Sans ce libellé, qui en avait déjà
+                 * une ne pouvait pas la renforcer. Même geste : le serveur
+                 * REMPLACE la serrure, l'ancienne clé cesse d'ouvrir.
+                 */
+                if (active)
                   FilledButton(
                     onPressed: _occupe ? null : _nouvelleCle,
-                    child: const Text('Créer une clé de récupération'),
+                    child: Text(_a('recuperation')
+                        ? 'Remplacer ma clé de récupération'
+                        : 'Créer une clé de récupération'),
                   ),
                 if (active) const SizedBox(height: 8),
                 OutlinedButton(
