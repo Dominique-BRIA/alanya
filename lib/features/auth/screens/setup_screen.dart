@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../l10n/app_localizations.dart';
@@ -11,6 +13,7 @@ import '../../../core/pays_repository.dart';
 import '../auth_repository.dart';
 import '../../../widgets/saisie_pays_numero.dart';
 import 'fin_inscription_screen.dart';
+import 'restauration_screen.dart';
 
 /* 🔴 LA LISTE DE PAYS CODÉE EN DUR A ÉTÉ RETIRÉE LE 25/08/2026.
  *
@@ -184,7 +187,26 @@ class _SetupScreenState extends State<SetupScreen> {
 
       await context.read<AuthController>().completeSetup(session);
       if (!mounted) return;
-      Navigator.of(context).popUntil((r) => r.isFirst);
+      /*
+       * 🔴 L'ARCHIVE CHIFFRÉE S'OUVRE ICI AUSSI, comme après une connexion.
+       *
+       * 🐛 ELLE NE S'OUVRAIT QU'À LA CONNEXION (`login_screen`). Un compte CRÉÉ
+       * sur le téléphone n'avait donc jamais d'archive : `deposer` sortait sans
+       * rien faire, aucun message n'était sauvegardé, et le web du même compte
+       * — ou un téléphone de remplacement — n'avait rien à restaurer : tout
+       * s'affichait « indisponible sur cet appareil » (signalé le 29/09/2026).
+       *
+       * ⚠️ LE MOT DE PASSE VIENT D'ÊTRE CHOISI : c'est le seul moment où on l'a
+       * sans le redemander. Pour un compte neuf, l'écran crée l'archive (serrure
+       * « mot de passe ») puis laisse entrer aussitôt — il n'y a rien à
+       * restaurer. Il n'est gardé nulle part.
+       */
+      final motDePasse = _passwordCtrl.text;
+      unawaited(Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => RestaurationScreen(motDePasse: motDePasse),
+        ),
+      ));
     } on ApiException catch (e) {
       showAppSnackBar(e.message);
     } catch (_) {
