@@ -1080,6 +1080,12 @@ class _ChatScreenState extends State<ChatScreen>
                     expiresAt: m.expiresAt)
                 : m)
             .toList();
+        // 🐛 SANS CETTE LIGNE, L ÉCRAN NE CHANGEAIT PAS : `_messages` était à
+        // jour, mais la liste AFFICHÉE (`_combined`) gardait les anciennes
+        // bulles jusqu au prochain redessin complet — envoyer un autre message,
+        // rouvrir le fil (user, 28/09/2026 : « le premier prend 2 coches quand
+        // j envoie le second »).
+        _rebuildCombined();
       });
     } else if (type == "message_status" || type == "e2ee_distribue") {
       // `e2ee_distribue` : un message CHIFFRÉ vient d'être relevé par un
@@ -1123,6 +1129,12 @@ class _ChatScreenState extends State<ChatScreen>
                     expiresAt: m.expiresAt)
                 : m)
             .toList();
+        // 🐛 SANS CETTE LIGNE, L ÉCRAN NE CHANGEAIT PAS : `_messages` était à
+        // jour, mais la liste AFFICHÉE (`_combined`) gardait les anciennes
+        // bulles jusqu au prochain redessin complet — envoyer un autre message,
+        // rouvrir le fil (user, 28/09/2026 : « le premier prend 2 coches quand
+        // j envoie le second »).
+        _rebuildCombined();
       });
     } else if (type == "message_deleted") {
       final messageId = e["messageId"] as String?;
@@ -1154,6 +1166,7 @@ class _ChatScreenState extends State<ChatScreen>
                   : m)
               .toList();
         }
+        _rebuildCombined(); // même oubli que pour « lu » et les états
       });
     } else if (type == "typing") {
       if (e["convId"] != widget.convId) return;
