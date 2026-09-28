@@ -389,12 +389,39 @@ class E2eeSauvegarde {
   /// ⚠️ UN BLOC ILLISIBLE NE BLOQUE PAS LES AUTRES : on le compte et on continue.
   /// Une restauration silencieusement partielle est pire qu'un échec net, donc
   /// le nombre remonte à l'appelant.
+  /// Tous les blocs de l'archive, page après page.
+  ///
+  /// 🐛 ON NE LISAIT QUE LA PREMIÈRE PAGE. Le serveur rend au plus 2 000 blocs
+  /// par appel et donne `suivant` quand il en reste : au-delà, les messages
+  /// les plus RÉCENTS manquaient à la restauration, en silence. Prouvé côté
+  /// serveur (`e2ee-archive-banc.mjs` ⑧) et ici par
+  /// `test/e2ee_archive_pages_test.dart`.
+  ///
+  /// ⚠️ 50 TOURS AU PLUS : un serveur qui rendrait toujours le même `suivant`
+  /// ferait tourner la boucle sans fin. 50 pages = 100 000 blocs.
+  Future<List<Map<String, dynamic>>> lireTousLesBlocs() async {
+    final blocs = <Map<String, dynamic>>[];
+    String? suivant;
+    for (var tour = 0; tour < 50; tour++) {
+      final r = await _api(
+        'GET',
+        suivant == null
+            ? '/api/e2ee/archive'
+            : '/api/e2ee/archive?apres=${Uri.encodeQueryComponent(suivant)}',
+        null,
+      );
+      blocs.addAll((r['blocs'] as List? ?? const []).cast<Map<String, dynamic>>());
+      suivant = r['suivant'] as String?;
+      if (suivant == null) break;
+    }
+    return blocs;
+  }
+
   Future<({List<Map<String, dynamic>> messages, int illisibles})> restaurer() async {
     final cle = _maitresse;
     if (cle == null) return (messages: <Map<String, dynamic>>[], illisibles: 0);
 
-    final r = await _api('GET', '/api/e2ee/archive', null);
-    final blocs = (r['blocs'] as List? ?? const []).cast<Map<String, dynamic>>();
+    final blocs = await lireTousLesBlocs();
 
     final vus = <String, Map<String, dynamic>>{};
     var illisibles = 0;
