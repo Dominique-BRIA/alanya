@@ -949,8 +949,8 @@ class _ChatScreenState extends State<ChatScreen>
             tempId != null ? _messages.indexWhere((m) => m.id == tempId) : -1;
         if (idx >= 0) {
           // Un « lu » a pu se poser sur la bulle avant l'écho : il reste.
-          _messages[idx] = msg.avecStatut(statutFusionne(
-              affiche: _messages[idx].status, recu: msg.status));
+          _messages[idx] =
+              msg.avecStatut(_statutAuRemplacement(_messages[idx], msg));
         } else if (!_messages.any((m) => m.id == msg.id)) {
           _messages = [..._messages, msg];
         }
@@ -1081,10 +1081,24 @@ class _ChatScreenState extends State<ChatScreen>
                 : m)
             .toList();
       });
-    } else if (type == "message_status") {
+    } else if (type == "message_status" || type == "e2ee_distribue") {
+      // `e2ee_distribue` : un message CHIFFRÉ vient d'être relevé par un
+      // appareil du destinataire (acquittement, serveur d443124). Même forme
+      // que `message_status` — le pont serveur n'accepte que les verbes `e2ee_*`.
       final messageId = e["messageId"] as String?;
       final newStatus = e["status"] as String?;
       if (messageId == null || newStatus == null) return;
+      /*
+       * ⚠️ UN ÉTAT PEUT PRÉCÉDER SON MESSAGE. Le destinataire relève avant que
+       * le serveur nous ait répondu (il attend Google pour la notification) :
+       * notre bulle porte encore son identifiant PROVISOIRE, et cet état ne
+       * trouverait personne. On le garde, et le remplacement l'appliquera.
+       */
+      if (!_messages.any((m) => m.id == messageId)) {
+        _statutsEnAvance[messageId] = statutFusionne(
+            affiche: _statutsEnAvance[messageId] ?? 'SENT', recu: newStatus);
+        return;
+      }
       setState(() {
         _messages = _messages
             .map((m) => m.id == messageId &&
@@ -2330,8 +2344,7 @@ class _ChatScreenState extends State<ChatScreen>
       setState(() {
         final i = _messages.indexWhere((m) => m.id == tempId);
         if (i >= 0) {
-          _messages[i] = msg.avecStatut(
-              statutFusionne(affiche: _messages[i].status, recu: msg.status));
+          _messages[i] = msg.avecStatut(_statutAuRemplacement(_messages[i], msg));
         } else if (!_messages.any((m) => m.id == msg.id)) {
           _messages = [..._messages, msg];
         }
@@ -2441,8 +2454,8 @@ class _ChatScreenState extends State<ChatScreen>
            * la bulle passait « lu », puis cette ligne la remettait « envoyé »
            * — pour toujours. Voir `statutFusionne`.
            */
-          _messages[i] = envoye.avecStatut(
-              statutFusionne(affiche: _messages[i].status, recu: envoye.status));
+          _messages[i] =
+              envoye.avecStatut(_statutAuRemplacement(_messages[i], envoye));
         } else if (!_messages.any((m) => m.id == id)) {
           _messages = [..._messages, envoye];
         }
@@ -2459,6 +2472,19 @@ class _ChatScreenState extends State<ChatScreen>
       _marquerStatut(tempId, "FAILED");
       _showError(messageDErreur(context, e));
     }
+  }
+
+  /// Les états reçus pour un message que l'écran ne connaît pas encore sous
+  /// son vrai identifiant. Voir le traitement de `message_status`.
+  final Map<String, String> _statutsEnAvance = {};
+
+  /// L'état d'une bulle provisoire remplacée par [recu], la version du
+  /// serveur : le plus avancé entre l'affiché, le reçu, et ce qui est arrivé
+  /// en avance pour ce message. Voir `statutFusionne`.
+  String _statutAuRemplacement(Message provisoire, Message recu) {
+    final enAvance = _statutsEnAvance.remove(recu.id);
+    final s = statutFusionne(affiche: provisoire.status, recu: recu.status);
+    return enAvance == null ? s : statutFusionne(affiche: s, recu: enAvance);
   }
 
   /// Change le statut d'une bulle, sans rien d'autre.
