@@ -1,6 +1,30 @@
+import 'dart:async';
+
 import '../../core/authed_api.dart';
+import '../../core/message_cache.dart';
 import '../../models/conversation.dart';
 import '../../models/message.dart';
+import '../home/dernier_message_local.dart';
+
+/// Donne aux fils CHIFFRÉS leur dernier texte, lu dans le cache local.
+///
+/// ⚠️ À APPLIQUER À TOUTE LISTE DE CONVERSATIONS AFFICHÉE — celle du serveur
+/// comme celle du cache : le serveur rend `lastMessage: null` pour un fil
+/// chiffré (il n’a pas le texte). Voir `dernier_message_local.dart`.
+///
+/// ⚠️ NE LÈVE JAMAIS : sans cache lisible, la liste s’affiche comme avant.
+/// Trois secondes au plus, comme les autres lectures de `sqflite`.
+Future<List<Conversation>> avecDerniersTextesLocaux(List<Conversation> convs) async {
+  final chiffres = [for (final c in convs) if (c.e2eeActif) c.id];
+  if (chiffres.isEmpty) return convs;
+  try {
+    final locaux = await MessageCache.derniersTextes(chiffres)
+        .timeout(const Duration(seconds: 3));
+    return appliquerDerniersTextes(convs, locaux);
+  } catch (_) {
+    return convs;
+  }
+}
 
 class ChatRepository {
   ChatRepository(this._api);
@@ -8,9 +32,10 @@ class ChatRepository {
 
   Future<List<Conversation>> listConversations() async {
     final data = await _api.get("/api/conversations");
-    return ((data["conversations"] as List?) ?? [])
+    final convs = ((data["conversations"] as List?) ?? [])
         .map((c) => Conversation.fromJson(c as Map<String, dynamic>))
         .toList();
+    return avecDerniersTextesLocaux(convs);
   }
 
   /// Crée (ou récupère) une conversation directe avec un utilisateur via son numéro.

@@ -9,6 +9,8 @@
 /// à tenir deux façons de récupérer un service dans la même application.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 
@@ -96,7 +98,24 @@ class PileE2ee {
   ///
   /// ⚠️ L'ARCHIVE REÇOIT L'EXPÉDITEUR. Les dépôts du mobile l'omettaient,
   /// alors que le web s'en sert pour attribuer un message restauré.
-  Future<({List<MessageClair> messages, int illisibles})> releverEtRanger() =>
+  /// Chaque relève, diffusée à TOUS les écrans qui écoutent.
+  ///
+  /// 🔴 POURQUOI UN FLUX. La relève rend les enveloppes de tous les fils, et
+  /// une enveloppe ne se relève qu’UNE fois. Si l’accueil relève (pour
+  /// l’aperçu de la liste) avant l’écran de conversation ouvert, celui-ci ne
+  /// reçoit plus rien — et son message n’apparaît pas, le défaut corrigé le
+  /// 28/09/2026. Qui relève, relève pour tout le monde : les messages sont
+  /// diffusés ici, après leur rangement.
+  Stream<List<MessageClair>> get releves => _releves.stream;
+  final _releves = StreamController<List<MessageClair>>.broadcast();
+
+  Future<({List<MessageClair> messages, int illisibles})> releverEtRanger() async {
+    final r = await _releverEtRangerSansDiffuser();
+    if (r.messages.isNotEmpty && !_releves.isClosed) _releves.add(r.messages);
+    return r;
+  }
+
+  Future<({List<MessageClair> messages, int illisibles})> _releverEtRangerSansDiffuser() =>
       fil.relever(ranger: (messages) async {
         for (final m in messages) {
           await MessageCache.rangeTexteDechiffre(

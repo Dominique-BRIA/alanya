@@ -125,5 +125,8 @@ class ConversationCache {
         'isPinned': c.isPinned,
         'isArchived': c.isArchived,
         'sourdine': c.sourdine,
+        // L’état chiffré : sans lui, l’affichage depuis le cache ne saurait pas
+        // qu’il faut chercher le dernier texte en local (fil chiffré).
+        'e2eeActif': c.e2eeActif,
       };
 }

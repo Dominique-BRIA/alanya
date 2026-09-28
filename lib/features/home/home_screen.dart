@@ -44,6 +44,7 @@ import '../settings/screens/devices_screen.dart';
 import '../ai/ai_repository.dart';
 import '../auth/auth_controller.dart';
 import '../chat/chat_repository.dart';
+import '../../services/e2ee/e2ee_fournisseur.dart';
 import '../chat/screens/chat_screen.dart';
 import '../calls/screens/dialer_screen.dart';
 import '../contacts/teintes_listes.dart';
@@ -649,6 +650,29 @@ class _ConversationsTabState extends State<_ConversationsTab>
             convId != ChatScreen.activeConvId) {
           _showMessageNotification(e);
         }
+      } else if (t == "e2ee_arrivee") {
+        /*
+         * 🔴 UN MESSAGE CHIFFRÉ N'ÉMET PAS `message` — seulement cette sonnette.
+         *
+         * 🐛 La liste ne bougeait donc pas à son arrivée, et son aperçu restait
+         * vide : le serveur n'a pas le texte (demande du user, 28/09/2026).
+         *
+         * On relève — le texte est déchiffré et rangé dans le cache de son fil,
+         * où `avecDerniersTextesLocaux` ira le chercher — puis on recharge la
+         * liste, qui ramène aussi le compteur de non-lus du serveur (il
+         * l'incrémente pour un message chiffré comme pour un autre).
+         *
+         * ⚠️ AUCUN CONFLIT AVEC L'ÉCRAN DE CONVERSATION OUVERT : les relèves
+         * passent une par une, et chacune est diffusée à tous les écrans
+         * (`PileE2ee.releves`) — celle-ci remplit aussi le fil ouvert.
+         */
+        final pile = context.e2ee;
+        unawaited(() async {
+          try {
+            await pile?.releverEtRanger();
+          } catch (_) {}
+          if (mounted) await _poll();
+        }());
       } else if (t == "read") {
         _poll();
       } else if (t == "message_edited") {
@@ -840,7 +864,10 @@ class _ConversationsTabState extends State<_ConversationsTab>
 
   Future<void> _load() async {
     // 1) Charge d'abord le cache local (affichage instantané, offline-first).
-    final cached = await ConversationCache.getAll();
+    // Les fils chiffrés prennent leur dernier texte dans le cache local des
+    // messages — le serveur ne l’a pas. Voir `avecDerniersTextesLocaux`.
+    final cached =
+        await avecDerniersTextesLocaux(await ConversationCache.getAll());
     if (cached.isNotEmpty && mounted) {
       setState(() {
         _convs = cached;

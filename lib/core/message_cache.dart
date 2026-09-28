@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
+import '../models/conversation.dart' show LastMessage;
 import '../models/message.dart';
 
 /// Cache local des messages (offline-first).
@@ -248,6 +249,41 @@ class MessageCache {
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
+  }
+
+  /// Le dernier message AVEC TEXTE de chacune de ces conversations.
+  ///
+  /// ⚠️ POUR LA LISTE DES CONVERSATIONS, fils chiffrés : le serveur n'a pas
+  /// leur texte, l'appareil si — voir `dernier_message_local.dart`. Une seule
+  /// requête pour toutes les conversations, pas une par ligne de la liste.
+  static Future<Map<String, LastMessage>> derniersTextes(Iterable<String> convIds) async {
+    final ids = convIds.toList();
+    if (ids.isEmpty) return {};
+    final db = await _database();
+    final lignes = await db.query(
+      'messages',
+      columns: ['id', 'conv_id', 'sender_id', 'content', 'type', 'created_at'],
+      where: 'conv_id IN (${List.filled(ids.length, '?').join(',')}) '
+          "AND content IS NOT NULL AND content != '' AND deleted_at IS NULL",
+      whereArgs: ids,
+      orderBy: 'created_at DESC',
+    );
+    final parConv = <String, LastMessage>{};
+    for (final l in lignes) {
+      final conv = l['conv_id'] as String;
+      // Trié du plus récent au plus ancien : le premier vu est le dernier écrit.
+      parConv.putIfAbsent(
+        conv,
+        () => LastMessage(
+          id: l['id'] as String,
+          content: l['content'] as String?,
+          type: l['type'] as String,
+          senderId: l['sender_id'] as String,
+          createdAt: DateTime.parse(l['created_at'] as String),
+        ),
+      );
+    }
+    return parConv;
   }
 
   /// Range le texte d'un message chiffré qu'on vient de relever — dans SON fil.

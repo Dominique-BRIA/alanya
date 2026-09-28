@@ -1,6 +1,7 @@
 // chat_screen.dart — WhatsApp previews COMPLET (thumbnails vidéo, PDF, waveform, grille)
 import 'dart:async';
 import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
+import '../../../services/e2ee/e2ee_fil.dart' show MessageClair;
 import '../../../services/e2ee/e2ee_fournisseur.dart';
 import '../../../widgets/e2ee/e2ee_widgets.dart';
 import '../fusion_releve.dart';
@@ -162,6 +163,8 @@ class _ChatScreenState extends State<ChatScreen>
   bool _micHeld = false;
   Timer? _pollTimer;
   StreamSubscription<Map<String, dynamic>>? _rtSub;
+  /// Les relèves lancées ailleurs (l’accueil, pour l’aperçu de la liste).
+  StreamSubscription<List<MessageClair>>? _relevesSub;
   bool _wasBusy = false;
   // _myId reflète TOUJOURS l'utilisateur courant. Un getter (au lieu d'un champ
   // figé au chargement) évite un état périmé/null : si l'auth se charge en
@@ -497,6 +500,9 @@ class _ChatScreenState extends State<ChatScreen>
     // `_rebuildCombined` en refait les bulles.
     EnvoiMediaStore.instance.addListener(_surEnvois);
     _rtSub = rt.events.listen(_onRealtimeEvent);
+    // ⚠️ Une relève faite par un AUTRE écran doit aussi remplir ce fil : une
+    // enveloppe ne se relève qu’une fois. Voir `PileE2ee.releves`.
+    _relevesSub = context.e2ee?.releves.listen(_appliquerReleve);
     _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) => _poll());
     // Comme pour les messages : on utilise le serveur temps réel (WebSocket / WebRTC signaling)
     // pas de Timer polling pour les appels, juste event-driven
@@ -830,6 +836,7 @@ class _ChatScreenState extends State<ChatScreen>
     // l'objet du magasin.
     EnvoiMediaStore.instance.removeListener(_surEnvois);
     _rtSub?.cancel();
+    _relevesSub?.cancel();
     try {
       context.read<CallController>().removeListener(_onCallActivity);
     } catch (_) {}
@@ -1799,50 +1806,60 @@ class _ChatScreenState extends State<ChatScreen>
         );
       }
 
-      if (r.messages.isEmpty || !mounted) return;
-
-      /*
-       * 🔴 REMPLIR LES BULLES VIDES, ET AJOUTER CELLES QUI MANQUENT.
-       *
-       * 🐛 « LE MESSAGE N’APPARAÎT PAS TANT QU’ON NE ROUVRE PAS LA
-       * CONVERSATION » (user, 28/09/2026, mobile seulement). Un message chiffré
-       * est créé par la route REST, qui ne diffuse rien : on ne reçoit pas
-       * l’événement `message` qui ajoute la bulle, seulement `e2ee_arrivee`. Ce
-       * passage ne faisait que REMPLIR les bulles déjà affichées ; le nouveau
-       * message n’était ajouté nulle part. Voir `fusionnerReleve`, et
-       * `test/fusion_releve_test.dart`.
-       *
-       * ⚠️ LE WEB N’A PAS CE DÉFAUT : il recharge tout le fil sur
-       * `e2ee_arrivee`. Ici, pas de `_load()` — qui relance lui-même une relève.
-       *
-       * ⚠️ NI CACHE NI ARCHIVE ICI : `releverEtRanger` les a DÉJÀ écrits, fil
-       * par fil, avant l’acquittement. (Le `putConv` qui était ici vidait le
-       * fil entier avant d’écrire la liste affichée : il aurait effacé ce
-       * rangement.)
-       */
-      final fusion = fusionnerReleve(_messages, r.messages, widget.convId);
-      final nouveaux = fusion.ajoutes;
-
-      if (!mounted) return;
-      setState(() {
-        _messages = fusion.liste;
-        _rebuildCombined();
-      });
-
-      if (nouveaux.isNotEmpty) {
-        // Mêmes gestes qu'un message arrivé par le temps réel : on le lit, on
-        // sonne si le réglage le veut, on descend en bas du fil.
-        final dAutrui = nouveaux.where((m) => m.senderId != _myId).toList();
-        if (dAutrui.isNotEmpty) {
-          _markReadRemote();
-          if (NotificationSettings.instance.messagesOn) {
-            _sonnerMessageRecu(dAutrui.last.senderId);
-          }
-        }
-        _scrollToBottom();
-      }
+      _appliquerReleve(r.messages);
     } catch (_) {
       // Silencieux : les messages en clair de la conversation restent affichés.
+    }
+  }
+
+  /// Ce qu’une relève apporte à CE fil : bulles remplies, bulles ajoutées.
+  ///
+  /// ⚠️ APPELÉE DEUX FOIS POUR UNE MÊME RELÈVE quand c’est cet écran qui l’a
+  /// lancée — par son retour ET par le flux `PileE2ee.releves`. C’est voulu et
+  /// sans effet : `fusionnerReleve` ignore un message déjà affiché, donc ni
+  /// double bulle ni double son.
+  void _appliquerReleve(List<MessageClair> messages) {
+    if (messages.isEmpty || !mounted) return;
+
+    /*
+     * 🔴 REMPLIR LES BULLES VIDES, ET AJOUTER CELLES QUI MANQUENT.
+     *
+     * 🐛 « LE MESSAGE N’APPARAÎT PAS TANT QU’ON NE ROUVRE PAS LA
+     * CONVERSATION » (user, 28/09/2026, mobile seulement). Un message chiffré
+     * est créé par la route REST, qui ne diffuse rien : on ne reçoit pas
+     * l’événement `message` qui ajoute la bulle, seulement `e2ee_arrivee`. Ce
+     * passage ne faisait que REMPLIR les bulles déjà affichées ; le nouveau
+     * message n’était ajouté nulle part. Voir `fusionnerReleve`, et
+     * `test/fusion_releve_test.dart`.
+     *
+     * ⚠️ LE WEB N’A PAS CE DÉFAUT : il recharge tout le fil sur
+     * `e2ee_arrivee`. Ici, pas de `_load()` — qui relance lui-même une relève.
+     *
+     * ⚠️ NI CACHE NI ARCHIVE ICI : `releverEtRanger` les a DÉJÀ écrits, fil
+     * par fil, avant l’acquittement. (Le `putConv` qui était ici vidait le
+     * fil entier avant d’écrire la liste affichée : il aurait effacé ce
+     * rangement.)
+     */
+    final fusion = fusionnerReleve(_messages, messages, widget.convId);
+    final nouveaux = fusion.ajoutes;
+
+    if (!mounted) return;
+    setState(() {
+      _messages = fusion.liste;
+      _rebuildCombined();
+    });
+
+    if (nouveaux.isNotEmpty) {
+      // Mêmes gestes qu'un message arrivé par le temps réel : on le lit, on
+      // sonne si le réglage le veut, on descend en bas du fil.
+      final dAutrui = nouveaux.where((m) => m.senderId != _myId).toList();
+      if (dAutrui.isNotEmpty) {
+        _markReadRemote();
+        if (NotificationSettings.instance.messagesOn) {
+          _sonnerMessageRecu(dAutrui.last.senderId);
+        }
+      }
+      _scrollToBottom();
     }
   }
 

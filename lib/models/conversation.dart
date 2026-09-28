@@ -156,6 +156,28 @@ class Conversation {
         e2eeActif: e2eeActif,
       );
 
+  /// Copie avec un autre dernier message — le reste est intact.
+  ///
+  /// ⚠️ SERT AUX FILS CHIFFRÉS : le serveur n’a pas leur texte et rend
+  /// `lastMessage: null` ; le dernier texte vient du cache LOCAL, où la relève
+  /// range chaque message déchiffré. Voir `dernier_message_local.dart`.
+  Conversation copieAvecDernier(LastMessage? dernier) => Conversation(
+        id: id,
+        isGroup: isGroup,
+        title: title,
+        avatarUrl: avatarUrl,
+        members: members,
+        lastMessage: dernier,
+        unread: unread,
+        updatedAt: updatedAt,
+        lastCall: lastCall,
+        lastCallFourni: lastCallFourni,
+        isPinned: isPinned,
+        isArchived: isArchived,
+        sourdine: sourdine,
+        e2eeActif: e2eeActif,
+      );
+
   Map<String, String> get memberNames => {
         for (final m in members) m.id: m.displayName,
       };
