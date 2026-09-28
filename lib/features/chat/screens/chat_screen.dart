@@ -171,6 +171,7 @@ class _ChatScreenState extends State<ChatScreen>
   StreamSubscription<Map<String, dynamic>>? _rtSub;
   /// Les relèves lancées ailleurs (l’accueil, pour l’aperçu de la liste).
   StreamSubscription<List<MessageClair>>? _relevesSub;
+  StreamSubscription<Set<String>>? _restaurationsSub;
   bool _wasBusy = false;
   // _myId reflète TOUJOURS l'utilisateur courant. Un getter (au lieu d'un champ
   // figé au chargement) évite un état périmé/null : si l'auth se charge en
@@ -509,6 +510,10 @@ class _ChatScreenState extends State<ChatScreen>
     // ⚠️ Une relève faite par un AUTRE écran doit aussi remplir ce fil : une
     // enveloppe ne se relève qu’une fois. Voir `PileE2ee.releves`.
     _relevesSub = context.e2ee?.releves.listen(_appliquerReleve);
+    // ⚠️ La reprise de l'archive au démarrage peut finir APRÈS l'ouverture du
+    // fil : elle le dit ici. Voir `E2eeSauvegarde.restaurations`.
+    _restaurationsSub =
+        context.e2ee?.sauvegarde.restaurations.listen(_surRestauration);
     _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) => _poll());
     // Comme pour les messages : on utilise le serveur temps réel (WebSocket / WebRTC signaling)
     // pas de Timer polling pour les appels, juste event-driven
@@ -843,6 +848,7 @@ class _ChatScreenState extends State<ChatScreen>
     EnvoiMediaStore.instance.removeListener(_surEnvois);
     _rtSub?.cancel();
     _relevesSub?.cancel();
+    _restaurationsSub?.cancel();
     try {
       context.read<CallController>().removeListener(_onCallActivity);
     } catch (_) {}
@@ -1783,26 +1789,46 @@ class _ChatScreenState extends State<ChatScreen>
   /// conversation et à y revenir.
   Future<void> _completerParArchive() async {
     final pile = context.e2ee;
-    if (pile == null || !_filChiffre) return;
+    if (pile == null) return;
 
-    final manque =
-        _messages.any((m) => m.type == 'TEXT' && (m.content ?? '').isEmpty);
-    if (!manque) return;
+    /*
+     * 🐛 CE RATTRAPAGE NE S'EXÉCUTAIT JAMAIS. Il testait `_filChiffre`, que
+     * `_lireEtatChiffrement` — lancé juste avant, SANS être attendu — n'avait
+     * pas encore reçu du serveur : il valait toujours `false`, et la fonction
+     * sortait à la première ligne. D'où « les messages chiffrés ne sortent
+     * en clair qu'à la deuxième ouverture » (user, 28/09/2026).
+     *
+     * ⚠️ LES MESSAGES LE DISENT EUX-MÊMES : le serveur marque `chiffre` chaque
+     * ligne qui a une enveloppe. Aucune attente, et seules les bulles
+     * réellement chiffrées déclenchent la reprise.
+     */
+    if (!_manqueUnTexteChiffre()) return;
 
     try {
-      final n =
-          await pile.sauvegarde.reprendreAuDemarrage(pile.coffre, force: true);
-      if (n == 0 || !mounted) return;
+      await pile.sauvegarde.reprendreAuDemarrage(pile.coffre, force: true);
+      // La relecture du cache se fait sur `restaurations` : voir `_surRestauration`.
+    } catch (_) {
+      // Archive fermée ou réseau coupé : l'écran dit déjà « indisponible ».
+    }
+  }
 
-      final cache = await MessageCache.getConv(widget.convId);
+  bool _manqueUnTexteChiffre() => _messages.any(
+      (m) => m.chiffre && m.type == 'TEXT' && !m.isDeleted && (m.content ?? '').isEmpty);
+
+  /// L'archive vient de ranger des textes : si ce fil en fait partie, on relit
+  /// le cache pour remplir les bulles vides — sans attendre une réouverture.
+  Future<void> _surRestauration(Set<String> fils) async {
+    if (!fils.contains(widget.convId) || !mounted) return;
+    if (!_manqueUnTexteChiffre()) return;
+    try {
+      final cache = await MessageCache.getConv(widget.convId)
+          .timeout(const Duration(seconds: 3), onTimeout: () => const []);
       if (cache.isEmpty || !mounted) return;
       setState(() {
         _messages = _garderLeClairConnu(_messages, cache);
         _rebuildCombined();
       });
-    } catch (_) {
-      // Archive fermée ou réseau coupé : l'écran dit déjà « indisponible ».
-    }
+    } catch (_) {}
   }
 
   Future<void> _releverChiffres() async {

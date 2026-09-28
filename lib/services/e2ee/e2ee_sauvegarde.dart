@@ -14,6 +14,7 @@
 /// supprimer depuis le web.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -37,6 +38,18 @@ class E2eeSauvegarde {
   Uint8List? _maitresse;
 
   bool get estOuverte => _maitresse != null;
+
+  /// Les conversations dont l'archive vient de ranger des textes dans le cache.
+  ///
+  /// 🐛 « APRÈS UNE MISE À JOUR, LES MESSAGES CHIFFRÉS NE SORTENT EN CLAIR
+  /// QU'À LA DEUXIÈME OUVERTURE » (user, 28/09/2026). La reprise de l'archive
+  /// tourne en fond au démarrage ; si la conversation est ouverte avant
+  /// qu'elle finisse, l'écran a déjà lu le cache — vide — et rien ne lui
+  /// disait de le relire. C'est la réouverture qui le faisait.
+  ///
+  /// ⚠️ ÉMIS APRÈS L'ÉCRITURE, jamais avant : l'écran qui écoute relit le cache.
+  Stream<Set<String>> get restaurations => _restaurations.stream;
+  final _restaurations = StreamController<Set<String>>.broadcast();
 
   /* ══════════════ LE COFFRE ══════════════ */
 
@@ -466,6 +479,11 @@ class E2eeSauvegarde {
      */
     final messages = vus.values.toList();
     await _ecrireDansLeCache(messages);
+    final fils = {
+      for (final m in messages)
+        if (m['convId'] is String) m['convId'] as String,
+    };
+    if (fils.isNotEmpty && !_restaurations.isClosed) _restaurations.add(fils);
     return (messages: messages, illisibles: illisibles);
   }
 
