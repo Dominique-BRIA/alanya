@@ -11,6 +11,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 
+import '../../../core/avec_reprises.dart';
 import '../../../core/compression_image.dart';
 import '../../../core/connectivity_service.dart';
 import '../../../core/memoire_langues.dart';
@@ -1279,6 +1280,15 @@ class _ChatScreenState extends State<ChatScreen>
       // Reconnexion : ce qui s'est produit pendant la coupure n'a jamais été
       // reçu, et un événement WebSocket ne se rejoue pas. On rattrape.
       _rafraichitAppels();
+      /*
+       * 🐛 LES MESSAGES CHIFFRÉS N'ÉTAIENT PAS RATTRAPÉS. Leur sonnette
+       * (`e2ee_arrivee`) partie pendant la coupure ne sera jamais rejouée :
+       * sans cette relève, ils restaient « indisponibles » jusqu'à la
+       * réouverture du fil. Elle AJOUTE aussi les bulles absentes
+       * (`fusionnerReleve`, cas ②). Le web le faisait déjà
+       * (`subscribeToWsConnected` → `refreshMessages`).
+       */
+      unawaited(_releverChiffres());
     }
   }
 
@@ -1907,7 +1917,15 @@ class _ChatScreenState extends State<ChatScreen>
        * enveloppes de TOUS les fils ; ce passage ne rangeait que celles du fil
        * ouvert, et le texte des autres était acquitté puis perdu.
        */
-      final r = await pile.releverEtRanger();
+      /*
+       * 🔴 AVEC REPRISES. Juste après une coupure réseau, le premier essai part
+       * souvent avant que le réseau soit vraiment revenu ; son échec était
+       * avalé, et tout ce qui était arrivé pendant la coupure restait
+       * « indisponible sur cet appareil » jusqu'à ce qu'on rouvre le fil
+       * (signalé le 29/09/2026). Voir `avecReprises`.
+       */
+      final r = await avecReprises(pile.releverEtRanger, continuer: () => mounted);
+      if (r == null) return;
 
       /*
        * 🔴 UN ÉCHEC DE DÉCHIFFREMENT SE DIT. IL ÉTAIT COMPTÉ ET JAMAIS MONTRÉ.
