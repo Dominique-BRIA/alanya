@@ -11,7 +11,6 @@
 library;
 
 import 'dart:convert';
-import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
@@ -121,7 +120,7 @@ class E2eeService {
   /// 🔴 SEULES DES CLÉS PUBLIQUES SORTENT D'ICI. Si une clé privée passait par
   /// cette fonction, tout l'édifice serait faux — c'est le contrôle à faire en
   /// relecture avant tout autre.
-  /// ⚠️ LES IDENTIFIANTS SONT TIRÉS AU SORT, ET CE N'EST PAS COSMÉTIQUE.
+  /// ⚠️ LES IDENTIFIANTS NE REPARTENT JAMAIS DE ZÉRO, ET CE N'EST PAS COSMÉTIQUE.
   ///
   /// 🐛 Ils partaient de zéro : `generatePreKeys(0, 50)` rendait toujours
   /// 0…50. Republier un lot produisait donc EXACTEMENT les mêmes numéros, et
@@ -130,19 +129,28 @@ class E2eeService {
   ///
   /// La borne reprend celle du web : le protocole veut un entier moyen, pas un
   /// entier 64 bits.
-  int _idAuHasard() => Random.secure().nextInt(100000) + 1;
-
+  ///
+  /// 🐛 Puis ils ont été TIRÉS AU SORT, ce qui laissait deux lots se chevaucher
+  /// (voir `CoffreE2ee.reserverIdentifiants`). Depuis le 28/09/2026, ils sont
+  /// réservés à un compteur.
   Future<void> _publierMesCles({required int deviceId}) async {
     await coffre.preparer();
 
     final identite = await coffre.identiteLocale();
-    final signee = generateSignedPreKey(identite, _idAuHasard());
+    // Numéros RÉSERVÉS, plus tirés au sort — voir `reserverIdentifiants`.
+    final signee =
+        generateSignedPreKey(identite, await coffre.reserverIdentifiants(1));
     await coffre.storeSignedPreKey(signee.id, signee);
 
-    final uniques = generatePreKeys(_idAuHasard(), lotPreKeys);
-    for (final p in uniques) {
-      await coffre.storePreKey(p.id, p);
-    }
+    final uniques = generatePreKeys(
+        await coffre.reserverIdentifiants(lotPreKeys), lotPreKeys);
+    /*
+     * 🐛 ELLES ÉTAIENT RANGÉES UNE PAR UNE : 50 relectures et réécritures de la
+     * table entière, soit 100 allers-retours vers le coffre sécurisé — le
+     * défaut A-2 du registre, que `storePreKeys` existait pour éviter et que
+     * personne n’appelait. Un seul passage désormais.
+     */
+    await coffre.storePreKeys(uniques);
 
     /*
      * 🔴 `PUT`, ET NON `POST` — ET C'EST LA CAUSE D'UNE PANNE ENTIÈRE.
@@ -227,8 +235,72 @@ class E2eeService {
   /// ⚠️ UNE SESSION PAR APPAREIL, PAS PAR PERSONNE. Bob peut avoir un téléphone
   /// et un navigateur ; un message doit être chiffré séparément pour chacun,
   /// sinon l'un des deux ne le lira jamais.
+  ///
+  /// 🔴 EN DEUX TEMPS DEPUIS LE LOT 3 (28/09/2026) — jumeau du web.
+  ///
+  /// 🐛 Le correctif précédent évitait de REFAIRE une session existante, mais
+  /// demandait toujours le paquet de chaque appareil pour savoir lesquels
+  /// viser. Or demander un paquet CONSOMME une pré-clé du correspondant : il
+  /// en perdait une par message reçu, session ou non. Prouvé par
+  /// `test/e2ee_releve_test.dart`, groupe ④ (3 envois → 3 pré-clés).
+  ///
+  ///   ① `?liste=1` : les appareils vivants et leur clé d'identité, sans rien
+  ///     consommer ;
+  ///   ② `?deviceIds=` : un paquet seulement pour ceux sans session, ou dont la
+  ///     clé a changé — un appareil RÉINSTALLÉ garde son numéro, mais sa
+  ///     session d'avant ne vaut plus rien (groupe ④, second test).
   Future<List<int>> _ouvrirSessions(String pairId) async {
-    final r = await api('GET', '/api/e2ee/cles/$pairId', null);
+    final liste = await api('GET', '/api/e2ee/cles/$pairId?liste=1', null);
+
+    // Serveur antérieur : il ignore `liste` et rend directement des paquets.
+    if (liste['appareils'] is! List) {
+      return _ouvrirDepuisPaquets(pairId, liste, remplacer: false);
+    }
+
+    final appareils = listeDe(liste, 'appareils');
+    final aOuvrir = <int>[];
+    for (final a in appareils) {
+      final adresse = SignalProtocolAddress(pairId, a['deviceId'] as int);
+      final connue = await coffre.getIdentity(adresse);
+      final meme = connue != null &&
+          base64.encode(connue.serialize()) == a['cleIdentite'];
+      if (!await coffre.containsSession(adresse) || !meme) {
+        aOuvrir.add(a['deviceId'] as int);
+      }
+    }
+
+    if (aOuvrir.isNotEmpty) {
+      final r = await api(
+          'GET', '/api/e2ee/cles/$pairId?deviceIds=${aOuvrir.join(',')}', null);
+      await _ouvrirDepuisPaquets(pairId, r, remplacer: true);
+    }
+
+    /*
+     * ⚠️ SEULS LES APPAREILS DE LA LISTE : une session ancienne vers un
+     * appareil retiré ou muet depuis trente jours ne doit plus servir — ce
+     * serait chiffrer pour personne.
+     */
+    final prets = <int>[];
+    for (final a in appareils) {
+      final d = a['deviceId'] as int;
+      if (await coffre.containsSession(SignalProtocolAddress(pairId, d))) {
+        prets.add(d);
+      }
+    }
+    return prets;
+  }
+
+  /// Ouvre une session par paquet reçu (X3DH, signature vérifiée).
+  ///
+  /// [remplacer] : `true` quand l'appelant a DÉJÀ décidé que ces appareils ont
+  /// besoin d'une session neuve (absente, ou clé d'identité changée). `false`
+  /// pour la réponse d'un serveur antérieur, qui rend tous les paquets : on
+  /// garde alors les sessions existantes, comme avant.
+  Future<List<int>> _ouvrirDepuisPaquets(
+    String pairId,
+    Map<String, dynamic> r, {
+    required bool remplacer,
+  }) async {
     /*
      * 🐛 LE CHAMP S'APPELLE `paquets`, PAS `appareils`. On lisait le mauvais
      * nom : la valeur était `null`, et le `as List` levait un
@@ -266,7 +338,7 @@ class E2eeService {
        * ⚠️ LE RATCHET EST FAIT POUR DURER. Le refaire à chaque message annule
        * ce qu'il apporte et coûte une pré-clé à chaque fois.
        */
-      if (await coffre.containsSession(adresse)) {
+      if (!remplacer && await coffre.containsSession(adresse)) {
         ouverts.add(p['deviceId'] as int);
         continue;
       }

@@ -331,6 +331,36 @@ class CoffreE2ee implements SignalProtocolStore {
   }
 
   /// Range tout un lot d'un coup — UNE seule écriture.
+  /// Réserve [n] identifiants de pré-clé consécutifs, jamais encore servis.
+  ///
+  /// 🐛 ILS ÉTAIENT TIRÉS AU SORT (1 à 100 000, lots de 50 consécutifs). Deux
+  /// lots qui se chevauchent écrasent ici une clé privée pendant que le
+  /// serveur, qui écarte les doublons, garde l'ANCIENNE clé publique : la
+  /// session ouverte avec elle est indéchiffrable. Rare, silencieux,
+  /// définitif. Même correctif que le web (`reserverIdentifiants`).
+  ///
+  /// ⚠️ AU PREMIER APPEL, LE COMPTEUR PART AU-DESSUS du plus grand numéro déjà
+  /// rangé : une installation existante a publié des numéros au hasard.
+  ///
+  /// ⚠️ 0xFFFFFF EST LA BORNE DU PROTOCOLE ; on repart de 1 au-delà.
+  Future<int> reserverIdentifiants(int n) async {
+    const borne = 0xFFFFFF;
+    var debut = int.tryParse(await _lire('prochainIdentifiant') ?? '');
+    if (debut == null) {
+      var plusGrand = 0;
+      for (final t in ['prekeys', 'signed']) {
+        for (final k in (await _table(t)).keys) {
+          final v = int.tryParse(k);
+          if (v != null && v > plusGrand) plusGrand = v;
+        }
+      }
+      debut = plusGrand + 1;
+    }
+    if (debut + n > borne) debut = 1;
+    await _ecrire('prochainIdentifiant', '${debut + n}');
+    return debut;
+  }
+
   Future<void> storePreKeys(List<PreKeyRecord> lot) async {
     final t = await _table('prekeys');
     for (final p in lot) {

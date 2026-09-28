@@ -26,6 +26,9 @@ class FauxServeur {
   final cles = <String, Map<int, Map<String, dynamic>>>{};
   final enveloppes = <Map<String, dynamic>>[];
 
+  /// Pré-clés uniques consommées, par compte — ce que le lot 3 doit économiser.
+  final consommees = <String, int>{};
+
   /// Les acquittements, dans l'ordre — pour vérifier QUAND ils arrivent.
   final journal = <String>[];
   var _suivant = 0;
@@ -65,12 +68,28 @@ class FauxServeur {
       }
       if (methode == 'GET' && p.startsWith('/api/e2ee/cles/')) {
         final pair = p.substring('/api/e2ee/cles/'.length);
+        // Mêmes paramètres que la route réelle depuis le lot 3 : `liste=1`
+        // ne consomme rien, `deviceIds` restreint la consommation.
+        if (uri.queryParameters['liste'] == '1') {
+          return {
+            'appareils': [
+              for (final e in (cles[pair] ?? {}).entries)
+                {'deviceId': e.key, 'cleIdentite': e.value['cleIdentite']},
+            ],
+          };
+        }
+        final seulement = uri.queryParameters['deviceIds']
+            ?.split(',')
+            .map(int.parse)
+            .toSet();
         return {
           'paquets': [
             for (final e in (cles[pair] ?? {}).entries)
+              if (seulement == null || seulement.contains(e.key))
               () {
                 final stock = e.value['prekeys'] as List<Map<String, dynamic>>;
                 final unique = stock.isEmpty ? null : stock.removeAt(0);
+                if (unique != null) consommees[pair] = (consommees[pair] ?? 0) + 1;
                 final s = e.value['prekeySignee'] as Map<String, dynamic>;
                 return {
                   'deviceId': e.key,
@@ -248,6 +267,61 @@ void main() {
       expect(r.messages.map((m) => m.texte), ['trois'],
           reason: "l'illisible, relue, a de nouveau effacé la session réparée");
       expect(r.illisibles, 0);
+    });
+  });
+
+  group('④ une session sert plus d’un message', () {
+    // 🐛 Chaque envoi redemandait le paquet de clés du correspondant, ce qui
+    // CONSOMME une de ses pré-clés — même quand la session existait déjà.
+    test('trois envois ne consomment qu’UNE pré-clé du correspondant', () async {
+      for (final t in ['un', 'deux', 'trois']) {
+        await alice.fil.envoyer(convId: 'fil-ab', pairId: 'bob', texte: t);
+      }
+      expect(serveur.consommees['bob'] ?? 0, 1,
+          reason: 'une pré-clé brûlée par message : le stock de Bob fond');
+      final r = await bob.fil.relever();
+      expect(r.messages.map((m) => m.texte), ['un', 'deux', 'trois']);
+    });
+
+    test('un appareil réinstallé (même numéro, clé neuve) lit le message suivant', () async {
+      await alice.fil.envoyer(convId: 'fil-ab', pairId: 'bob', texte: 'avant');
+      await bob.fil.relever();
+
+      // Bob réinstalle : son coffre est vidé, il GARDE son numéro d’appareil
+      // et publie une identité neuve. Alice, elle, a encore l’ancienne session.
+      final numero = await bob.coffre.deviceId();
+      const magasin = FlutterSecureStorage();
+      for (final k in (await magasin.readAll()).keys.where((k) => k.startsWith('e2ee/bob/')).toList()) {
+        await magasin.delete(key: k);
+      }
+      await magasin.write(key: 'e2ee/bob/deviceId', value: '$numero');
+      serveur.cles.remove('bob');
+      final neuf = Client('bob', serveur);
+      await neuf.demarrer();
+      expect(await neuf.coffre.deviceId(), numero);
+
+      await alice.fil.envoyer(convId: 'fil-ab', pairId: 'bob', texte: 'après');
+      expect((await neuf.fil.relever()).messages.map((m) => m.texte), ['après'],
+          reason: 'Alice a chiffré sur la session de l’ancienne identité');
+    });
+  });
+
+  group('⑤ les numéros de pré-clés', () {
+    // Tirés au sort, deux lots pouvaient se chevaucher : une clé privée était
+    // écrasée ici pendant que le serveur gardait l’ancienne clé publique.
+    test('deux publications : cent numéros neufs, croissants, aucun écarté', () async {
+      final device = await alice.coffre.deviceId();
+      List<int> numeros() => [
+            for (final p in serveur.cles['alice']![device]!['prekeys'] as List)
+              (p as Map<String, dynamic>)['id'] as int,
+          ];
+      final avant = numeros();
+      await alice.service.publierMesCles(deviceId: device);
+      await alice.service.publierMesCles(deviceId: device);
+      final neufs = numeros().where((n) => !avant.contains(n)).toList();
+      expect(neufs.length, 100);
+      expect(neufs.toSet().length, 100, reason: 'un numéro servi deux fois');
+      expect(neufs.reduce((a, b) => a < b ? a : b) > avant.reduce((a, b) => a > b ? a : b), isTrue);
     });
   });
 
