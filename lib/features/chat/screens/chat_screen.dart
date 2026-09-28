@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
 import '../../../services/e2ee/e2ee_fournisseur.dart';
 import '../../../widgets/e2ee/e2ee_widgets.dart';
+import '../fusion_releve.dart';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -1801,53 +1802,46 @@ class _ChatScreenState extends State<ChatScreen>
 
       if (r.messages.isEmpty || !mounted) return;
 
-      final textes = <String, String>{
-        for (final m in r.messages) m.id: m.texte,
-      };
-
       /*
-       * ⚠️ ON RECONSTRUIT LES MESSAGES, faute de `copyWith` sur le modèle. Ne
-       * remplir que le cache ne suffirait pas : la liste déjà affichée garderait
-       * ses bulles vides jusqu'au prochain chargement.
-       */
-      final remplis = _messages.map((m) {
-        final t = textes[m.id];
-        if (t == null || (m.content ?? '').isNotEmpty) return m;
-        return Message(
-          id: m.id,
-          convId: m.convId,
-          senderId: m.senderId,
-          content: t,
-          type: m.type,
-          status: m.status,
-          replyToId: m.replyToId,
-          media: m.media,
-          createdAt: m.createdAt,
-          deletedAt: m.deletedAt,
-          editedAt: m.editedAt,
-          expiresAt: m.expiresAt,
-          replyTo: m.replyTo,
-          reactions: m.reactions,
-          starred: m.starred,
-          mentions: m.mentions,
-          statutCite: m.statutCite,
-        );
-      }).toList();
-
-      /*
-       * ⚠️ NI CACHE NI ARCHIVE ICI : `releverEtRanger` les a DÉJÀ écrits, fil
-       * par fil, avant l'acquittement. Il ne reste qu'à remplir l'écran.
+       * 🔴 REMPLIR LES BULLES VIDES, ET AJOUTER CELLES QUI MANQUENT.
        *
-       * 🐛 LE `putConv` QUI ÉTAIT ICI EFFAÇAIT CE RANGEMENT : il vide toutes
-       * les lignes du fil avant d'écrire la liste affichée. Un message relevé
-       * mais pas encore affiché — plus ancien que la page chargée, ou arrivé
-       * pendant le chargement — aurait disparu du cache à peine rangé.
+       * 🐛 « LE MESSAGE N’APPARAÎT PAS TANT QU’ON NE ROUVRE PAS LA
+       * CONVERSATION » (user, 28/09/2026, mobile seulement). Un message chiffré
+       * est créé par la route REST, qui ne diffuse rien : on ne reçoit pas
+       * l’événement `message` qui ajoute la bulle, seulement `e2ee_arrivee`. Ce
+       * passage ne faisait que REMPLIR les bulles déjà affichées ; le nouveau
+       * message n’était ajouté nulle part. Voir `fusionnerReleve`, et
+       * `test/fusion_releve_test.dart`.
+       *
+       * ⚠️ LE WEB N’A PAS CE DÉFAUT : il recharge tout le fil sur
+       * `e2ee_arrivee`. Ici, pas de `_load()` — qui relance lui-même une relève.
+       *
+       * ⚠️ NI CACHE NI ARCHIVE ICI : `releverEtRanger` les a DÉJÀ écrits, fil
+       * par fil, avant l’acquittement. (Le `putConv` qui était ici vidait le
+       * fil entier avant d’écrire la liste affichée : il aurait effacé ce
+       * rangement.)
        */
+      final fusion = fusionnerReleve(_messages, r.messages, widget.convId);
+      final nouveaux = fusion.ajoutes;
+
       if (!mounted) return;
       setState(() {
-        _messages = remplis;
+        _messages = fusion.liste;
         _rebuildCombined();
       });
+
+      if (nouveaux.isNotEmpty) {
+        // Mêmes gestes qu'un message arrivé par le temps réel : on le lit, on
+        // sonne si le réglage le veut, on descend en bas du fil.
+        final dAutrui = nouveaux.where((m) => m.senderId != _myId).toList();
+        if (dAutrui.isNotEmpty) {
+          _markReadRemote();
+          if (NotificationSettings.instance.messagesOn) {
+            _sonnerMessageRecu(dAutrui.last.senderId);
+          }
+        }
+        _scrollToBottom();
+      }
     } catch (_) {
       // Silencieux : les messages en clair de la conversation restent affichés.
     }
