@@ -18,12 +18,11 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart' show compute;
+import 'package:flutter/foundation.dart' show compute, visibleForTesting;
 
 import 'e2ee_coffre.dart';
 import 'e2ee_serrures.dart';
 import '../../core/message_cache.dart';
-import '../../models/message.dart';
 import 'e2ee_service.dart';
 
 typedef AppelApi = Future<Map<String, dynamic>> Function(
@@ -614,26 +613,37 @@ class E2eeSauvegarde {
         final quand = brut is num
             ? DateTime.fromMillisecondsSinceEpoch(brut.toInt())
             : DateTime.tryParse('$brut') ?? DateTime.now();
-        await MessageCache.upsert(
-          Message(
-            id: id,
-            chiffre: true,
-            convId: convId,
-            senderId: (m['expediteurId'] as String?) ?? '',
-            content: texte,
-            type: 'TEXT',
-            status: 'SENT',
-            replyToId: null,
-            media: const [],
-            createdAt: quand,
-          ),
-          convId,
+        /*
+         * 🐛 C'ÉTAIT UN `upsert` — un `INSERT OR REPLACE` de la ligne entière.
+         * Il remettait à zéro la suppression, l'expiration et le statut, à
+         * chaque lancement où l'archive avait grossi : un message supprimé
+         * pour tous ou éphémère ressortait en clair. Voir
+         * `restauration_archive.dart`.
+         */
+        await MessageCache.restaurerDepuisArchive(
+          id: id,
+          convId: convId,
+          expediteurId: (m['expediteurId'] as String?) ?? '',
+          texte: texte,
+          quand: quand,
         );
       } catch (_) {
         // Ligne illisible : on passe à la suivante.
       }
     }
   }
+
+  /// Le nombre de blocs de l'archive, d'après la première page du serveur.
+  ///
+  /// 🐛 ON COMPTAIT LA PAGE, PAS L'ARCHIVE. La première page s'arrête à 2 000
+  /// blocs : au-delà, ce compte restait figé, et la reprise au démarrage
+  /// croyait l'archive inchangée pour toujours. `totalArchive` est le compte
+  /// du serveur (première page seulement) ; un serveur antérieur ne le donne
+  /// pas, et la page fait alors foi, comme avant.
+  @visibleForTesting
+  static int nombreDeBlocs(Map<String, dynamic> premierePage) =>
+      (premierePage['totalArchive'] as num?)?.toInt() ??
+      (premierePage['blocs'] as List? ?? const []).length;
 
   /// Reprend l'archive au démarrage, sans rien demander.
   ///
@@ -658,7 +668,7 @@ class E2eeSauvegarde {
       if (_maitresse == null) return 0;
 
       final r = await _api('GET', '/api/e2ee/archive', null);
-      final blocs = (r['blocs'] as List? ?? const []).length;
+      final blocs = nombreDeBlocs(r);
       if (blocs == 0) return 0;
 
       /*

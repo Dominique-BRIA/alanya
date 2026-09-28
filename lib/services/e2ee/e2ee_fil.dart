@@ -319,13 +319,33 @@ class E2eeFil {
          * `createdAt`, vérifiés dans la route. Une clé mal orthographiée ne se
          * voit pas à la compilation — elle rend `null` à l'exécution.
          */
-        messages.add((
+        final clair = (
           id: (e['messageId'] ?? e['id']) as String,
           convId: e['convId'] as String,
           expediteurId: e['expediteurId'] as String,
           texte: texte,
           quand: DateTime.parse(e['createdAt'] as String).millisecondsSinceEpoch,
-        ));
+        );
+        messages.add(clair);
+        /*
+         * 🔴 RANGÉ AUSSITÔT, AVANT LE MESSAGE SUIVANT.
+         *
+         * 🐛 TOUT LE LOT ÉTAIT DÉCHIFFRÉ, PUIS RANGÉ D'UN COUP — jusqu'à deux
+         * cents messages. Android qui tuait l'application entre les deux
+         * perdait tous les textes déjà ouverts : le cliquet avait avancé, et
+         * la relève suivante les prenait pour « déjà lus ». Ranger message par
+         * message réduit cette fenêtre à un seul. Prouvé par
+         * `test/e2ee_releve_test.dart`, groupe ③, le 28/09/2026.
+         *
+         * ⚠️ UN RANGEMENT RATÉ N'EMPÊCHE PAS L'ACQUITTEMENT. Garder l'enveloppe
+         * ne sauverait rien — elle ne se relirait plus — et la remettrait en
+         * tête de file. Le texte reste au moins dans ce que rend la relève.
+         */
+        if (ranger != null) {
+          try {
+            await ranger([clair]);
+          } catch (_) {}
+        }
         aAcquitter.add(e['id'] as String);
         noteEtat(e['convId'] as String, true);
       } catch (erreur) {
@@ -384,17 +404,6 @@ class E2eeFil {
           // Le nettoyage ne doit pas empêcher de relever les suivantes.
         }
       }
-    }
-
-    if (ranger != null && messages.isNotEmpty) {
-      /*
-       * ⚠️ UN RANGEMENT RATÉ N'EMPÊCHE PAS L'ACQUITTEMENT. Garder l'enveloppe
-       * ne sauverait rien — elle ne se relirait plus — et la remettrait en
-       * tête de file. Le texte reste au moins dans ce que rend la relève.
-       */
-      try {
-        await ranger(messages);
-      } catch (_) {}
     }
 
     if (aAcquitter.isNotEmpty) {

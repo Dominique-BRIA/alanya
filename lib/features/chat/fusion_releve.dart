@@ -37,7 +37,8 @@ import '../../services/e2ee/e2ee_fil.dart' show MessageClair;
   // faute de `copyWith` sur le modèle.
   final remplis = [
     for (final m in affiches)
-      if (textes[m.id] == null || (m.content ?? '').isNotEmpty)
+      // ⚠️ Une bulle supprimée reste vide : l'enveloppe a pu arriver après.
+      if (textes[m.id] == null || (m.content ?? '').isNotEmpty || m.deletedAt != null)
         m
       else
         Message(

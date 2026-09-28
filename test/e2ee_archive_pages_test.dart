@@ -40,4 +40,28 @@ void main() {
         });
     expect((await s.lireTousLesBlocs()).single['contenu'], 'seul');
   });
+
+  // 🐛 LA REPRISE AU DÉMARRAGE COMPTAIT LA PREMIÈRE PAGE, pas l'archive. Passé
+  // 2 000 blocs, ce compte restait figé à 2 000 : l'archive avait beau grossir,
+  // la reprise croyait n'avoir rien de neuf et ne se relançait plus.
+  test('la reprise compte TOUTE l’archive, pas la première page', () {
+    final premiere = {
+      'blocs': List.filled(2000, {'iv': 'aXY=', 'contenu': 'x'}),
+      'suivant': 'dernier',
+      'totalArchive': 2100,
+    };
+    expect(E2eeSauvegarde.nombreDeBlocs(premiere), 2100,
+        reason: 'au-delà de 2 000 blocs, la reprise ne voyait plus l’archive grossir');
+  });
+
+  test('un serveur antérieur, sans `totalArchive` : la page fait foi', () {
+    expect(
+      E2eeSauvegarde.nombreDeBlocs({
+        'blocs': [
+          {'iv': 'aXY=', 'contenu': 'seul'},
+        ],
+      }),
+      1,
+    );
+  });
 }

@@ -389,5 +389,27 @@ void main() {
           reason: 'le rangement doit passer AVANT l’acquittement');
       expect(serveur.enAttentePour('bob'), 0);
     });
+
+    /*
+     * 🐛 TOUT LE LOT ÉTAIT DÉCHIFFRÉ, PUIS RANGÉ D'UN COUP — jusqu'à deux cents
+     * messages. Android qui tue l'application entre les deux perdait tous les
+     * textes déjà ouverts : le cliquet avait avancé, et la relève suivante les
+     * prenait pour « déjà lus ». On ne peut pas tuer l'application au milieu
+     * d'une boucle à coup sûr ; on éprouve donc la propriété qui ferme la
+     * fenêtre : un rangement par message, jamais un lot.
+     */
+    test('est appelé pour CHAQUE message, dès son déchiffrement', () async {
+      for (final t in ['un', 'deux', 'trois']) {
+        await alice.fil.envoyer(convId: 'fil-ab', pairId: 'bob', texte: t);
+      }
+      final tailles = <int>[];
+      final r = await bob.fil.relever(ranger: (messages) async {
+        tailles.add(messages.length);
+      });
+
+      expect(r.messages.map((m) => m.texte), ['un', 'deux', 'trois']);
+      expect(tailles, [1, 1, 1],
+          reason: 'les textes attendaient la fin du lot pour être rangés');
+    });
   });
 }

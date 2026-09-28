@@ -50,6 +50,27 @@ void main() {
     expect(r.ajoutes, isEmpty);
   });
 
+  // 🐛 L'enveloppe peut arriver APRÈS la suppression pour tous : la bulle,
+  // vide parce que supprimée, recevait le texte du message supprimé.
+  test('une bulle SUPPRIMÉE ne reçoit pas de texte', () {
+    final supprimee = Message(
+      id: 'm1',
+      convId: 'fil',
+      senderId: 'bob',
+      content: null,
+      type: 'TEXT',
+      status: 'DELIVERED',
+      replyToId: null,
+      media: const [],
+      createdAt: DateTime(2026, 9, 28, 10),
+      deletedAt: DateTime(2026, 9, 28, 11),
+    );
+    final r = fusionnerReleve([supprimee], [_releve('m1', 'supprimé')], 'fil');
+    expect(r.liste.single.content, isNull,
+        reason: 'le texte d’un message supprimé pour tous revenait à l’écran');
+    expect(r.ajoutes, isEmpty);
+  });
+
   test('un texte déjà connu n’est jamais remplacé', () {
     final r = fusionnerReleve([_bulle('m1', texte: 'connu')], [_releve('m1', 'autre')], 'fil');
     expect(r.liste.single.content, 'connu');

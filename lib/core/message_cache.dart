@@ -6,6 +6,7 @@ import 'package:sqflite/sqflite.dart';
 import '../models/conversation.dart' show LastMessage;
 import '../models/message.dart';
 import 'cache_clairs.dart';
+import 'restauration_archive.dart';
 
 /// Cache local des messages (offline-first).
 ///
@@ -49,7 +50,7 @@ class MessageCache {
        * Toute évolution future de ce cache passe désormais par `onUpgrade`, en
        * incrémentant `version`.
        */
-      version: 5,
+      version: 6,
       onUpgrade: (db, ancienne, nouvelle) async {
         if (ancienne < 2) await _creeTableTraductions(db);
         /*
@@ -107,6 +108,8 @@ class MessageCache {
             );
           }
         }
+        // v6 — les messages effacés de cet appareil : voir `_creeTableEffaces`.
+        if (ancienne < 6) await _creeTableEffaces(db);
       },
       onCreate: (db, _) async {
         await db.execute('''
@@ -131,10 +134,28 @@ class MessageCache {
           'CREATE INDEX idx_messages_conv ON messages(conv_id, created_at)',
         );
         await _creeTableTraductions(db);
+        await _creeTableEffaces(db);
       },
     );
     return _db!;
   }
+
+  /*
+   * ═══ EFFACÉS ═══
+   *
+   * 🔴 LA MÉMOIRE D'UN EFFACEMENT, quand la ligne elle-même n'est plus là.
+   *
+   * « Supprimer pour moi » et l'expiration d'un éphémère RETIRENT la ligne du
+   * cache. Mais l'archive chiffrée garde le texte, et la restauration tourne à
+   * chaque lancement où l'archive a grossi : sans cette table, elle recréait
+   * la ligne, et le message effacé ressortait en clair. Voir
+   * `restauration_archive.dart`.
+   *
+   * ⚠️ UN IDENTIFIANT, RIEN DE PLUS : on retient QU'un message est parti, pas
+   * ce qu'il disait.
+   */
+  static Future<void> _creeTableEffaces(Database db) => db.execute(
+      'CREATE TABLE IF NOT EXISTS effaces (message_id TEXT PRIMARY KEY)');
 
   /*
    * ═══ TRADUCTIONS ═══
@@ -374,11 +395,21 @@ class MessageCache {
   /// ⚠️ LIMITE : un message chiffré seulement RELEVÉ (fil jamais ouvert depuis)
   /// n'a pas encore sa date — l'enveloppe ne la porte pas. Il la reçoit à
   /// l'ouverture du fil, qui écrit la page du serveur.
-  static Future<void> _purgerExpires(Database db) => db.delete(
-        'messages',
-        where: 'expires_at IS NOT NULL AND expires_at <= ?',
-        whereArgs: [dateCache(DateTime.now())],
-      );
+  static Future<void> _purgerExpires(Database db) async {
+    final maintenant = dateCache(DateTime.now());
+    // ⚠️ RETENU AVANT D'ÊTRE RETIRÉ : l'archive ne connaît pas l'expiration, et
+    // la restauration suivante recréerait l'éphémère. Voir `_creeTableEffaces`.
+    await db.rawInsert(
+      'INSERT OR IGNORE INTO effaces (message_id) '
+      'SELECT id FROM messages WHERE expires_at IS NOT NULL AND expires_at <= ?',
+      [maintenant],
+    );
+    await db.delete(
+      'messages',
+      where: 'expires_at IS NOT NULL AND expires_at <= ?',
+      whereArgs: [maintenant],
+    );
+  }
 
   /// Range le texte d'un message chiffré qu'on vient de relever — dans SON fil.
   ///
@@ -401,28 +432,83 @@ class MessageCache {
     required DateTime quand,
   }) async {
     final db = await _database();
+    /*
+     * 🐛 UN MESSAGE SUPPRIMÉ RETROUVAIT SON TEXTE. L'enveloppe peut arriver
+     * APRÈS la suppression — destinataire hors ligne, relève tardive — et la
+     * mise à jour visait la ligne par son seul identifiant : le clair d'un
+     * message supprimé pour tous revenait s'y loger.
+     */
     final modifiees = await db.update(
       'messages',
       // Un texte venu d’une enveloppe : le message est chiffré par définition.
       {'content': texte, 'chiffre': 1},
-      where: 'id = ?',
+      where: 'id = ? AND deleted_at IS NULL',
       whereArgs: [id],
     );
     if (modifiees > 0) return;
-    await db.insert(
-      'messages',
-      {
-        'id': id,
-        'conv_id': convId,
-        'sender_id': expediteurId,
-        'content': texte,
-        'type': 'TEXT',
-        'status': 'DELIVERED',
-        'created_at': dateCache(quand),
-        'chiffre': 1,
-      },
-      conflictAlgorithm: ConflictAlgorithm.ignore,
+    /*
+     * ⚠️ `OR IGNORE` écarte une ligne déjà là (supprimée pour tous) ; le
+     * `NOT EXISTS` écarte une ligne effacée de cet appareil.
+     */
+    await db.rawInsert(
+      'INSERT OR IGNORE INTO messages '
+      '(id, conv_id, sender_id, content, type, status, created_at, chiffre) '
+      "SELECT ?, ?, ?, ?, 'TEXT', 'DELIVERED', ?, 1 "
+      'WHERE NOT EXISTS (SELECT 1 FROM effaces WHERE message_id = ?)',
+      [id, convId, expediteurId, texte, dateCache(quand), id],
     );
+  }
+
+  /// Range un message venu de l'archive chiffrée — sans rien défaire.
+  ///
+  /// ⚠️ PAS UN `upsert`. La règle, et le défaut qu'elle corrige, sont dans
+  /// `restauration_archive.dart` : une ligne existante ne reçoit au plus que
+  /// son texte manquant, une ligne supprimée ou effacée ne bouge pas.
+  static Future<void> restaurerDepuisArchive({
+    required String id,
+    required String convId,
+    required String expediteurId,
+    required String texte,
+    required DateTime quand,
+  }) async {
+    final db = await _database();
+    final efface = (await db.query('effaces',
+            where: 'message_id = ?', whereArgs: [id], limit: 1))
+        .isNotEmpty;
+    final l = await db.query('messages',
+        columns: ['content', 'deleted_at'], where: 'id = ?', whereArgs: [id], limit: 1);
+    final geste = gesteRestauration(
+      efface: efface,
+      ligne: l.isEmpty
+          ? null
+          : (texte: l.first['content'] as String?, supprime: l.first['deleted_at'] != null),
+    );
+    switch (geste) {
+      case GesteRestauration.rien:
+        return;
+      case GesteRestauration.completerTexte:
+        await db.update(
+          'messages',
+          {'content': texte, 'chiffre': 1},
+          where: "id = ? AND deleted_at IS NULL AND (content IS NULL OR content = '')",
+          whereArgs: [id],
+        );
+      case GesteRestauration.inserer:
+        await db.insert(
+          'messages',
+          {
+            'id': id,
+            'conv_id': convId,
+            'sender_id': expediteurId,
+            'content': texte,
+            'type': 'TEXT',
+            'status': 'SENT',
+            'created_at': dateCache(quand),
+            'chiffre': 1,
+          },
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+    }
   }
 
   /// Met à jour le statut d'un message.
@@ -455,6 +541,9 @@ class MessageCache {
   /// — comme le serveur la rend. Sa traduction part dans les deux cas.
   static Future<void> appliquerSuppression(String messageId, String scope) async {
     final db = await _database();
+    // ⚠️ Retenu, pour que l'archive ne le fasse pas revenir : voir `_creeTableEffaces`.
+    await db.insert('effaces', {'message_id': messageId},
+        conflictAlgorithm: ConflictAlgorithm.ignore);
     if (scope == 'me') {
       await db.delete('messages', where: 'id = ?', whereArgs: [messageId]);
     } else {
@@ -492,6 +581,7 @@ class MessageCache {
     // Les traductions sont du contenu de messages : les laisser derrière
     // laisserait des bribes de conversations du compte précédent sur l'appareil.
     await db.delete('traductions');
+    await db.delete('effaces');
   }
 
   // --- Sérialisation helpers ---
