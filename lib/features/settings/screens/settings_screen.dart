@@ -3,9 +3,6 @@ import 'package:provider/provider.dart';
 
 import '../../../core/alanya_id_formatter.dart';
 import '../../../core/biometric_service.dart';
-import '../../../core/data_saver_service.dart';
-import '../../../core/locale_controller.dart';
-import '../../../core/theme_controller.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/alanya_wordmark.dart';
@@ -15,12 +12,6 @@ import '../../auth/auth_controller.dart';
 import '../../account/screens/change_password_screen.dart';
 import '../../account/screens/delete_account_screen.dart';
 import '../../account/screens/profile_screen.dart';
-import 'notification_settings_screen.dart';
-import 'ringtones_screen.dart';
-import 'repondeur_screen.dart';
-import 'export_medias_screen.dart';
-import 'translation_screen.dart';
-import '../../../services/e2ee/e2ee_fournisseur.dart';
 import '../../parametres/screens/sauvegarde_chiffree_screen.dart';
 import 'privacy_settings_screen.dart';
 import 'login_history_screen.dart';
@@ -28,6 +19,8 @@ import 'pays_mobile_screen.dart';
 import 'recuperation_screen.dart';
 import '../../blocked/screens/blocked_users_screen.dart';
 import '../../chat/screens/starred_messages_screen.dart';
+import '../deconnexion.dart';
+import '../widgets/preferences_section.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -37,7 +30,6 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _biometricEnabled = false;
-  bool _dataSaverEnabled = DataSaverService.instance.isOn;
   bool _biometricAvailable = false;
   String _biometricType = "Chargement...";
   bool _loadingBiometric = true;
@@ -103,8 +95,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final user = context.watch<AuthController>().user;
-    final localeCtrl = context.watch<LocaleController>();
-    final themeCtrl = context.watch<ThemeController>();
 
     return Scaffold(
       appBar: backAppBar(context, tr(context, 'settings')),
@@ -284,126 +274,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
 
-          // PREFERENCES
+          // PREFERENCES — partagées avec l écran Profil (même bloc, une
+          // seule définition). Voir `preferences_section.dart`.
           _sectionHeader(tr(context, 'set_section_preferences')),
-          _settingsTile(
-            icon: Icons.notifications_outlined,
-            iconColor: _accent,
-            title: tr(context, 'set_notifications'),
-            subtitle: tr(context, 'set_notifications_sub'),
-            trailing: _chevron(),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                  builder: (_) => const NotificationSettingsScreen()),
-            ),
-          ),
-          _settingsTile(
-            icon: Icons.library_music_outlined,
-            iconColor: _accent,
-            title: tr(context, 'set_ringtones'),
-            subtitle: tr(context, 'set_ringtones_sub'),
-            trailing: _chevron(),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const RingtonesScreen()),
-            ),
-          ),
-          _settingsTile(
-            icon: Icons.voicemail_outlined,
-            iconColor: _accent,
-            title: tr(context, 'vm_title'),
-            subtitle: tr(context, 'vm_set_enable_hint'),
-            trailing: _chevron(),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const RepondeurScreen()),
-            ),
-          ),
-          _settingsTile(
-            icon: Icons.translate,
-            iconColor: _accent,
-            title: tr(context, 'translated'),
-            subtitle: tr(context, 'set_translation_sub'),
-            trailing: _chevron(),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const TranslationScreen()),
-            ),
-          ),
-          // L'export a sa place APRES la traduction et AVANT l'apparence :
-          // c'est un outil de donnees, comme les sonneries et la traduction,
-          // et non un reglage de presentation.
-          _settingsTile(
-            icon: Icons.download_for_offline_outlined,
-            iconColor: _accent,
-            title: tr(context, 'exp_titre'),
-            subtitle: tr(context, 'exp_sub'),
-            trailing: _chevron(),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const ExportMediasScreen()),
-            ),
-          ),
-          _settingsTile(
-            icon: ThemeController.icone(themeCtrl.choix),
-            iconColor: _accent,
-            title: tr(context, 'set_theme'),
-            subtitle: ThemeController.label(themeCtrl.choix),
-            trailing: _chevron(),
-            onTap: () => _showThemePicker(themeCtrl),
-          ),
-          _settingsTile(
-            icon:
-                _dataSaverEnabled ? Icons.data_saver_on : Icons.data_saver_off,
-            iconColor: _dataSaverEnabled ? _positive : _mutedIcon,
-            title: tr(context, 'set_data_saver'),
-            subtitle: _dataSaverEnabled
-                ? tr(context, 'set_data_saver_on')
-                : tr(context, 'set_disabled_tap_on'),
-            trailing: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: _dataSaverEnabled
-                    ? _positive.withValues(alpha: 0.1)
-                    : _chipOffBg,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                _dataSaverEnabled ? "ON" : "OFF",
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: _dataSaverEnabled ? _positive : _muted,
-                ),
-              ),
-            ),
-            onTap: () async {
-              final v = !_dataSaverEnabled;
-              await DataSaverService.instance.setEnabled(v);
-              if (mounted) setState(() => _dataSaverEnabled = v);
-            },
-          ),
-          _settingsTile(
-            icon: Icons.language,
-            iconColor: _positive,
-            title: tr(context, 'language'),
-            subtitle: _currentLanguageName(localeCtrl),
-            trailing: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                value: LocaleController.supported
-                        .any((l) => l.code == localeCtrl.languageCode)
-                    ? localeCtrl.languageCode
-                    : 'fr',
-                icon: Icon(Icons.expand_more, color: _mutedIcon, size: 20),
-                items: LocaleController.supported.map((l) {
-                  return DropdownMenuItem(
-                    value: l.code,
-                    child: Text('${l.flag}  ${l.nativeName}',
-                        style: const TextStyle(fontSize: 14)),
-                  );
-                }).toList(),
-                onChanged: (code) {
-                  if (code != null) localeCtrl.setLocale(code);
-                },
-              ),
-            ),
-          ),
+          const PreferencesSection(),
 
           // COMPTE
           _sectionHeader(tr(context, 'set_section_account')),
@@ -430,76 +304,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: OutlinedButton.icon(
-              onPressed: () async {
-                /*
-                 * 🔴 ON AVERTIT SI LA SAUVEGARDE MANQUE, et c'est le seul moment
-                 * où cela sert encore. Se déconnecter efface le coffre et purge
-                 * le cache — deux décisions justes — et les enveloppes sont
-                 * acquittées : l'historique chiffré disparaît, sans que rien ne
-                 * le dise.
-                 *
-                 * ⚠️ ON AVERTIT, ON N'EMPÊCHE PAS. Se déconnecter est un geste
-                 * de sécurité : quelqu'un qui quitte un poste partagé doit
-                 * pouvoir le faire tout de suite.
-                 *
-                 * ⚠️ ET SEULEMENT S'IL Y A QUELQUE CHOSE À PERDRE. Un
-                 * avertissement qui s'affiche à tout le monde à chaque fois
-                 * cesse d'être lu.
-                 */
-                final pile = context.e2ee;
-                if (pile != null && pile.fil.conversationsChiffrees() > 0) {
-                  final coffre = await pile.sauvegarde.lireCoffre();
-                  if (coffre.serrures.isEmpty && context.mounted) {
-                    final quandMeme = await showDialog<bool>(
-                      context: context,
-                      builder: (c) => AlertDialog(
-                        title: const Text('Vos messages chiffrés seront perdus'),
-                        content: const Text(
-                          'Vous avez des conversations chiffrées et aucune '
-                          'sauvegarde. En vous déconnectant, ces messages '
-                          'seront définitivement perdus : ils ne vivent que sur '
-                          'cet appareil, et personne — nous compris — ne peut '
-                          'les retrouver.',
-                          style: TextStyle(fontSize: 13),
-                        ),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(c, false),
-                            child: const Text('Annuler'),
-                          ),
-                          TextButton(
-                            onPressed: () => Navigator.pop(c, true),
-                            child: const Text('Se déconnecter quand même'),
-                          ),
-                        ],
-                      ),
-                    );
-                    if (quandMeme != true) return;
-                  }
-                }
-                if (!context.mounted) return;
-                showDialog(
-                  context: context,
-                  builder: (_) => AlertDialog(
-                    title: Text(tr(context, 'set_logout_q')),
-                    content: Text(
-                        tr(context, 'set_logout_body')),
-                    actions: [
-                      TextButton(
-                          onPressed: () => Navigator.pop(context),
-                          child: Text(tr(context, 'cancel'))),
-                      TextButton(
-                        onPressed: () {
-                          Navigator.pop(context);
-                          context.read<AuthController>().logout();
-                        },
-                        child: Text(tr(context, 'set_logout_action'),
-                            style: TextStyle(color: _danger)),
-                      ),
-                    ],
-                  ),
-                );
-              },
+              // Mêmes gardes que depuis le profil : voir `deconnexion.dart`.
+              onPressed: () => confirmerDeconnexion(context),
               icon: Icon(Icons.logout, color: _danger),
               label: Text(tr(context, 'logout'), style: TextStyle(color: _danger)),
               style: OutlinedButton.styleFrom(
@@ -592,46 +398,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             : null,
         trailing: trailing,
         onTap: onTap,
-      ),
-    );
-  }
-
-  String _currentLanguageName(LocaleController localeCtrl) {
-    final match = LocaleController.supported
-        .where((l) => l.code == localeCtrl.languageCode);
-    return match.isNotEmpty ? match.first.nativeName : 'Français';
-  }
-
-  void _showThemePicker(ThemeController themeCtrl) {
-    showModalBottomSheet(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Text(tr(context, 'set_theme'),
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-          ),
-          const Divider(height: 1),
-          ...ChoixTheme.values.map((c) {
-            final selected = themeCtrl.choix == c;
-            return ListTile(
-              leading: Icon(ThemeController.icone(c), color: _accent),
-              title: Text(ThemeController.label(c)),
-              // Sans sous-titre, « Nuit » et « Noir » ne se distinguent pas.
-              subtitle: Text(
-                ThemeController.description(c),
-                style: TextStyle(fontSize: 12, color: _muted),
-              ),
-              trailing: selected ? Icon(Icons.check, color: _accent) : null,
-              onTap: () {
-                Navigator.pop(ctx);
-                themeCtrl.setChoix(c);
-              },
-            );
-          }),
-          const SizedBox(height: 8),
-        ]),
       ),
     );
   }

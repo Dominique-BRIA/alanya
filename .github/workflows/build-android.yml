@@ -10,7 +10,7 @@ on:
   # `push` suffit : il couvre chaque commit des branches listees, qu'une PR
   # soit ouverte ou non. Le declencheur manuel reste pour les cas ponctuels.
   push:
-    branches: [arena/01a09534-alanya, feature/vocal-attente-loop, feat/chip-appel-callstyle]
+    branches: [arena/01a09534-alanya, feature/vocal-attente-loop, feat/chip-appel-callstyle, feat/ecran-profil]
   workflow_dispatch:
 
 # Deux poussees rapprochees : la premiere construction ne sert deja plus a rien

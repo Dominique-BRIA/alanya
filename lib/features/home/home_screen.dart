@@ -38,7 +38,7 @@ import '../../widgets/alanya_nav_bar.dart';
 import '../../widgets/avatar_circle.dart';
 import '../../widgets/motif_background.dart';
 import '../../widgets/multi_select_mixin.dart';
-import '../account/screens/avatar_viewer_screen.dart';
+import '../account/screens/profile_screen.dart';
 import '../settings/screens/repondeur_screen.dart';
 import '../settings/screens/settings_screen.dart';
 import '../settings/screens/devices_screen.dart';
@@ -1294,9 +1294,36 @@ class _ConversationsTabState extends State<_ConversationsTab>
   /// Extraite du `build` pour partager sa ligne avec le bouton « Saisir ID ».
   /// La marge droite tombe de 12 à 8 : l'écart avec le bouton est repris par le
   /// `SizedBox` de la ligne, sinon les deux se toucheraient.
+  ///
+  /// Appui : l'écran Profil. Appui long : copie l'Alanya ID (demande du user,
+  /// 28/09/2026). Toute la carte réagit, photo comprise — la photo ouvrait sa
+  /// visionneuse, un second geste au même endroit qui aurait rendu le premier
+  /// imprévisible ; on la change et on la voit désormais depuis le profil.
   Widget _carteProfil(BuildContext context, AuthUser user) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 8, 0),
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const ProfileScreen()),
+          ),
+          onLongPress: () {
+            // L'ID brut, sans espaces : c'est ce que « Saisir ID » attend.
+            Clipboard.setData(ClipboardData(text: user.publicNumber));
+            HapticFeedback.selectionClick();
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(tr(context, 'alanya_number_copied'))));
+          },
+          child: _contenuCarteProfil(context, user),
+        ),
+      ),
+    );
+  }
+
+  Widget _contenuCarteProfil(BuildContext context, AuthUser user) {
     return Container(
-      margin: const EdgeInsets.fromLTRB(12, 12, 8, 0),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: themed(context,
@@ -1314,14 +1341,6 @@ class _ConversationsTabState extends State<_ConversationsTab>
             avatarUrl: user.avatarUrl,
             radius: 22,
             backgroundColor: AlanyaColors.terracotta,
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => AvatarViewerScreen(
-                  name: user.nom ?? user.pseudo ?? tr(context, 'home_me'),
-                  avatarUrl: user.avatarUrl,
-                ),
-              ),
-            ),
           ),
           const SizedBox(width: 12),
           Expanded(
