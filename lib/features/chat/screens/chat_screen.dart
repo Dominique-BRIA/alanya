@@ -833,6 +833,22 @@ class _ChatScreenState extends State<ChatScreen>
 
   @override
   void dispose() {
+    /*
+     * 🔴 LE BANDEAU « CLÉ CHANGÉE » PART AVEC LA CONVERSATION. Il est posé sur
+     * le messager de toute l'application : sans ceci, il restait sur l'accueil
+     * (capture du user, 29/09/2026), à propos d'une conversation qu'on ne
+     * regarde plus. Tant qu'on n'y a pas répondu, il revient à la prochaine
+     * ouverture du fil.
+     *
+     * ⚠️ APRÈS LA TRAME : pendant `dispose`, l'arbre est verrouillé et le
+     * messager ne peut pas se reconstruire.
+     */
+    final messager = _messagerBandeau;
+    if (messager != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (messager.mounted) messager.clearMaterialBanners();
+      });
+    }
     ChatScreen.activeConvId = null;
     WidgetsBinding.instance.removeObserver(this);
     _typingDebounce?.cancel();
@@ -1791,16 +1807,12 @@ class _ChatScreenState extends State<ChatScreen>
     if (!await pile.coffre.cleAChange(pair)) return;
     if (!mounted) return;
 
-    /*
-     * ⚠️ `showMaterialBanner` EXIGE UN `MaterialBanner`, pas un widget qui en
-     * rend un. On lui donne donc ce que notre composant construit, plutôt que
-     * le composant lui-même.
-     */
-    ScaffoldMessenger.of(context).showMaterialBanner(
-      AvertissementCleChangee(
+    // ⚠️ Par `montrerAvertissementCle` : le messager y est pris une fois, et
+    // les bandeaux en file effacés — voir pourquoi dans `e2ee_widgets.dart`.
+    _messagerBandeau = montrerAvertissementCle(
+      context,
         nomPair: widget.title,
         onVerifier: () {
-          ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
           unawaited(pile.coffre.oublierAvertissement(pair));
           showAppSnackBar(
             'Ouvrez les infos du contact, puis « Chiffrement », pour comparer '
@@ -1814,12 +1826,14 @@ class _ChatScreenState extends State<ChatScreen>
          * chaque jour lui apprendrait à la balayer sans la lire.
          */
         onIgnorer: () {
-          ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
           unawaited(pile.coffre.oublierAvertissement(pair));
         },
-      ).build(context) as MaterialBanner,
     );
   }
+
+  /// Le messager qui porte le bandeau « clé changée » de CE fil, pour le
+  /// retirer en quittant l'écran — voir `dispose`.
+  ScaffoldMessengerState? _messagerBandeau;
 
   /// Va chercher dans l'archive ce qui manque à CETTE conversation.
   ///

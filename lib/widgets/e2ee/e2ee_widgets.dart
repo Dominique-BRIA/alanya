@@ -155,6 +155,44 @@ class BanniereChiffrement extends StatelessWidget {
   }
 }
 
+/// Affiche l'avertissement de changement de clé d'un correspondant, et rend
+/// le messager qui le porte — pour que l'écran puisse le retirer en partant.
+///
+/// 🐛 LE BANDEAU RESTAIT BLOQUÉ SUR L'ACCUEIL, BOUTONS MORTS (capture du user,
+/// 29/09/2026). Il est posé sur le messager de TOUTE l'application, donc
+/// survivait à la sortie de la conversation ; et ses boutons cherchaient ce
+/// messager à partir de l'écran de conversation, déjà détruit : « Looking up a
+/// deactivated widget's ancestor is unsafe ». Ni fermeture, ni effacement de
+/// l'alerte — elle revenait à chaque ouverture, et chaque ouverture en
+/// ajoutait un de plus EN FILE. Prouvé par `test/avertissement_cle_test.dart`.
+///
+/// ⚠️ LE MESSAGER EST PRIS UNE FOIS, ICI, tant que l'écran est vivant ; les
+/// boutons s'en servent directement.
+/// ⚠️ LES BANDEAUX EN FILE SONT EFFACÉS avant d'en montrer un : un seul à la fois.
+ScaffoldMessengerState montrerAvertissementCle(
+  BuildContext context, {
+  required String nomPair,
+  required VoidCallback onVerifier,
+  required VoidCallback onIgnorer,
+}) {
+  final messager = ScaffoldMessenger.of(context);
+  messager.clearMaterialBanners();
+  messager.showMaterialBanner(
+    AvertissementCleChangee(
+      nomPair: nomPair,
+      onVerifier: () {
+        messager.hideCurrentMaterialBanner();
+        onVerifier();
+      },
+      onIgnorer: () {
+        messager.hideCurrentMaterialBanner();
+        onIgnorer();
+      },
+    ).build(context) as MaterialBanner,
+  );
+  return messager;
+}
+
 /// L'avertissement de changement de clé — ticket 4.12.
 ///
 /// 🔴 ON AVERTIT, ON NE BLOQUE JAMAIS (modèle WhatsApp, décision du 21/09/2026).
