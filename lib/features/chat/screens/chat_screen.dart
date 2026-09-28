@@ -1100,6 +1100,9 @@ class _ChatScreenState extends State<ChatScreen>
       final messageId = e["messageId"] as String?;
       final scope = e["scope"] as String? ?? "me";
       if (messageId == null || e["convId"] != widget.convId) return;
+      // L'accueil le fait aussi : c'est sans effet de le faire deux fois.
+      unawaited(MessageCache.appliquerSuppression(messageId, scope)
+          .catchError((_) {}));
       setState(() {
         if (scope == "me") {
           _messages = _messages.where((m) => m.id != messageId).toList();
@@ -1452,7 +1455,17 @@ class _ChatScreenState extends State<ChatScreen>
       if (older.isEmpty) {
         _hasMoreOlder = false;
       } else {
-        final newMsgs = older.reversed.toList();
+        /*
+         * ⚠️ UNE PAGE ANCIENNE D'UN FIL CHIFFRÉ ARRIVE SANS TEXTE : le serveur
+         * ne l'a pas. Le texte déchiffré est dans le cache local — on le
+         * recolle, comme au premier chargement. Sans cela, remonter
+         * l'historique montrait des bulles vides.
+         */
+        final connus = await MessageCache.getConv(widget.convId)
+            .timeout(const Duration(seconds: 3), onTimeout: () => const [])
+            .catchError((_) => const <Message>[]);
+        if (!mounted) return;
+        final newMsgs = _garderLeClairConnu(older.reversed.toList(), connus);
         final before =
             _scrollCtrl.hasClients ? _scrollCtrl.position.maxScrollExtent : 0.0;
         _loadedOlder = true;

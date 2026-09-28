@@ -9,6 +9,7 @@ import '../../core/whatsapp_text.dart';
 
 import '../../core/connectivity_service.dart';
 import '../../core/conversation_cache.dart';
+import '../../core/message_cache.dart';
 import '../../core/messages_systeme.dart';
 import '../../core/geo_service.dart';
 import '../geo/screens/geo_disclosure_screen.dart';
@@ -675,6 +676,25 @@ class _ConversationsTabState extends State<_ConversationsTab>
         }());
       } else if (t == "read") {
         _poll();
+      } else if (t == "message_deleted") {
+        /*
+         * 🔴 LE CACHE LOCAL DOIT OUBLIER LE TEXTE, MÊME CONVERSATION FERMÉE.
+         *
+         * Il garde désormais les textes déchiffrés anciens (`putConv`) : un
+         * message supprimé pour tous y resterait lisible, et resterait l'aperçu
+         * de la liste s'il était le dernier. L'écran de conversation ne le
+         * reçoit que s'il est ouvert ; l'accueil, lui, est toujours là.
+         */
+        final id = e["messageId"] as String?;
+        if (id != null) {
+          unawaited(() async {
+            try {
+              await MessageCache.appliquerSuppression(
+                  id, e["scope"] as String? ?? "me");
+            } catch (_) {}
+            if (mounted) await _poll();
+          }());
+        }
       } else if (t == "message_edited") {
         // Un message modifié peut être le DERNIER de sa conversation : le libellé
         // de la liste change alors, et il vient du serveur (voir

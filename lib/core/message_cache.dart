@@ -5,6 +5,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../models/conversation.dart' show LastMessage;
 import '../models/message.dart';
+import 'cache_clairs.dart';
 
 /// Cache local des messages (offline-first).
 ///
@@ -197,20 +198,37 @@ class MessageCache {
     await db.delete('traductions', where: 'message_id = ?', whereArgs: [messageId]);
   }
 
-  /// Sauvegarde (ou met à jour) une liste de messages pour une conversation.
-  /// Remplace entièrement les messages existants de cette conversation.
+  /// Range la dernière page du serveur pour une conversation.
+  ///
+  /// 🔴 NE VIDE PLUS LE FIL. Les textes déchiffrés plus anciens que la page, et
+  /// ceux que le serveur rend sans contenu, sont gardés : ils n'existent nulle
+  /// part ailleurs sur l'appareil. La règle est dans `cache_clairs.dart`.
   static Future<void> putConv(String convId, List<Message> messages) async {
     final db = await _database();
-    final batch = db.batch();
-
-    // Supprime les anciens messages de cette conversation.
-    batch.delete(
+    final lignes = await db.query(
       'messages',
+      columns: ['id', 'content', 'created_at', 'chiffre'],
       where: 'conv_id = ?',
       whereArgs: [convId],
     );
+    final plan = planRemplacement(
+      [
+        for (final l in lignes)
+          LigneCache(
+            id: l['id'] as String,
+            content: l['content'] as String?,
+            createdAt: DateTime.parse(l['created_at'] as String),
+            chiffre: (l['chiffre'] as int? ?? 0) == 1,
+          ),
+      ],
+      messages,
+    );
 
-    // Insère les nouveaux.
+    final batch = db.batch();
+    for (final id in plan.aEffacer) {
+      batch.delete('messages', where: 'id = ?', whereArgs: [id]);
+    }
+
     for (final m in messages) {
       batch.insert(
         'messages',
@@ -218,7 +236,7 @@ class MessageCache {
           'id': m.id,
           'conv_id': convId,
           'sender_id': m.senderId,
-          'content': m.content,
+          'content': plan.textes[m.id] ?? m.content,
           'type': m.type,
           'status': m.status,
           'reply_to_id': m.replyToId,
@@ -240,15 +258,24 @@ class MessageCache {
   }
 
   /// Ajoute ou met à jour un seul message (sans tout effacer).
+  ///
+  /// ⚠️ GARDE LE TEXTE DÉCHIFFRÉ : un message chiffré venu du serveur (une page
+  /// plus ancienne, par exemple) arrive sans contenu. Voir `texteAEcrire`.
   static Future<void> upsert(Message m, String convId) async {
     final db = await _database();
+    String? ancien;
+    if ((m.content ?? '').isEmpty && m.deletedAt == null) {
+      final l = await db.query('messages',
+          columns: ['content'], where: 'id = ?', whereArgs: [m.id], limit: 1);
+      if (l.isNotEmpty) ancien = l.first['content'] as String?;
+    }
     await db.insert(
       'messages',
       {
         'id': m.id,
         'conv_id': convId,
         'sender_id': m.senderId,
-        'content': m.content,
+        'content': texteAEcrire(m, ancien),
         'type': m.type,
         'status': m.status,
         'reply_to_id': m.replyToId,
@@ -361,6 +388,36 @@ class MessageCache {
   static Future<void> remove(String messageId) async {
     final db = await _database();
     await db.delete('messages', where: 'id = ?', whereArgs: [messageId]);
+  }
+
+  /// Reporte dans le cache l'événement `message_deleted` du serveur.
+  ///
+  /// 🔴 SANS LUI, UN TEXTE SUPPRIMÉ RESTAIT SUR L'APPAREIL. Seul l'écran de
+  /// conversation ouvert réagissait, et seulement à l'écran. Tant que `putConv`
+  /// vidait le fil à chaque ouverture, le défaut se corrigeait tout seul ;
+  /// maintenant que les textes chiffrés anciens sont gardés, il ne se
+  /// corrigerait plus jamais.
+  ///
+  /// [scope] `me` : le message disparaît pour nous seuls → la ligne part.
+  /// Sinon (`everyone`) : la ligne reste, marquée supprimée, sans texte ni média
+  /// — comme le serveur la rend. Sa traduction part dans les deux cas.
+  static Future<void> appliquerSuppression(String messageId, String scope) async {
+    final db = await _database();
+    if (scope == 'me') {
+      await db.delete('messages', where: 'id = ?', whereArgs: [messageId]);
+    } else {
+      await db.update(
+        'messages',
+        {
+          'content': null,
+          'media_json': null,
+          'deleted_at': DateTime.now().toUtc().toIso8601String(),
+        },
+        where: 'id = ?',
+        whereArgs: [messageId],
+      );
+    }
+    await db.delete('traductions', where: 'message_id = ?', whereArgs: [messageId]);
   }
 
   /// Récupère tous les messages d'une conversation (du plus ancien au plus récent).
