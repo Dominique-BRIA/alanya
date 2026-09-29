@@ -18,10 +18,10 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../../core/alanya_id_formatter.dart';
 import '../../../core/api_client.dart';
+import '../../../core/lien_alanya.dart';
 import '../../../core/pays_repository.dart';
 import '../../../core/token_storage.dart';
 import '../../../l10n/app_localizations.dart';
@@ -32,6 +32,7 @@ import '../../../widgets/avatar_circle.dart';
 import '../../../widgets/avatar_source.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../../../widgets/motif_background.dart';
+import '../../../widgets/qr_alanya.dart';
 import '../../auth/auth_controller.dart';
 import '../../contacts/contacts_repository.dart';
 import '../../contacts/screens/contact_info_screen.dart';
@@ -243,13 +244,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // ⚠️ FOND BLANC DANS LES DEUX THÈMES : un QR code sur fond sombre ne
-            // se lit pas avec tous les lecteurs.
-            Container(
-              color: Colors.white,
-              padding: const EdgeInsets.all(12),
-              child: QrImageView(data: publicNumber, size: 200),
-            ),
+            // Un LIEN et non le numéro seul : scanné par l'appareil photo, le
+            // numéro s'affichait comme du texte ; le lien ouvre l'application.
+            // Fond blanc et logo : voir `QrAlanya`.
+            QrAlanya(data: lienProfil(publicNumber), size: 200),
             const SizedBox(height: 12),
             Text(
               formatAlanyaId(publicNumber),
