@@ -5,10 +5,27 @@ import '../../core/alanya_id_formatter.dart';
 import '../../core/api_client.dart';
 import '../../core/app_snackbar.dart';
 import '../../l10n/app_localizations.dart';
+import '../../models/contact.dart';
 import '../auth/auth_controller.dart';
 import '../chat/chat_repository.dart';
 import '../chat/screens/chat_screen.dart';
 import 'contacts_repository.dart';
+
+/// La conversation directe avec [user], telle qu'on l'ouvre après un QR
+/// (profil ou invitation).
+MaterialPageRoute<void> routeConversation(
+  String convId,
+  UserSearchResult user,
+) => MaterialPageRoute(
+  builder: (_) => ChatScreen(
+    convId: convId,
+    title: user.pseudo ?? formatAlanyaId(user.publicNumber),
+    avatarUrl: user.avatarUrl,
+    otherUserId: user.id,
+    otherPublicNumber: user.publicNumber,
+    otherStatusMsg: user.statusMsg,
+  ),
+);
 
 /// UN ALANYA ID VENU D'UN QR CODE : ajouter le compte aux contacts, puis
 /// ouvrir la conversation avec lui.
@@ -55,16 +72,7 @@ Future<bool> ouvrirProfilScanne(
       }
     }
     final convId = await chat.createDirect(user.publicNumber);
-    final route = MaterialPageRoute(
-      builder: (_) => ChatScreen(
-        convId: convId,
-        title: user.pseudo ?? formatAlanyaId(user.publicNumber),
-        avatarUrl: user.avatarUrl,
-        otherUserId: user.id,
-        otherPublicNumber: user.publicNumber,
-        otherStatusMsg: user.statusMsg,
-      ),
-    );
+    final route = routeConversation(convId, user);
     // ⚠️ Le `NavigatorState` est pris AVANT les allers-retours réseau : le
     // contexte de l'appelant a pu être démonté entre-temps, le navigateur non.
     if (remplacer) {

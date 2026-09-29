@@ -163,6 +163,10 @@ dependencies:
   # flutter >= 3.44.0 et minSdk 24 : c'est pile le 3.44.6 des trois CI et le
   # minSdk de l'application. Descendre Flutter sous 3.44 casserait `pub get`.
   app_links: ^7.2.1
+  # Partage d'une invitation QR (lien ou image) vers WhatsApp, Facebook…
+  # 12.x et non 13 : la 13 n'est pas résoluble avec les autres paquets du
+  # projet. flutter >= 3.22, minSdk 19 : compatible avec les trois CI.
+  share_plus: ^12.0.2
 
 
 dev_dependencies:

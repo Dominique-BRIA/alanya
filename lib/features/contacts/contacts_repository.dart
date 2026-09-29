@@ -1,6 +1,7 @@
 import '../../core/api_client.dart';
 import '../../core/authed_api.dart';
 import '../../models/contact.dart';
+import '../../models/invitation_qr.dart';
 
 class ContactsRepository {
   ContactsRepository(this._api);
@@ -58,6 +59,28 @@ class ContactsRepository {
       }
     }
     return added;
+  }
+
+  // ---------------------------------------------------------------------------
+  // INVITATIONS À USAGE UNIQUE (QR partageable, 15 minutes)
+  // ---------------------------------------------------------------------------
+
+  /// Crée une invitation. 429 au-delà de 30 par heure (frein anti-robot).
+  Future<InvitationCreee> creerInvitation() async {
+    final data = await _api.post("/api/invitations", const {});
+    return InvitationCreee.fromJson(data);
+  }
+
+  /// La fiche de confirmation, sans utiliser l'invitation.
+  Future<ApercuInvitation> consulterInvitation(String jeton) async {
+    final data = await _api.get("/api/invitations/$jeton");
+    return ApercuInvitation.fromJson(data);
+  }
+
+  /// Utilise l'invitation : contacts réciproques, conversation rendue.
+  Future<InvitationUtilisee> utiliserInvitation(String jeton) async {
+    final data = await _api.post("/api/invitations/$jeton/utiliser", const {});
+    return InvitationUtilisee.fromJson(data);
   }
 
   Future<void> setBlocked(String contactId, bool blocked) async {

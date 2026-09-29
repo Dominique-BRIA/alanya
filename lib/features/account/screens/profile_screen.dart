@@ -36,6 +36,7 @@ import '../../../widgets/qr_alanya.dart';
 import '../../auth/auth_controller.dart';
 import '../../contacts/contacts_repository.dart';
 import '../../contacts/screens/contact_info_screen.dart';
+import '../../contacts/screens/invitation_qr_screen.dart';
 import '../../media/media_repository.dart';
 import '../../parametres/screens/sauvegarde_chiffree_screen.dart';
 import '../../settings/deconnexion.dart';
@@ -260,6 +261,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ],
         ),
         actions: [
+          // Le QR permanent ci-dessus donne l'Alanya ID à qui le voit ; celui-ci
+          // se partage à distance, sert une fois, et ne révèle pas l'ID.
+          TextButton.icon(
+            icon: const Icon(Icons.timer_outlined, size: 18),
+            label: Text(tr(context, 'invqr_open')),
+            onPressed: () {
+              Navigator.pop(c);
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const InvitationQrScreen()),
+              );
+            },
+          ),
           TextButton(
             onPressed: () => Navigator.pop(c),
             child: Text(tr(context, 'close')),

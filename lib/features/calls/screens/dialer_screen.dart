@@ -13,6 +13,7 @@ import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../../chat/chat_repository.dart';
 import '../../contacts/contacts_repository.dart';
+import '../../contacts/ouvrir_invitation.dart';
 import '../../contacts/ouvrir_profil_scanne.dart';
 import '../../contacts/screens/add_contact_screen.dart';
 import '../../contacts/screens/scanner_qr_screen.dart';
@@ -218,11 +219,13 @@ class _DialerScreenState extends State<DialerScreen> {
         });
         await ouvrirProfilScanne(context, publicNumber, remplacer: true);
         if (mounted) setState(() => _ouvertureQr = false);
-      case CibleInvitation():
-        // Les invitations à usage unique n'existent pas encore côté serveur
-        // (lot 4) : aucun QR de cette forme ne peut circuler. Le lot 5
-        // branchera ici leur utilisation.
-        showAppSnackBar(tr(context, 'qr_scan_not_alanya'));
+      case CibleInvitation(:final jeton):
+        // Invitation à usage unique : l'Alanya ID n'est pas dans le QR, le
+        // pavé reste donc vide pendant l'ouverture.
+        _debounce?.cancel();
+        setState(() => _ouvertureQr = true);
+        await utiliserInvitationEtOuvrir(context, jeton, remplacer: true);
+        if (mounted) setState(() => _ouvertureQr = false);
     }
   }
 

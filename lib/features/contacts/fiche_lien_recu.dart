@@ -7,10 +7,12 @@ import '../../core/app_snackbar.dart';
 import '../../core/lien_alanya.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/contact.dart';
+import '../../models/invitation_qr.dart';
 import '../../theme/alanya_theme.dart';
 import '../../widgets/avatar_circle.dart';
 import '../auth/auth_controller.dart';
 import 'contacts_repository.dart';
+import 'ouvrir_invitation.dart';
 import 'ouvrir_profil_scanne.dart';
 
 /// UN LIEN ALANYA A OUVERT L'APPLICATION : on montre à qui il mène, et
@@ -20,14 +22,14 @@ import 'ouvrir_profil_scanne.dart';
 /// ne doit PAS ajouter un contact tout seul. Posté dans un groupe ou caché
 /// derrière un texte, il ferait sinon entrer un inconnu dans le répertoire de
 /// chaque personne qui clique. Le scan dans l'application, lui, reste direct
-/// (`ouvrirProfilScanne`) : scanner est déjà un geste volontaire.
+/// (`ouvrirProfilScanne`, `utiliserInvitationEtOuvrir`) : scanner est déjà un
+/// geste volontaire.
 Future<void> proposerLienRecu(BuildContext context, CibleLien cible) async {
   switch (cible) {
     case CibleProfil(:final publicNumber):
       await _proposerProfil(context, publicNumber);
-    case CibleInvitation():
-      // Les invitations à usage unique arrivent aux lots 4-5.
-      showAppSnackBar(tr(context, 'qr_scan_not_alanya'));
+    case CibleInvitation(:final jeton):
+      await _proposerInvitation(context, jeton);
   }
 }
 
@@ -56,23 +58,100 @@ Future<void> _proposerProfil(BuildContext context, String publicNumber) async {
   }
   if (!context.mounted) return;
 
-  final confirme = await showModalBottomSheet<bool>(
-    context: context,
-    showDragHandle: true,
-    builder: (c) => _Fiche(user: user),
+  final nom = user.pseudo ?? formatAlanyaId(user.publicNumber);
+  final confirme = await _montrerFiche(
+    context,
+    entete: tr(context, 'qr_link_received'),
+    nom: nom,
+    avatarUrl: user.avatarUrl,
+    detail: formatAlanyaId(user.publicNumber),
+    dejaContact: user.alreadyContact,
   );
   if (confirme != true || !context.mounted) return;
   await ouvrirProfilScanne(context, user.publicNumber);
 }
 
+/// 🔒 L'Alanya ID du créateur n'est pas montré : le serveur ne le rend qu'une
+/// fois l'invitation utilisée. Le nom et la photo suffisent à le reconnaître.
+Future<void> _proposerInvitation(BuildContext context, String jeton) async {
+  final messages = MessagesInvitation.de(context);
+  final ApercuInvitation apercu;
+  try {
+    apercu = await context.read<ContactsRepository>().consulterInvitation(
+      jeton,
+    );
+  } on ApiException catch (e) {
+    showAppSnackBar(messages.pour(e));
+    return;
+  } catch (_) {
+    if (context.mounted) showAppSnackBar(tr(context, 'dial_lookup_failed'));
+    return;
+  }
+  if (!context.mounted) return;
+
+  if (apercu.estLaMienne) {
+    showAppSnackBar(messages.laMienne);
+    return;
+  }
+  // Déjà acceptée par moi (second clic sur le même lien) : rien à confirmer,
+  // on rouvre la conversation.
+  if (apercu.dejaUtiliseeParMoi) {
+    await utiliserInvitationEtOuvrir(context, jeton);
+    return;
+  }
+
+  final confirme = await _montrerFiche(
+    context,
+    entete: tr(context, 'invqr_received'),
+    nom: apercu.pseudo ?? 'Alanya',
+    avatarUrl: apercu.avatarUrl,
+    detail: tr(context, 'invqr_single_use'),
+    dejaContact: apercu.dejaContact,
+  );
+  if (confirme != true || !context.mounted) return;
+  await utiliserInvitationEtOuvrir(context, jeton);
+}
+
+Future<bool?> _montrerFiche(
+  BuildContext context, {
+  required String entete,
+  required String nom,
+  required String? avatarUrl,
+  required String detail,
+  required bool dejaContact,
+}) => showModalBottomSheet<bool>(
+  context: context,
+  showDragHandle: true,
+  builder: (_) => _Fiche(
+    entete: entete,
+    nom: nom,
+    avatarUrl: avatarUrl,
+    detail: detail,
+    dejaContact: dejaContact,
+  ),
+);
+
 class _Fiche extends StatelessWidget {
-  final UserSearchResult user;
-  const _Fiche({required this.user});
+  final String entete;
+  final String nom;
+  final String? avatarUrl;
+
+  /// Sous le nom : l'Alanya ID pour un profil, la mention « usage unique »
+  /// pour une invitation (qui ne révèle pas l'ID).
+  final String detail;
+  final bool dejaContact;
+
+  const _Fiche({
+    required this.entete,
+    required this.nom,
+    required this.avatarUrl,
+    required this.detail,
+    required this.dejaContact,
+  });
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final nom = user.pseudo ?? formatAlanyaId(user.publicNumber);
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
@@ -80,11 +159,11 @@ class _Fiche extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              tr(context, 'qr_link_received'),
+              entete,
               style: TextStyle(color: mutedOf(context, Colors.black54)),
             ),
             const SizedBox(height: 16),
-            AvatarCircle(name: nom, avatarUrl: user.avatarUrl, radius: 36),
+            AvatarCircle(name: nom, avatarUrl: avatarUrl, radius: 36),
             const SizedBox(height: 12),
             Text(
               nom,
@@ -97,13 +176,14 @@ class _Fiche extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              formatAlanyaId(user.publicNumber),
+              detail,
+              textAlign: TextAlign.center,
               style: TextStyle(
                 color: mutedOf(context, Colors.black54),
                 letterSpacing: 1,
               ),
             ),
-            if (user.alreadyContact) ...[
+            if (dejaContact) ...[
               const SizedBox(height: 4),
               Text(
                 tr(context, 'add_already_in_book'),
@@ -119,7 +199,7 @@ class _Fiche extends StatelessWidget {
               child: FilledButton(
                 onPressed: () => Navigator.pop(context, true),
                 child: Text(
-                  user.alreadyContact
+                  dejaContact
                       ? tr(context, 'qr_link_chat')
                       : tr(context, 'qr_link_add_and_chat'),
                 ),
