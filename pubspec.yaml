@@ -153,6 +153,11 @@ dependencies:
   # Le module Android de la 4.x déclare son `namespace` — sans lui, AGP 8.11
   # refuse de bâtir, comme pour les autres greffons de ce fichier.
   flutter_timezone: ^4.1.1
+  # Lecture des QR codes Alanya (caméra ET image de la galerie). Exige
+  # flutter >= 3.29 et minSdk 23 : compatible avec le 3.44.6 épinglé dans les
+  # trois CI et le minSdk 24 de l'application. Embarque le modèle ML Kit de
+  # lecture de codes (~3 Mo par ABI), sans téléchargement au premier usage.
+  mobile_scanner: ^7.4.2
 
 
 dev_dependencies:

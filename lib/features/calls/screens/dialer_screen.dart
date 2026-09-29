@@ -7,12 +7,15 @@ import 'package:provider/provider.dart';
 import '../../../core/alanya_id_formatter.dart';
 import '../../../core/api_client.dart';
 import '../../../core/app_snackbar.dart';
+import '../../../core/lien_alanya.dart';
 import '../../../models/contact.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../../chat/chat_repository.dart';
 import '../../contacts/contacts_repository.dart';
+import '../../contacts/ouvrir_profil_scanne.dart';
 import '../../contacts/screens/add_contact_screen.dart';
+import '../../contacts/screens/scanner_qr_screen.dart';
 import '../call_controller.dart';
 import '../message_erreur_appel.dart';
 import '../../../l10n/app_localizations.dart';
@@ -47,6 +50,9 @@ class _DialerScreenState extends State<DialerScreen> {
   String? _lookupError;
   bool _searching = false;
   bool _calling = false;
+
+  /// Un QR scanné est en cours d'ouverture (recherche, ajout, conversation).
+  bool _ouvertureQr = false;
   Timer? _debounce;
 
   /// Même règle que partout ailleurs : 3 à 10 chiffres, décidée une seule fois
@@ -191,6 +197,35 @@ class _DialerScreenState extends State<DialerScreen> {
     }
   }
 
+  /// Scanner le QR code d'un compte au lieu de taper son Alanya ID : le compte
+  /// est ajouté aux contacts et sa conversation s'ouvre, à la place du pavé.
+  Future<void> _scannerQr() async {
+    final cible = await Navigator.of(context).push<CibleLien>(
+      MaterialPageRoute(builder: (_) => const ScannerQrScreen()),
+    );
+    if (!mounted || cible == null) return;
+    switch (cible) {
+      case CibleProfil(:final publicNumber):
+        // Le numéro s'affiche pendant l'aller-retour : l'utilisateur voit ce
+        // qui a été lu, comme s'il l'avait tapé.
+        _debounce?.cancel();
+        setState(() {
+          _ouvertureQr = true;
+          _digits = publicNumber;
+          _displayCtrl.text = formatAlanyaId(publicNumber);
+          _found = null;
+          _lookupError = null;
+        });
+        await ouvrirProfilScanne(context, publicNumber, remplacer: true);
+        if (mounted) setState(() => _ouvertureQr = false);
+      case CibleInvitation():
+        // Les invitations à usage unique n'existent pas encore côté serveur
+        // (lot 4) : aucun QR de cette forme ne peut circuler. Le lot 5
+        // branchera ici leur utilisation.
+        showAppSnackBar(tr(context, 'qr_scan_not_alanya'));
+    }
+  }
+
   Future<void> _addContact() async {
     if (!_isComplete) {
       showAppSnackBar(tr(context, 'dial_invalid_id'));
@@ -219,6 +254,11 @@ class _DialerScreenState extends State<DialerScreen> {
         context,
         tr(context, 'dialer_title'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.qr_code_scanner),
+            tooltip: tr(context, 'qr_scan_title'),
+            onPressed: _calling || _ouvertureQr ? null : _scannerQr,
+          ),
           IconButton(
             icon: const Icon(Icons.search),
             tooltip: tr(context, 'lookup_this_account'),
