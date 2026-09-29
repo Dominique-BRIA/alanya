@@ -16,10 +16,14 @@ library;
 /// si [continuer] a dit non. Ne lève jamais.
 Future<T?> avecReprises<T>(
   Future<T> Function() operation, {
+  // Courts d'abord : le user trouvait 2 s trop long pour un premier nouvel
+  // essai (29/09/2026). La plupart des retours réseau se règlent en moins
+  // d'une seconde ; les suivants laissent le temps aux cas plus lents.
   List<Duration> delais = const [
+    Duration(milliseconds: 500),
+    Duration(seconds: 1),
     Duration(seconds: 2),
     Duration(seconds: 5),
-    Duration(seconds: 10),
   ],
   bool Function()? continuer,
   Future<void> Function(Duration)? attendre,

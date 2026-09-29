@@ -1580,7 +1580,18 @@ class _ChatScreenState extends State<ChatScreen>
     if (context.read<RealtimeClient>().connected) return;
     try {
       final repo = context.read<ChatRepository>();
-      final latest = (await repo.getMessages(widget.convId)).reversed.toList();
+      /*
+       * 🔴 LES TEXTES CONNUS SONT RECOLLÉS, comme à l'ouverture du fil.
+       *
+       * 🐛 CE RELAIS REMPLAÇAIT LES BULLES PAR LA PAGE DU SERVEUR, qui n'a
+       * jamais le texte d'un message chiffré. Il tourne quand la connexion
+       * temps réel est coupée — donc précisément au retour du réseau, avant
+       * qu'elle revienne : toute la conversation passait à « indisponible sur
+       * cet appareil », et la relève ne remplissait ensuite que les nouveaux
+       * messages (test T5 du user, 29/09/2026).
+       */
+      final latest = _garderLeClairConnu(
+          (await repo.getMessages(widget.convId)).reversed.toList(), _messages);
       if (!mounted) return;
       if (_signature(latest) == _signature(_messages)) return;
       final hadMore = latest.length > _messages.length;

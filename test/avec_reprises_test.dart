@@ -16,7 +16,7 @@ void main() {
   });
 
   test(
-    'toujours en échec : quatre essais au plus, puis null, sans lever',
+    'toujours en échec : cinq essais au plus, puis null, sans lever',
     () async {
       var appels = 0;
       final r = await avecReprises<String>(() async {
@@ -24,7 +24,7 @@ void main() {
         throw Exception('hors ligne');
       }, attendre: _sansAttendre);
       expect(r, isNull);
-      expect(appels, 4);
+      expect(appels, 5);
     },
   );
 
