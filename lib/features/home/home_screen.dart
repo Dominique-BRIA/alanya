@@ -53,6 +53,8 @@ import '../contacts/teintes_listes.dart';
 import '../../core/sonneries_livrees.dart';
 import '../contacts/screens/contact_lists_screen.dart';
 import '../contacts/screens/contacts_screen.dart';
+import '../contacts/fiche_lien_recu.dart';
+import '../../core/liens_entrants.dart';
 import '../calls/call_controller.dart';
 import '../calls/ouvrir_appel_en_cours.dart';
 import '../calls/calls_repository.dart';
@@ -162,7 +164,24 @@ class _HomeScreenState extends State<HomeScreen> {
       await FullScreenPermission.demanderSiNecessaire(context);
       if (!mounted) return;
       await _assureLeSuiviDePosition();
+      // Le lien Alanya qui a lancé l'application passe APRÈS les questions
+      // ci-dessus, pour la même raison : une question à la fois.
+      if (!mounted) return;
+      _pretPourLiens = true;
+      _traiterLienEnAttente();
     });
+    LiensEntrants.instance.enAttente.addListener(_traiterLienEnAttente);
+  }
+
+  /// Faux tant que les questions du démarrage ne sont pas passées.
+  bool _pretPourLiens = false;
+
+  /// Un lien Alanya (QR, lien partagé) a ouvert l'application : on propose
+  /// la fiche de la personne. Voir `LiensEntrants` et `proposerLienRecu`.
+  void _traiterLienEnAttente() {
+    if (!mounted || !_pretPourLiens) return;
+    final cible = LiensEntrants.instance.prendre();
+    if (cible != null) proposerLienRecu(context, cible);
   }
 
   /// Met en place le relevé de position, si ce compte est concerné.
@@ -207,6 +226,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     MissedCalls.instance.removeListener(_onManquesChanges);
+    LiensEntrants.instance.enAttente.removeListener(_traiterLienEnAttente);
     // FIX: NE PAS déconnecter la WS ici.
     // HomeScreen peut être démonté/remonté (changement de langue via
     // LocaleController.notifyListeners, rotation, hot restart, etc.).

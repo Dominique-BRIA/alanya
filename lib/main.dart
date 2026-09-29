@@ -56,6 +56,7 @@ import 'features/meetings/meeting_banner.dart';
 import 'features/meetings/meeting_controller.dart';
 import 'features/meetings/meetings_repository.dart';
 import 'features/status/status_repository.dart';
+import 'core/liens_entrants.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -108,6 +109,9 @@ void main() async {
   await DataSaverService.instance.load();
   await NotificationSettings.instance.load();
   await TraductionAuto.instance.load();
+  // Liens Alanya (QR, lien partagé) : abonnement AVANT tout écran, sans quoi
+  // le lien qui a lancé l'application serait perdu. Voir `LiensEntrants`.
+  LiensEntrants.instance.demarrer();
 
   runApp(
     MultiProvider(

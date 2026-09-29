@@ -331,7 +331,7 @@ class _DialerScreenState extends State<DialerScreen> {
   /// ou erreur. Hauteur fixe pour que le clavier ne saute pas.
   Widget _statusLine() {
     Widget content;
-    if (_searching) {
+    if (_searching || _ouvertureQr) {
       content = Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -344,7 +344,7 @@ class _DialerScreenState extends State<DialerScreen> {
             ),
           ),
           const SizedBox(width: 8),
-          Text(tr(context, 'searching'),
+          Text(tr(context, _ouvertureQr ? 'qr_scan_opening' : 'searching'),
               style: TextStyle(color: mutedOf(context, Colors.black54))),
         ],
       );

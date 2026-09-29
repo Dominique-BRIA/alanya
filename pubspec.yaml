@@ -158,6 +158,11 @@ dependencies:
   # trois CI et le minSdk 24 de l'application. Embarque le modèle ML Kit de
   # lecture de codes (~3 Mo par ABI), sans téléchargement au premier usage.
   mobile_scanner: ^7.4.2
+  # Liens https://alanyavox.com/u/… et /i/… qui ouvrent l'application (QR
+  # scanné par l'appareil photo, lien partagé). ⚠️ La 7.x exige
+  # flutter >= 3.44.0 et minSdk 24 : c'est pile le 3.44.6 des trois CI et le
+  # minSdk de l'application. Descendre Flutter sous 3.44 casserait `pub get`.
+  app_links: ^7.2.1
 
 
 dev_dependencies:
