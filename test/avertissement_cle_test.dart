@@ -6,9 +6,12 @@
 // cherchaient ce messager à partir de l'écran de conversation, déjà détruit —
 // et échouaient. Chaque ouverture en ajoutait un de plus, en file.
 
+import 'package:alanya/core/locale_controller.dart';
 import 'package:alanya/widgets/e2ee/e2ee_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Un écran « conversation » qui affiche le bandeau à son ouverture.
 class _Conversation extends StatefulWidget {
@@ -39,12 +42,23 @@ Future<void> _ouvrir(WidgetTester tester, NavigatorState nav, VoidCallback onIgn
 
 void main() {
   late NavigatorState nav;
+  late LocaleController langue;
 
-  Widget appli() => MaterialApp(
-        home: Builder(builder: (c) {
-          nav = Navigator.of(c);
-          return const Scaffold(body: Text('accueil'));
-        }),
+  // Les textes du bandeau passent par `tr()`, qui lit la langue dans l'arbre ;
+  // `LocaleController` écrit dans les préférences, d'où le bouchon.
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+    langue = LocaleController();
+  });
+
+  Widget appli() => ChangeNotifierProvider<LocaleController>.value(
+        value: langue,
+        child: MaterialApp(
+          home: Builder(builder: (c) {
+            nav = Navigator.of(c);
+            return const Scaffold(body: Text('accueil'));
+          }),
+        ),
       );
 
   testWidgets('« Plus tard » ferme le bandeau après être revenu à l’accueil', (tester) async {

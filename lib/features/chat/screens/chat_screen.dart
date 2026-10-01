@@ -64,6 +64,7 @@ import '../../calls/message_erreur_appel.dart';
 import '../../calls/ouvrir_appel_en_cours.dart';
 import '../../contacts/contacts_repository.dart';
 import '../../contacts/screens/contact_info_screen.dart';
+import '../../contacts/verification_cle.dart';
 import '../../group/screens/group_info_screen.dart';
 import '../../media/media_repository.dart';
 import '../../settings/screens/translation_screen.dart';
@@ -1835,10 +1836,11 @@ class _ChatScreenState extends State<ChatScreen>
         nomPair: widget.title,
         onVerifier: () {
           unawaited(pile.coffre.oublierAvertissement(pair));
-          showAppSnackBar(
-            'Ouvrez les infos du contact, puis « Chiffrement », pour comparer '
-            'le code de sécurité.',
-          );
+          // Ouvre l'écran de vérification lui-même : le bouton ne donnait
+          // qu'un conseil (« ouvrez les infos du contact… »), 02/10/2026.
+          if (!mounted) return;
+          unawaited(ouvrirVerificationCle(context,
+              pairId: pair, nomPair: widget.title));
         },
         /*
          * ⚠️ « IGNORER » ÉTEINT L'ALERTE AUSSI, ET DÉFINITIVEMENT. C'est un

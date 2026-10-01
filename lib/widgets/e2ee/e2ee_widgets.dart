@@ -15,6 +15,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../../services/e2ee/e2ee_service.dart';
+import '../../theme/alanya_theme.dart';
 
 /// Le bouclier de la barre de conversation — ticket 4.11.
 ///
@@ -214,21 +215,87 @@ class AvertissementCleChangee extends StatelessWidget {
   final VoidCallback onVerifier;
   final VoidCallback onIgnorer;
 
+  /*
+   * 🎨 REFAIT LE 02/10/2026 (« rends-le plus beau et professionnel ») : un
+   * titre, le nom du correspondant, ce qui est NORMAL avant ce qui inquiète,
+   * et une action principale qui ouvre directement la vérification. Ambre
+   * plutôt que rouge : c'est le plus souvent une réinstallation, pas une
+   * attaque. Mêmes textes et même ordre que le web (`chat.tsx`,
+   * `.e2ee-alerte`), traduits dans les 9 langues.
+   */
   @override
   Widget build(BuildContext context) {
+    final titre = themed(context,
+        light: const Color(0xFF7C2D12), dark: const Color(0xFFFCD9B6));
+    final corps = themed(context,
+        light: const Color(0xFF6B3A1F), dark: const Color(0xFFE8C3A3));
+    final pastille = themed(context,
+        light: const Color(0xFFFDE7CC), dark: const Color(0xFF4A2E18));
+    final icone = themed(context,
+        light: const Color(0xFFB45309), dark: const Color(0xFFFDBA74));
     return MaterialBanner(
-      backgroundColor: const Color(0xFFFDF0F0),
-      content: Text(
-        'La clé de sécurité de $nomPair a changé. '
-        'Cela arrive après une réinstallation — ou si quelqu’un s’interpose.',
-        style: const TextStyle(fontSize: 13, color: Color(0xFF9B2C2C)),
+      backgroundColor: themed(context,
+          light: const Color(0xFFFFF6EC), dark: const Color(0xFF2A1D14)),
+      dividerColor: themed(context,
+          light: const Color(0xFFF5D9BC), dark: const Color(0xFF4A2E18)),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+      leading: Container(
+        width: 38,
+        height: 38,
+        decoration: BoxDecoration(color: pastille, shape: BoxShape.circle),
+        child: Icon(Icons.gpp_maybe_outlined, color: icone, size: 21),
+      ),
+      content: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _TexteTraduit('e2ee_cle_titre',
+              style: TextStyle(
+                  fontSize: 14.5, fontWeight: FontWeight.w700, color: titre)),
+          const SizedBox(height: 4),
+          _TexteTraduit('e2ee_cle_corps',
+              params: {'nom': nomPair},
+              style: TextStyle(fontSize: 13, height: 1.4, color: corps)),
+        ],
       ),
       actions: [
-        TextButton(onPressed: onVerifier, child: const Text('Vérifier')),
-        TextButton(onPressed: onIgnorer, child: const Text('Plus tard')),
+        TextButton(
+          onPressed: onIgnorer,
+          style: TextButton.styleFrom(foregroundColor: corps),
+          child: const _TexteTraduit('e2ee_cle_plus_tard'),
+        ),
+        FilledButton.icon(
+          onPressed: onVerifier,
+          style: FilledButton.styleFrom(
+            backgroundColor: accentOf(context),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10)),
+          ),
+          icon: const Icon(Icons.verified_user_outlined, size: 18),
+          label: const _TexteTraduit('e2ee_cle_verifier'),
+        ),
       ],
     );
   }
+}
+
+/// Un texte traduit AU MOMENT DE L'AFFICHAGE.
+///
+/// ⚠️ LE BANDEAU EST CONSTRUIT HORS DU CYCLE D'AFFICHAGE — par
+/// `montrerAvertissementCle`, depuis un rappel asynchrone — et `tr()` passe par
+/// `context.watch`, que Provider refuse hors de l'arbre (assertion en debug).
+/// Ce petit widget repousse l'appel à son propre `build`. Même piège que
+/// `horodatageStatut` le 15/09/2026.
+class _TexteTraduit extends StatelessWidget {
+  const _TexteTraduit(this.cle, {this.params, this.style});
+
+  final String cle;
+  final Map<String, String>? params;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) =>
+      Text(tr(context, cle, params), style: style);
 }
 
 /// L'écran de vérification — ticket 4.13.

@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../l10n/app_localizations.dart';
-import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
 import '../../../services/e2ee/e2ee_fournisseur.dart';
-import '../../../widgets/e2ee/e2ee_widgets.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -26,8 +24,8 @@ import '../../calls/ouvrir_appel_en_cours.dart';
 import '../../chat/chat_repository.dart';
 import '../../chat/screens/shared_content_screen.dart';
 import '../contacts_repository.dart';
+import '../verification_cle.dart';
 import '../../../core/erreur_lisible.dart';
-import '../../auth/auth_controller.dart';
 
 /// Écran "Info Contact" — design premium glassmorphism, mode sombre prioritaire.
 ///
@@ -718,70 +716,10 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
   }
 
 
-  Future<void> _ouvrirVerification() async {
-    final pile = context.e2ee;
-    final monId = context.read<AuthController>().user?.id;
-    if (pile == null || monId == null) return;
-    try {
-      /*
-       * 🔴 ON OUVRE LA SESSION NOUS-MÊMES PLUTÔT QUE D'EXIGER UN ÉCHANGE.
-       *
-       * 🐛 Le code réclamait la clé du correspondant dans le coffre local, et
-       * disait « échangez d'abord un message chiffré » quand elle manquait.
-       * Or vérifier AVANT d'écrire est précisément à quoi sert un code de
-       * sécurité : exiger l'échange d'abord retourne l'outil contre son usage.
-       *
-       * `ouvrirSessions` va chercher le paquet de pré-clés, vérifie sa
-       * signature et range l'identité — exactement ce que ferait le premier
-       * envoi, sans envoyer.
-       */
-      final appareils = await pile.service.ouvrirSessions(widget.userId);
-      if (appareils.isEmpty) {
-        throw StateError("Ce contact n’a aucun appareil chiffré.");
-      }
-
-      /*
-       * 🔴 UN CODE PAR APPAREIL, comme le web. Le mobile n'en montrait qu'UN,
-       * celui du premier appareil de la liste.
-       *
-       * ⚠️ LE CODE COMPARE DEUX CLÉS D'IDENTITÉ, et le correspondant en a une
-       * par appareil. N'en afficher qu'une laissait les autres invisibles — et
-       * c'est précisément un appareil qu'on n'aurait pas remarqué qui serait
-       * celui d'un intrus.
-       *
-       * ⚠️ ET DEUX PERSONNES POUVAIENT COMPARER DEUX APPAREILS DIFFÉRENTS : le
-       * web les listait tous, le mobile en prenait un. Les codes ne
-       * correspondaient pas, et rien n'expliquait pourquoi — le pire message
-       * possible sur un écran dont tout l'objet est de dire « c'est bien lui ».
-       */
-      final codes = <CodeAppareil>[];
-      for (final appareil in appareils) {
-        codes.add(CodeAppareil(
-          deviceId: appareil,
-          code: await pile.service.codeSecurite(
-            monId: monId,
-            pairId: widget.userId,
-            adressePair: SignalProtocolAddress(widget.userId, appareil),
-          ),
-        ));
-      }
-
-      if (!mounted) return;
-      await Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => EcranVerification(
-          codes: codes,
-          nomPair: widget.name,
-          verifie: false,
-          onBasculer: () => Navigator.of(context).pop(),
-        ),
-      ));
-    } catch (e) {
-      if (!mounted) return;
-      // ⚠️ On nomme la panne au lieu d'affirmer une cause : trois fois cette
-      // semaine, la cause devinée était la mauvaise.
-      showAppSnackBar(messageDErreur(context, e));
-    }
-  }
+  // Partagée avec le bandeau « code de sécurité modifié » : voir
+  // `verification_cle.dart`.
+  Future<void> _ouvrirVerification() => ouvrirVerificationCle(context,
+      pairId: widget.userId, nomPair: widget.name);
 
   Widget _infoRow({
     required IconData icon,
