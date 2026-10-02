@@ -57,6 +57,7 @@ import '../../../widgets/choix_langue_interlocuteur.dart';
 import '../../../widgets/contact_share_sheet.dart';
 import '../../../widgets/dialogues_traduction.dart';
 import '../../../widgets/motif_background.dart';
+import '../../../widgets/selecteur_emojis.dart';
 import '../../account/screens/avatar_viewer_screen.dart';
 import '../../auth/auth_controller.dart';
 import '../../calls/call_controller.dart';
@@ -6514,54 +6515,16 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
-  /// Emojis les plus courants, insérés dans le champ au clic.
+  /// Le sélecteur complet — même catalogue que le web, avec les récents et
+  /// une recherche. Il remplace une grille figée de 24 emojis (02/10/2026).
   ///
-  /// Volontairement une grille figée et non un vrai clavier emoji : rien dans
-  /// le projet n'en fournissait, et une liste courte couvre l'essentiel sans
-  /// ajouter de dépendance. Les emojis sont du TEXTE — ils partent dans un
-  /// message normal, sans rien changer au protocole.
-  static const List<String> _emojisCourants = [
-    "😀",
-    "😂",
-    "🙂",
-    "😍",
-    "😘",
-    "😎",
-    "🤔",
-    "😴",
-    "😢",
-    "😭",
-    "😡",
-    "🥳",
-    "👍",
-    "👎",
-    "👏",
-    "🙏",
-    "❤️",
-    "🔥",
-    "✨",
-    "🎉",
-    "💯",
-    "✅",
-    "❌",
-    "📞",
-  ];
-
+  /// Les emojis restent du TEXTE : ils partent dans un message normal, sans
+  /// rien changer au protocole.
   Widget _emojiPanel() {
     return Container(
-      height: 180,
+      height: 300,
       margin: const EdgeInsets.only(top: 6),
-      child: GridView.count(
-        crossAxisCount: 8,
-        children: [
-          for (final e in _emojisCourants)
-            InkWell(
-              onTap: () => _insereEmoji(e),
-              child:
-                  Center(child: Text(e, style: const TextStyle(fontSize: 24))),
-            ),
-        ],
-      ),
+      child: SelecteurEmojis(onChoisir: _insereEmoji),
     );
   }
 

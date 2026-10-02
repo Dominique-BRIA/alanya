@@ -1,218 +1,13 @@
 import 'package:flutter/material.dart';
-import '../../../l10n/app_localizations.dart';
 
-/// Choix d'un emoji, en feuille.
-///
-/// ⚠️ ÉCRIT À LA MAIN PLUTÔT QU'AVEC UN PAQUET, et c'est un choix. Un clavier
-/// d'emojis complet (`emoji_picker_flutter` et consorts) apporte ses propres
-/// polices, ses propres ressources et sa propre contrainte de version — pour
-/// une grille de caractères que Flutter sait déjà dessiner. Le projet a trois
-/// chaînes d'intégration à tenir accordées : une dépendance de plus se paie à
-/// chaque montée de version.
-///
-/// La sélection est volontairement COURTE. Ce n'est pas un clavier : c'est le
-/// nécessaire pour décorer un statut, rangé par usage et non par ordre Unicode.
-/// Les clés restent françaises (identifiants internes) ; seuls les
-/// libellés affichés passent par `tr()`.
-const Map<String, String> _familleTraduites = {
-  'Visages': 'emoji_faces',
-  'Gestes': 'emoji_gestures',
-  'Cœurs': 'emoji_hearts',
-  'Nature': 'emoji_nature',
-  'Animaux': 'emoji_animals',
-  'Nourriture': 'emoji_food',
-  'Objets': 'emoji_objects',
-  'Symboles': 'emoji_symbols',
-};
+import '../../../widgets/selecteur_emojis.dart';
 
-const Map<String, List<String>> emojisParFamille = {
-  "Visages": [
-    "😀",
-    "😁",
-    "😂",
-    "🤣",
-    "😊",
-    "😍",
-    "🥰",
-    "😎",
-    "🤩",
-    "😜",
-    "🤗",
-    "🤔",
-    "😴",
-    "😢",
-    "😭",
-    "😡",
-    "🥳",
-    "😱",
-    "🤯",
-    "🙄",
-    "😇",
-    "🤤",
-    "😬",
-    "🥺",
-    "😤",
-    "🤠",
-    "🤓",
-    "😷",
-    "🤒",
-    "😈",
-  ],
-  "Gestes": [
-    "👍",
-    "👎",
-    "👏",
-    "🙌",
-    "🙏",
-    "💪",
-    "✌️",
-    "🤞",
-    "👌",
-    "🤝",
-    "👋",
-    "🫶",
-    "🤙",
-    "☝️",
-    "✋",
-    "🖐️",
-    "🤟",
-    "👊",
-    "🫰",
-    "🫡",
-  ],
-  "Cœurs": [
-    "❤️",
-    "🧡",
-    "💛",
-    "💚",
-    "💙",
-    "💜",
-    "🖤",
-    "🤍",
-    "🤎",
-    "💔",
-    "❣️",
-    "💕",
-    "💞",
-    "💓",
-    "💗",
-    "💖",
-    "💘",
-    "💝",
-    "💟",
-    "♥️",
-  ],
-  "Nature": [
-    "🔥",
-    "✨",
-    "⭐",
-    "🌟",
-    "💫",
-    "☀️",
-    "🌙",
-    "☁️",
-    "🌈",
-    "⚡",
-    "❄️",
-    "🌊",
-    "🌸",
-    "🌺",
-    "🌻",
-    "🌹",
-    "🌴",
-    "🍀",
-    "🌵",
-    "🍁",
-  ],
-  "Animaux": [
-    "🐶",
-    "🐱",
-    "🦁",
-    "🐯",
-    "🐴",
-    "🦄",
-    "🐘",
-    "🐬",
-    "🐳",
-    "🦋",
-    "🐝",
-    "🐞",
-    "🦅",
-    "🦜",
-    "🐍",
-    "🐢",
-    "🐐",
-    "🐓",
-    "🦈",
-    "🐆",
-  ],
-  "Nourriture": [
-    "🍏",
-    "🍌",
-    "🍇",
-    "🍉",
-    "🍓",
-    "🍍",
-    "🥑",
-    "🌽",
-    "🍞",
-    "🧀",
-    "🍗",
-    "🍔",
-    "🍟",
-    "🍕",
-    "🌮",
-    "🍜",
-    "🍚",
-    "🍰",
-    "🍫",
-    "☕",
-  ],
-  "Objets": [
-    "🎉",
-    "🎊",
-    "🎁",
-    "🎈",
-    "🏆",
-    "🥇",
-    "⚽",
-    "🏀",
-    "🎵",
-    "🎸",
-    "📱",
-    "💻",
-    "📷",
-    "🚗",
-    "✈️",
-    "🚀",
-    "💰",
-    "💡",
-    "🔑",
-    "⏰",
-  ],
-  "Symboles": [
-    "💯",
-    "✅",
-    "❌",
-    "❓",
-    "❗",
-    "⚠️",
-    "🚫",
-    "♻️",
-    "🔔",
-    "🔕",
-    "➕",
-    "➖",
-    "🔴",
-    "🟢",
-    "🔵",
-    "🟡",
-    "⬛",
-    "⬜",
-    "🔺",
-    "🔻",
-  ],
-};
+/// Choix d'un emoji, en feuille, pour décorer un statut.
+///
+/// ⚠️ LE MÊME SÉLECTEUR QUE LE CHAT ET LE WEB (02/10/2026). Cette feuille
+/// portait sa propre liste écrite à la main — courte, et différente de celle
+/// du chat. Elle reprend désormais le catalogue commun (1 812 emojis, 8
+/// catégories, récents, recherche).
 
 /// Ouvre la feuille et rend l'emoji choisi, ou `null` si l'on referme.
 Future<String?> choisirEmoji(BuildContext context) {
@@ -237,56 +32,32 @@ class _FeuilleEmoji extends StatelessWidget {
     return SafeArea(
       child: SizedBox(
         // Une demi-hauteur d'écran : assez pour balayer les familles, pas assez
-        // pour cacher ce qu'on est en train de décorer.
-        height: MediaQuery.of(context).size.height * 0.5,
-        child: Column(
-          children: [
-            Container(
-              width: 40,
-              height: 4,
-              margin: const EdgeInsets.symmetric(vertical: 10),
-              decoration: BoxDecoration(
-                color: Colors.white24,
-                borderRadius: BorderRadius.circular(2),
+        // pour cacher ce qu'on est en train de décorer. Le clavier, quand on
+        // tape une recherche, remonte la feuille au lieu de la recouvrir.
+        height: MediaQuery.of(context).size.height * 0.5 +
+            MediaQuery.of(context).viewInsets.bottom,
+        child: Padding(
+          padding:
+              EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+          child: Column(
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(top: 10, bottom: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
-            ),
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                children: [
-                  for (final famille in emojisParFamille.entries) ...[
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(4, 10, 4, 6),
-                      child: Text(
-                        tr(context, _familleTraduites[famille.key] ?? famille.key),
-                        style: const TextStyle(
-                          color: Colors.white54,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                    Wrap(
-                      children: [
-                        for (final e in famille.value)
-                          InkWell(
-                            onTap: () => Navigator.of(context).pop(e),
-                            child: Padding(
-                              padding: const EdgeInsets.all(8),
-                              child: Text(
-                                e,
-                                style: const TextStyle(fontSize: 26),
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ],
-                  const SizedBox(height: 12),
-                ],
+              Expanded(
+                child: SelecteurEmojis(
+                  sombre: true,
+                  onChoisir: (e) => Navigator.of(context).pop(e),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
