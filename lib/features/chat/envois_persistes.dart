@@ -103,6 +103,8 @@ class EnvoisPersistes {
             'legende': envoi.legende,
             'replyToId': envoi.replyToId,
             'mentions': envoi.mentions,
+            // Perdu au redémarrage, une vue unique partirait en photo ordinaire.
+            'vueUnique': envoi.vueUnique,
             'creeA': envoi.creeA.toIso8601String(),
             'mediaIdsObtenus': envoi.mediaIdsObtenus,
             'fichiers': fichiers,
@@ -181,6 +183,7 @@ class EnvoisPersistes {
             mentions: (meta['mentions'] as List?)
                 ?.map((m) => Map<String, String>.from(m as Map))
                 .toList(),
+            vueUnique: meta['vueUnique'] == true,
             creeA: DateTime.tryParse(meta['creeA'] as String? ?? ''),
           );
           // ⚠️ CE QUI ÉTAIT DÉJÀ TÉLÉVERSÉ NE REPART PAS. Sur cinq photos dont

@@ -286,13 +286,44 @@ class ChatRepository {
   Future<Message> sendMultiMedia(String convId, List<String> mediaIds, String msgType,
       {String? replyToId,
       String? content,
-      List<Map<String, String>>? mentions}) async {
+      List<Map<String, String>>? mentions,
+      bool vueUnique = false}) async {
     final data = await _api.post("/api/conversations/$convId/messages", {
       "type": msgType, "mediaIds": mediaIds,
+      if (vueUnique) "vueUnique": true,
       if (content != null && content.isNotEmpty) "content": content,
       if (replyToId != null) "replyToId": replyToId,
       if (mentions != null && mentions.isNotEmpty) "mentions": mentions,
     });
     return Message.fromJson(data as Map<String, dynamic>);
   }
+
+  /// Ouvre un message à vue unique : le serveur écrit l'ouverture et rend le
+  /// média, servi pendant [ResultatOuvertureVueUnique.fenetre].
+  ///
+  /// Lève [ApiException] : 403 EXPEDITEUR, 410 DEJA_OUVERTE ou EFFACEE.
+  Future<ResultatOuvertureVueUnique> ouvrirVueUnique(String messageId) async {
+    final data = await _api.post("/api/messages/$messageId/vue-unique", {});
+    return ResultatOuvertureVueUnique(
+      media: ((data["media"] as List?) ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(MessageMedia.fromJson)
+          .toList(),
+      fenetre: Duration(seconds: (data["fenetreSecondes"] as num?)?.toInt() ?? 300),
+    );
+  }
+
+  /// Le visionneur est refermé : le serveur clôt l'accès et efface le fichier
+  /// si tous ont vu. Ne lève jamais — la purge du serveur rattrape un échec.
+  Future<void> fermerVueUnique(String messageId) async {
+    try {
+      await _api.post("/api/messages/$messageId/vue-unique/fermer", {});
+    } catch (_) {}
+  }
+}
+
+class ResultatOuvertureVueUnique {
+  const ResultatOuvertureVueUnique({required this.media, required this.fenetre});
+  final List<MessageMedia> media;
+  final Duration fenetre;
 }

@@ -25,6 +25,7 @@ class EnvoiMedia {
     this.legende,
     this.replyToId,
     this.mentions,
+    this.vueUnique = false,
     /// ⚠️ FOURNI UNIQUEMENT PAR LA RELECTURE SUR DISQUE. Un envoi restauré après
     /// que le système a tué l'application doit retrouver SA place dans le fil —
     /// celle du moment où on l'a envoyé — et non se poser en bas de la
@@ -67,6 +68,11 @@ class EnvoiMedia {
 
   /// Médias déjà téléversés, dans l'ordre des [fichiers].
   final List<String> mediaIdsObtenus = [];
+
+  /// Photo, vidéo ou vocal À VUE UNIQUE : le destinataire l'ouvre une fois,
+  /// puis le serveur efface le fichier. Un seul média, sans légende — le
+  /// serveur refuse le reste.
+  final bool vueUnique;
 
   /// Index du fichier en cours (0 pour le premier).
   int indexCourant = 0;

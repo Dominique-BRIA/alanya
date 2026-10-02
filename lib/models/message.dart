@@ -178,7 +178,45 @@ class Message {
     this.mentions = const [],
     this.statutCite,
     this.chiffre = false,
+    this.vueUnique = false,
+    this.vueUniqueOuverte = false,
+    this.vueUniqueEffacee = false,
   });
+
+  /// Photo, vidéo ou vocal À VUE UNIQUE (02/10/2026). Le média ne s'affiche
+  /// jamais dans la bulle : il s'ouvre une fois, dans un visionneur protégé.
+  final bool vueUnique;
+
+  /// Expéditeur : quelqu'un l'a ouverte. Destinataire : JE l'ai ouverte.
+  final bool vueUniqueOuverte;
+
+  /// Le serveur a effacé le fichier : plus rien à ouvrir, pour personne.
+  final bool vueUniqueEffacee;
+
+  /// Copie de ce message avec l'état de vue unique changé.
+  Message avecVueUnique({bool? ouverte, bool? effacee}) => Message(
+        id: id,
+        convId: convId,
+        senderId: senderId,
+        content: content,
+        type: type,
+        status: status,
+        replyToId: replyToId,
+        media: media,
+        createdAt: createdAt,
+        deletedAt: deletedAt,
+        editedAt: editedAt,
+        expiresAt: expiresAt,
+        replyTo: replyTo,
+        reactions: reactions,
+        starred: starred,
+        mentions: mentions,
+        statutCite: statutCite,
+        chiffre: chiffre,
+        vueUnique: vueUnique,
+        vueUniqueOuverte: ouverte ?? vueUniqueOuverte,
+        vueUniqueEffacee: effacee ?? vueUniqueEffacee,
+      );
 
   /// Vrai si le message a été supprimé pour tout le monde.
   bool get isDeleted => deletedAt != null;
@@ -205,6 +243,9 @@ class Message {
           mentions: mentions,
           statutCite: statutCite,
           chiffre: chiffre,
+          vueUnique: vueUnique,
+          vueUniqueOuverte: vueUniqueOuverte,
+          vueUniqueEffacee: vueUniqueEffacee,
         );
 
   factory Message.fromJson(Map<String, dynamic> j) => Message(
@@ -222,6 +263,9 @@ class Message {
             ? StatutCite.fromJson(j["statutCite"] as Map<String, dynamic>)
             : null,
         chiffre: j["chiffre"] == true,
+        vueUnique: j["vueUnique"] == true,
+        vueUniqueOuverte: j["vueUniqueOuverte"] == true,
+        vueUniqueEffacee: j["vueUniqueEffacee"] == true,
         deletedAt: j["deletedAt"] != null
             ? DateTime.tryParse(j["deletedAt"] as String)
             : null,

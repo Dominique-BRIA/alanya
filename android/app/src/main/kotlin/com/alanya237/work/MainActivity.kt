@@ -33,6 +33,7 @@ class MainActivity : FlutterActivity() {
     private companion object {
         const val CANAL = "alanya/ecran_verrouille"
         const val CANAL_ENREGISTREMENT = "alanya/enregistrement"
+        const val CANAL_ECRAN_PROTEGE = "alanya/ecran_protege"
         const val TAG_PROX = "AlanyaProximite"
     }
 
@@ -170,6 +171,26 @@ class MainActivity : FlutterActivity() {
                                 action = CallForegroundService.ACTION_ARRETER
                             },
                         )
+                        resultat.success(true)
+                    }
+                    else -> resultat.notImplemented()
+                }
+            }
+
+        // ÉCRAN PROTÉGÉ — vue unique (02/10/2026). FLAG_SECURE interdit la
+        // capture et l'enregistrement d'écran, et masque la fenêtre dans
+        // l'aperçu des applications récentes. Posé à l'ouverture du
+        // visionneur, retiré à sa fermeture : sur toute l'application, il
+        // empêcherait aussi de capturer une conversation ordinaire.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CANAL_ECRAN_PROTEGE)
+            .setMethodCallHandler { appel, resultat ->
+                when (appel.method) {
+                    "activer" -> {
+                        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                        resultat.success(true)
+                    }
+                    "desactiver" -> {
+                        window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
                         resultat.success(true)
                     }
                     else -> resultat.notImplemented()

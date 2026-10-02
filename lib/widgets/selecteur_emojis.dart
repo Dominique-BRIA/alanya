@@ -104,9 +104,10 @@ class _SelecteurEmojisState extends State<SelecteurEmojis> {
 
   Future<void> _choisir(String emoji) async {
     widget.onChoisir(emoji);
-    final liste = [emoji, ..._recentsListe.where((e) => e != emoji)]
-        .take(_maxRecents)
-        .toList();
+    final liste = [
+      emoji,
+      ..._recentsListe.where((e) => e != emoji),
+    ].take(_maxRecents).toList();
     setState(() => _recentsListe = liste);
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -137,8 +138,12 @@ class _SelecteurEmojisState extends State<SelecteurEmojis> {
 
   @override
   Widget build(BuildContext context) {
-    final accent = widget.sombre ? AlanyaColors.terracottaNuit : accentOf(context);
-    final muted = widget.sombre ? Colors.white60 : mutedOf(context, Colors.black54);
+    final accent = widget.sombre
+        ? AlanyaColors.terracottaNuit
+        : accentOf(context);
+    final muted = widget.sombre
+        ? Colors.white60
+        : mutedOf(context, Colors.black54);
     final texte = widget.sombre ? Colors.white : null;
     final enRecherche = _requete.trim().isNotEmpty;
     final onglets = [
@@ -185,8 +190,10 @@ class _SelecteurEmojisState extends State<SelecteurEmojis> {
                       _requete = '';
                     }),
                     child: Tooltip(
-                      message: tr(context,
-                          id == _recents ? 'emoji_recent' : 'emoji_cat_$id'),
+                      message: tr(
+                        context,
+                        id == _recents ? 'emoji_recent' : 'emoji_cat_$id',
+                      ),
                       child: Container(
                         decoration: BoxDecoration(
                           border: Border(
@@ -229,8 +236,10 @@ class _SelecteurEmojisState extends State<SelecteurEmojis> {
                     borderRadius: BorderRadius.circular(8),
                     onTap: () => _choisir(visibles[i]),
                     child: Center(
-                      child: Text(visibles[i],
-                          style: const TextStyle(fontSize: 26)),
+                      child: Text(
+                        visibles[i],
+                        style: const TextStyle(fontSize: 26),
+                      ),
                     ),
                   ),
                 ),

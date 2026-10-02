@@ -58,6 +58,8 @@ import '../../../widgets/contact_share_sheet.dart';
 import '../../../widgets/dialogues_traduction.dart';
 import '../../../widgets/motif_background.dart';
 import '../../../widgets/selecteur_emojis.dart';
+import '../widgets/bulle_vue_unique.dart';
+import 'visionneur_vue_unique.dart';
 import '../../account/screens/avatar_viewer_screen.dart';
 import '../../auth/auth_controller.dart';
 import '../../calls/call_controller.dart';
@@ -400,6 +402,10 @@ class _ChatScreenState extends State<ChatScreen>
   bool _recording = false;
   DateTime? _recordStarted;
   bool _recordLocked = false;
+
+  /// Le vocal verrouillé partira à VUE UNIQUE (le « 1 » de la barre
+  /// d'enregistrement). Remis à faux à chaque nouvel enregistrement.
+  bool _vocalVueUnique = false;
   Duration _recordDuration = Duration.zero;
   Timer? _recordTimer;
   bool _voiceActive = false;
@@ -1098,6 +1104,9 @@ class _ChatScreenState extends State<ChatScreen>
                 ? Message(
                     id: m.id,
                     chiffre: m.chiffre,
+                    vueUnique: m.vueUnique,
+                    vueUniqueOuverte: m.vueUniqueOuverte,
+                    vueUniqueEffacee: m.vueUniqueEffacee,
                     convId: m.convId,
                     senderId: m.senderId,
                     content: m.content,
@@ -1147,6 +1156,9 @@ class _ChatScreenState extends State<ChatScreen>
                 ? Message(
                     id: m.id,
                     chiffre: m.chiffre,
+                    vueUnique: m.vueUnique,
+                    vueUniqueOuverte: m.vueUniqueOuverte,
+                    vueUniqueEffacee: m.vueUniqueEffacee,
                     convId: m.convId,
                     senderId: m.senderId,
                     content: m.content,
@@ -1171,6 +1183,36 @@ class _ChatScreenState extends State<ChatScreen>
         // j envoie le second »).
         _rebuildCombined();
       });
+    } else if (type == "vue_unique_ouverte" || type == "vue_unique_effacee") {
+      /*
+       * VUE UNIQUE : quelqu'un a ouvert, ou le fichier est effacé.
+       *
+       * « Ouverte » ne vaut que pour l'expéditeur (quelqu'un a vu) et pour MOI
+       * si c'est moi qui ai ouvert, depuis un autre appareil : la bulle de ce
+       * téléphone ne doit plus proposer d'ouvrir. L'ouverture d'un AUTRE
+       * membre du groupe ne change rien à la mienne.
+       */
+      final messageId = e["messageId"] as String?;
+      if (messageId == null || e["convId"] != widget.convId) return;
+      final efface = type == "vue_unique_effacee";
+      final parQui = e["userId"] as String?;
+      setState(() {
+        _messages = [
+          for (final m in _messages)
+            if (m.id != messageId)
+              m
+            else if (efface)
+              m.avecVueUnique(effacee: true)
+            else if (m.senderId == _myId || parQui == _myId)
+              m.avecVueUnique(ouverte: true)
+            else
+              m,
+        ];
+        _rebuildCombined();
+      });
+      for (final m in _messages) {
+        if (m.id == messageId) unawaited(MessageCache.upsert(m, widget.convId));
+      }
     } else if (type == "message_deleted") {
       final messageId = e["messageId"] as String?;
       final scope = e["scope"] as String? ?? "me";
@@ -1187,6 +1229,9 @@ class _ChatScreenState extends State<ChatScreen>
                   ? Message(
                       id: m.id,
                       chiffre: m.chiffre,
+                      vueUnique: m.vueUnique,
+                      vueUniqueOuverte: m.vueUniqueOuverte,
+                      vueUniqueEffacee: m.vueUniqueEffacee,
                       convId: m.convId,
                       senderId: m.senderId,
                       content: null,
@@ -1392,6 +1437,9 @@ class _ChatScreenState extends State<ChatScreen>
           Message(
             id: m.id,
             chiffre: m.chiffre,
+            vueUnique: m.vueUnique,
+            vueUniqueOuverte: m.vueUniqueOuverte,
+            vueUniqueEffacee: m.vueUniqueEffacee,
             convId: m.convId,
             senderId: m.senderId,
             content: textes[m.id],
@@ -1784,7 +1832,9 @@ class _ChatScreenState extends State<ChatScreen>
   /// produirait une bulle vide chez le destinataire. Les médias, eux, ne sont
   /// pas chiffrés et restent transférables — même règle que
   /// `backend-alanya/src/lib/e2ee-clair.mjs`.
-  bool _peutTransferer(Message m) => !(_filChiffre && m.type == 'TEXT');
+  bool _peutTransferer(Message m) =>
+      // Une vue unique ne se transfère pas : le serveur le refuse aussi.
+      !m.vueUnique && !(_filChiffre && m.type == 'TEXT');
 
   Future<void> _lireEtatChiffrement() async {
     final pile = context.e2ee;
@@ -2592,6 +2642,9 @@ class _ChatScreenState extends State<ChatScreen>
             Message(
               id: m.id,
               chiffre: m.chiffre,
+              vueUnique: m.vueUnique,
+              vueUniqueOuverte: m.vueUniqueOuverte,
+              vueUniqueEffacee: m.vueUniqueEffacee,
               convId: m.convId,
               senderId: m.senderId,
               content: m.content,
@@ -2634,6 +2687,9 @@ class _ChatScreenState extends State<ChatScreen>
   Message _withEdited(Message m, String content, DateTime editedAt) => Message(
       id: m.id,
       chiffre: m.chiffre,
+      vueUnique: m.vueUnique,
+      vueUniqueOuverte: m.vueUniqueOuverte,
+      vueUniqueEffacee: m.vueUniqueEffacee,
       convId: m.convId,
       senderId: m.senderId,
       content: content,
@@ -2952,7 +3008,11 @@ class _ChatScreenState extends State<ChatScreen>
     if (snapshot == null && original == null) return const SizedBox.shrink();
     final senderName = _replySenderName(original, snapshot);
     final hasMedia =
-        original != null && original.media.isNotEmpty && !original.isDeleted;
+        original != null &&
+        original.media.isNotEmpty &&
+        !original.isDeleted &&
+        // Citer une vue unique n'en montre pas la vignette.
+        !original.vueUnique;
     return GestureDetector(
       onTap: original != null ? () => _scrollToMessage(m.replyToId!) : null,
       child: Container(
@@ -2995,7 +3055,8 @@ class _ChatScreenState extends State<ChatScreen>
     final auteur = original.senderId == _myId
         ? tr(context, 'you')
         : (widget.memberNames[original.senderId] ?? tr(context, 'reply_to'));
-    final avecMedia = original.media.isNotEmpty && !original.isDeleted;
+    final avecMedia =
+        original.media.isNotEmpty && !original.isDeleted && !original.vueUnique;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -3178,7 +3239,8 @@ class _ChatScreenState extends State<ChatScreen>
     );
     if (apercu == null || apercu.fichiers.isEmpty) return; // annulé
 
-    await _lanceEnvoiMedias(apercu.fichiers, apercu.legende, apercu.mentions);
+    await _lanceEnvoiMedias(
+        apercu.fichiers, apercu.legende, apercu.mentions, apercu.vueUnique);
   }
 
   // ══════════════════════════════════════════════
@@ -3194,7 +3256,8 @@ class _ChatScreenState extends State<ChatScreen>
   /// découpe donc en plusieurs messages ; le regroupement à la lecture les
   /// réunira visuellement.
   Future<void> _lanceEnvoiMedias(List<MediaPickResult> fichiers, String? legende,
-      [List<Map<String, String>> mentions = const []]) async {
+      [List<Map<String, String>> mentions = const [],
+      bool vueUnique = false]) async {
     final replyId = _replyTo?.id;
     if (_replyTo != null) setState(() => _replyTo = null);
 
@@ -3222,6 +3285,8 @@ class _ChatScreenState extends State<ChatScreen>
         // ses mentions. Repetees, elles notifieraient a chaque paquet.
         mentions: debut == 0 ? mentions : null,
         replyToId: debut == 0 ? replyId : null,
+        // Une vue unique n'a qu'un fichier : le paquet est forcément le seul.
+        vueUnique: vueUnique && lot.length == 1,
       );
 
       // Bulle immédiate, avec la vignette locale : plus d'attente devant un
@@ -3237,6 +3302,7 @@ class _ChatScreenState extends State<ChatScreen>
         replyTo: null,
         media: const [],
         createdAt: DateTime.now(),
+        vueUnique: envoi.vueUnique,
       );
       setState(() {
         _messages = [..._messages, optimiste];
@@ -3275,6 +3341,30 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   void _reessayerEnvoi(EnvoiMedia envoi) => _lanceDansLeMagasin(envoi);
+
+  /// Ouvre un message à vue unique dans le visionneur protégé.
+  ///
+  /// La bulle passe à « Ouverte » DÈS que le serveur a accepté — et non à la
+  /// fermeture : si l'application est tuée pendant l'affichage, la vue est
+  /// consommée quand même, et la bulle ne doit pas proposer de rouvrir.
+  Future<void> _ouvrirVueUnique(Message m) => VisionneurVueUnique.ouvrir(
+        context,
+        message: m,
+        chat: context.read<ChatRepository>(),
+        baseUrl: _baseUrl,
+        token: _token,
+        onOuvert: () {
+          if (!mounted) return;
+          final ouverte = m.avecVueUnique(ouverte: true);
+          setState(() {
+            _messages = [
+              for (final x in _messages) x.id == m.id ? ouverte : x,
+            ];
+            _rebuildCombined();
+          });
+          unawaited(MessageCache.upsert(ouverte, widget.convId));
+        },
+      );
 
   /// Abandonne un envoi échoué : la bulle disparaît du fil. Les médias déjà
   /// téléversés deviennent orphelins côté serveur — mais c'est un choix
@@ -3590,6 +3680,7 @@ class _ChatScreenState extends State<ChatScreen>
     setState(() {
       _recording = true;
       _recordLocked = false;
+      _vocalVueUnique = false;
       _recordStarted = DateTime.now();
     });
     _startRecordTimer();
@@ -3638,7 +3729,7 @@ class _ChatScreenState extends State<ChatScreen>
         mimeType: mime,
         durationMs: result.durationMs,
       ),
-    ], null);
+    ], null, const [], _vocalVueUnique);
   }
 
   String _ext(String name) {
@@ -3738,6 +3829,9 @@ class _ChatScreenState extends State<ChatScreen>
     final token = await _freshToken();
     final items = <ConvMediaItem>[];
     for (final msg in _messages) {
+      // Une vue unique ne se feuillette pas dans la galerie : elle ne s'ouvre
+      // qu'une fois, dans son visionneur protégé.
+      if (msg.vueUnique) continue;
       for (final media in msg.media) {
         final t = MediaHelper.detectType(media.mimeType, media.filename);
         if (t == AlanyaMediaType.image || t == AlanyaMediaType.video) {
@@ -3851,6 +3945,9 @@ class _ChatScreenState extends State<ChatScreen>
                   ? Message(
                       id: m.id,
                       chiffre: m.chiffre,
+                      vueUnique: m.vueUnique,
+                      vueUniqueOuverte: m.vueUniqueOuverte,
+                      vueUniqueEffacee: m.vueUniqueEffacee,
                       convId: m.convId,
                       senderId: m.senderId,
                       content: null,
@@ -4346,7 +4443,7 @@ class _ChatScreenState extends State<ChatScreen>
                       }
                     }),
               ],
-              if (!m.isDeleted && m.media.isNotEmpty)
+              if (!m.isDeleted && m.media.isNotEmpty && !m.vueUnique)
                 ListTile(
                     leading: Icon(Icons.download_outlined, color: _iconNeutral),
                     title: Text(tr(context, 'save')),
@@ -5011,6 +5108,23 @@ class _ChatScreenState extends State<ChatScreen>
                                     onAbandonner: () =>
                                         _abandonneEnvoi(envoiEnCours),
                                   )
+                                : m.vueUnique
+                                    ? BulleVueUnique(
+                                        message: m,
+                                        isMe: mine,
+                                        couleurAccent: _accent,
+                                        couleurDiscrete: _muted,
+                                        timestamp: _time(m.createdAt),
+                                        statusWidget: mine
+                                            ? _statusTicks(m.status, _muted)
+                                            : null,
+                                        onOuvrir: BulleVueUnique.ouvrable(m,
+                                                isMe: mine)
+                                            ? () => _ouvrirVueUnique(m)
+                                            : null,
+                                        onLongPress: () =>
+                                            _openMessageActions(m),
+                                      )
                                 : isContact
                                     ? ContactBubble(
                                         contacts: contactsPartages,
@@ -6290,7 +6404,26 @@ class _ChatScreenState extends State<ChatScreen>
                           Text(tr(context, 'recording_locked'),
                               style: TextStyle(fontSize: 13, color: _muted)),
                         ]))),
-                const SizedBox(width: 8),
+                // Le « 1 » de WhatsApp : ce vocal partira à vue unique.
+                IconButton(
+                  tooltip: tr(context, 'vu_activer'),
+                  onPressed: () {
+                    setState(() => _vocalVueUnique = !_vocalVueUnique);
+                    if (_vocalVueUnique) {
+                      showAppSnackBar(tr(context, 'vu_active_info'));
+                    }
+                  },
+                  icon: Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: _vocalVueUnique ? _accent : Colors.transparent,
+                    ),
+                    child: PastilleVueUnique(
+                        taille: 24,
+                        couleur: _vocalVueUnique ? Colors.white : _muted),
+                  ),
+                ),
                 GestureDetector(
                     onTap: _uploading ? null : () => _stopVoiceRecord(),
                     child: CircleAvatar(

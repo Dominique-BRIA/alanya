@@ -8,6 +8,7 @@ import '../../../core/compression_image.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/media/media_picker_sheet.dart';
 import '../../../l10n/app_localizations.dart';
+import 'visionneur_vue_unique.dart' show PastilleVueUnique;
 
 /// Ce que l'aperçu rend à l'écran de discussion.
 ///
@@ -26,10 +27,14 @@ class MediaCaptionResult {
   /// et le serveur la traite pareil.
   final List<Map<String, String>> mentions;
 
+  /// Envoi À VUE UNIQUE (une seule photo ou vidéo, sans légende).
+  final bool vueUnique;
+
   const MediaCaptionResult({
     required this.fichiers,
     this.legende,
     this.mentions = const [],
+    this.vueUnique = false,
   });
 }
 
@@ -79,6 +84,16 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
   late final PageController _pages;
   final TextEditingController _captionCtrl = TextEditingController();
   int _index = 0;
+
+  /// Le « 1 » de WhatsApp : envoyer à vue unique.
+  bool _vueUnique = false;
+
+  /// Offert seulement pour UNE photo ou UNE vidéo : le serveur refuse un lot,
+  /// et un document n'a pas de sens à vue unique.
+  bool get _vueUniquePossible =>
+      _fichiers.length == 1 &&
+      (_fichiers.first.mimeType.startsWith('image/') ||
+          _fichiers.first.mimeType.startsWith('video/'));
 
   /// Un lecteur par vidéo, créé à la demande et libéré à la sortie. Les créer
   /// tous d'avance ouvrirait dix décodeurs pour dix vidéos.
@@ -146,9 +161,13 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
   }
 
   void _envoie() {
-    final legende = _captionCtrl.text.trim();
+    final vueUnique = _vueUnique && _vueUniquePossible;
+    // Une vue unique part SANS légende : elle resterait lisible bien après
+    // l'effacement du média.
+    final legende = vueUnique ? '' : _captionCtrl.text.trim();
     Navigator.of(context).pop(MediaCaptionResult(
       fichiers: _fichiers,
+      vueUnique: vueUnique,
       legende: legende.isEmpty ? null : legende,
       // Réduites à celles encore présentes dans la légende : effacer
       // « @Dominique » avant d'envoyer ne doit notifier personne. Même règle
@@ -502,8 +521,11 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
                 color: const Color(0xFF2A3942),
                 borderRadius: BorderRadius.circular(24),
               ),
+              child: Row(children: [
+               Expanded(
               child: TextField(
                 controller: _captionCtrl,
+                enabled: !(_vueUnique && _vueUniquePossible),
                 onChanged: (_) => _majRequeteMention(),
                 textCapitalization: TextCapitalization.sentences,
                 maxLines: 4,
@@ -511,9 +533,11 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
                 style: const TextStyle(color: Colors.white, fontSize: 15),
                 cursorColor: Colors.white,
                 decoration: InputDecoration(
-                  hintText: _fichiers.length > 1
-                      ? tr(context, 'caption_all_media')
-                      : tr(context, 'status_add_caption'),
+                  hintText: _vueUnique && _vueUniquePossible
+                      ? tr(context, 'vu_titre')
+                      : _fichiers.length > 1
+                          ? tr(context, 'caption_all_media')
+                          : tr(context, 'status_add_caption'),
                   hintStyle:
                       const TextStyle(color: Colors.white54, fontSize: 15),
                   border: InputBorder.none,
@@ -527,6 +551,33 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
                   isDense: true,
                 ),
               ),
+               ),
+                // LE « 1 » DE WHATSAPP, dans le champ, contre le bord droit.
+                if (_vueUniquePossible)
+                  IconButton(
+                    tooltip: tr(context, 'vu_activer'),
+                    onPressed: () {
+                      setState(() => _vueUnique = !_vueUnique);
+                      if (_vueUnique) {
+                        _captionCtrl.clear();
+                        ScaffoldMessenger.of(context)
+                          ..hideCurrentSnackBar()
+                          ..showSnackBar(SnackBar(
+                              content: Text(tr(context, 'vu_active_info'))));
+                      }
+                    },
+                    icon: Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: _vueUnique ? AlanyaColors.gold : Colors.transparent,
+                      ),
+                      child: PastilleVueUnique(
+                          taille: 24,
+                          couleur: _vueUnique ? Colors.white : Colors.white70),
+                    ),
+                  ),
+              ]),
             ),
           ),
           const SizedBox(width: 8),

@@ -90,6 +90,9 @@ class _SharedContentScreenState extends State<SharedContentScreen>
             _links.add(_LinkEntry(match.group(0)!, m.createdAt));
           }
         }
+        // Une vue unique ne figure pas dans les médias partagés : la galerie
+        // la montrerait en vignette, sans limite, et le serveur la refuse.
+        if (m.vueUnique) continue;
         for (final media in m.media) {
           final t = MediaHelper.detectType(media.mimeType, media.filename);
           final disp = '$baseUrl${media.url}?token=$token';

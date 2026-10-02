@@ -74,6 +74,9 @@ import '../../services/e2ee/e2ee_fil.dart' show MessageClair;
           starred: m.starred,
           mentions: m.mentions,
           statutCite: m.statutCite,
+          vueUnique: m.vueUnique,
+          vueUniqueOuverte: m.vueUniqueOuverte,
+          vueUniqueEffacee: m.vueUniqueEffacee,
         ),
   ];
 

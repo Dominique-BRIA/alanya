@@ -311,11 +311,13 @@ class RealtimeClient extends ChangeNotifier {
           String convId, List<String> mediaIds, String msgType, String tempId,
           {String? replyToId,
           String? content,
-          List<Map<String, String>>? mentions}) =>
+          List<Map<String, String>>? mentions,
+          bool vueUnique = false}) =>
       _send({
         "type": "send",
         "convId": convId,
         "mediaIds": mediaIds,
+        if (vueUnique) "vueUnique": true,
         "msgType": msgType,
         "tempId": tempId,
         if (content != null && content.isNotEmpty) "content": content,

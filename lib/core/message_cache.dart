@@ -50,7 +50,7 @@ class MessageCache {
        * Toute évolution future de ce cache passe désormais par `onUpgrade`, en
        * incrémentant `version`.
        */
-      version: 6,
+      version: 7,
       onUpgrade: (db, ancienne, nouvelle) async {
         if (ancienne < 2) await _creeTableTraductions(db);
         /*
@@ -110,6 +110,16 @@ class MessageCache {
         }
         // v6 — les messages effacés de cet appareil : voir `_creeTableEffaces`.
         if (ancienne < 6) await _creeTableEffaces(db);
+        /*
+         * v7 — LA VUE UNIQUE, en un seul entier : 1 = vue unique, 2 = ouverte,
+         * 4 = fichier effacé. Sans elle, un fil relu hors ligne montrerait
+         * une photo à vue unique comme une photo ordinaire — et tenterait de
+         * charger un média que le serveur refuse.
+         */
+        if (ancienne < 7) {
+          await db.execute(
+              'ALTER TABLE messages ADD COLUMN vue_unique INTEGER NOT NULL DEFAULT 0');
+        }
       },
       onCreate: (db, _) async {
         await db.execute('''
@@ -127,7 +137,8 @@ class MessageCache {
             media_json TEXT,
             mentions_json TEXT,
             chiffre INTEGER NOT NULL DEFAULT 0,
-            expires_at TEXT
+            expires_at TEXT,
+            vue_unique INTEGER NOT NULL DEFAULT 0
           )
         ''');
         await db.execute(
@@ -302,6 +313,7 @@ class MessageCache {
               ? jsonEncode(m.mentions.map((x) => x.toJson()).toList())
               : null,
           'chiffre': m.chiffre ? 1 : 0,
+          'vue_unique': bitsVueUnique(m),
         },
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
@@ -342,6 +354,7 @@ class MessageCache {
               ? jsonEncode(m.mentions.map((x) => x.toJson()).toList())
               : null,
           'chiffre': m.chiffre ? 1 : 0,
+          'vue_unique': bitsVueUnique(m),
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
@@ -601,6 +614,11 @@ class MessageCache {
 
   // --- Sérialisation helpers ---
 
+  /// L'état de vue unique en un entier (voir la migration v7).
+  static int bitsVueUnique(Message m) => !m.vueUnique
+      ? 0
+      : 1 | (m.vueUniqueOuverte ? 2 : 0) | (m.vueUniqueEffacee ? 4 : 0);
+
   static Map<String, dynamic> _replyToJson(ReplyPreview r) => {
         'id': r.id,
         'senderId': r.senderId,
@@ -663,6 +681,10 @@ class MessageCache {
       createdAt: DateTime.parse(row['created_at'] as String),
       mentions: mentions,
       chiffre: row['chiffre'] == 1,
+      // `?? 0` : base encore en v6 le temps de la migration.
+      vueUnique: ((row['vue_unique'] as int?) ?? 0) & 1 != 0,
+      vueUniqueOuverte: ((row['vue_unique'] as int?) ?? 0) & 2 != 0,
+      vueUniqueEffacee: ((row['vue_unique'] as int?) ?? 0) & 4 != 0,
     );
   }
 }
