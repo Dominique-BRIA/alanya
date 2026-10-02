@@ -5364,7 +5364,7 @@ class _ChatScreenState extends State<ChatScreen>
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 3),
         child: Text.rich(
-          TextSpan(children: spansWhatsApp(legende!)),
+          TextSpan(children: spansWhatsApp(legende!, tailleBase: 14.5)),
           style: TextStyle(color: onText, fontSize: 14.5),
         ),
       ),

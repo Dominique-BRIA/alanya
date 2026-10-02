@@ -1605,14 +1605,16 @@ class _ConversationsTabState extends State<_ConversationsTab>
   /// électroniques.
   List<InlineSpan> _spansApercuAvecMentions(String texte, TextStyle base) {
     final motif = RegExp(r'(^|\s)(@[^\s@]{1,40})');
-    if (!motif.hasMatch(texte)) return spansWhatsApp(texte);
+    final taille = base.fontSize ?? 12;
+    if (!motif.hasMatch(texte)) return spansWhatsApp(texte, tailleBase: taille);
 
     final spans = <InlineSpan>[];
     var position = 0;
     for (final m in motif.allMatches(texte)) {
       final debutMention = m.start + m.group(1)!.length;
       if (debutMention > position) {
-        spans.addAll(spansWhatsApp(texte.substring(position, debutMention)));
+        spans.addAll(spansWhatsApp(texte.substring(position, debutMention),
+            tailleBase: taille));
       }
       spans.add(TextSpan(
         text: m.group(2),
@@ -1621,7 +1623,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
       position = m.end;
     }
     if (position < texte.length) {
-      spans.addAll(spansWhatsApp(texte.substring(position)));
+      spans.addAll(spansWhatsApp(texte.substring(position), tailleBase: taille));
     }
     return spans;
   }
@@ -2120,7 +2122,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
                     return Text.rich(
                       TextSpan(
                         style: TextStyle(fontSize: 12, color: muted2),
-                        children: spansWhatsApp(trimmed),
+                        children: spansWhatsApp(trimmed, tailleBase: 12),
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
