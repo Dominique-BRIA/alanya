@@ -199,6 +199,35 @@ Map<String, dynamic> ligneMediaChiffre(DescripteurMedia m) => {
   'chiffre': true,
 };
 
+/// L'URL et les en-têtes pour TÉLÉCHARGER un média chiffré.
+///
+/// 🔴 MÊME AUTHENTIFICATION QUE LES MÉDIAS EN CLAIR (`CachedMedia`) : le
+/// header `Authorization: Bearer`. Une interpolation `?token=$token` laisse
+/// passer un `+` de JWT comme un espace ; le serveur refuse, et
+/// `package:http` peut suivre une redirection de login qui ne se termine
+/// jamais — d'où le spinner infini sur le téléphone, alors que le navigateur
+/// (cookie + Bearer) ouvre le fichier.
+///
+/// ⚠️ LE JETON VA AUSSI EN QUERY, encodé par `Uri` : le banc d'interop et
+/// certaines routes ne lisent que ça. Les deux à la fois ne se gênent pas.
+({Uri uri, Map<String, String> headers}) adresseTelechargementMedia({
+  required String baseUrl,
+  required String id,
+  String? token,
+}) {
+  final racine =
+      baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
+  final uri = Uri.parse('$racine/api/media/$id');
+  final jeton = (token != null && token.isNotEmpty) ? token : null;
+  if (jeton == null) {
+    return (uri: uri, headers: const <String, String>{});
+  }
+  return (
+    uri: uri.replace(queryParameters: {'token': jeton}),
+    headers: {'Authorization': 'Bearer $jeton'},
+  );
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // 2. LE FICHIER CHIFFRÉ — format AGB1 (voir le jumeau web pour le détail)
 // ════════════════════════════════════════════════════════════════════════════

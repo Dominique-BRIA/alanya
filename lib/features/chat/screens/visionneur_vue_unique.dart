@@ -14,6 +14,7 @@ import '../../../core/ecran_protege.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../models/message.dart';
 import '../../../services/e2ee/e2ee_media.dart';
+import '../../../services/e2ee/e2ee_media_ouverture.dart';
 import '../chat_repository.dart';
 
 /// LE VISIONNEUR D'UN MESSAGE À VUE UNIQUE — photo, vidéo ou vocal.
@@ -118,9 +119,15 @@ class _VisionneurVueUniqueState extends State<VisionneurVueUnique> {
       setState(() => _media = media);
       Uint8List? clair;
       if (d != null) {
-        final rep = await http.get(Uri.parse(_adresse(serveur)));
-        if (rep.statusCode != 200) throw ApiException(rep.statusCode, 'HTTP');
-        final chiffre = rep.bodyBytes;
+        final jeton = widget.token;
+        if (jeton == null || jeton.isEmpty) {
+          throw ApiException(401, 'HTTP');
+        }
+        final chiffre = await OuvertureMediaChiffre.telechargerOctets(
+          baseUrl: widget.baseUrl,
+          id: d.id,
+          token: jeton,
+        );
         final cle = d.cle, empreinte = d.empreinte, taille = d.taille;
         clair = await Isolate.run<Uint8List>(() => dechiffrerFichier(chiffre,
             cle: cle, empreinte: empreinte, taille: taille));

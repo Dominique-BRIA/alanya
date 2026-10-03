@@ -74,7 +74,30 @@ class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
   @override
   void initState() {
     super.initState();
-    if (_image) unawaited(_charger());
+    // Après le premier frame : setState depuis initState est fragile, et le
+    // jeton n'est parfois pas encore là (cache messages avant le coffre).
+    if (_image) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_charger());
+      });
+    }
+  }
+
+  @override
+  void didUpdateWidget(BulleMediaChiffre oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.descripteur.id != widget.descripteur.id) {
+      _fichier = null;
+      _etat = _Etat.attente;
+      if (_image) unawaited(_charger());
+      return;
+    }
+    final jetonArrive = (oldWidget.token == null || oldWidget.token!.isEmpty) &&
+        widget.token != null &&
+        widget.token!.isNotEmpty;
+    if (jetonArrive && _etat != _Etat.pret && _etat != _Etat.altere) {
+      unawaited(_charger());
+    }
   }
 
   @override
@@ -86,7 +109,7 @@ class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
 
   Future<File?> _charger() async {
     if (_fichier != null) return _fichier;
-    setState(() => _etat = _Etat.chargement);
+    if (mounted) setState(() => _etat = _Etat.chargement);
     try {
       final f = await OuvertureMediaChiffre.ouvrir(
         d,
@@ -102,6 +125,8 @@ class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
     } on FichierInvalide {
       if (mounted) setState(() => _etat = _Etat.altere);
     } catch (_) {
+      // Timeout, 401, réseau : tap pour réessayer. Si le jeton arrive juste
+      // après (cache du fil avant le coffre), didUpdateWidget relance.
       if (mounted) setState(() => _etat = _Etat.echec);
     }
     return null;
