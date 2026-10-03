@@ -94,6 +94,8 @@ class _SharedContentScreenState extends State<SharedContentScreen>
         // la montrerait en vignette, sans limite, et le serveur la refuse.
         if (m.vueUnique) continue;
         for (final media in m.media) {
+          // Chiffré : illisible tel quel, il s'ouvre depuis sa bulle.
+          if (media.chiffre) continue;
           final t = MediaHelper.detectType(media.mimeType, media.filename);
           final disp = '$baseUrl${media.url}?token=$token';
           final dl = '$baseUrl${media.url}?download=1&token=$token';

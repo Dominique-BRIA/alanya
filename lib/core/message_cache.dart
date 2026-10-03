@@ -5,6 +5,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../models/conversation.dart' show LastMessage;
 import '../models/message.dart';
+import '../services/e2ee/e2ee_media.dart';
 import 'cache_clairs.dart';
 import 'restauration_archive.dart';
 
@@ -50,7 +51,7 @@ class MessageCache {
        * Toute évolution future de ce cache passe désormais par `onUpgrade`, en
        * incrémentant `version`.
        */
-      version: 7,
+      version: 8,
       onUpgrade: (db, ancienne, nouvelle) async {
         if (ancienne < 2) await _creeTableTraductions(db);
         /*
@@ -120,6 +121,15 @@ class MessageCache {
           await db.execute(
               'ALTER TABLE messages ADD COLUMN vue_unique INTEGER NOT NULL DEFAULT 0');
         }
+        /*
+         * v8 — LE MÉDIA CHIFFRÉ (cours, chapitre 23) : son descripteur, CLÉ
+         * COMPRISE, en JSON. Le fichier du serveur est illisible ; sans cette
+         * colonne, une photo reçue chiffrée ne se rouvrirait plus après la
+         * consommation de son enveloppe.
+         */
+        if (ancienne < 8) {
+          await db.execute('ALTER TABLE messages ADD COLUMN e2ee_media_json TEXT');
+        }
       },
       onCreate: (db, _) async {
         await db.execute('''
@@ -138,7 +148,8 @@ class MessageCache {
             mentions_json TEXT,
             chiffre INTEGER NOT NULL DEFAULT 0,
             expires_at TEXT,
-            vue_unique INTEGER NOT NULL DEFAULT 0
+            vue_unique INTEGER NOT NULL DEFAULT 0,
+            e2ee_media_json TEXT
           )
         ''');
         await db.execute(
@@ -270,10 +281,18 @@ class MessageCache {
     final db = await _database();
     final lignes = await db.query(
       'messages',
-      columns: ['id', 'content', 'created_at', 'chiffre'],
+      columns: ['id', 'content', 'created_at', 'chiffre', 'e2ee_media_json'],
       where: 'conv_id = ?',
       whereArgs: [convId],
     );
+    // 🔴 LE DESCRIPTEUR SURVIT AU RAFRAÎCHISSEMENT, comme le texte : le serveur
+    // rend ce message sans lui, et l'écraser rendrait la photo impossible à
+    // rouvrir, l'enveloppe étant déjà acquittée (chapitre 23).
+    final descripteurs = <String, String>{
+      for (final l in lignes)
+        if (l['e2ee_media_json'] != null)
+          l['id'] as String: l['e2ee_media_json'] as String,
+    };
     final plan = planRemplacement(
       [
         for (final l in lignes)
@@ -314,6 +333,11 @@ class MessageCache {
               : null,
           'chiffre': m.chiffre ? 1 : 0,
           'vue_unique': bitsVueUnique(m),
+          'e2ee_media_json': m.deletedAt != null
+              ? null
+              : m.mediaChiffre != null
+                  ? jsonEncode(m.mediaChiffre!.toJson())
+                  : descripteurs[m.id],
         },
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
@@ -329,10 +353,17 @@ class MessageCache {
   static Future<void> upsert(Message m, String convId) async {
     final db = await _database();
     String? ancien;
-    if ((m.content ?? '').isEmpty && m.deletedAt == null) {
+    String? ancienDescripteur;
+    if (((m.content ?? '').isEmpty || m.mediaChiffre == null) && m.deletedAt == null) {
       final l = await db.query('messages',
-          columns: ['content'], where: 'id = ?', whereArgs: [m.id], limit: 1);
-      if (l.isNotEmpty) ancien = l.first['content'] as String?;
+          columns: ['content', 'e2ee_media_json'],
+          where: 'id = ?',
+          whereArgs: [m.id],
+          limit: 1);
+      if (l.isNotEmpty) {
+        ancien = l.first['content'] as String?;
+        ancienDescripteur = l.first['e2ee_media_json'] as String?;
+      }
     }
     await db.insert(
       'messages',
@@ -355,6 +386,11 @@ class MessageCache {
               : null,
           'chiffre': m.chiffre ? 1 : 0,
           'vue_unique': bitsVueUnique(m),
+          'e2ee_media_json': m.deletedAt != null
+              ? null
+              : m.mediaChiffre != null
+                  ? jsonEncode(m.mediaChiffre!.toJson())
+                  : ancienDescripteur,
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
@@ -446,7 +482,9 @@ class MessageCache {
     required String expediteurId,
     required String texte,
     required DateTime quand,
+    DescripteurMedia? media,
   }) async {
+    final mediaJson = media == null ? null : jsonEncode(media.toJson());
     final db = await _database();
     /*
      * 🐛 UN MESSAGE SUPPRIMÉ RETROUVAIT SON TEXTE. L'enveloppe peut arriver
@@ -457,7 +495,11 @@ class MessageCache {
     final modifiees = await db.update(
       'messages',
       // Un texte venu d’une enveloppe : le message est chiffré par définition.
-      {'content': texte, 'chiffre': 1},
+      {
+        'content': texte,
+        'chiffre': 1,
+        if (mediaJson != null) 'e2ee_media_json': mediaJson,
+      },
       /*
        * ⚠️ `sender_id` ET `conv_id` AUSSI : l'identifiant vient du serveur,
        * hors du chiffré, alors que l'expéditeur est sûr (sa session a
@@ -473,18 +515,37 @@ class MessageCache {
      * autre expéditeur) ; le `NOT EXISTS` écarte une ligne effacée de cet
      * appareil.
      */
+    // Ligne complète pour un média : type déduit du vrai type du fichier, et
+    // ligne de média reconstruite — le fil peut l'afficher avant que le
+    // serveur ait rendu la sienne.
     await db.rawInsert(
       'INSERT OR IGNORE INTO messages '
-      '(id, conv_id, sender_id, content, type, status, created_at, chiffre) '
-      "SELECT ?, ?, ?, ?, 'TEXT', 'DELIVERED', ?, 1 "
+      '(id, conv_id, sender_id, content, type, status, created_at, chiffre, media_json, e2ee_media_json) '
+      "SELECT ?, ?, ?, ?, ?, 'DELIVERED', ?, 1, ?, ? "
       'WHERE NOT EXISTS (SELECT 1 FROM effaces WHERE message_id = ?)',
-      [id, convId, expediteurId, texte, dateCache(quand), id],
+      [
+        id,
+        convId,
+        expediteurId,
+        texte,
+        typeMessagePour(media),
+        dateCache(quand),
+        media == null ? null : jsonEncode([ligneMediaChiffre(media)]),
+        mediaJson,
+        id,
+      ],
     );
     // L'insertion a-t-elle eu lieu ? `rawInsert` ne le dit pas de façon sûre
     // avec `OR IGNORE` : on relit.
     final l = await db.query('messages',
-        columns: ['content', 'sender_id'], where: 'id = ?', whereArgs: [id], limit: 1);
-    return l.isNotEmpty && l.first['content'] == texte && l.first['sender_id'] == expediteurId;
+        columns: ['content', 'sender_id', 'e2ee_media_json'],
+        where: 'id = ?',
+        whereArgs: [id],
+        limit: 1);
+    return l.isNotEmpty &&
+        l.first['content'] == texte &&
+        l.first['sender_id'] == expediteurId &&
+        (mediaJson == null || l.first['e2ee_media_json'] == mediaJson);
   }
 
   /// Range un message venu de l'archive chiffrée — sans rien défaire.
@@ -498,6 +559,7 @@ class MessageCache {
     required String expediteurId,
     required String texte,
     required DateTime quand,
+    DescripteurMedia? media,
   }) async {
     final db = await _database();
     final efface = (await db.query('effaces',
@@ -533,9 +595,28 @@ class MessageCache {
             'status': 'SENT',
             'created_at': dateCache(quand),
             'chiffre': 1,
+            if (media != null) ...{
+              'type': typeMessagePour(media),
+              'media_json': jsonEncode([ligneMediaChiffre(media)]),
+              'e2ee_media_json': jsonEncode(media.toJson()),
+            },
           },
           conflictAlgorithm: ConflictAlgorithm.ignore,
         );
+    }
+    /*
+     * LE DESCRIPTEUR SE COMPLÈTE À PART DU TEXTE. Une ligne qui a déjà son
+     * texte — légende relevée, ou vide — peut encore attendre sa clé : c'est
+     * le cas d'un nouveau téléphone qui a reçu la liste du serveur avant
+     * l'archive. Jamais sur une ligne supprimée ou effacée d'ici.
+     */
+    if (media != null && !efface) {
+      await db.update(
+        'messages',
+        {'e2ee_media_json': jsonEncode(media.toJson()), 'chiffre': 1},
+        where: 'id = ? AND deleted_at IS NULL AND e2ee_media_json IS NULL',
+        whereArgs: [id],
+      );
     }
   }
 
@@ -635,7 +716,20 @@ class MessageCache {
             'mimeType': m.mimeType,
             'sizeBytes': m.sizeBytes,
             'durationMs': m.durationMs,
+            if (m.chiffre) 'chiffre': true,
           }).toList();
+
+  /// Un descripteur relu ; illisible = absent, jamais une exception qui
+  /// ferait tomber tout le fil.
+  static DescripteurMedia? _descripteur(String? json) {
+    if (json == null) return null;
+    try {
+      return DescripteurMedia.depuisJson(jsonDecode(json));
+    } catch (_) {
+      return null;
+    }
+  }
+
 
   static Message _rowToMessage(Map<String, dynamic> row) {
     ReplyPreview? replyTo;
@@ -681,6 +775,7 @@ class MessageCache {
       createdAt: DateTime.parse(row['created_at'] as String),
       mentions: mentions,
       chiffre: row['chiffre'] == 1,
+      mediaChiffre: _descripteur(row['e2ee_media_json'] as String?),
       // `?? 0` : base encore en v6 le temps de la migration.
       vueUnique: ((row['vue_unique'] as int?) ?? 0) & 1 != 0,
       vueUniqueOuverte: ((row['vue_unique'] as int?) ?? 0) & 2 != 0,

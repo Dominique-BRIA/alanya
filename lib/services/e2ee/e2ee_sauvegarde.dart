@@ -15,6 +15,7 @@
 library;
 
 import 'dart:async';
+import 'e2ee_media.dart';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -596,7 +597,15 @@ class E2eeSauvegarde {
         final id = m['id'] as String?;
         final convId = m['convId'] as String?;
         final texte = m['texte'] as String?;
-        if (id == null || convId == null || texte == null) continue;
+        // Le média d'un message — absent des archives d'avant le 03/10/2026.
+        // Un descripteur mal formé est écarté seul : le texte passe quand même.
+        DescripteurMedia? media;
+        try {
+          if (m['media'] != null) media = DescripteurMedia.depuisJson(m['media']);
+        } catch (_) {}
+        if (id == null || convId == null || (texte == null && media == null)) {
+          continue;
+        }
 
         /*
          * 🔴 DEUX FORMATS COEXISTENT DANS L'ARCHIVE, ET IL FAUT LES DEUX.
@@ -624,8 +633,9 @@ class E2eeSauvegarde {
           id: id,
           convId: convId,
           expediteurId: (m['expediteurId'] as String?) ?? '',
-          texte: texte,
+          texte: texte ?? '',
           quand: quand,
+          media: media,
         );
       } catch (_) {
         // Ligne illisible : on passe à la suivante.

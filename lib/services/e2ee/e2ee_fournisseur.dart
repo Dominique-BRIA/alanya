@@ -125,6 +125,7 @@ class PileE2ee {
             expediteurId: m.expediteurId,
             texte: m.texte,
             quand: DateTime.fromMillisecondsSinceEpoch(m.quand),
+            media: m.media,
           );
           // ⚠️ Un texte écarté (ligne d'un autre expéditeur, supprimée…) ne
           // part pas dans l'archive : il y ressusciterait à la restauration.
@@ -141,6 +142,9 @@ class PileE2ee {
               'expediteurId': m.expediteurId,
               'texte': m.texte,
               'quand': m.quand,
+              // Le média et SA CLÉ : c'est ce qui le rend lisible sur un
+              // autre téléphone (chapitre 23).
+              if (m.media != null) 'media': m.media!.toJson(),
             },
         ]);
       });

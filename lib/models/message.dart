@@ -1,3 +1,5 @@
+import '../services/e2ee/e2ee_media.dart' show DescripteurMedia;
+
 class MessageMedia {
   final String id;
   final String url; // chemin servi par /api/media/:id
@@ -6,6 +8,9 @@ class MessageMedia {
   final int? sizeBytes;
   final int? durationMs;
 
+  /// Chiffré de bout en bout : à déchiffrer, JAMAIS à afficher tel quel.
+  final bool chiffre;
+
   MessageMedia({
     required this.id,
     required this.url,
@@ -13,6 +18,7 @@ class MessageMedia {
     this.filename,
     this.sizeBytes,
     this.durationMs,
+    this.chiffre = false,
   });
 
   bool get isImage => mimeType.startsWith("image/");
@@ -24,6 +30,7 @@ class MessageMedia {
         mimeType: j["mimeType"] as String,
         sizeBytes: (j["sizeBytes"] as num?)?.toInt(),
         durationMs: (j["durationMs"] as num?)?.toInt(),
+        chiffre: j["chiffre"] == true,
       );
 }
 
@@ -181,7 +188,39 @@ class Message {
     this.vueUnique = false,
     this.vueUniqueOuverte = false,
     this.vueUniqueEffacee = false,
+    this.mediaChiffre,
   });
+
+  /// Le média CHIFFRÉ de bout en bout, tel que l'enveloppe l'a livré : sa clé,
+  /// son empreinte, son aperçu (cours, chapitre 23). Présent = le fichier du
+  /// serveur est illisible, et c'est ce descripteur qui permet de l'ouvrir.
+  final DescripteurMedia? mediaChiffre;
+
+  /// Copie avec le texte et le média déchiffrés.
+  Message avecDechiffre({String? texte, DescripteurMedia? media}) => Message(
+        id: id,
+        convId: convId,
+        senderId: senderId,
+        content: texte ?? content,
+        type: type,
+        status: status,
+        replyToId: replyToId,
+        media: this.media,
+        createdAt: createdAt,
+        deletedAt: deletedAt,
+        editedAt: editedAt,
+        expiresAt: expiresAt,
+        replyTo: replyTo,
+        reactions: reactions,
+        starred: starred,
+        mentions: mentions,
+        statutCite: statutCite,
+        chiffre: chiffre,
+        vueUnique: vueUnique,
+        vueUniqueOuverte: vueUniqueOuverte,
+        vueUniqueEffacee: vueUniqueEffacee,
+        mediaChiffre: media ?? mediaChiffre,
+      );
 
   /// Photo, vidéo ou vocal À VUE UNIQUE (02/10/2026). Le média ne s'affiche
   /// jamais dans la bulle : il s'ouvre une fois, dans un visionneur protégé.
@@ -216,6 +255,7 @@ class Message {
         vueUnique: vueUnique,
         vueUniqueOuverte: ouverte ?? vueUniqueOuverte,
         vueUniqueEffacee: effacee ?? vueUniqueEffacee,
+        mediaChiffre: mediaChiffre,
       );
 
   /// Vrai si le message a été supprimé pour tout le monde.
@@ -246,6 +286,7 @@ class Message {
           vueUnique: vueUnique,
           vueUniqueOuverte: vueUniqueOuverte,
           vueUniqueEffacee: vueUniqueEffacee,
+          mediaChiffre: mediaChiffre,
         );
 
   factory Message.fromJson(Map<String, dynamic> j) => Message(

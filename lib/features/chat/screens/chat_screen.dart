@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
 import '../../../services/e2ee/e2ee_fil.dart' show MessageClair;
 import '../../../services/e2ee/e2ee_fournisseur.dart';
+import '../../../services/e2ee/e2ee_media.dart';
 import '../../../widgets/e2ee/e2ee_widgets.dart';
 import '../frontiere_chiffrement.dart';
 import '../fusion_releve.dart';
@@ -58,6 +59,7 @@ import '../../../widgets/contact_share_sheet.dart';
 import '../../../widgets/dialogues_traduction.dart';
 import '../../../widgets/motif_background.dart';
 import '../../../widgets/selecteur_emojis.dart';
+import '../widgets/bulle_media_chiffre.dart';
 import '../widgets/bulle_vue_unique.dart';
 import 'visionneur_vue_unique.dart';
 import '../../account/screens/avatar_viewer_screen.dart';
@@ -1107,6 +1109,7 @@ class _ChatScreenState extends State<ChatScreen>
                     vueUnique: m.vueUnique,
                     vueUniqueOuverte: m.vueUniqueOuverte,
                     vueUniqueEffacee: m.vueUniqueEffacee,
+                    mediaChiffre: m.mediaChiffre,
                     convId: m.convId,
                     senderId: m.senderId,
                     content: m.content,
@@ -1159,6 +1162,7 @@ class _ChatScreenState extends State<ChatScreen>
                     vueUnique: m.vueUnique,
                     vueUniqueOuverte: m.vueUniqueOuverte,
                     vueUniqueEffacee: m.vueUniqueEffacee,
+                    mediaChiffre: m.mediaChiffre,
                     convId: m.convId,
                     senderId: m.senderId,
                     content: m.content,
@@ -1232,6 +1236,7 @@ class _ChatScreenState extends State<ChatScreen>
                       vueUnique: m.vueUnique,
                       vueUniqueOuverte: m.vueUniqueOuverte,
                       vueUniqueEffacee: m.vueUniqueEffacee,
+                      mediaChiffre: m.mediaChiffre,
                       convId: m.convId,
                       senderId: m.senderId,
                       content: null,
@@ -1427,11 +1432,22 @@ class _ChatScreenState extends State<ChatScreen>
       for (final m in [...connus, ..._messages])
         if ((m.content ?? '').isNotEmpty) m.id: m.content!,
     };
-    if (textes.isEmpty) return duServeur;
+    // Le DESCRIPTEUR d'un média chiffré, clé comprise (chapitre 23) : le
+    // serveur rend ce message sans lui — il ne l'a jamais eu.
+    final descripteurs = <String, DescripteurMedia>{
+      for (final m in [...connus, ..._messages])
+        if (m.mediaChiffre != null) m.id: m.mediaChiffre!,
+    };
+    if (textes.isEmpty && descripteurs.isEmpty) return duServeur;
+
+    bool aCompleter(Message m) =>
+        m.deletedAt == null &&
+        (((m.content ?? '').isEmpty && textes[m.id] != null) ||
+            (m.mediaChiffre == null && descripteurs[m.id] != null));
 
     return [
       for (final m in duServeur)
-        if ((m.content ?? '').isNotEmpty || textes[m.id] == null)
+        if (!aCompleter(m))
           m
         else
           Message(
@@ -1440,9 +1456,10 @@ class _ChatScreenState extends State<ChatScreen>
             vueUnique: m.vueUnique,
             vueUniqueOuverte: m.vueUniqueOuverte,
             vueUniqueEffacee: m.vueUniqueEffacee,
+            mediaChiffre: m.mediaChiffre ?? descripteurs[m.id],
             convId: m.convId,
             senderId: m.senderId,
-            content: textes[m.id],
+            content: (m.content ?? '').isEmpty ? (textes[m.id] ?? m.content) : m.content,
             type: m.type,
             status: m.status,
             replyToId: m.replyToId,
@@ -2645,6 +2662,7 @@ class _ChatScreenState extends State<ChatScreen>
               vueUnique: m.vueUnique,
               vueUniqueOuverte: m.vueUniqueOuverte,
               vueUniqueEffacee: m.vueUniqueEffacee,
+              mediaChiffre: m.mediaChiffre,
               convId: m.convId,
               senderId: m.senderId,
               content: m.content,
@@ -2690,6 +2708,7 @@ class _ChatScreenState extends State<ChatScreen>
       vueUnique: m.vueUnique,
       vueUniqueOuverte: m.vueUniqueOuverte,
       vueUniqueEffacee: m.vueUniqueEffacee,
+      mediaChiffre: m.mediaChiffre,
       convId: m.convId,
       senderId: m.senderId,
       content: content,
@@ -3012,7 +3031,9 @@ class _ChatScreenState extends State<ChatScreen>
         original.media.isNotEmpty &&
         !original.isDeleted &&
         // Citer une vue unique n'en montre pas la vignette.
-        !original.vueUnique;
+        !original.vueUnique &&
+        // Ni un fichier chiffré, illisible sans déchiffrement.
+        !original.media.first.chiffre;
     return GestureDetector(
       onTap: original != null ? () => _scrollToMessage(m.replyToId!) : null,
       child: Container(
@@ -3056,7 +3077,10 @@ class _ChatScreenState extends State<ChatScreen>
         ? tr(context, 'you')
         : (widget.memberNames[original.senderId] ?? tr(context, 'reply_to'));
     final avecMedia =
-        original.media.isNotEmpty && !original.isDeleted && !original.vueUnique;
+        original.media.isNotEmpty &&
+        !original.isDeleted &&
+        !original.vueUnique &&
+        !original.media.first.chiffre;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -3341,6 +3365,51 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   void _reessayerEnvoi(EnvoiMedia envoi) => _lanceDansLeMagasin(envoi);
+
+  /// La bulle d'un MÉDIA CHIFFRÉ de bout en bout (cours, chapitre 23) : son
+  /// aperçu et sa clé viennent de l'enveloppe. Sans eux — enveloppe jamais
+  /// reçue sur ce téléphone — on le DIT, comme pour un texte.
+  Widget _bulleMediaChiffre(Message m, bool mine) {
+    final d = m.mediaChiffre;
+    final legende = (m.content ?? '').trim();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (d != null)
+          BulleMediaChiffre(
+            descripteur: d,
+            isMe: mine,
+            baseUrl: _baseUrl,
+            token: _token,
+            couleurDiscrete: _muted,
+            onLongPress: () => _openMessageActions(m),
+          )
+        else
+          MediaChiffreIndisponible(couleur: _muted),
+        if (legende.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 6, 4, 0),
+            child: Text.rich(TextSpan(children: spansWhatsApp(legende)),
+                style: TextStyle(color: _bubbleTextColor(mine))),
+          ),
+        Align(
+          alignment: Alignment.centerRight,
+          child: Padding(
+            padding: const EdgeInsets.only(top: 3, right: 2),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Text(_time(m.createdAt),
+                  style: TextStyle(fontSize: 11, color: _muted)),
+              if (mine) ...[
+                const SizedBox(width: 4),
+                _statusTicks(m.status, _muted),
+              ],
+            ]),
+          ),
+        ),
+      ],
+    );
+  }
 
   /// Ouvre un message à vue unique dans le visionneur protégé.
   ///
@@ -3833,6 +3902,9 @@ class _ChatScreenState extends State<ChatScreen>
       // qu'une fois, dans son visionneur protégé.
       if (msg.vueUnique) continue;
       for (final media in msg.media) {
+        // Un fichier chiffré ne se feuillette pas tel quel : il s'ouvre par
+        // sa bulle, qui le déchiffre (chapitre 23).
+        if (media.chiffre) continue;
         final t = MediaHelper.detectType(media.mimeType, media.filename);
         if (t == AlanyaMediaType.image || t == AlanyaMediaType.video) {
           items.add(ConvMediaItem(
@@ -3948,6 +4020,7 @@ class _ChatScreenState extends State<ChatScreen>
                       vueUnique: m.vueUnique,
                       vueUniqueOuverte: m.vueUniqueOuverte,
                       vueUniqueEffacee: m.vueUniqueEffacee,
+                      mediaChiffre: m.mediaChiffre,
                       convId: m.convId,
                       senderId: m.senderId,
                       content: null,
@@ -4443,7 +4516,11 @@ class _ChatScreenState extends State<ChatScreen>
                       }
                     }),
               ],
-              if (!m.isDeleted && m.media.isNotEmpty && !m.vueUnique)
+              if (!m.isDeleted &&
+                  m.media.isNotEmpty &&
+                  !m.vueUnique &&
+                  // Enregistrer un fichier chiffré donnerait des octets illisibles.
+                  !m.media.first.chiffre)
                 ListTile(
                     leading: Icon(Icons.download_outlined, color: _iconNeutral),
                     title: Text(tr(context, 'save')),
@@ -5125,6 +5202,10 @@ class _ChatScreenState extends State<ChatScreen>
                                         onLongPress: () =>
                                             _openMessageActions(m),
                                       )
+                                : m.mediaChiffre != null ||
+                                        (m.media.isNotEmpty &&
+                                            m.media.first.chiffre)
+                                    ? _bulleMediaChiffre(m, mine)
                                 : isContact
                                     ? ContactBubble(
                                         contacts: contactsPartages,

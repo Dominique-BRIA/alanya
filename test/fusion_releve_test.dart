@@ -6,6 +6,7 @@
 // était pas : la route REST qui crée un message chiffré ne diffuse rien.
 
 import 'package:alanya/features/chat/fusion_releve.dart';
+import 'package:alanya/services/e2ee/e2ee_fil.dart' show MessageClair;
 import 'package:alanya/models/message.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -21,7 +22,7 @@ Message _bulle(String id, {String? texte, int minute = 0, String conv = 'fil'}) 
       createdAt: DateTime(2026, 9, 28, 10, minute),
     );
 
-({String id, String convId, String expediteurId, String texte, int quand}) _releve(
+MessageClair _releve(
   String id, String texte, {int minute = 0, String conv = 'fil'}) =>
     (
       id: id,
@@ -29,6 +30,7 @@ Message _bulle(String id, {String? texte, int minute = 0, String conv = 'fil'}) 
       expediteurId: 'bob',
       texte: texte,
       quand: DateTime(2026, 9, 28, 10, minute).millisecondsSinceEpoch,
+      media: null,
     );
 
 void main() {

@@ -17,6 +17,7 @@ import 'package:flutter/services.dart' show PlatformException;
 import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart'
     show DuplicateMessageException;
 
+import 'e2ee_media.dart';
 import 'e2ee_service.dart';
 
 /// Un message tel que le fil le manipule, en clair.
@@ -26,6 +27,8 @@ typedef MessageClair = ({
   String expediteurId,
   String texte,
   int quand,
+  /// Le média chiffré que porte le message (charge v2), avec sa clé.
+  DescripteurMedia? media,
 });
 
 /// Range des messages relevés — appelé AVANT leur acquittement.
@@ -367,12 +370,20 @@ class E2eeFil {
          * `createdAt`, vérifiés dans la route. Une clé mal orthographiée ne se
          * voit pas à la compilation — elle rend `null` à l'exécution.
          */
+        /*
+         * 🔴 LA CHARGE EST LUE ICI, ET VÉRIFIÉE (cours, chapitre 23). Un texte
+         * nu (v1) passe tel quel ; une charge v2 doit annoncer CE message — un
+         * serveur qui l'aurait rattachée à un autre est démasqué, et
+         * l'enveloppe tombe dans le `catch` : illisible, acquittée.
+         */
+        final charge = lireCharge(texte, e['messageId'] as String?);
         final clair = (
           id: (e['messageId'] ?? e['id']) as String,
           convId: e['convId'] as String,
           expediteurId: e['expediteurId'] as String,
-          texte: texte,
+          texte: charge.texte,
           quand: DateTime.parse(e['createdAt'] as String).millisecondsSinceEpoch,
+          media: charge.media,
         );
         messages.add(clair);
         /*

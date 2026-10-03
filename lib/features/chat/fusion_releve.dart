@@ -6,6 +6,8 @@ library;
 
 import '../../models/message.dart';
 import '../../services/e2ee/e2ee_fil.dart' show MessageClair;
+import '../../services/e2ee/e2ee_media.dart'
+    show ligneMediaChiffre, typeMessagePour;
 
 /// Fusionne les messages relevés dans la liste affichée du fil [convId].
 ///
@@ -40,10 +42,21 @@ import '../../services/e2ee/e2ee_fil.dart' show MessageClair;
    * (`clairPour`, `e2ee-etat-memorise.mjs` ⑤).
    */
   final parId = {for (final m in releves) m.id: m};
-  String? texteDe(Message m) {
+  MessageClair? releveDe(Message m) {
     final r = parId[m.id];
     if (r == null || r.expediteurId != m.senderId || r.convId != m.convId) return null;
-    return r.texte;
+    return r;
+  }
+
+  /*
+   * Une bulle se complète si l'enveloppe apporte ce qui lui MANQUE : son
+   * texte, ou — chapitre 23 — le descripteur de son média chiffré. Jamais on
+   * ne remplace ce qui est déjà là.
+   */
+  bool aCompleter(Message m) {
+    final r = releveDe(m);
+    if (r == null || m.deletedAt != null) return false;
+    return (m.content ?? '').isEmpty || (m.mediaChiffre == null && r.media != null);
   }
 
 
@@ -52,7 +65,7 @@ import '../../services/e2ee/e2ee_fil.dart' show MessageClair;
   final remplis = [
     for (final m in affiches)
       // ⚠️ Une bulle supprimée reste vide : l'enveloppe a pu arriver après.
-      if (texteDe(m) == null || (m.content ?? '').isNotEmpty || m.deletedAt != null)
+      if (!aCompleter(m))
         m
       else
         Message(
@@ -60,7 +73,7 @@ import '../../services/e2ee/e2ee_fil.dart' show MessageClair;
           chiffre: true,
           convId: m.convId,
           senderId: m.senderId,
-          content: texteDe(m),
+          content: (m.content ?? '').isEmpty ? releveDe(m)!.texte : m.content,
           type: m.type,
           status: m.status,
           replyToId: m.replyToId,
@@ -77,6 +90,7 @@ import '../../services/e2ee/e2ee_fil.dart' show MessageClair;
           vueUnique: m.vueUnique,
           vueUniqueOuverte: m.vueUniqueOuverte,
           vueUniqueEffacee: m.vueUniqueEffacee,
+          mediaChiffre: m.mediaChiffre ?? releveDe(m)!.media,
         ),
   ];
 
@@ -91,11 +105,16 @@ import '../../services/e2ee/e2ee_fil.dart' show MessageClair;
           convId: m.convId,
           senderId: m.expediteurId,
           content: m.texte,
-          type: 'TEXT',
+          // Un média relevé arrive complet : son type, et la ligne de média
+          // qu'aurait rendue le serveur, marquée chiffrée.
+          type: typeMessagePour(m.media),
           status: 'DELIVERED',
           replyToId: null,
-          media: const [],
+          media: m.media == null
+              ? const []
+              : [MessageMedia.fromJson(ligneMediaChiffre(m.media!))],
           createdAt: DateTime.fromMillisecondsSinceEpoch(m.quand),
+          mediaChiffre: m.media,
         ),
   ];
 
