@@ -1822,12 +1822,56 @@ class _ConversationsTabState extends State<_ConversationsTab>
       leading: isSelecting
           ? selectCheckbox(c.id)
           : (c.isGroup
-              ? CircleAvatar(
-                  // Nuit : l'indigo porte l'identité (avatars, groupes).
-                  backgroundColor:
-                      isDark ? AlanyaColors.indigo : AlanyaColors.forest,
-                  child:
-                      const Icon(Icons.groups, color: Colors.white, size: 22),
+              /*
+               * 🐛 LA PHOTO DU GROUPE ÉTAIT IGNORÉE (user, 03/10/2026 :
+               * « aligne sur le web »). Le serveur l'envoie dans `avatarUrl`,
+               * l'écran dessinait toujours la même icône. Comme le web : la
+               * photo, ou les initiales du nom, et une pastille du nombre de
+               * membres en bas à droite (`.group-stack`).
+               */
+              ? SizedBox(
+                  width: 46,
+                  height: 46,
+                  child: Stack(clipBehavior: Clip.none, children: [
+                    AvatarCircle(
+                      name: title,
+                      avatarUrl: c.avatarUrl,
+                      radius: 22,
+                      // Nuit : l'indigo porte l'identité (avatars, groupes).
+                      backgroundColor:
+                          isDark ? AlanyaColors.indigo : AlanyaColors.forest,
+                      textColor: Colors.white,
+                    ),
+                    Positioned(
+                      right: -3,
+                      bottom: -2,
+                      child: Container(
+                        constraints:
+                            const BoxConstraints(minWidth: 20, minHeight: 20),
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? AlanyaColors.craie2
+                              : AlanyaColors.grey200,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                              color: Theme.of(context).scaffoldBackgroundColor,
+                              width: 2),
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(
+                          c.members.isEmpty ? '+' : '${c.members.length}',
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w700,
+                            color: isDark
+                                ? const Color(0xFF140A06)
+                                : AlanyaColors.grey600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ]),
                 )
               : AvatarCircle(
                   name: title,
@@ -1837,10 +1881,31 @@ class _ConversationsTabState extends State<_ConversationsTab>
                 )),
       title: Row(
         children: [
-          Expanded(
+          Flexible(
             child: Text(title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontWeight: FontWeight.w600)),
           ),
+          // Étiquette « Groupe », comme le web : à côté du nom, discrète.
+          if (c.isGroup)
+            Container(
+              margin: const EdgeInsets.only(left: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              decoration: BoxDecoration(
+                color: isDark ? AlanyaColors.indigo : AlanyaColors.grey200,
+                borderRadius: BorderRadius.circular(3),
+              ),
+              child: Text(
+                tr(context, 'group_label'),
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w500,
+                  color: isDark ? AlanyaColors.craie2 : AlanyaColors.grey600,
+                ),
+              ),
+            ),
+          const Spacer(),
           // F8 : badge épinglé
           if (c.isPinned)
             Padding(
