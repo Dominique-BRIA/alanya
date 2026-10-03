@@ -3415,6 +3415,7 @@ class _ChatScreenState extends State<ChatScreen>
           )
         else if (d != null)
           BulleMediaChiffre(
+            key: ValueKey(d.id),
             descripteur: d,
             isMe: mine,
             baseUrl: _baseUrl,

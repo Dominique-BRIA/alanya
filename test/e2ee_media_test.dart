@@ -137,4 +137,30 @@ void main() {
       expect(lireCharge(piege, 'm').texte, piege);
     });
   });
+
+  group('adresse de téléchargement', () {
+    test('Bearer + jeton encodé (plus, slash, égal)', () {
+      final a = adresseTelechargementMedia(
+        baseUrl: 'https://alanyavox.com',
+        id: 'abc-def',
+        token: 'a+b/c=',
+      );
+      expect(a.headers['Authorization'], 'Bearer a+b/c=');
+      expect(a.uri.queryParameters['token'], 'a+b/c=');
+      expect(a.uri.toString(), contains('token=a%2Bb%2Fc%3D'));
+      expect(a.uri.path, '/api/media/abc-def');
+    });
+
+    test('sans jeton : pas de query, pas de header', () {
+      final a = adresseTelechargementMedia(
+        baseUrl: 'https://alanyavox.com/',
+        id: 'x',
+        token: null,
+      );
+      expect(a.headers, isEmpty);
+      expect(a.uri.query, isEmpty);
+      expect(a.uri.origin, 'https://alanyavox.com');
+      expect(a.uri.path, '/api/media/x');
+    });
+  });
 }
