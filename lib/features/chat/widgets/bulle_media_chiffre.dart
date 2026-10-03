@@ -478,7 +478,13 @@ class _TuileMediaChiffreState extends State<TuileMediaChiffre> {
 
   Future<File?> _charger() async {
     if (_fichier != null) return _fichier;
-    if (mounted) setState(() => _charge = true);
+    // Un nouvel essai efface l'échec du précédent.
+    if (mounted) {
+      setState(() {
+        _charge = true;
+        _echec = false;
+      });
+    }
     try {
       final f = await OuvertureMediaChiffre.ouvrir(d,
           baseUrl: widget.baseUrl, token: widget.token);

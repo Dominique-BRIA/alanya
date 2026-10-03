@@ -35,11 +35,24 @@ class OuvertureMediaChiffre {
   }) {
     final deja = _enCours[d.id];
     if (deja != null) return deja;
-    final f = _ouvrir(
-      d,
-      baseUrl,
-      token,
-    ).whenComplete(() => _enCours.remove(d.id));
+    /*
+     * 🔴 LE CHARGEMENT QUI TOURNAIT SANS FIN SUR LE TÉLÉPHONE (03/10/2026).
+     *
+     * 🐛 C'ÉTAIT `.whenComplete(() => _enCours.remove(d.id))`. La flèche
+     * RENVOIE ce que `remove` rend : la valeur retirée, c'est-à-dire CE
+     * Future-ci. Or `whenComplete` ATTEND tout Future que son rappel renvoie.
+     * Le Future s'attendait donc lui-même : il ne se terminait jamais, ni en
+     * succès ni en erreur — même quand le fichier était déjà en cache. Toute
+     * photo chiffrée restait sur son aperçu flou, chargement compris, et un
+     * toucher réattendait le même Future mort.
+     *
+     * ⚠️ UN CORPS EN ACCOLADES, qui ne renvoie rien. Trouvé par
+     * `test/e2ee_media_ouverture_test.dart` : le banc d'interopérabilité
+     * déchiffrait sans passer par `ouvrir`, il ne pouvait pas le voir.
+     */
+    final f = _ouvrir(d, baseUrl, token).whenComplete(() {
+      _enCours.remove(d.id);
+    });
     _enCours[d.id] = f;
     return f;
   }
@@ -71,13 +84,10 @@ class OuvertureMediaChiffre {
     final garde = await MediaCache.get(_cle(d), _extension(d));
     if (garde != null) return File(garde);
 
-    final rep = await http.get(
-      Uri.parse(
-        '$baseUrl/api/media/${d.id}${token != null ? '?token=$token' : ''}',
-      ),
+    final chiffre = await _telecharger(
+      Uri.parse('$baseUrl/api/media/${d.id}'),
+      token,
     );
-    if (rep.statusCode != 200) throw MediaIndisponible(rep.statusCode);
-    final chiffre = rep.bodyBytes;
 
     final cle = d.cle;
     final empreinte = d.empreinte;
@@ -92,6 +102,60 @@ class OuvertureMediaChiffre {
     );
 
     return File(await MediaCache.put(_cle(d), _extension(d), clair));
+  }
+
+  /// Au-delà, sans un octet reçu, le téléchargement est abandonné.
+  ///
+  /// ⚠️ UN DÉLAI D'INACTIVITÉ, PAS UN DÉLAI TOTAL : une vidéo de 50 Mo sur un
+  /// réseau mobile lent peut prendre plusieurs minutes, et c'est normal. Ce
+  /// qui ne l'est pas, c'est une connexion qui ne renvoie plus rien.
+  /// Modifiable pour les tests.
+  static Duration delaiInactivite = const Duration(seconds: 30);
+
+  /// Télécharge le fichier chiffré, comme `CachedMedia` télécharge les autres.
+  ///
+  /// ⚠️ C'ÉTAIT UN `http.get` NU : aucun délai, aucune nouvelle tentative, et
+  /// le jeton dans l'adresse plutôt qu'en en-tête comme partout ailleurs dans
+  /// l'application. Ce n'était PAS la cause du chargement sans fin (voir
+  /// `ouvrir`), mais le même symptôme aurait suivi : une connexion qui se
+  /// bloque — réseau mobile qui décroche, stockage qui ne répond plus — ne
+  /// finissait jamais. Avec le délai, elle finit en « échec », et un toucher
+  /// relance.
+  ///
+  /// ⚠️ VÉRIFIÉ, ET ÉCARTÉ : un jeton invalide ne bloque pas. Le serveur
+  /// répond en moins d'une seconde (401 sans jeton, 400 avec un faux).
+  static Future<Uint8List> _telecharger(Uri adresse, String? token) async {
+    final entetes = <String, String>{
+      if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+    };
+    var essai = 0;
+    while (true) {
+      final client = http.Client();
+      try {
+        final rep = await client
+            .send(http.Request('GET', adresse)..headers.addAll(entetes))
+            .timeout(delaiInactivite);
+        // Un refus du serveur ne se répare pas en réessayant.
+        if (rep.statusCode != 200) throw MediaIndisponible(rep.statusCode);
+        final octets = BytesBuilder(copy: false);
+        await for (final morceau in rep.stream.timeout(delaiInactivite)) {
+          octets.add(morceau);
+        }
+        return octets.takeBytes();
+      } on MediaIndisponible {
+        rethrow;
+      } catch (_) {
+        if (essai < 2) {
+          essai++;
+          await Future.delayed(Duration(milliseconds: 400 * essai));
+          continue;
+        }
+        rethrow;
+      } finally {
+        // Fermer le client coupe aussi une connexion restée pendante.
+        client.close();
+      }
+    }
   }
 }
 
