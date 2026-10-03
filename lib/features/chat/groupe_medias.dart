@@ -35,6 +35,17 @@ class GroupeMedias {
     return null;
   }
 
+  /// La légende du lot, affichée SOUS la grille comme sur le web. Le
+  /// regroupement n'accepte qu'un message légendé par lot : il n'y en a donc
+  /// jamais deux à départager.
+  String? get legende {
+    for (final m in messages) {
+      final t = (m.content ?? '').trim();
+      if (t.isNotEmpty) return t;
+    }
+    return null;
+  }
+
   /// Statut à afficher : celui du dernier message envoyé du groupe.
   String get statut => messages.last.status;
 }

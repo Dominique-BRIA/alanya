@@ -1762,7 +1762,6 @@ class _ChatScreenState extends State<ChatScreen>
       if (x is! Message) return false;
       if (x.media.isEmpty) return false;
       if (x.isDeleted) return false;
-      if ((x.content ?? '').isNotEmpty) return false;
       if (x.replyToId != null) return false;
       if (x.reactions.isNotEmpty) return false;
       if (x.starred) return false;
@@ -1796,10 +1795,15 @@ class _ChatScreenState extends State<ChatScreen>
         lot.add(msg);
         j++;
       }
-      if (lot.length > 1) {
+      // Au plus UNE légende par lot, comme le web (`groupMediaRuns`) : deux
+      // légendes ne tiennent pas sous une seule grille, et on préfère alors ne
+      // pas regrouper plutôt que d'en perdre une.
+      final legendes =
+          lot.where((m) => (m.content ?? '').trim().isNotEmpty).length;
+      if (lot.length > 1 && legendes <= 1) {
         sortie.add(GroupeMedias(lot));
       } else {
-        sortie.add(courant);
+        sortie.addAll(lot);
       }
       i = j;
     }
@@ -5634,11 +5638,17 @@ class _ChatScreenState extends State<ChatScreen>
                   : Border.all(
                       color: enSurbrillance ? AlanyaColors.gold : _hairline),
             ),
-            child: _grilleAvecLegende(
+            // Une grille de médias CHIFFRÉS se dessine avec des tuiles qui
+            // déchiffrent : la grille ordinaire lirait le fichier du serveur,
+            // illisible (chapitre 25).
+            child: groupe.messages.any((m) =>
+                    m.mediaChiffre != null ||
+                    (m.media.isNotEmpty && m.media.first.chiffre))
+                ? _grilleChiffree(groupe, mine)
+                : _grilleAvecLegende(
               medias: medias,
-              // Un message porteur d'une légende n'est jamais regroupé : il n'y
-              // a donc pas de légende à afficher ici, par construction.
-              legende: null,
+              // La légende du lot, sous la grille, comme sur le web.
+              legende: groupe.legende,
               horodatage: _time(groupe.date),
               statut: mine ? _statusTicks(groupe.statut, Colors.white) : null,
               mine: mine,
@@ -5652,6 +5662,178 @@ class _ChatScreenState extends State<ChatScreen>
         ],
       ),
     );
+  }
+
+  /// La grille d'un lot de médias CHIFFRÉS : une tuile par message, qui
+  /// déchiffre la sienne (chapitre 25).
+  ///
+  /// Même disposition que `MediaGrid`, pour qu'un lot chiffré ne se distingue
+  /// pas d'un lot en clair : deux côte à côte, trois en « une grande + deux »,
+  /// quatre et plus en carré, « +N » sur la quatrième tuile — la règle du web
+  /// (`ALBUM_VISIBLE_TILES = 4`). « +N » ouvre le lot entier.
+  ///
+  /// La légende du lot, s'il en a une, se place SOUS la grille, comme sur le
+  /// web ; l'heure passe alors sous la légende.
+  Widget _grilleChiffree(GroupeMedias groupe, bool mine) {
+    final msgs = groupe.messages;
+    final legende = groupe.legende;
+    final aLegende = legende != null;
+    const ecart = 2.0;
+
+    Widget tuile(Message m) => m.mediaChiffre != null
+        ? TuileMediaChiffre(
+            descripteur: m.mediaChiffre!,
+            baseUrl: _baseUrl,
+            token: _token,
+            onLongPress: () => _openMessageActions(m),
+          )
+        : GestureDetector(
+            onLongPress: () => _openMessageActions(m),
+            child: Container(
+              color: Colors.black12,
+              alignment: Alignment.center,
+              child: Icon(Icons.lock_outline, color: _muted),
+            ),
+          );
+
+    Widget plus(int reste) => GestureDetector(
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => LotMediasChiffres(
+              descripteurs: [
+                for (final m in msgs)
+                  if (m.mediaChiffre != null) m.mediaChiffre!,
+              ],
+              baseUrl: _baseUrl,
+              token: _token,
+            ),
+          )),
+          onLongPress: () => _openMessageActions(msgs[3]),
+          child: Stack(fit: StackFit.expand, children: [
+            tuile(msgs[3]),
+            Container(
+              color: Colors.black.withValues(alpha: 0.5),
+              alignment: Alignment.center,
+              child: Text('+$reste',
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w700)),
+            ),
+          ]),
+        );
+
+    final heure = Row(mainAxisSize: MainAxisSize.min, children: [
+      Text(_time(groupe.date),
+          style: TextStyle(
+              fontSize: 11,
+              color: aLegende
+                  ? (mine ? Colors.white70 : _muted45)
+                  : Colors.white)),
+      if (mine) ...[
+        const SizedBox(width: 3),
+        _statusTicks(groupe.statut,
+            aLegende ? Colors.white70 : Colors.white),
+      ],
+    ]);
+
+    final grille = LayoutBuilder(builder: (context, contraintes) {
+      final w = contraintes.maxWidth.isFinite ? contraintes.maxWidth : 260.0;
+      final n = msgs.length;
+      Widget g;
+      if (n == 2) {
+        g = SizedBox(
+          width: w,
+          height: (w - ecart) / 2,
+          child: Row(children: [
+            Expanded(child: tuile(msgs[0])),
+            const SizedBox(width: ecart),
+            Expanded(child: tuile(msgs[1])),
+          ]),
+        );
+      } else if (n == 3) {
+        g = SizedBox(
+          width: w,
+          height: w,
+          child: Row(children: [
+            Expanded(child: tuile(msgs[0])),
+            const SizedBox(width: ecart),
+            Expanded(
+              child: Column(children: [
+                Expanded(child: tuile(msgs[1])),
+                const SizedBox(height: ecart),
+                Expanded(child: tuile(msgs[2])),
+              ]),
+            ),
+          ]),
+        );
+      } else {
+        g = SizedBox(
+          width: w,
+          height: w,
+          child: Column(children: [
+            Expanded(
+              child: Row(children: [
+                Expanded(child: tuile(msgs[0])),
+                const SizedBox(width: ecart),
+                Expanded(child: tuile(msgs[1])),
+              ]),
+            ),
+            const SizedBox(height: ecart),
+            Expanded(
+              child: Row(children: [
+                Expanded(child: tuile(msgs[2])),
+                const SizedBox(width: ecart),
+                Expanded(child: n > 4 ? plus(n - 4) : tuile(msgs[3])),
+              ]),
+            ),
+          ]),
+        );
+      }
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Stack(children: [
+          g,
+          if (!aLegende)
+            Positioned(
+              right: 6,
+              bottom: 6,
+              child: IgnorePointer(
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.45),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: heure,
+                ),
+              ),
+            ),
+        ]),
+      );
+    });
+
+    if (!aLegende) return grille;
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      grille,
+      const SizedBox(height: 5),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 3),
+        child: Text.rich(
+          TextSpan(children: spansWhatsApp(legende, tailleBase: 14.5)),
+          style: TextStyle(color: _bubbleTextColor(mine), fontSize: 14.5),
+        ),
+      ),
+      const SizedBox(height: 2),
+      Align(
+        alignment: Alignment.centerRight,
+        child: Padding(
+          padding: const EdgeInsets.only(right: 3),
+          child: heure,
+        ),
+      ),
+    ]);
   }
 
   /// Pastilles de réactions sous la bulle : agrège par emoji (emoji + compteur),

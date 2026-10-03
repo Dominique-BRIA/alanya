@@ -436,3 +436,153 @@ class _VideoPleinEcranState extends State<_VideoPleinEcran> {
     ),
   );
 }
+
+/// UNE TUILE DE GRILLE pour un média chiffré — photos envoyées à la suite,
+/// regroupées à l'affichage (un message par photo, une grille à l'écran).
+///
+/// 🐛 SANS ELLE, LA GRILLE AFFICHAIT LE FICHIER DU SERVEUR TEL QUEL — c'est-à-
+/// dire le CHIFFRÉ : Android refusait de le décoder (« Failed to decode
+/// image »), et les tuiles tournaient sans fin (signalé le 03/10/2026). Jumeau
+/// de `TuileChiffree` côté web.
+class TuileMediaChiffre extends StatefulWidget {
+  const TuileMediaChiffre({
+    super.key,
+    required this.descripteur,
+    required this.baseUrl,
+    required this.token,
+    this.onLongPress,
+  });
+
+  final DescripteurMedia descripteur;
+  final String baseUrl;
+  final String? token;
+  final VoidCallback? onLongPress;
+
+  @override
+  State<TuileMediaChiffre> createState() => _TuileMediaChiffreState();
+}
+
+class _TuileMediaChiffreState extends State<TuileMediaChiffre> {
+  File? _fichier;
+  bool _echec = false;
+  bool _charge = false;
+
+  DescripteurMedia get d => widget.descripteur;
+  bool get _image => d.mime.startsWith('image/');
+
+  @override
+  void initState() {
+    super.initState();
+    if (_image) _charger();
+  }
+
+  Future<File?> _charger() async {
+    if (_fichier != null) return _fichier;
+    if (mounted) setState(() => _charge = true);
+    try {
+      final f = await OuvertureMediaChiffre.ouvrir(d,
+          baseUrl: widget.baseUrl, token: widget.token);
+      if (mounted) {
+        setState(() {
+          _fichier = f;
+          _charge = false;
+        });
+      }
+      return f;
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _echec = true;
+          _charge = false;
+        });
+      }
+      return null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    Uint8List? apercu;
+    try {
+      if (d.apercu != null) apercu = base64Decode(d.apercu!);
+    } catch (_) {}
+    return GestureDetector(
+      onLongPress: widget.onLongPress,
+      onTap: () async {
+        final f = _fichier ?? await _charger();
+        if (f == null || !context.mounted) return;
+        await Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => _image ? _ImagePleinEcran(f) : _VideoPleinEcran(f)));
+      },
+      child: Stack(fit: StackFit.expand, children: [
+        if (apercu != null)
+          ImageFiltered(
+            imageFilter: _image
+                ? ImageFilter.blur(sigmaX: 6, sigmaY: 6)
+                : ImageFilter.blur(sigmaX: 0, sigmaY: 0),
+            child: Image.memory(apercu, fit: BoxFit.cover, gaplessPlayback: true),
+          )
+        else
+          Container(color: Colors.black12),
+        if (_fichier != null && _image) Image.file(_fichier!, fit: BoxFit.cover),
+        if (_charge)
+          const Center(
+            child: SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white)),
+          ),
+        if (!_image && !_charge)
+          const Center(
+            child: CircleAvatar(
+              radius: 18,
+              backgroundColor: Colors.black54,
+              child: Icon(Icons.play_arrow, color: Colors.white),
+            ),
+          ),
+        if (_echec)
+          const Center(child: Icon(Icons.broken_image_outlined, color: Colors.white70)),
+      ]),
+    );
+  }
+}
+
+/// LE LOT ENTIER, ouvert par « +N » : la grille du fil n'en montre que quatre
+/// tuiles, comme le web. Chaque tuile déchiffre la sienne et s'ouvre en plein
+/// écran au toucher.
+class LotMediasChiffres extends StatelessWidget {
+  const LotMediasChiffres({
+    super.key,
+    required this.descripteurs,
+    required this.baseUrl,
+    required this.token,
+  });
+
+  final List<DescripteurMedia> descripteurs;
+  final String baseUrl;
+  final String? token;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    backgroundColor: Colors.black,
+    appBar: AppBar(
+      backgroundColor: Colors.black,
+      foregroundColor: Colors.white,
+      title: Text('${descripteurs.length}'),
+    ),
+    body: GridView.builder(
+      padding: const EdgeInsets.all(2),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
+        mainAxisSpacing: 2,
+        crossAxisSpacing: 2,
+      ),
+      itemCount: descripteurs.length,
+      itemBuilder: (_, i) => TuileMediaChiffre(
+        descripteur: descripteurs[i],
+        baseUrl: baseUrl,
+        token: token,
+      ),
+    ),
+  );
+}
