@@ -4,6 +4,7 @@ import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
 import '../../../services/e2ee/e2ee_fil.dart' show MessageClair;
 import '../../../services/e2ee/e2ee_fournisseur.dart';
 import '../../../services/e2ee/e2ee_media.dart';
+import '../../../services/e2ee/e2ee_media_envoi.dart';
 import '../../../widgets/e2ee/e2ee_widgets.dart';
 import '../frontiere_chiffrement.dart';
 import '../fusion_releve.dart';
@@ -3285,6 +3286,34 @@ class _ChatScreenState extends State<ChatScreen>
     final replyId = _replyTo?.id;
     if (_replyTo != null) setState(() => _replyTo = null);
 
+    /*
+     * 🔴 FIL CHIFFRÉ : CHAQUE MÉDIA PART CHIFFRÉ DE BOUT EN BOUT (chapitre 25).
+     *
+     * Un message par fichier (décision du user) : la charge ne porte qu'un
+     * descripteur. Rien ne passe par le magasin d'envois — sa file hors ligne
+     * renverrait le fichier EN CLAIR au retour du réseau.
+     */
+    final pile = context.e2ee;
+    final pair = widget.otherUserId;
+    final moi = _myId;
+    if (_filChiffre && pile != null && pair != null && moi != null) {
+      final medias = context.read<MediaRepository>();
+      for (var i = 0; i < fichiers.length; i++) {
+        await _envoyerMediaChiffre(
+          pile: pile,
+          medias: medias,
+          pair: pair,
+          moi: moi,
+          fichier: fichiers[i],
+          // La légende accompagne le PREMIER fichier seulement.
+          legende: i == 0 ? (legende ?? '') : '',
+          replyToId: i == 0 ? replyId : null,
+          vueUnique: vueUnique && fichiers.length == 1,
+        );
+      }
+      return;
+    }
+
     for (var debut = 0; debut < fichiers.length; debut += 10) {
       final lot = fichiers.sublist(
           debut, debut + 10 > fichiers.length ? fichiers.length : debut + 10);
@@ -3376,7 +3405,15 @@ class _ChatScreenState extends State<ChatScreen>
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (d != null)
+        if (d == null && m.status == "PENDING")
+          const SizedBox(
+            width: 200,
+            child: Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: LinearProgressIndicator(minHeight: 3),
+            ),
+          )
+        else if (d != null)
           BulleMediaChiffre(
             descripteur: d,
             isMe: mine,
@@ -3409,6 +3446,78 @@ class _ChatScreenState extends State<ChatScreen>
         ),
       ],
     );
+  }
+
+  /// Envoie UN média chiffré, avec sa bulle d'attente. Voir
+  /// `EnvoiMediaChiffre`.
+  Future<void> _envoyerMediaChiffre({
+    required PileE2ee pile,
+    required MediaRepository medias,
+    required String pair,
+    required String moi,
+    required MediaPickResult fichier,
+    required String legende,
+    String? replyToId,
+    bool vueUnique = false,
+  }) async {
+    final tempId = "tmp-${DateTime.now().microsecondsSinceEpoch}";
+    final erreur = tr(context, 'send_failed');
+    setState(() {
+      _messages = [
+        ..._messages,
+        Message(
+          id: tempId,
+          chiffre: true,
+          convId: widget.convId,
+          senderId: moi,
+          content: legende,
+          type: typeMessagePour(DescripteurMedia(
+              id: tempId, cle: '', empreinte: '', taille: 0, mime: fichier.mimeType)),
+          status: "PENDING",
+          replyToId: replyToId,
+          // Une ligne de média chiffré SANS descripteur : la bulle d'attente.
+          media: [
+            MessageMedia(
+                id: tempId, url: '', mimeType: 'application/octet-stream', chiffre: true)
+          ],
+          createdAt: DateTime.now(),
+          vueUnique: vueUnique,
+        ),
+      ];
+      _rebuildCombined();
+    });
+    _scrollToBottom();
+    try {
+      final envoye = await EnvoiMediaChiffre.envoyer(
+        pile: pile,
+        medias: medias,
+        convId: widget.convId,
+        pairId: pair,
+        moi: moi,
+        fichier: fichier,
+        legende: legende,
+        replyToId: replyToId,
+        vueUnique: vueUnique,
+      );
+      if (!mounted) return;
+      setState(() {
+        final vus = <String>{};
+        _messages = [
+          for (final m in _messages)
+            // L'écho du serveur a pu arriver d'abord : pas de doublon.
+            if (vus.add(m.id == tempId ? envoye.id : m.id))
+              m.id == tempId ? envoye : m,
+        ];
+        _rebuildCombined();
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _messages = _messages.where((m) => m.id != tempId).toList();
+        _rebuildCombined();
+      });
+      showAppSnackBar("$erreur : $e");
+    }
   }
 
   /// Ouvre un message à vue unique dans le visionneur protégé.

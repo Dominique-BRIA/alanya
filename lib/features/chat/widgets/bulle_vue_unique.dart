@@ -43,13 +43,17 @@ class BulleVueUnique extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final type = message.media.isNotEmpty
-        ? message.media.first.mimeType
-        : (message.type == 'VIDEO'
-              ? 'video/'
-              : message.type == 'AUDIO'
-              ? 'audio/'
-              : 'image/');
+    // Chiffrée, le serveur ne voit qu'un « octet-stream » : le vrai type est
+    // dans le descripteur (chapitre 25).
+    final type = message.mediaChiffre?.mime ??
+        (message.media.isNotEmpty && !message.media.first.chiffre
+            ? message.media.first.mimeType
+            : null) ??
+        (message.type == 'VIDEO'
+            ? 'video/'
+            : message.type == 'AUDIO'
+                ? 'audio/'
+                : 'image/');
     final (icone, cle) = type.startsWith('video/')
         ? (Icons.videocam_outlined, 'vu_video')
         : type.startsWith('audio/')

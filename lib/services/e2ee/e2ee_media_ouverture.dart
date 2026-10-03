@@ -44,6 +44,14 @@ class OuvertureMediaChiffre {
     return f;
   }
 
+  /// Range le clair d'un média qu'on vient d'ENVOYER : l'expéditeur l'a
+  /// déjà, le retélécharger pour le déchiffrer serait absurde.
+  static Future<void> garderClair(DescripteurMedia d, List<int> clair) async {
+    try {
+      await MediaCache.put(_cle(d), _extension(d), clair);
+    } catch (_) {}
+  }
+
   static String _cle(DescripteurMedia d) => 'e2ee_${d.id}';
 
   static String _extension(DescripteurMedia d) {

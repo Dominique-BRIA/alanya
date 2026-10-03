@@ -218,9 +218,45 @@ class E2eeFil {
       throw const E2eeImpossible('Aucun appareil chiffré chez ce correspondant.');
     }
 
+    final enveloppes = await _enveloppesPour(pairId, appareils, texte);
+
+    /*
+     * 🐛 J'AVAIS INVENTÉ `POST /api/messages/chiffre`. Cette route n'existe pas.
+     * Le vrai chemin est celui du web, et il tient en DEUX appels :
+     *
+     *   ① la ligne du fil, SANS contenu — le serveur la refuserait autrement ;
+     *   ② les enveloppes, rattachées à cette ligne.
+     *
+     * ⚠️ DANS CET ORDRE, ET PAS L'INVERSE. Une enveloppe sans message auquel se
+     * rattacher serait orpheline ; un message sans enveloppe s'afficherait vide
+     * chez le destinataire.
+     */
+    final message = await _api('POST', '/api/conversations/$convId/messages', {
+      'type': 'TEXT',
+      'chiffre': true,
+    });
+    final messageId = message['id'] as String;
+
+    await _api('POST', '/api/e2ee/enveloppes', {
+      'convId': convId,
+      'deviceId': await _monDeviceId(),
+      'enveloppes': enveloppes,
+      'messageId': messageId,
+    });
+
+    return messageId;
+  }
+
+  /// Les enveloppes d'un clair : une par appareil du correspondant, puis une
+  /// par AUTRE appareil de mon compte. Commun au texte et aux médias.
+  Future<List<Map<String, dynamic>>> _enveloppesPour(
+    String pairId,
+    List<int> appareils,
+    String clair,
+  ) async {
     final enveloppes = <Map<String, dynamic>>[];
     for (final deviceId in appareils) {
-      final e = await _service.chiffrer(pairId, deviceId, texte);
+      final e = await _service.chiffrer(pairId, deviceId, clair);
       /*
        * 🐛 `destinataireId` MANQUAIT. Le serveur refuse l'enveloppe sans lui —
        * il ne peut pas deviner à QUI la remettre à partir du seul numéro
@@ -251,7 +287,7 @@ class E2eeFil {
         final miens =
             await _service.ouvrirSessions(moi, exclure: await _monDeviceId());
         for (final deviceId in miens) {
-          final e = await _service.chiffrer(moi, deviceId, texte);
+          final e = await _service.chiffrer(moi, deviceId, clair);
           enveloppes.add({
             'destinataireId': moi,
             'destinataireDevice': deviceId,
@@ -261,31 +297,47 @@ class E2eeFil {
         }
       } catch (_) {}
     }
+    return enveloppes;
+  }
 
-    /*
-     * 🐛 J'AVAIS INVENTÉ `POST /api/messages/chiffre`. Cette route n'existe pas.
-     * Le vrai chemin est celui du web, et il tient en DEUX appels :
-     *
-     *   ① la ligne du fil, SANS contenu — le serveur la refuserait autrement ;
-     *   ② les enveloppes, rattachées à cette ligne.
-     *
-     * ⚠️ DANS CET ORDRE, ET PAS L'INVERSE. Une enveloppe sans message auquel se
-     * rattacher serait orpheline ; un message sans enveloppe s'afficherait vide
-     * chez le destinataire.
-     */
+  /// Envoie un MÉDIA chiffré de bout en bout — cours, chapitre 25 (lot C).
+  ///
+  /// Le fichier est DÉJÀ chiffré et téléversé (`media.id`) ; restent la ligne
+  /// du message et les enveloppes portant la charge v2 : clé, empreinte,
+  /// aperçu, légende.
+  ///
+  /// ⚠️ L'ORDRE EST INVERSE DE CELUI DU TEXTE : la ligne d'abord, les
+  /// enveloppes ensuite. La charge v2 porte l'identifiant du message — il
+  /// faut donc l'avoir avant de chiffrer. Jumeau de `envoyerMediaChiffre`
+  /// côté web.
+  Future<String> envoyerMedia({
+    required String convId,
+    required String pairId,
+    required DescripteurMedia media,
+    String legende = '',
+    String? replyToId,
+    bool vueUnique = false,
+  }) async {
+    final appareils = await _service.ouvrirSessions(pairId);
+    if (appareils.isEmpty) {
+      throw const E2eeImpossible('Aucun appareil chiffré chez ce correspondant.');
+    }
     final message = await _api('POST', '/api/conversations/$convId/messages', {
-      'type': 'TEXT',
+      'type': typeMessagePour(media),
       'chiffre': true,
+      'mediaIds': [media.id],
+      if (replyToId != null) 'replyToId': replyToId,
+      if (vueUnique) 'vueUnique': true,
     });
     final messageId = message['id'] as String;
-
+    final enveloppes =
+        await _enveloppesPour(pairId, appareils, ecrireCharge(messageId, legende, media));
     await _api('POST', '/api/e2ee/enveloppes', {
       'convId': convId,
       'deviceId': await _monDeviceId(),
       'enveloppes': enveloppes,
       'messageId': messageId,
     });
-
     return messageId;
   }
 

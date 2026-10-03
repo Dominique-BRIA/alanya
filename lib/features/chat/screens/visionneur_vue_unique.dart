@@ -1,15 +1,19 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../../core/api_client.dart';
 import '../../../core/ecran_protege.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../models/message.dart';
+import '../../../services/e2ee/e2ee_media.dart';
 import '../chat_repository.dart';
 
 /// LE VISIONNEUR D'UN MESSAGE À VUE UNIQUE — photo, vidéo ou vocal.
@@ -71,6 +75,7 @@ class _VisionneurVueUniqueState extends State<VisionneurVueUnique> {
   MessageMedia? _media;
 
   Uint8List? _octetsImage;
+  File? _temporaire;
   VideoPlayerController? _video;
   AudioPlayer? _audio;
   Duration _positionAudio = Duration.zero;
@@ -93,17 +98,54 @@ class _VisionneurVueUniqueState extends State<VisionneurVueUnique> {
       final r = await widget.chat.ouvrirVueUnique(widget.message.id);
       if (!mounted) return;
       if (r.media.isEmpty) throw ApiException(410, 'EFFACEE', 'EFFACEE');
-      final media = r.media.first;
+      final serveur = r.media.first;
       _ouvert = true;
       widget.onOuvert?.call();
+      /*
+       * 🔴 VUE UNIQUE CHIFFRÉE (chapitre 25) : le fichier du serveur est
+       * illisible, son vrai type est dans le descripteur. Il est déchiffré EN
+       * MÉMOIRE — jamais dans le cache des médias, ce qui le garderait.
+       */
+      final d = widget.message.mediaChiffre;
+      final media = d == null
+          ? serveur
+          : MessageMedia(
+              id: serveur.id,
+              url: serveur.url,
+              mimeType: d.mime,
+              durationMs: d.dureeMs,
+            );
       setState(() => _media = media);
+      Uint8List? clair;
+      if (d != null) {
+        final rep = await http.get(Uri.parse(_adresse(serveur)));
+        if (rep.statusCode != 200) throw ApiException(rep.statusCode, 'HTTP');
+        final chiffre = rep.bodyBytes;
+        final cle = d.cle, empreinte = d.empreinte, taille = d.taille;
+        clair = await Isolate.run<Uint8List>(() => dechiffrerFichier(chiffre,
+            cle: cle, empreinte: empreinte, taille: taille));
+        if (!mounted) return;
+      }
 
       if (media.mimeType.startsWith('image/')) {
+        if (clair != null) {
+          setState(() => _octetsImage = clair);
+          return;
+        }
         final rep = await http.get(Uri.parse(_adresse(media)));
         if (rep.statusCode != 200) throw ApiException(rep.statusCode, 'HTTP');
         if (mounted) setState(() => _octetsImage = rep.bodyBytes);
       } else if (media.mimeType.startsWith('video/')) {
-        final c = VideoPlayerController.networkUrl(Uri.parse(_adresse(media)));
+        // Le lecteur vidéo ne lit pas des octets : un fichier TEMPORAIRE,
+        // effacé à la fermeture.
+        if (clair != null) {
+          final dossier = await getTemporaryDirectory();
+          _temporaire = File('${dossier.path}/vu-${DateTime.now().microsecondsSinceEpoch}');
+          await _temporaire!.writeAsBytes(clair, flush: true);
+        }
+        final c = _temporaire != null
+            ? VideoPlayerController.file(_temporaire!)
+            : VideoPlayerController.networkUrl(Uri.parse(_adresse(media)));
         _video = c;
         await c.initialize();
         if (!mounted) return;
@@ -129,7 +171,7 @@ class _VisionneurVueUniqueState extends State<VisionneurVueUnique> {
                 setState(() => _audioEnCours = s == PlayerState.playing);
             }),
           );
-        await p.play(UrlSource(_adresse(media)));
+        await p.play(clair != null ? BytesSource(clair) : UrlSource(_adresse(media)));
       }
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -153,6 +195,9 @@ class _VisionneurVueUniqueState extends State<VisionneurVueUnique> {
     }
     _video?.dispose();
     _audio?.dispose();
+    // Le fichier temporaire d'une vidéo chiffrée : rien ne doit rester.
+    final temporaire = _temporaire;
+    if (temporaire != null) unawaited(temporaire.delete().catchError((_) => temporaire));
     // L'image quitte le cache des images décodées : sans cela, elle pourrait
     // réapparaître le temps de la session sans repasser par le serveur.
     final octets = _octetsImage;
