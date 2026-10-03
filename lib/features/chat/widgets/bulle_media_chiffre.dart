@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'dart:ui' show ImageFilter;
 
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:open_filex/open_filex.dart';
@@ -36,6 +37,7 @@ class BulleMediaChiffre extends StatefulWidget {
     required this.token,
     required this.couleurDiscrete,
     this.onLongPress,
+    this.onOuvrir,
   });
 
   final DescripteurMedia descripteur;
@@ -44,6 +46,10 @@ class BulleMediaChiffre extends StatefulWidget {
   final String? token;
   final Color couleurDiscrete;
   final VoidCallback? onLongPress;
+
+  /// Ouvre la GALERIE de la conversation sur ce média, pour glisser vers les
+  /// autres. Sans lui, le toucher ouvre ce seul média en plein écran.
+  final VoidCallback? onOuvrir;
 
   @override
   State<BulleMediaChiffre> createState() => _BulleMediaChiffreState();
@@ -153,6 +159,7 @@ class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
     return GestureDetector(
       onLongPress: widget.onLongPress,
       onTap: () async {
+        if (widget.onOuvrir != null) return widget.onOuvrir!();
         final f = _fichier ?? await _charger();
         if (f == null || !context.mounted) return;
         await Navigator.of(context).push(
@@ -454,12 +461,17 @@ class TuileMediaChiffre extends StatefulWidget {
     required this.baseUrl,
     required this.token,
     this.onLongPress,
+    this.onOuvrir,
   });
 
   final DescripteurMedia descripteur;
   final String baseUrl;
   final String? token;
   final VoidCallback? onLongPress;
+
+  /// Ouvre la GALERIE de la conversation sur ce média, pour glisser vers les
+  /// autres. Sans lui, le toucher ouvre ce seul média en plein écran.
+  final VoidCallback? onOuvrir;
 
   @override
   State<TuileMediaChiffre> createState() => _TuileMediaChiffreState();
@@ -520,6 +532,7 @@ class _TuileMediaChiffreState extends State<TuileMediaChiffre> {
     return GestureDetector(
       onLongPress: widget.onLongPress,
       onTap: () async {
+        if (widget.onOuvrir != null) return widget.onOuvrir!();
         final f = _fichier ?? await _charger();
         if (f == null || !context.mounted) return;
         await Navigator.of(context).push(MaterialPageRoute(
@@ -558,46 +571,6 @@ class _TuileMediaChiffreState extends State<TuileMediaChiffre> {
   }
 }
 
-/// LE LOT ENTIER, ouvert par « +N » : la grille du fil n'en montre que quatre
-/// tuiles, comme le web. Chaque tuile déchiffre la sienne et s'ouvre en plein
-/// écran au toucher.
-class LotMediasChiffres extends StatelessWidget {
-  const LotMediasChiffres({
-    super.key,
-    required this.descripteurs,
-    required this.baseUrl,
-    required this.token,
-  });
-
-  final List<DescripteurMedia> descripteurs;
-  final String baseUrl;
-  final String? token;
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    backgroundColor: Colors.black,
-    appBar: AppBar(
-      backgroundColor: Colors.black,
-      foregroundColor: Colors.white,
-      title: Text('${descripteurs.length}'),
-    ),
-    body: GridView.builder(
-      padding: const EdgeInsets.all(2),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        mainAxisSpacing: 2,
-        crossAxisSpacing: 2,
-      ),
-      itemCount: descripteurs.length,
-      itemBuilder: (_, i) => TuileMediaChiffre(
-        descripteur: descripteurs[i],
-        baseUrl: baseUrl,
-        token: token,
-      ),
-    ),
-  );
-}
-
 /// Le jeton À JOUR pour télécharger un média chiffré (voir
 /// `OuvertureMediaChiffre._telecharger`), ou `null` hors de l'application
 /// (tests de widgets), où le jeton passé par l'écran sert de repli.
@@ -606,5 +579,94 @@ FournisseurJeton? fournisseurJeton(BuildContext context) {
     return context.read<AuthedApi>().jeton;
   } catch (_) {
     return null;
+  }
+}
+
+/// L'ENVOI D'UN MÉDIA CHIFFRÉ EN COURS — même allure que `SendingMediaBubble`.
+///
+/// 🐛 « ON VOIT JUSTE UN TRAIT QUI DÉFILE EN BAS » (user, 03/10/2026). La
+/// bulle d'attente n'était qu'une barre indéterminée de 200 px : ni la photo
+/// qu'on envoie, ni l'avancement. Elle montre désormais la vignette locale
+/// sous un voile, et un anneau avec le pourcentage du téléversement.
+class EnvoiChiffreEnCours extends StatelessWidget {
+  const EnvoiChiffreEnCours({
+    super.key,
+    required this.octets,
+    required this.mime,
+    required this.progression,
+  });
+
+  /// Le fichier EN CLAIR, encore en mémoire chez l'expéditeur.
+  final Uint8List? octets;
+  final String mime;
+
+  /// 0 pendant l'aperçu et le chiffrement, puis le téléversement, puis 1.
+  final ValueListenable<double> progression;
+
+  @override
+  Widget build(BuildContext context) {
+    final image = mime.startsWith('image/') && octets != null;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: SizedBox(
+        width: 236,
+        height: 160,
+        child: Stack(fit: StackFit.expand, children: [
+          if (image)
+            // Décodée à la taille de la bulle : une photo d'appareil de
+            // 12 Mpx décodée en entier coûterait des dizaines de Mo.
+            Image.memory(octets!, fit: BoxFit.cover, cacheWidth: 472)
+          else
+            Container(
+              color: const Color(0xFF1A1A2E),
+              child: Icon(
+                mime.startsWith('video/')
+                    ? Icons.movie_outlined
+                    : Icons.insert_drive_file_outlined,
+                size: 42,
+                color: Colors.white38,
+              ),
+            ),
+          // Voile : sans lui, l'anneau blanc disparaît sur une photo claire.
+          Container(color: Colors.black.withValues(alpha: 0.35)),
+          Center(
+            child: ValueListenableBuilder<double>(
+              valueListenable: progression,
+              builder: (context, valeur, _) => valeur >= 1
+                  // Les octets sont partis ; restent la ligne et les
+                  // enveloppes. On n'écrit pas « terminé », ce serait faux.
+                  ? Text(tr(context, 'sending'),
+                      style: const TextStyle(color: Colors.white, fontSize: 13))
+                  : SizedBox(
+                      width: 46,
+                      height: 46,
+                      child: Stack(alignment: Alignment.center, children: [
+                        CircularProgressIndicator(
+                          // Indéterminé pendant le chiffrement : une barre
+                          // figée à 0 % ressemblerait à un envoi bloqué.
+                          value: valeur <= 0.01 ? null : valeur,
+                          strokeWidth: 3,
+                          backgroundColor: Colors.white24,
+                          valueColor:
+                              const AlwaysStoppedAnimation(Colors.white),
+                        ),
+                        if (valeur > 0.01)
+                          Text('${(valeur * 100).round()}',
+                              style: const TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600)),
+                      ]),
+                    ),
+            ),
+          ),
+          const Positioned(
+            right: 8,
+            bottom: 8,
+            child: Icon(Icons.lock_outline, size: 16, color: Colors.white70),
+          ),
+        ]),
+      ),
+    );
   }
 }

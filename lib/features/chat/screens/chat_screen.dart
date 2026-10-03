@@ -78,6 +78,7 @@ import '../chat_repository.dart';
 import '../envoi_media.dart';
 import '../envoi_media_store.dart';
 import '../groupe_medias.dart';
+import '../medias_partages.dart';
 import '../widgets/activity_indicator.dart';
 import 'pdf_viewer_screen.dart';
 import 'media_caption_screen.dart';
@@ -94,7 +95,6 @@ import '../../../widgets/media/media_grid.dart';
 import '../../../widgets/media/contact_bubble.dart';
 import '../../../widgets/media/location_bubble.dart';
 import '../../../widgets/media/sending_media_bubble.dart';
-import '../../../core/media_helper.dart';
 import '../chat_media_integration.dart';
 import '../../../widgets/media/gps_preview.dart';
 import 'media_gallery_viewer.dart';
@@ -395,6 +395,11 @@ class _ChatScreenState extends State<ChatScreen>
       : Colors.red.shade50;
 
   String? _token;
+
+  /// Les envois de médias CHIFFRÉS en cours, par identifiant provisoire : le
+  /// fichier (pour la vignette) et l'avancement du téléversement.
+  final Map<String, ({MediaPickResult fichier, ValueNotifier<double> progression})>
+      _envoisChiffres = {};
   String _baseUrl = "";
   bool _uploading = false;
 
@@ -3421,12 +3426,11 @@ class _ChatScreenState extends State<ChatScreen>
       mainAxisSize: MainAxisSize.min,
       children: [
         if (d == null && m.status == "PENDING")
-          const SizedBox(
-            width: 200,
-            child: Padding(
-              padding: EdgeInsets.symmetric(vertical: 12),
-              child: LinearProgressIndicator(minHeight: 3),
-            ),
+          EnvoiChiffreEnCours(
+            octets: _envoisChiffres[m.id]?.fichier.bytes,
+            mime: _envoisChiffres[m.id]?.fichier.mimeType ?? '',
+            progression: _envoisChiffres[m.id]?.progression ??
+                ValueNotifier<double>(0),
           )
         else if (d != null)
           BulleMediaChiffre(
@@ -3436,6 +3440,7 @@ class _ChatScreenState extends State<ChatScreen>
             token: _token,
             couleurDiscrete: _muted,
             onLongPress: () => _openMessageActions(m),
+            onOuvrir: () => _openGallery(d.id),
           )
         else
           MediaChiffreIndisponible(couleur: _muted),
@@ -3477,6 +3482,8 @@ class _ChatScreenState extends State<ChatScreen>
   }) async {
     final tempId = "tmp-${DateTime.now().microsecondsSinceEpoch}";
     final erreur = tr(context, 'send_failed');
+    final suivi = (fichier: fichier, progression: ValueNotifier<double>(0));
+    _envoisChiffres[tempId] = suivi;
     setState(() {
       _messages = [
         ..._messages,
@@ -3513,6 +3520,7 @@ class _ChatScreenState extends State<ChatScreen>
         legende: legende,
         replyToId: replyToId,
         vueUnique: vueUnique,
+        onProgression: (r) => suivi.progression.value = r,
       );
       if (!mounted) return;
       setState(() {
@@ -3532,6 +3540,8 @@ class _ChatScreenState extends State<ChatScreen>
         _rebuildCombined();
       });
       showAppSnackBar("$erreur : $e");
+    } finally {
+      _envoisChiffres.remove(tempId)?.progression.dispose();
     }
   }
 
@@ -4018,30 +4028,11 @@ class _ChatScreenState extends State<ChatScreen>
 
   // Collecte tous les médias image/vidéo de la conversation (ordre du fil) pour
   // la galerie navigable (swipe entre médias).
+  /// Les médias du fil pour la galerie — en clair ET chiffrés, pour qu'on
+  /// puisse glisser de l'un à l'autre (voir `mediasGalerie`).
   Future<List<ConvMediaItem>> _galleryItems() async {
     final token = await _freshToken();
-    final items = <ConvMediaItem>[];
-    for (final msg in _messages) {
-      // Une vue unique ne se feuillette pas dans la galerie : elle ne s'ouvre
-      // qu'une fois, dans son visionneur protégé.
-      if (msg.vueUnique) continue;
-      for (final media in msg.media) {
-        // Un fichier chiffré ne se feuillette pas tel quel : il s'ouvre par
-        // sa bulle, qui le déchiffre (chapitre 23).
-        if (media.chiffre) continue;
-        final t = MediaHelper.detectType(media.mimeType, media.filename);
-        if (t == AlanyaMediaType.image || t == AlanyaMediaType.video) {
-          items.add(ConvMediaItem(
-            id: media.id,
-            url: "$_baseUrl${media.url}?token=$token",
-            downloadUrl: "$_baseUrl${media.url}?download=1&token=$token",
-            filename: media.filename ?? "",
-            isVideo: t == AlanyaMediaType.video,
-          ));
-        }
-      }
-    }
-    return items;
+    return mediasGalerie(_messages, baseUrl: _baseUrl, token: token);
   }
 
   // Ouvre la visionneuse navigable positionnée sur le média [mediaId].
@@ -5681,7 +5672,7 @@ class _ChatScreenState extends State<ChatScreen>
   /// Même disposition que `MediaGrid`, pour qu'un lot chiffré ne se distingue
   /// pas d'un lot en clair : deux côte à côte, trois en « une grande + deux »,
   /// quatre et plus en carré, « +N » sur la quatrième tuile — la règle du web
-  /// (`ALBUM_VISIBLE_TILES = 4`). « +N » ouvre le lot entier.
+  /// (`ALBUM_VISIBLE_TILES = 4`). « +N » ouvre la galerie sur la 4ᵉ tuile.
   ///
   /// La légende du lot, s'il en a une, se place SOUS la grille, comme sur le
   /// web ; l'heure passe alors sous la légende.
@@ -5697,6 +5688,7 @@ class _ChatScreenState extends State<ChatScreen>
             baseUrl: _baseUrl,
             token: _token,
             onLongPress: () => _openMessageActions(m),
+            onOuvrir: () => _openGallery(m.mediaChiffre!.id),
           )
         : GestureDetector(
             onLongPress: () => _openMessageActions(m),
@@ -5708,16 +5700,12 @@ class _ChatScreenState extends State<ChatScreen>
           );
 
     Widget plus(int reste) => GestureDetector(
-          onTap: () => Navigator.of(context).push(MaterialPageRoute(
-            builder: (_) => LotMediasChiffres(
-              descripteurs: [
-                for (final m in msgs)
-                  if (m.mediaChiffre != null) m.mediaChiffre!,
-              ],
-              baseUrl: _baseUrl,
-              token: _token,
-            ),
-          )),
+          // La galerie, sur le 4ᵉ média : on y feuillette tout le lot, et
+          // le reste de la conversation.
+          onTap: () {
+            final d = msgs[3].mediaChiffre;
+            if (d != null) _openGallery(d.id);
+          },
           onLongPress: () => _openMessageActions(msgs[3]),
           child: Stack(fit: StackFit.expand, children: [
             tuile(msgs[3]),

@@ -39,6 +39,10 @@ class EnvoiMediaChiffre {
     String legende = '',
     String? replyToId,
     bool vueUnique = false,
+    /// Avancement du TÉLÉVERSEMENT, de 0 à 1 — la seule étape longue dont on
+    /// connaît la taille. Avant (aperçu, chiffrement) : 0 ; après (ligne et
+    /// enveloppes) : 1.
+    void Function(double ratio)? onProgression,
   }) async {
     final octets = fichier.bytes;
     final mime = fichier.mimeType;
@@ -60,7 +64,12 @@ class EnvoiMediaChiffre {
       'chiffre.bin',
       'application/octet-stream',
       chiffre: true,
+      onProgress: onProgression == null
+          ? null
+          : (envoyes, total) =>
+              onProgression(total > 0 ? envoyes / total : 0),
     );
+    onProgression?.call(1);
 
     final d = DescripteurMedia(
       id: envoye.id,

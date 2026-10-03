@@ -10,8 +10,6 @@ import '../../../core/alanya_id_formatter.dart';
 import '../../../core/app_snackbar.dart';
 import '../../../core/memoire_langues.dart';
 import '../../../core/traduction_appareil.dart';
-import '../../../core/token_storage.dart';
-import '../../../models/message.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
 import '../../../widgets/choix_langue_interlocuteur.dart';
@@ -22,7 +20,10 @@ import '../../calls/call_controller.dart';
 import '../../calls/message_erreur_appel.dart';
 import '../../calls/ouvrir_appel_en_cours.dart';
 import '../../chat/chat_repository.dart';
+import '../../chat/medias_partages.dart';
+import '../../chat/screens/media_gallery_viewer.dart';
 import '../../chat/screens/shared_content_screen.dart';
+import '../../chat/widgets/bulle_media_chiffre.dart';
 import '../contacts_repository.dart';
 import '../verification_cle.dart';
 import '../../../core/erreur_lisible.dart';
@@ -76,7 +77,9 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
   static const double _expandedHeight = 300;
 
   late bool _isBlocked = widget.isBlocked;
-  List<Message>? _sharedMedia;
+  /// Les photos et vidéos du fil, en clair ou chiffrées, du plus récent au
+  /// plus ancien (voir `medias_partages.dart`).
+  List<ConvMediaItem>? _sharedMedia;
   bool _loadingMedia = false;
 
   /// Garde-fou : l'appel peut passer par une création de conversation, donc
@@ -157,15 +160,21 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
     if (convId == null) return;
     setState(() => _loadingMedia = true);
     _baseUrl = context.read<ApiClient>().baseUrl;
-    _token = await context.read<TokenStorage>().accessToken;
     try {
-      final msgs = await context.read<ChatRepository>().getMessages(convId);
+      /*
+       * 🐛 LES APERÇUS NE S'AFFICHAIENT PAS ICI, mais bien dans « Médias
+       * partagés » (user, 03/10/2026). Cet écran avait sa propre copie du
+       * chargement, restée avec les trois défauts que l'autre venait de
+       * perdre : jeton lu AVANT les messages (401), une seule page, et les
+       * médias chiffrés passés tels quels à `CachedMedia` — le fichier
+       * illisible du serveur. Le chargement est désormais commun.
+       */
+      final fil = await chargerFilPourMedias(context, convId);
       if (!mounted) return;
       setState(() {
-        _sharedMedia = msgs
-            .where((m) =>
-                (m.type == "IMAGE" || m.type == "VIDEO") && m.media.isNotEmpty)
-            .toList();
+        _token = fil.token;
+        _sharedMedia = mediasGalerie(fil.messages,
+            baseUrl: _baseUrl, token: fil.token, chiffreDe: fil.chiffreDe);
         _loadingMedia = false;
       });
     } catch (_) {
@@ -794,7 +803,7 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
   Widget _sharedMediaCard() {
     final cs = Theme.of(context).colorScheme;
     final hasConv = widget.convId != null;
-    final recent = (_sharedMedia ?? const <Message>[]).take(8).toList();
+    final recent = (_sharedMedia ?? const <ConvMediaItem>[]).take(8).toList();
     return GlassCard(
       radius: 22,
       padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
@@ -844,26 +853,41 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
                   itemCount: recent.length,
                   separatorBuilder: (_, __) => const SizedBox(width: 8),
                   itemBuilder: (_, i) {
-                    final m = recent[i];
-                    final media = m.media.first;
-                    final isVideo = m.type == "VIDEO";
-                    final url = '$_baseUrl${media.url}?token=$_token';
+                    final it = recent[i];
+                    final d = it.chiffre;
+                    // Toucher une vignette ouvre la galerie sur elle.
+                    void ouvrir() => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => MediaGalleryViewer(
+                                items: _sharedMedia!, initialIndex: i),
+                          ),
+                        );
                     return ClipRRect(
                       borderRadius: BorderRadius.circular(14),
                       child: SizedBox(
                         width: 76,
                         height: 76,
-                        child: isVideo
+                        child: d != null
+                            ? TuileMediaChiffre(
+                                descripteur: d,
+                                baseUrl: _baseUrl,
+                                token: _token,
+                                onOuvrir: ouvrir,
+                              )
+                            : GestureDetector(
+                        onTap: ouvrir,
+                        child: it.isVideo
                             ? const ColoredBox(
                                 color: Color(0xFF1A1A2E),
                                 child: Icon(Icons.play_circle_fill_rounded,
                                     color: Colors.white70, size: 30),
                               )
                             : CachedMedia(
-                                url: url,
+                                url: it.url,
                                 width: 76,
                                 height: 76,
                                 fit: BoxFit.cover),
+                        ),
                       ),
                     );
                   },

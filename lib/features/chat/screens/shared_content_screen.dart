@@ -7,17 +7,13 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 
 import '../../../core/api_client.dart';
-import '../../../core/authed_api.dart';
 import '../../../core/downloader.dart';
 import '../../../core/media_cache.dart';
 import '../../../core/media_helper.dart';
-import '../../../core/message_cache.dart';
-import '../../../core/token_storage.dart';
-import '../../../models/message.dart';
 import '../../../services/e2ee/e2ee_media.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/media/cached_media.dart';
-import '../chat_repository.dart';
+import '../medias_partages.dart';
 import '../widgets/bulle_media_chiffre.dart';
 import 'media_gallery_viewer.dart';
 import 'pdf_viewer_screen.dart';
@@ -75,6 +71,9 @@ class _SharedContentScreenState extends State<SharedContentScreen>
   String _baseUrl = '';
   String? _token;
 
+  /// Les mêmes médias, prêts pour la galerie (voir `mediasGalerie`).
+  List<ConvMediaItem> _galerie = const [];
+
   static final _urlRe = RegExp(r'(https?:\/\/[^\s]+)', caseSensitive: false);
 
   @override
@@ -89,51 +88,18 @@ class _SharedContentScreenState extends State<SharedContentScreen>
     super.dispose();
   }
 
-  /// Au plus tant de pages de 100 messages : de quoi couvrir une longue
-  /// conversation sans faire de cet écran un téléchargement sans fin.
-  static const _pagesMax = 30;
-
   Future<void> _load() async {
     final baseUrl = context.read<ApiClient>().baseUrl;
-    final repo = context.read<ChatRepository>();
-    final storage = context.read<TokenStorage>();
-    AuthedApi? api;
     try {
-      api = context.read<AuthedApi>();
-    } catch (_) {}
-    try {
-      /*
-       * 🐛 UNE SEULE PAGE ÉTAIT LUE (user, 03/10/2026 : « rien ne s'affiche,
-       * même les anciens médias »). Le serveur rend 50 messages par page ;
-       * un média plus ancien que les 50 derniers messages n'apparaissait
-       * jamais. On parcourt les pages, par 100, jusqu'au début du fil.
-       */
-      final msgs = <Message>[];
-      String? curseur;
-      for (var p = 0; p < _pagesMax; p++) {
-        final page =
-            await repo.getMessages(widget.convId, cursor: curseur, limit: 100);
-        msgs.addAll(page);
-        if (page.length < 100) break;
-        curseur = page.last.id;
-      }
-
-      /*
-       * 🐛 LE JETON ÉTAIT LU AVANT LES MESSAGES. Si celui du stockage avait
-       * expiré, le chargement des messages le rafraîchissait… après coup :
-       * chaque vignette partait avec le jeton mort, 401, icône d'erreur
-       * presque invisible. Lu APRÈS, il est celui que l'application vient de
-       * renouveler.
-       */
-      final token = api != null ? await api.jeton() : await storage.accessToken;
+      // Toutes les pages, le jeton lu APRÈS, les clés des médias chiffrés :
+      // le chargement commun à la fiche contact et à cet écran.
+      final fil = await chargerFilPourMedias(context, widget.convId);
+      final msgs = fil.messages;
+      final token = fil.token;
       _baseUrl = baseUrl;
       _token = token;
-
-      // Les clés des médias chiffrés ne sont qu'ici, sur ce téléphone.
-      final descripteurs = <String, DescripteurMedia>{
-        for (final m in await MessageCache.getConv(widget.convId))
-          if (m.mediaChiffre != null) m.id: m.mediaChiffre!,
-      };
+      _galerie = mediasGalerie(msgs,
+          baseUrl: baseUrl, token: token, chiffreDe: fil.chiffreDe);
 
       for (final m in msgs) {
         final content = m.content;
@@ -152,7 +118,7 @@ class _SharedContentScreenState extends State<SharedContentScreen>
            * sur ce téléphone), il n'y a rien à montrer.
            */
           if (media.chiffre) {
-            final d = descripteurs[m.id];
+            final d = fil.chiffreDe(m);
             if (d != null &&
                 (d.mime.startsWith('image/') || d.mime.startsWith('video/'))) {
               _media.add(_MediaEntry(media.id, '', '', d.nom ?? '',
@@ -220,9 +186,12 @@ class _SharedContentScreenState extends State<SharedContentScreen>
         final it = _media[i];
         final d = it.chiffre;
         if (d != null) {
-          // La tuile déchiffre la sienne et s'ouvre en plein écran au toucher.
+          // La tuile déchiffre la sienne ; le toucher ouvre la galerie.
           return TuileMediaChiffre(
-              descripteur: d, baseUrl: _baseUrl, token: _token);
+              descripteur: d,
+              baseUrl: _baseUrl,
+              token: _token,
+              onOuvrir: () => _openMediaAt(i));
         }
         return GestureDetector(
           onTap: () => _openMediaAt(i),
@@ -248,23 +217,14 @@ class _SharedContentScreenState extends State<SharedContentScreen>
     );
   }
 
+  /// Ouvre la galerie sur le média touché — en clair ou chiffré, on glisse
+  /// de l'un à l'autre.
   void _openMediaAt(int index) {
-    // La galerie ne montre que les médias en clair : l'index touché est
-    // recalculé parmi eux.
-    final clairs = _media.where((e) => e.chiffre == null).toList();
-    index = clairs.indexOf(_media[index]);
-    if (index < 0) return;
-    final items = clairs
-        .map((e) => ConvMediaItem(
-              id: e.id,
-              url: e.url,
-              downloadUrl: e.downloadUrl,
-              filename: e.filename,
-              isVideo: e.isVideo,
-            ))
-        .toList();
+    final id = _media[index].chiffre?.id ?? _media[index].id;
+    final debut = _galerie.indexWhere((e) => e.id == id);
+    if (debut < 0) return;
     Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => MediaGalleryViewer(items: items, initialIndex: index),
+      builder: (_) => MediaGalleryViewer(items: _galerie, initialIndex: debut),
     ));
   }
 
