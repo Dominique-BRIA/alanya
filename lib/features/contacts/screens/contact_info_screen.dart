@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../../l10n/app_localizations.dart';
+import '../../../services/e2ee/e2ee_fournisseur.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -6,19 +8,25 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/api_client.dart';
 import '../../../core/alanya_id_formatter.dart';
 import '../../../core/app_snackbar.dart';
-import '../../../core/token_storage.dart';
-import '../../../models/message.dart';
+import '../../../core/memoire_langues.dart';
+import '../../../core/traduction_appareil.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
+import '../../../widgets/choix_langue_interlocuteur.dart';
 import '../../../widgets/glass_card.dart';
 import '../../../widgets/media/cached_media.dart';
 import '../../account/screens/avatar_viewer_screen.dart';
 import '../../calls/call_controller.dart';
 import '../../calls/message_erreur_appel.dart';
-import '../../calls/screens/active_call_screen.dart';
+import '../../calls/ouvrir_appel_en_cours.dart';
 import '../../chat/chat_repository.dart';
+import '../../chat/medias_partages.dart';
+import '../../chat/screens/media_gallery_viewer.dart';
 import '../../chat/screens/shared_content_screen.dart';
+import '../../chat/widgets/bulle_media_chiffre.dart';
 import '../contacts_repository.dart';
+import '../verification_cle.dart';
+import '../../../core/erreur_lisible.dart';
 
 /// Écran "Info Contact" — design premium glassmorphism, mode sombre prioritaire.
 ///
@@ -69,7 +77,9 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
   static const double _expandedHeight = 300;
 
   late bool _isBlocked = widget.isBlocked;
-  List<Message>? _sharedMedia;
+  /// Les photos et vidéos du fil, en clair ou chiffrées, du plus récent au
+  /// plus ancien (voir `medias_partages.dart`).
+  List<ConvMediaItem>? _sharedMedia;
   bool _loadingMedia = false;
 
   /// Garde-fou : l'appel peut passer par une création de conversation, donc
@@ -80,13 +90,48 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
 
   bool _muted = false;
 
+  /// La langue FIXÉE pour ce correspondant, ou `null` pour « auto ».
+  String? _langueFixee;
+
   String get _muteKey => "mute_${widget.convId ?? widget.userId}";
 
   @override
   void initState() {
     super.initState();
     _loadMuted();
+    _loadLangue();
     _loadSharedMedia();
+    _lireEtatChiffrement();
+  }
+
+  /// L'état réel du chiffrement, demandé au serveur.
+  ///
+  /// 🔴 `_chiffree` NE PARTAIT QUE DE `false` ET N'ÉTAIT JAMAIS LU. Il ne
+  /// passait à `true` qu'après une activation réussie DANS CETTE INSTANCE de
+  /// l'écran — donc jamais, en pratique, puisqu'on le rouvre à chaque fois.
+  ///
+  /// 🐛 Conséquence : « Vérifier le code de sécurité » menait à l'ACTIVATION,
+  /// qui réclame le mot de passe. À chaque ouverture, pour une conversation
+  /// déjà chiffrée depuis longtemps.
+  ///
+  /// ⚠️ UN ÉTAT QUI DÉCIDE D'UNE ACTION SE LIT, IL NE SE SUPPOSE PAS. Partir
+  /// de `false` revenait à affirmer « ce n'est pas chiffré » sans avoir
+  /// demandé — et à faire payer cette supposition à l'utilisateur.
+  Future<void> _lireEtatChiffrement() async {
+    final pile = context.e2ee;
+    final convId = widget.convId;
+    if (pile == null || convId == null) return;
+    try {
+      final r = await pile.fil.etat(convId);
+      if (mounted && r != _chiffree) setState(() => _chiffree = r);
+    } catch (_) {
+      // Sans réponse, on n'affirme rien de plus qu'avant.
+    }
+  }
+
+  Future<void> _loadLangue() async {
+    final fixee = await MemoireLangues.langueFixee(widget.userId);
+    if (mounted) setState(() => _langueFixee = fixee);
   }
 
   Future<void> _loadMuted() async {
@@ -102,8 +147,12 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_muteKey, value);
     } catch (_) {}
+    // ⚠️ `tr()` LIT LE CONTEXTE, ce qu'un libellé en dur ne faisait pas :
+    // l'écriture des préférences est asynchrone, l'écran a pu être quitté
+    // entre-temps.
+    if (!mounted) return;
     showAppSnackBar(
-        value ? "Notifications en sourdine" : "Notifications réactivées");
+        value ? tr(context, 'ci_muted') : tr(context, 'ci_unmuted'));
   }
 
   Future<void> _loadSharedMedia() async {
@@ -111,15 +160,21 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
     if (convId == null) return;
     setState(() => _loadingMedia = true);
     _baseUrl = context.read<ApiClient>().baseUrl;
-    _token = await context.read<TokenStorage>().accessToken;
     try {
-      final msgs = await context.read<ChatRepository>().getMessages(convId);
+      /*
+       * 🐛 LES APERÇUS NE S'AFFICHAIENT PAS ICI, mais bien dans « Médias
+       * partagés » (user, 03/10/2026). Cet écran avait sa propre copie du
+       * chargement, restée avec les trois défauts que l'autre venait de
+       * perdre : jeton lu AVANT les messages (401), une seule page, et les
+       * médias chiffrés passés tels quels à `CachedMedia` — le fichier
+       * illisible du serveur. Le chargement est désormais commun.
+       */
+      final fil = await chargerFilPourMedias(context, convId);
       if (!mounted) return;
       setState(() {
-        _sharedMedia = msgs
-            .where((m) =>
-                (m.type == "IMAGE" || m.type == "VIDEO") && m.media.isNotEmpty)
-            .toList();
+        _token = fil.token;
+        _sharedMedia = mediasGalerie(fil.messages,
+            baseUrl: _baseUrl, token: fil.token, chiffreDe: fil.chiffreDe);
         _loadingMedia = false;
       });
     } catch (_) {
@@ -131,7 +186,7 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
     final contactId = widget.contactId;
     if (contactId == null) {
       showAppSnackBar(
-          "Ajoute d'abord ce contact à ton répertoire pour le bloquer");
+          tr(context, 'ci_add_first_to_block'));
       return;
     }
     final newState = !_isBlocked;
@@ -139,11 +194,11 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
       await context.read<ContactsRepository>().setBlocked(contactId, newState);
       if (!mounted) return;
       setState(() => _isBlocked = newState);
-      showAppSnackBar(newState ? "Contact bloqué" : "Contact débloqué");
+      showAppSnackBar(newState ? tr(context, 'ci_blocked') : tr(context, 'ci_unblocked'));
     } on ApiException catch (e) {
       showAppSnackBar(e.message);
     } catch (_) {
-      showAppSnackBar("Action impossible");
+      showAppSnackBar(tr(context, 'action_failed'));
     }
   }
 
@@ -165,18 +220,15 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
           .createDirect(widget.publicNumber);
       if (!mounted) return;
       await cc.startOutgoing(convId, type, widget.name);
-      if (!mounted) return;
-      // Même enchaînement que depuis le fil de discussion : sans cette
-      // ouverture, l'appel démarrait sans que rien ne s'affiche, seul le
-      // bandeau global le signalait.
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          fullscreenDialog: true,
-          builder: (_) => const ActiveCallScreen(),
-        ),
-      );
+      // Sans cette ouverture, l'appel démarrait sans que rien ne s'affiche,
+      // seul le bandeau global le signalait.
+      //
+      // ⚠️ PAS DE `if (!mounted) return;` ICI. L'appel est déjà parti :
+      // renoncer parce que CETTE fiche a disparu laissait sonner le
+      // correspondant devant un appelant qui ne voit rien.
+      await ouvrirEcranAppelLance(cc);
     } catch (e) {
-      showAppSnackBar(messageErreurAppel(e));
+      showAppSnackBar(messageErreurAppel(e, context: context));
     } finally {
       if (mounted) setState(() => _callStarting = false);
     }
@@ -187,7 +239,7 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
     if (Navigator.of(context).canPop()) {
       Navigator.of(context).pop();
     } else {
-      showAppSnackBar("Ouvre la conversation depuis l'accueil");
+      showAppSnackBar(tr(context, 'ci_open_from_home'));
     }
   }
 
@@ -402,14 +454,14 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
   }
 
   String? _presenceLabel() {
-    if (widget.isOnline) return "en ligne";
+    if (widget.isOnline) return tr(context, 'presence_online');
     final ls = widget.lastSeen;
     if (ls == null) return null;
     final diff = DateTime.now().difference(ls);
-    if (diff.inMinutes < 1) return "vu à l'instant";
-    if (diff.inMinutes < 60) return "vu il y a ${diff.inMinutes} min";
-    if (diff.inHours < 24) return "vu il y a ${diff.inHours} h";
-    return "vu il y a ${diff.inDays} j";
+    if (diff.inMinutes < 1) return tr(context, 'presence_just_now');
+    if (diff.inMinutes < 60) return tr(context, 'presence_min', {'n': '${diff.inMinutes}'});
+    if (diff.inHours < 24) return tr(context, 'presence_hour', {'n': '${diff.inHours}'});
+    return tr(context, 'presence_day', {'n': '${diff.inDays}'});
   }
 
   // ---------------------------------------------------------------------------
@@ -421,17 +473,17 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
       children: [
         _RoundAction(
           icon: Icons.call_rounded,
-          label: "Appeler",
+          label: tr(context, 'call_action'),
           onTap: () => _startCall("AUDIO"),
         ),
         _RoundAction(
           icon: Icons.chat_bubble_rounded,
-          label: "Message",
+          label: tr(context, 'message_action'),
           onTap: _openMessage,
         ),
         _RoundAction(
           icon: Icons.videocam_rounded,
-          label: "Vidéo",
+          label: tr(context, 'video'),
           onTap: () => _startCall("VIDEO"),
         ),
       ],
@@ -444,7 +496,7 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
   Widget _infoCard() {
     final bio = widget.statusMsg?.isNotEmpty == true
         ? widget.statusMsg!
-        : "Hey ! J'utilise Alanya.";
+        : tr(context, 'ci_default_invite');
     final username = widget.username;
     return GlassCard(
       radius: 22,
@@ -453,25 +505,41 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
         children: [
           _infoRow(
             icon: Icons.phone_rounded,
-            label: "Téléphone",
+            label: tr(context, 'phone'),
             value: "#${_formatNumber(widget.publicNumber)}",
             onTap: () {
               Clipboard.setData(ClipboardData(text: widget.publicNumber));
-              showAppSnackBar("Numéro copié");
+              showAppSnackBar(tr(context, 'number_copied'));
             },
             trailing: Icons.copy_rounded,
           ),
           _divider(),
           _infoRow(
             icon: Icons.info_outline_rounded,
-            label: "À propos",
+            label: tr(context, 'about'),
             value: bio,
           ),
+          /*
+           * 🔴 C'EST ICI QU'ON VA CHERCHER LE CODE DE SÉCURITÉ — modèle
+           * WhatsApp, décision du user. La vérification n'a de sens que dans la
+           * fiche du correspondant : c'est SA clé qu'on compare, pas un réglage
+           * de l'application.
+           */
+          if (context.e2ee != null) ...[
+            _divider(),
+            _infoRow(
+              icon: Icons.verified_user_outlined,
+              label: "Chiffrement",
+              value: "Vérifier le code de sécurité",
+              trailing: Icons.chevron_right_rounded,
+              onTap: _chiffree ? _ouvrirVerification : _activerChiffrement,
+            ),
+          ],
           if (username != null && username.isNotEmpty) ...[
             _divider(),
             _infoRow(
               icon: Icons.alternate_email_rounded,
-              label: "Nom d'utilisateur",
+              label: tr(context, 'username'),
               value: username,
             ),
           ],
@@ -479,6 +547,188 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
       ),
     );
   }
+
+  /// Ouvre l'écran de vérification.
+  ///
+  /// ⚠️ LE CODE NE PEUT PAS TOUJOURS SE CALCULER : il faut qu'une session existe
+  /// déjà, donc qu'un message ait été échangé. On le dit plutôt que d'afficher
+  /// un écran vide — un écran vide fait croire à une panne.
+  /// L'état du chiffrement de cette conversation, tel que le serveur le donne.
+  bool _chiffree = false;
+
+  /// Crée l'archive avec SES DEUX SERRURES, puis active le chiffrement.
+  ///
+  /// 🔴 DEUX SERRURES D'UN COUP, ET C'EST CE QUI REND LE RESTE SIMPLE. Le mot de
+  /// passe ouvre l'archive à chaque connexion, sans rien demander ; la clé de
+  /// récupération la rouvre sur un appareil neuf, ou si le mot de passe est
+  /// oublié. Avec une seule des deux, il resterait toujours un cas où l'archive
+  /// se referme sans que personne puisse la rouvrir.
+  ///
+  /// 🔴 POURQUOI MAINTENANT. Sans archive, l'utilisateur se déconnecte après sa
+  /// première conversation chiffrée et TOUS SES MESSAGES DEVIENNENT VIDES, sans
+  /// le moindre avertissement. C'est le défaut signalé le 26/09/2026.
+  ///
+  /// ⚠️ LA SAUVEGARDE D'ABORD, LE CHIFFREMENT ENSUITE : l'ordre inverse
+  /// laisserait une fenêtre, courte mais réelle, où des messages chiffrés
+  /// existeraient sans archive pour les recueillir.
+  Future<void> _activerChiffrement() async {
+    final pile = context.e2ee;
+    final convId = widget.convId;
+    if (pile == null || convId == null) return;
+
+    final mdp = await _demanderMotDePasse();
+    if (mdp == null || mdp.isEmpty) return;
+
+    try {
+      final cle = await pile.sauvegarde.activerAvecDeuxSerrures(mdp, pile.coffre);
+      await pile.fil.activer(convId);
+      if (!mounted) return;
+      setState(() => _chiffree = true);
+      if (cle != null) await _montrerCleRecuperation(cle);
+    } catch (e) {
+      if (!mounted) return;
+      /*
+       * 🔴 ON RÉPÈTE CE QUE LE SERVEUR A DIT, on ne devine plus.
+       *
+       * 🐛 L'ancien message énumérait deux causes possibles — « vérifiez
+       * votre mot de passe, et que votre correspondant a ouvert l'application
+       * récemment » — en espérant tomber juste. Il tombait à côté.
+       *
+       * Le serveur, lui, SAIT : il répond `CLES_MANQUANTES` avec « un
+       * participant n'a pas encore publié ses clés », ou `HORS_PERIMETRE`, ou
+       * `GROUPE_NON_SUPPORTE`. Trois raisons distinctes, trois gestes
+       * différents — et toutes les trois étaient aplaties en une phrase qui
+       * désignait le correspondant.
+       *
+       * ⚠️ LE CAS RÉEL RENCONTRÉ LE 27/09/2026 : c'était CE TÉLÉPHONE qui
+       * n'avait pas publié ses clés, pas le correspondant. Le message envoyait
+       * chercher exactement du mauvais côté.
+       */
+      /*
+       * 🔴 NOTRE PROPRE ÉCHEC PASSE AVANT CELUI DU SERVEUR.
+       *
+       * Quand la préparation de cet appareil a échoué au démarrage, le serveur
+       * répond « un participant n'a pas encore publié ses clés » — c'est exact,
+       * mais celui qui le lit comprend « mon correspondant », et va le relancer
+       * pour rien.
+       *
+       * ⚠️ LE PARTICIPANT SANS CLÉS, C'EST NOUS, et nous sommes les seuls à
+       * pouvoir le savoir : le serveur ne voit qu'une identité absente, pas la
+       * raison de son absence.
+       */
+      final echec = pile.echecDemarrage;
+      showAppSnackBar(
+        echec == null
+            ? messageDErreur(context, e)
+            : "Ce téléphone n'a pas pu préparer ses clés de chiffrement : "
+                "${messageDErreur(context, echec)}",
+      );
+    }
+  }
+
+  /// Demande le mot de passe du compte.
+  ///
+  /// ⚠️ ON DIT POURQUOI ON LE DEMANDE. Un mot de passe réclamé sans raison
+  /// apparente, au milieu d'un réglage, ressemble à un piège — et c'est
+  /// exactement ce qu'un vrai piège imiterait.
+  Future<String?> _demanderMotDePasse() {
+    final ctrl = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Activer le chiffrement'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Votre mot de passe protège la sauvegarde de vos messages '
+              'chiffrés. Sans elle, ils seraient perdus à la prochaine '
+              'déconnexion.',
+              style: TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: ctrl,
+              obscureText: true,
+              autofocus: true,
+              decoration:
+                  const InputDecoration(labelText: 'Mot de passe du compte'),
+              onSubmitted: (v) => Navigator.of(ctx).pop(v),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(ctrl.text),
+            child: const Text('Activer'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Montre les douze mots, une seule fois.
+  ///
+  /// ⚠️ ELLE N'EXISTE EN CLAIR QUE DANS CET INSTANT : ni le serveur ni nous ne
+  /// pouvons la redonner. L'écran le dit AVANT de la montrer — lu après,
+  /// l'avertissement arrive une fois les mots déjà recopiés à la va-vite.
+  Future<void> _montrerCleRecuperation(String cle) async {
+    final mots = cle.split(' ');
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Votre clé de récupération'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Notez-la maintenant. Elle ne sera plus jamais affichée, et nous '
+              'ne pouvons pas la retrouver. C’est le seul moyen de '
+              'retrouver vos messages sur un autre appareil.',
+              style: TextStyle(fontSize: 12.5),
+            ),
+            const SizedBox(height: 14),
+            // ⚠️ NUMÉROTÉS : douze mots se recopient dans le désordre plus
+            // souvent qu'on ne le croit, et l'erreur ne se découvre qu'au
+            // moment de s'en servir — des mois plus tard.
+            Wrap(
+              spacing: 10,
+              runSpacing: 6,
+              children: [
+                for (var i = 0; i < mots.length; i++)
+                  Text('${i + 1}. ${mots[i]}',
+                      style: const TextStyle(
+                          fontFamily: 'monospace', fontSize: 13.5)),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Clipboard.setData(ClipboardData(text: cle)),
+            child: const Text('Copier'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Je l’ai notée'),
+          ),
+        ],
+      ),
+    );
+  }
+
+
+  // Partagée avec le bandeau « code de sécurité modifié » : voir
+  // `verification_cle.dart`.
+  Future<void> _ouvrirVerification() => ouvrirVerificationCle(context,
+      pairId: widget.userId, nomPair: widget.name);
 
   Widget _infoRow({
     required IconData icon,
@@ -553,7 +803,7 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
   Widget _sharedMediaCard() {
     final cs = Theme.of(context).colorScheme;
     final hasConv = widget.convId != null;
-    final recent = (_sharedMedia ?? const <Message>[]).take(8).toList();
+    final recent = (_sharedMedia ?? const <ConvMediaItem>[]).take(8).toList();
     return GlassCard(
       radius: 22,
       padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
@@ -573,7 +823,7 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  "Médias partagés",
+                  tr(context, 'shared_media'),
                   style: TextStyle(
                     fontWeight: FontWeight.w600,
                     fontSize: 15,
@@ -603,26 +853,41 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
                   itemCount: recent.length,
                   separatorBuilder: (_, __) => const SizedBox(width: 8),
                   itemBuilder: (_, i) {
-                    final m = recent[i];
-                    final media = m.media.first;
-                    final isVideo = m.type == "VIDEO";
-                    final url = '$_baseUrl${media.url}?token=$_token';
+                    final it = recent[i];
+                    final d = it.chiffre;
+                    // Toucher une vignette ouvre la galerie sur elle.
+                    void ouvrir() => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => MediaGalleryViewer(
+                                items: _sharedMedia!, initialIndex: i),
+                          ),
+                        );
                     return ClipRRect(
                       borderRadius: BorderRadius.circular(14),
                       child: SizedBox(
                         width: 76,
                         height: 76,
-                        child: isVideo
+                        child: d != null
+                            ? TuileMediaChiffre(
+                                descripteur: d,
+                                baseUrl: _baseUrl,
+                                token: _token,
+                                onOuvrir: ouvrir,
+                              )
+                            : GestureDetector(
+                        onTap: ouvrir,
+                        child: it.isVideo
                             ? const ColoredBox(
                                 color: Color(0xFF1A1A2E),
                                 child: Icon(Icons.play_circle_fill_rounded,
                                     color: Colors.white70, size: 30),
                               )
                             : CachedMedia(
-                                url: url,
+                                url: it.url,
                                 width: 76,
                                 height: 76,
                                 fit: BoxFit.cover),
+                        ),
                       ),
                     );
                   },
@@ -632,7 +897,7 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
           if (_sharedMedia != null && _sharedMedia!.isEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 10),
-              child: Text("Aucun média partagé",
+              child: Text(tr(context, 'no_shared_media'),
                   style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13)),
             ),
         ],
@@ -643,6 +908,61 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
   // ---------------------------------------------------------------------------
   // PARAMÈTRES
   // ---------------------------------------------------------------------------
+  /// LA LANGUE DU CORRESPONDANT — « auto » par défaut.
+  ///
+  /// 🔴 POURQUOI CE RÉGLAGE EXISTE (demande du user, 31/08/2026). La détection
+  /// automatique se trompe souvent : « merci » est français, portugais et
+  /// proche de l'italien, et un message de trois mots n'a pas de quoi trancher.
+  /// L'utilisateur, lui, SAIT dans quelle langue son interlocuteur écrit. Le
+  /// lui demander une fois vaut mieux que le deviner cent fois.
+  ///
+  /// ⚠️ « AUTO » N'EST PAS UNE LANGUE : c'est l'absence de consigne, et donc le
+  /// mécanisme actuel — détection, puis mémoire de ce qu'on a observé chez
+  /// cette personne. Le défaut ne s'écrit nulle part : ne rien stocker dit
+  /// déjà « devine ».
+  ///
+  /// Une langue fixée PRIME sur tout, et l'observation cesse de la corriger
+  /// (voir `core/memoire_langues.dart`).
+  Widget _ligneLangue(ColorScheme cs) {
+    return Material(
+      type: MaterialType.transparency,
+      child: ListTile(
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+        leading: Icon(Icons.translate_rounded, color: accentOf(context)),
+        title: Text(
+          tr(context, 'ci_language_of', {'nom': widget.name}),
+          style: TextStyle(
+              fontSize: 15, fontWeight: FontWeight.w500, color: cs.onSurface),
+        ),
+        subtitle: Text(
+          _langueFixee == null
+              ? tr(context, 'lang_auto')
+              : nomAutonyme(_langueFixee!),
+          style: TextStyle(fontSize: 12.5, color: cs.onSurfaceVariant),
+        ),
+        trailing: const Icon(Icons.chevron_right_rounded, size: 20),
+        onTap: _choisirLangue,
+      ),
+    );
+  }
+
+  Future<void> _choisirLangue() async {
+    // La liste, l'enregistrement et l'installation vivent dans
+    // `widgets/choix_langue_interlocuteur.dart` : le bandeau de la conversation
+    // ouvre exactement la même chose.
+    final choix = await choisirLangueInterlocuteur(
+      context,
+      userId: widget.userId,
+      nom: widget.name,
+    );
+    if (choix == null || !mounted) return;
+    setState(() => _langueFixee = choix.langue);
+    if (choix.langue != null) {
+      await installerCoupleSiNecessaire(context, choix.langue!);
+    }
+  }
+
   Widget _settingsCard() {
     final cs = Theme.of(context).colorScheme;
     return GlassCard(
@@ -660,20 +980,22 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
               color: accentOf(context),
             ),
             title: Text(
-              "Notifications",
+              tr(context, 'set_notifications'),
               style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w500,
                   color: cs.onSurface),
             ),
             subtitle: Text(
-              _muted ? "En sourdine" : "Activées",
+              _muted ? tr(context, 'ci_muted_state') : tr(context, 'ci_active_state'),
               style: TextStyle(fontSize: 12.5, color: cs.onSurfaceVariant),
             ),
             value: !_muted,
             activeColor: positiveOf(context),
             onChanged: (on) => _toggleMuted(!on),
           ),
+          _divider(),
+          _ligneLangue(cs),
           _divider(),
           Material(
             type: MaterialType.transparency,
@@ -686,8 +1008,8 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
               ),
               title: Text(
                 _isBlocked
-                    ? "Débloquer ${widget.name}"
-                    : "Bloquer ${widget.name}",
+                    ? tr(context, 'ci_unblock_name', {'nom': widget.name})
+                    : tr(context, 'ci_block_name', {'nom': widget.name}),
                 style: const TextStyle(
                     color: AlanyaColors.error,
                     fontWeight: FontWeight.w500,

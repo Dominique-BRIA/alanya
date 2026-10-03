@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../core/authed_api.dart';
 import '../theme/alanya_theme.dart';
+import '../l10n/app_localizations.dart';
 
 /// Modal d'évaluation de l'appel post-communication (Note sur 5 étoiles + Avis).
 class CallRatingSheet extends StatefulWidget {
@@ -48,8 +49,8 @@ class _CallRatingSheetState extends State<CallRatingSheet> {
       if (mounted) {
         Navigator.of(context).pop();
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Merci pour votre évaluation !"),
+          SnackBar(
+            content: Text(tr(context, 'rating_thanks')),
             backgroundColor: AlanyaColors.forest,
           ),
         );
@@ -59,7 +60,7 @@ class _CallRatingSheetState extends State<CallRatingSheet> {
         setState(() => _submitting = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text("Erreur d'envoi de la note: $e"),
+            content: Text(tr(context, 'rating_send_error', {'erreur': '$e'})),
             backgroundColor: Colors.red,
           ),
         );
@@ -90,13 +91,13 @@ class _CallRatingSheetState extends State<CallRatingSheet> {
           ),
           const SizedBox(height: 16),
 
-          const Text(
-            "Évaluez votre appel",
+          Text(
+            tr(context, 'rating_title'),
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
           ),
           const SizedBox(height: 6),
-          const Text(
-            "Comment s'est passée votre communication avec l'agent ?",
+          Text(
+            tr(context, 'rating_question'),
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 13, color: Colors.white70),
           ),
@@ -126,7 +127,7 @@ class _CallRatingSheetState extends State<CallRatingSheet> {
             maxLines: 3,
             style: const TextStyle(color: Colors.white, fontSize: 14),
             decoration: InputDecoration(
-              hintText: "Un commentaire ou une remarque ? (optionnel)",
+              hintText: tr(context, 'rating_hint'),
               hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
               filled: true,
               fillColor: const Color(0xFF2A3942),
@@ -145,7 +146,7 @@ class _CallRatingSheetState extends State<CallRatingSheet> {
               Expanded(
                 child: TextButton(
                   onPressed: _submitting ? null : () => Navigator.of(context).pop(),
-                  child: const Text("Passer", style: TextStyle(color: Colors.white60)),
+                  child: Text(tr(context, 'rating_skip'), style: const TextStyle(color: Colors.white60)),
                 ),
               ),
               const SizedBox(width: 12),
@@ -162,7 +163,7 @@ class _CallRatingSheetState extends State<CallRatingSheet> {
                           width: 20, height: 20,
                           child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                         )
-                      : const Text("Envoyer", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      : Text(tr(context, 'send'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                 ),
               ),
             ],

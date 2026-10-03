@@ -1,6 +1,30 @@
+import 'dart:async';
+
 import '../../core/authed_api.dart';
+import '../../core/message_cache.dart';
 import '../../models/conversation.dart';
 import '../../models/message.dart';
+import '../home/dernier_message_local.dart';
+
+/// Donne aux fils CHIFFRÉS leur dernier texte, lu dans le cache local.
+///
+/// ⚠️ À APPLIQUER À TOUTE LISTE DE CONVERSATIONS AFFICHÉE — celle du serveur
+/// comme celle du cache : le serveur rend `lastMessage: null` pour un fil
+/// chiffré (il n’a pas le texte). Voir `dernier_message_local.dart`.
+///
+/// ⚠️ NE LÈVE JAMAIS : sans cache lisible, la liste s’affiche comme avant.
+/// Trois secondes au plus, comme les autres lectures de `sqflite`.
+Future<List<Conversation>> avecDerniersTextesLocaux(List<Conversation> convs) async {
+  final chiffres = [for (final c in convs) if (c.e2eeActif) c.id];
+  if (chiffres.isEmpty) return convs;
+  try {
+    final locaux = await MessageCache.derniersTextes(chiffres)
+        .timeout(const Duration(seconds: 3));
+    return appliquerDerniersTextes(convs, locaux);
+  } catch (_) {
+    return convs;
+  }
+}
 
 class ChatRepository {
   ChatRepository(this._api);
@@ -8,9 +32,10 @@ class ChatRepository {
 
   Future<List<Conversation>> listConversations() async {
     final data = await _api.get("/api/conversations");
-    return ((data["conversations"] as List?) ?? [])
+    final convs = ((data["conversations"] as List?) ?? [])
         .map((c) => Conversation.fromJson(c as Map<String, dynamic>))
         .toList();
+    return avecDerniersTextesLocaux(convs);
   }
 
   /// Crée (ou récupère) une conversation directe avec un utilisateur via son numéro.
@@ -28,19 +53,52 @@ class ChatRepository {
     return data["id"] as String;
   }
 
-  Future<List<Message>> getMessages(String convId, {String? cursor}) async {
-    final path = "/api/conversations/$convId/messages${cursor != null ? "?cursor=$cursor" : ""}";
+  /// [limit] : taille de la page (50 par défaut côté serveur, 100 au plus).
+  Future<List<Message>> getMessages(String convId, {String? cursor, int? limit}) async {
+    final params = [
+      if (cursor != null) "cursor=$cursor",
+      if (limit != null) "limit=$limit",
+    ];
+    final path = "/api/conversations/$convId/messages${params.isEmpty ? "" : "?${params.join("&")}"}";
     final data = await _api.get(path);
     return ((data["messages"] as List?) ?? [])
         .map((m) => Message.fromJson(m as Map<String, dynamic>))
         .toList();
   }
 
-  Future<Message> sendText(String convId, String content, {String? replyToId}) async {
+  /// [mentions] : les comptes visés par un `@`, chacun `{userId, libelle}`.
+  ///
+  /// ⚠️ CE CHEMIN EST LE REPLI du WebSocket, et il doit se comporter comme lui :
+  /// une mention retenue en temps réel et perdue ici ferait dépendre la
+  /// notification de l'état du réseau au moment de l'envoi.
+  /// [statutCite] : l'identifiant du statut auquel ce message répond.
+  ///
+  /// ⚠️ SEUL L'IDENTIFIANT PART. L'aperçu (texte, image, couleur) est recopié
+  /// par le serveur après contrôle de visibilité — sans quoi n'importe quel
+  /// client pourrait fabriquer une citation d'un statut qu'il n'a jamais vu.
+  /// [tempId] : l'identifiant que la file d'envois donne à ce message.
+  ///
+  /// 🔴 SANS LUI, UN REJEU CRÉE UN DOUBLON. `OutboxStore` ne retire son entrée
+  /// qu'une fois la réponse reçue : si la coupure tombe APRÈS que le serveur a
+  /// écrit le message mais AVANT que la réponse n'arrive, l'envoi est compté
+  /// comme échoué et rejoué — le message part alors deux fois. Transmis, cet
+  /// identifiant permet au serveur de reconnaître le rejeu et de renvoyer le
+  /// message d'origine au lieu d'en écrire un second.
+  ///
+  /// ⚠️ Un serveur plus ancien l'ignore simplement : le champ est facultatif
+  /// des deux côtés, et son absence ramène au comportement d'avant.
+  Future<Message> sendText(String convId, String content,
+      {String? replyToId,
+      List<Map<String, String>>? mentions,
+      String? statutCite,
+      String? tempId}) async {
     final data = await _api.post("/api/conversations/$convId/messages", {
       "content": content,
       "type": "TEXT",
       if (replyToId != null) "replyToId": replyToId,
+      if (statutCite != null) "statutCite": statutCite,
+      if (mentions != null && mentions.isNotEmpty) "mentions": mentions,
+      if (tempId != null) "tempId": tempId,
     });
     return Message.fromJson(data);
   }
@@ -67,6 +125,23 @@ class ChatRepository {
   /// F8 : Épingler/désépingler une conversation.
   Future<void> pinConversation(String convId, bool pinned) async {
     await _api.patch("/api/conversations/$convId/pin", {"pinned": pinned});
+  }
+
+  /// Coupe ou rétablit les notifications de cette conversation, POUR MOI.
+  ///
+  /// ⚠️ ÊTRE EN SOURDINE, C'EST NE PAS ÊTRE DÉRANGÉ — pas cesser de recevoir.
+  /// Le serveur écarte le destinataire de la poussée ; les messages arrivent,
+  /// le compteur de non lus monte, le temps réel continue.
+  ///
+  /// Rend l'état RETENU PAR LE SERVEUR, et non celui qu'on espérait : c'est lui
+  /// que l'écran doit afficher. Même règle que le web, dont la fiche de
+  /// conversation basculait un état local sans rien envoyer nulle part.
+  Future<bool> definirSourdine(String convId, bool sourdine) async {
+    final data = await _api.post(
+      "/api/conversations/$convId/sourdine",
+      {"sourdine": sourdine},
+    );
+    return (data["sourdine"] as bool?) ?? sourdine;
   }
 
   /// F9 : Archiver/désarchiver une conversation.
@@ -212,12 +287,48 @@ class ChatRepository {
     return Message.fromJson(data);
   }
 
-  Future<Message> sendMultiMedia(String convId, List<String> mediaIds, String msgType, {String? replyToId, String? content}) async {
+  /// [mentions] : les `@` de la légende — même règle que pour un texte.
+  Future<Message> sendMultiMedia(String convId, List<String> mediaIds, String msgType,
+      {String? replyToId,
+      String? content,
+      List<Map<String, String>>? mentions,
+      bool vueUnique = false}) async {
     final data = await _api.post("/api/conversations/$convId/messages", {
       "type": msgType, "mediaIds": mediaIds,
+      if (vueUnique) "vueUnique": true,
       if (content != null && content.isNotEmpty) "content": content,
       if (replyToId != null) "replyToId": replyToId,
+      if (mentions != null && mentions.isNotEmpty) "mentions": mentions,
     });
     return Message.fromJson(data as Map<String, dynamic>);
   }
+
+  /// Ouvre un message à vue unique : le serveur écrit l'ouverture et rend le
+  /// média, servi pendant [ResultatOuvertureVueUnique.fenetre].
+  ///
+  /// Lève [ApiException] : 403 EXPEDITEUR, 410 DEJA_OUVERTE ou EFFACEE.
+  Future<ResultatOuvertureVueUnique> ouvrirVueUnique(String messageId) async {
+    final data = await _api.post("/api/messages/$messageId/vue-unique", {});
+    return ResultatOuvertureVueUnique(
+      media: ((data["media"] as List?) ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(MessageMedia.fromJson)
+          .toList(),
+      fenetre: Duration(seconds: (data["fenetreSecondes"] as num?)?.toInt() ?? 300),
+    );
+  }
+
+  /// Le visionneur est refermé : le serveur clôt l'accès et efface le fichier
+  /// si tous ont vu. Ne lève jamais — la purge du serveur rattrape un échec.
+  Future<void> fermerVueUnique(String messageId) async {
+    try {
+      await _api.post("/api/messages/$messageId/vue-unique/fermer", {});
+    } catch (_) {}
+  }
+}
+
+class ResultatOuvertureVueUnique {
+  const ResultatOuvertureVueUnique({required this.media, required this.fenetre});
+  final List<MessageMedia> media;
+  final Duration fenetre;
 }

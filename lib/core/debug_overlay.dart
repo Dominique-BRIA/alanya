@@ -17,6 +17,17 @@ import 'package:flutter/material.dart';
 /// ⚠️ Les traces elles-mêmes RESTENT en place, et c'est délibéré : `traceAppel`
 /// continue d'écrire dans le journal système, où elle ne coûte rien et où `adb
 /// logcat` la retrouvera. Seul l'affichage est coupé.
+/// ✅ REPASSÉ À `false` LE 24/08/2026 : troisième allumage, et cette fois il n'y
+/// avait rien à corriger. Le chip vert était bel et bien posé — les traces
+/// `CHIP start() / startForegroundService() OK / CHIP POSÉ` l'ont montré, et
+/// les deux notifications d'appel aux chronomètres décalés l'ont confirmé.
+/// L'outil a donc servi à PROUVER qu'un comportement fonctionnait, pas à
+/// trouver un défaut : c'est le même service rendu.
+///
+/// ⚠️ Le chemin de diagnostic reste en place et ne coûte rien tant que ce
+/// drapeau est faux : `OngoingCallChip.journalise` écrit dans le journal
+/// système et dans les préférences, `verserTracesChip()` les draine.
+/// Rallumer ce drapeau suffit à revoir les étapes du chip sans câble.
 const bool tracesAppelsVisibles = false;
 
 /// Trace de négociation d'appel : journal système ET overlay à l'écran.

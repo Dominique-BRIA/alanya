@@ -1,0 +1,503 @@
+// LA RELÈVE DU MOBILE, ÉPROUVÉE SUR LE VRAI CODE — sans APK et sans réseau.
+//
+// 🔴 CE QUE CE TEST FAIT TOURNER : `CoffreE2ee`, `E2eeService` et `E2eeFil`
+// tels qu'ils partent dans l'application, avec la vraie bibliothèque Signal.
+// Seuls deux éléments sont simulés : le stockage sécurisé (en mémoire) et le
+// serveur (une table d'enveloppes qui suit les routes de `backend-alanya`).
+//
+// ⚠️ CE QU'IL NE PROUVE PAS : l'écran. Il éprouve le protocole et l'ordre des
+// opérations, là où les défauts de relève se cachaient.
+//
+// Trois défauts, un groupe chacun :
+//   ① deux relèves simultanées déchiffraient deux fois le même message ;
+//   ② une enveloppe illisible revenait à chaque relève et détruisait la
+//     session réparée entre-temps ;
+//   ③ le texte devait être rangé AVANT l'acquittement, fil par fil.
+
+import 'package:alanya/services/e2ee/e2ee_coffre.dart';
+import 'package:alanya/services/e2ee/e2ee_fil.dart';
+import 'package:alanya/services/e2ee/e2ee_service.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+/// Le serveur, réduit aux routes du chiffrement.
+class FauxServeur {
+  /// compte → appareil → paquet publié.
+  final cles = <String, Map<int, Map<String, dynamic>>>{};
+  final enveloppes = <Map<String, dynamic>>[];
+
+  /// Pré-clés uniques consommées, par compte — ce que le lot 3 doit économiser.
+  final consommees = <String, int>{};
+
+  /// Les acquittements, dans l'ordre — pour vérifier QUAND ils arrivent.
+  final journal = <String>[];
+  var _suivant = 0;
+
+  String _id() => 'id${_suivant++}';
+
+  /// L'API telle que la voit UN compte.
+  Future<Map<String, dynamic>> Function(String, String, Map<String, dynamic>?)
+      pour(String moi) {
+    return (methode, chemin, corps) async {
+      // ⚠️ UN VRAI TOUR DE BOUCLE, comme un aller-retour réseau : sans lui,
+      // deux relèves lancées ensemble ne s'entrelaceraient jamais.
+      await Future<void>.delayed(Duration.zero);
+      final uri = Uri.parse(chemin);
+      final p = uri.path;
+
+      if (methode == 'PUT' && p == '/api/e2ee/cles') {
+        final c = corps!;
+        final existant = cles.putIfAbsent(moi, () => {})[c['deviceId'] as int];
+        final stock = <Map<String, dynamic>>[
+          ...?(existant?['prekeys'] as List<Map<String, dynamic>>?),
+          ...(c['prekeys'] as List).cast<Map<String, dynamic>>(),
+        ];
+        cles[moi]![c['deviceId'] as int] = {...c, 'prekeys': stock};
+        return {'prekeysRestantes': stock.length};
+      }
+      if (methode == 'DELETE' && p == '/api/e2ee/cles') {
+        cles[moi]?.remove(int.parse(uri.queryParameters['deviceId']!));
+        return {};
+      }
+      if (methode == 'GET' && p == '/api/e2ee/cles') {
+        return {
+          'appareils': [
+            for (final e in (cles[moi] ?? {}).entries)
+              {
+                'deviceId': e.key,
+                'reapproNecessaire': (e.value['prekeys'] as List).length < 10,
+              },
+          ],
+        };
+      }
+      if (methode == 'GET' && p.startsWith('/api/e2ee/cles/')) {
+        final pair = p.substring('/api/e2ee/cles/'.length);
+        // Mêmes paramètres que la route réelle depuis le lot 3 : `liste=1`
+        // ne consomme rien, `deviceIds` restreint la consommation.
+        if (uri.queryParameters['liste'] == '1') {
+          return {
+            'appareils': [
+              for (final e in (cles[pair] ?? {}).entries)
+                {'deviceId': e.key, 'cleIdentite': e.value['cleIdentite']},
+            ],
+          };
+        }
+        final seulement = uri.queryParameters['deviceIds']
+            ?.split(',')
+            .map(int.parse)
+            .toSet();
+        return {
+          'paquets': [
+            for (final e in (cles[pair] ?? {}).entries)
+              if (seulement == null || seulement.contains(e.key))
+              () {
+                final stock = e.value['prekeys'] as List<Map<String, dynamic>>;
+                final unique = stock.isEmpty ? null : stock.removeAt(0);
+                if (unique != null) consommees[pair] = (consommees[pair] ?? 0) + 1;
+                final s = e.value['prekeySignee'] as Map<String, dynamic>;
+                return {
+                  'deviceId': e.key,
+                  'registrationId': e.value['registrationId'],
+                  'cleIdentite': e.value['cleIdentite'],
+                  'prekeySignee': {
+                    'prekeyId': s['id'],
+                    'clePublique': s['clePublique'],
+                    'signature': s['signature'],
+                  },
+                  'prekeyUnique': unique == null
+                      ? null
+                      : {'prekeyId': unique['id'], 'clePublique': unique['clePublique']},
+                };
+              }(),
+          ],
+        };
+      }
+      if (methode == 'POST' && p.endsWith('/messages')) {
+        return {'id': _id(), 'createdAt': DateTime.now().toIso8601String()};
+      }
+      if (methode == 'POST' && p == '/api/e2ee/enveloppes') {
+        for (final e in (corps!['enveloppes'] as List).cast<Map<String, dynamic>>()) {
+          depose(
+            convId: corps['convId'] as String,
+            expediteurId: moi,
+            expediteurDevice: corps['deviceId'] as int,
+            destinataireId: e['destinataireId'] as String,
+            destinataireDevice: e['destinataireDevice'] as int,
+            type: e['type'] as int,
+            corps: e['corps'] as String,
+            messageId: corps['messageId'] as String?,
+          );
+        }
+        return {'deposees': 1};
+      }
+      if (methode == 'GET' && p == '/api/e2ee/enveloppes') {
+        final device = int.parse(uri.queryParameters['deviceId']!);
+        return {
+          'enveloppes': [
+            for (final e in enveloppes)
+              if (e['destinataireId'] == moi &&
+                  e['destinataireDevice'] == device &&
+                  e['remis'] != true)
+                Map<String, dynamic>.of(e),
+          ],
+        };
+      }
+      if (methode == 'DELETE' && p == '/api/e2ee/enveloppes') {
+        final ids = uri.queryParameters['ids']!.split(',');
+        for (final e in enveloppes) {
+          if (ids.contains(e['id']) && e['destinataireId'] == moi) e['remis'] = true;
+        }
+        journal.add('acquitte:${ids.join(",")}');
+        return {'acquittees': ids.length};
+      }
+      throw StateError('Route inconnue du faux serveur : $methode $chemin');
+    };
+  }
+
+  void depose({
+    required String convId,
+    required String expediteurId,
+    required int expediteurDevice,
+    required String destinataireId,
+    required int destinataireDevice,
+    required int type,
+    required String corps,
+    String? messageId,
+  }) {
+    enveloppes.add({
+      'id': _id(),
+      'convId': convId,
+      'expediteurId': expediteurId,
+      'expediteurDevice': expediteurDevice,
+      'destinataireId': destinataireId,
+      'destinataireDevice': destinataireDevice,
+      'type': type,
+      'corps': corps,
+      'messageId': messageId ?? _id(),
+      'createdAt': DateTime.now().toIso8601String(),
+    });
+  }
+
+  int enAttentePour(String compte) => enveloppes
+      .where((e) => e['destinataireId'] == compte && e['remis'] != true)
+      .length;
+}
+
+/// Un client complet : coffre, service et fil, comme dans `PileE2ee.pour`.
+class Client {
+  /// [stockage] : un second appareil du MÊME compte a son propre coffre.
+  Client(this.compte, FauxServeur serveur, {String? stockage})
+      : coffre = CoffreE2ee(stockage ?? compte) {
+    final api = serveur.pour(compte);
+    service = E2eeService(coffre, api);
+    fil = E2eeFil(service, api, coffre.deviceId, monCompte: compte);
+  }
+
+  final String compte;
+  final CoffreE2ee coffre;
+  late final E2eeService service;
+  late final E2eeFil fil;
+
+  Future<void> demarrer() async {
+    await coffre.preparer();
+    await service.publierMesCles(deviceId: await coffre.deviceId());
+  }
+}
+
+void main() {
+  late FauxServeur serveur;
+  late Client alice;
+  late Client bob;
+
+  setUp(() async {
+    FlutterSecureStorage.setMockInitialValues({});
+    serveur = FauxServeur();
+    alice = Client('alice', serveur);
+    bob = Client('bob', serveur);
+    await alice.demarrer();
+    await bob.demarrer();
+  });
+
+  group('① deux relèves lancées ensemble', () {
+    test('ne déchiffrent pas deux fois le même message', () async {
+      await alice.fil.envoyer(convId: 'fil-ab', pairId: 'bob', texte: 'un');
+
+      // L'ouverture du fil et la sonnette `e2ee_arrivee`, presque ensemble.
+      final r = await Future.wait([bob.fil.relever(), bob.fil.relever()]);
+
+      final lus = [for (final x in r) ...x.messages.map((m) => m.texte)];
+      expect(lus, ['un'], reason: 'le message doit être lu UNE fois');
+      expect(r.fold<int>(0, (n, x) => n + x.illisibles), 0,
+          reason: 'la seconde relève a pris le message déjà ouvert pour un illisible');
+    });
+
+    test('et la session survit : le message suivant se lit', () async {
+      await alice.fil.envoyer(convId: 'fil-ab', pairId: 'bob', texte: 'un');
+      await Future.wait([bob.fil.relever(), bob.fil.relever()]);
+
+      await alice.fil.envoyer(convId: 'fil-ab', pairId: 'bob', texte: 'deux');
+      final r = await bob.fil.relever();
+
+      expect(r.messages.map((m) => m.texte), ['deux'],
+          reason: 'la relève concurrente a effacé la session de Bob');
+      expect(r.illisibles, 0);
+    });
+  });
+
+  group('② une enveloppe illisible', () {
+    test('est acquittée, et ne revient pas détruire la session réparée', () async {
+      await alice.fil.envoyer(convId: 'fil-ab', pairId: 'bob', texte: 'un');
+      expect((await bob.fil.relever()).messages.single.texte, 'un');
+
+      // Une enveloppe que rien ne peut ouvrir, venue de l'appareil d'Alice.
+      serveur.depose(
+        convId: 'fil-ab',
+        expediteurId: 'alice',
+        expediteurDevice: await alice.coffre.deviceId(),
+        destinataireId: 'bob',
+        destinataireDevice: await bob.coffre.deviceId(),
+        type: 1,
+        corps: 'AAAA',
+      );
+      expect((await bob.fil.relever()).illisibles, 1);
+      expect(serveur.enAttentePour('bob'), 0,
+          reason: "l'illisible reste en tête de file et sera retentée à chaque relève");
+
+      // La réparation prévue : Bob écrit, Alice adopte la nouvelle session.
+      await bob.fil.envoyer(convId: 'fil-ab', pairId: 'alice', texte: 'réparons');
+      expect((await alice.fil.relever()).messages.single.texte, 'réparons');
+
+      await alice.fil.envoyer(convId: 'fil-ab', pairId: 'bob', texte: 'trois');
+      final r = await bob.fil.relever();
+      expect(r.messages.map((m) => m.texte), ['trois'],
+          reason: "l'illisible, relue, a de nouveau effacé la session réparée");
+      expect(r.illisibles, 0);
+    });
+  });
+
+  group('④ une session sert plus d’un message', () {
+    // 🐛 Chaque envoi redemandait le paquet de clés du correspondant, ce qui
+    // CONSOMME une de ses pré-clés — même quand la session existait déjà.
+    test('trois envois ne consomment qu’UNE pré-clé du correspondant', () async {
+      for (final t in ['un', 'deux', 'trois']) {
+        await alice.fil.envoyer(convId: 'fil-ab', pairId: 'bob', texte: t);
+      }
+      expect(serveur.consommees['bob'] ?? 0, 1,
+          reason: 'une pré-clé brûlée par message : le stock de Bob fond');
+      final r = await bob.fil.relever();
+      expect(r.messages.map((m) => m.texte), ['un', 'deux', 'trois']);
+    });
+
+    test('un appareil réinstallé (même numéro, clé neuve) lit le message suivant', () async {
+      await alice.fil.envoyer(convId: 'fil-ab', pairId: 'bob', texte: 'avant');
+      await bob.fil.relever();
+
+      // Bob réinstalle : son coffre est vidé, il GARDE son numéro d’appareil
+      // et publie une identité neuve. Alice, elle, a encore l’ancienne session.
+      final numero = await bob.coffre.deviceId();
+      const magasin = FlutterSecureStorage();
+      for (final k in (await magasin.readAll()).keys.where((k) => k.startsWith('e2ee/bob/')).toList()) {
+        await magasin.delete(key: k);
+      }
+      await magasin.write(key: 'e2ee/bob/deviceId', value: '$numero');
+      serveur.cles.remove('bob');
+      final neuf = Client('bob', serveur);
+      await neuf.demarrer();
+      expect(await neuf.coffre.deviceId(), numero);
+
+      await alice.fil.envoyer(convId: 'fil-ab', pairId: 'bob', texte: 'après');
+      expect((await neuf.fil.relever()).messages.map((m) => m.texte), ['après'],
+          reason: 'Alice a chiffré sur la session de l’ancienne identité');
+    });
+  });
+
+  group('⑤ les numéros de pré-clés', () {
+    // Tirés au sort, deux lots pouvaient se chevaucher : une clé privée était
+    // écrasée ici pendant que le serveur gardait l’ancienne clé publique.
+    test('deux publications : cent numéros neufs, croissants, aucun écarté', () async {
+      final device = await alice.coffre.deviceId();
+      List<int> numeros() => [
+            for (final p in serveur.cles['alice']![device]!['prekeys'] as List)
+              (p as Map<String, dynamic>)['id'] as int,
+          ];
+      final avant = numeros();
+      await alice.service.publierMesCles(deviceId: device);
+      await alice.service.publierMesCles(deviceId: device);
+      final neufs = numeros().where((n) => !avant.contains(n)).toList();
+      expect(neufs.length, 100);
+      expect(neufs.toSet().length, 100, reason: 'un numéro servi deux fois');
+      expect(neufs.reduce((a, b) => a < b ? a : b) > avant.reduce((a, b) => a > b ? a : b), isTrue);
+    });
+  });
+
+  group('⑥ mes autres appareils', () {
+    // 🐛 On ne chiffrait que pour le correspondant : un message écrit depuis
+    // le téléphone n’arrivait jamais sur le navigateur du même compte.
+    test('mon message arrive aussi sur mon second appareil', () async {
+      final alice2 = Client('alice', serveur, stockage: 'alice-2');
+      await alice2.demarrer();
+      expect(await alice2.coffre.deviceId(), isNot(await alice.coffre.deviceId()));
+
+      await alice.fil.envoyer(convId: 'fil-ab', pairId: 'bob', texte: 'pour tous');
+
+      expect((await bob.fil.relever()).messages.map((m) => m.texte), ['pour tous']);
+      final r = await alice2.fil.relever();
+      expect(r.messages.map((m) => m.texte), ['pour tous'],
+          reason: 'aucune enveloppe pour mon autre appareil');
+      expect(r.messages.single.expediteurId, 'alice');
+      // Et l’appareil émetteur ne s’est rien envoyé à lui-même.
+      expect((await alice.fil.relever()).messages, isEmpty);
+    });
+  });
+
+  group('⑦ un appareil de plus chez un correspondant', () {
+    // Un serveur qui AJOUTE un appareil à Bob (dont il détient la clé) ferait
+    // chiffrer Alice pour lui : cela doit se voir, comme un changement de clé.
+    test('le second appareil de Bob alerte Alice ; un premier contact, non', () async {
+      await alice.fil.envoyer(convId: 'fil-ab', pairId: 'bob', texte: 'un');
+      expect(await alice.coffre.cleAChange('bob'), isFalse,
+          reason: 'le premier appareil d’un contact n’a rien remplacé');
+
+      final bob2 = Client('bob', serveur, stockage: 'bob-2');
+      await bob2.demarrer();
+      await alice.fil.envoyer(convId: 'fil-ab', pairId: 'bob', texte: 'deux');
+      expect(await alice.coffre.cleAChange('bob'), isTrue,
+          reason: 'un appareil ajouté chez Bob est passé sans alerte');
+
+      final carole = Client('carole', serveur);
+      await carole.demarrer();
+      await alice.fil.envoyer(convId: 'fil-ac', pairId: 'carole', texte: 'salut');
+      expect(await alice.coffre.cleAChange('carole'), isFalse);
+    });
+  });
+
+  /*
+   * 🐛 LE SERVEUR ÉTAIT SEUL JUGE, ET SA RÉPONSE N'ÉTAIT GARDÉE QU'EN MÉMOIRE.
+   * Un serveur compromis qui répondait « non chiffré » faisait repartir le
+   * texte en clair ; et au redémarrage de l'application, l'écran repartait de
+   * « non chiffré » tant que le serveur n'avait pas répondu.
+   */
+  group('⑧ un fil vu chiffré le reste', () {
+    test('« non chiffré » après « chiffré » est ignoré', () async {
+      await alice.fil.chargerMemoire();
+      alice.fil.noteEtat('fil-ab', true);
+      alice.fil.noteEtat('fil-ab', false);
+      expect(alice.fil.estChiffree('fil-ab'), isTrue,
+          reason: 'le serveur a fait redescendre un fil chiffré');
+    });
+
+    test('la mémoire survit au redémarrage de l’application', () async {
+      await alice.fil.chargerMemoire();
+      alice.fil.noteEtat('fil-ab', true);
+      await Future<void>.delayed(Duration.zero);
+
+      final relance = Client('alice', serveur);
+      await relance.fil.chargerMemoire();
+      expect(relance.fil.estChiffree('fil-ab'), isTrue,
+          reason: 'après redémarrage, le fil repartait « non chiffré »');
+      expect(relance.fil.etatConnu('fil-ab'), isTrue);
+      expect(relance.fil.estChiffree('fil-inconnu'), isFalse);
+      expect(relance.fil.etatConnu('fil-inconnu'), isFalse,
+          reason: 'un fil jamais vu doit rester « inconnu », pas « clair »');
+    });
+
+    test('et la mémoire compte pour l’avertissement de déconnexion', () async {
+      await alice.fil.chargerMemoire();
+      alice.fil.noteEtat('fil-ab', true);
+      await Future<void>.delayed(Duration.zero);
+      final relance = Client('alice', serveur);
+      await relance.fil.chargerMemoire();
+      expect(relance.fil.conversationsChiffrees(), 1,
+          reason: 'après un démarrage à froid, rien ne signalait la perte');
+    });
+  });
+
+  /*
+   * 🐛 UN TÉLÉPHONE DISSOCIÉ PUIS RECONNECTÉ ÉTAIT MUET. La dissociation retire
+   * l'identité du serveur, mais le coffre gardait « publié » : au démarrage
+   * suivant, rien n'était republié, et le réapprovisionnement ne faisait rien
+   * pour un appareil absent de la liste. Les correspondants obtenaient
+   * « Aucun appareil chiffré ». Même chose après le balayage des trente jours.
+   */
+  group('⑨ un appareil que le serveur a oublié', () {
+    test('se republie au démarrage suivant, avec la MÊME identité', () async {
+      final id = await alice.coffre.deviceId();
+      final cleAvant = serveur.cles['alice']![id]!['cleIdentite'];
+      serveur.cles['alice']!.remove(id); // retirée côté serveur
+
+      final republie = await alice.service.reapprovisionnerSiNecessaire(deviceId: id);
+
+      expect(republie, isTrue, reason: 'un appareil absent du serveur restait muet');
+      expect(serveur.cles['alice']?[id]?['cleIdentite'], cleAvant,
+          reason: 'la republication ne doit pas changer l’identité');
+    });
+
+    test('quitter l’appareil retire l’identité du serveur ET vide le coffre', () async {
+      final id = await alice.coffre.deviceId();
+      await alice.fil.chargerMemoire();
+      alice.fil.noteEtat('fil-ab', true);
+      await Future<void>.delayed(Duration.zero);
+      await alice.coffre.noterPublie();
+
+      await alice.service.oublierCetAppareil();
+
+      expect(serveur.cles['alice']?[id], isNull, reason: 'identité restée servie');
+      expect(await alice.coffre.dejaPublie(), isFalse,
+          reason: 'le coffre disait encore « publié » : pas de republication');
+      expect(alice.coffre.identiteLocale(), throwsStateError,
+          reason: 'l’identité privée restait sur l’appareil');
+      expect(await alice.coffre.filsChiffres(), isEmpty);
+    });
+
+    test('témoin : un appareil connu et bien pourvu ne republie rien', () async {
+      final id = await alice.coffre.deviceId();
+      expect(await alice.service.reapprovisionnerSiNecessaire(deviceId: id), isFalse);
+    });
+  });
+
+  group('③ le rangement', () {
+    test('reçoit les messages de TOUS les fils, avant tout acquittement', () async {
+      final carole = Client('carole', serveur);
+      await carole.demarrer();
+
+      await alice.fil.envoyer(convId: 'fil-ab', pairId: 'bob', texte: 'Alice');
+      await carole.fil.envoyer(convId: 'fil-cb', pairId: 'bob', texte: 'Carole');
+
+      final ranges = <String, String>{};
+      var acquittementsAuRangement = -1;
+      await bob.fil.relever(ranger: (messages) async {
+        acquittementsAuRangement = serveur.journal.length;
+        for (final m in messages) {
+          ranges[m.convId] = m.texte;
+        }
+      });
+
+      expect(ranges, {'fil-ab': 'Alice', 'fil-cb': 'Carole'});
+      expect(acquittementsAuRangement, 0,
+          reason: 'le rangement doit passer AVANT l’acquittement');
+      expect(serveur.enAttentePour('bob'), 0);
+    });
+
+    /*
+     * 🐛 TOUT LE LOT ÉTAIT DÉCHIFFRÉ, PUIS RANGÉ D'UN COUP — jusqu'à deux cents
+     * messages. Android qui tue l'application entre les deux perdait tous les
+     * textes déjà ouverts : le cliquet avait avancé, et la relève suivante les
+     * prenait pour « déjà lus ». On ne peut pas tuer l'application au milieu
+     * d'une boucle à coup sûr ; on éprouve donc la propriété qui ferme la
+     * fenêtre : un rangement par message, jamais un lot.
+     */
+    test('est appelé pour CHAQUE message, dès son déchiffrement', () async {
+      for (final t in ['un', 'deux', 'trois']) {
+        await alice.fil.envoyer(convId: 'fil-ab', pairId: 'bob', texte: t);
+      }
+      final tailles = <int>[];
+      final r = await bob.fil.relever(ranger: (messages) async {
+        tailles.add(messages.length);
+      });
+
+      expect(r.messages.map((m) => m.texte), ['un', 'deux', 'trois']);
+      expect(tailles, [1, 1, 1],
+          reason: 'les textes attendaient la fin du lot pour être rangés');
+    });
+  });
+}

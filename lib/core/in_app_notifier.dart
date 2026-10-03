@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../theme/alanya_theme.dart';
 import '../widgets/avatar_circle.dart';
 import 'push_service.dart';
+import '../l10n/app_localizations.dart';
 
 /// Type de heads-up actuellement affiché.
 enum _Kind { none, message, call }
@@ -647,7 +648,7 @@ class _ReplyField extends StatelessWidget {
             ),
             decoration: InputDecoration(
               isDense: true,
-              hintText: "Réponse rapide…",
+              hintText: tr(context, 'quick_reply_hint'),
               hintStyle: TextStyle(
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
                 fontSize: 14,
@@ -756,8 +757,8 @@ class _CallCard extends StatelessWidget {
                               const SizedBox(width: 6),
                               Text(
                                 isVideo
-                                    ? "Appel vidéo entrant…"
-                                    : "Appel entrant…",
+                                    ? tr(context, 'incoming_video_call')
+                                    : tr(context, 'incoming_call'),
                                 style: TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w500,
@@ -789,7 +790,7 @@ class _CallCard extends StatelessWidget {
                     Expanded(
                       child: _CallActionButton(
                         icon: Icons.call_end_rounded,
-                        label: "Refuser",
+                        label: tr(context, 'decline'),
                         background: AlanyaColors.error,
                         onTap: onReject,
                       ),
@@ -800,7 +801,7 @@ class _CallCard extends StatelessWidget {
                         icon: isVideo
                             ? Icons.videocam_rounded
                             : Icons.call_rounded,
-                        label: "Répondre",
+                        label: tr(context, 'reply'),
                         background: AlanyaColors.forest,
                         onTap: onAccept,
                       ),

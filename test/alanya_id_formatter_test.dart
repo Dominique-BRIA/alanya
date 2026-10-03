@@ -11,8 +11,10 @@ void main() {
     test('4 chiffres : 2 par 2', () {
       expect(formatAlanyaId('1234'), '12 34');
     });
-    test('6 chiffres : 3 par 3', () {
-      expect(formatAlanyaId('123456'), '123 456');
+    test('6 chiffres : 2 par 2', () {
+      // Changé le 18/08/2026 à la demande du user : « 123 456 » devient
+      // « 12 34 56 », comme les longueurs 4 et 8.
+      expect(formatAlanyaId('123456'), '12 34 56');
     });
     test('8 chiffres : 2 par 2 — le seul cas émis par le serveur', () {
       expect(formatAlanyaId('67641599'), '67 64 15 99');

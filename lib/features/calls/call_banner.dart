@@ -7,6 +7,7 @@ import '../../core/push_service.dart';
 import '../../theme/alanya_theme.dart';
 import 'call_controller.dart';
 import 'screens/active_call_screen.dart';
+import '../../l10n/app_localizations.dart';
 
 /// Bandeau global « appel en cours » (style WhatsApp) affiché au-dessus de
 /// toutes les pages quand un appel est actif MAIS que l'écran plein-écran
@@ -64,13 +65,13 @@ class _CallBannerState extends State<CallBanner> {
     final elapsed = _elapsed(cc.connectedSince);
     final String label;
     if (elapsed.isNotEmpty) {
-      label = "Appel en cours · $elapsed";
+      label = tr(context, 'call_ongoing_elapsed', {'duree': elapsed});
     } else if (cc.activeRole == ActiveCallRole.outgoing) {
-      label = "Appel en cours d'établissement…";
+      label = tr(context, 'call_establishing');
     } else if (cc.incoming != null) {
-      label = "Appel entrant…";
+      label = tr(context, 'incoming_call');
     } else {
-      label = "Connexion…";
+      label = tr(context, 'connecting_dots');
     }
 
     return Positioned(
@@ -110,7 +111,7 @@ class _CallBannerState extends State<CallBanner> {
                           color: Colors.white, fontWeight: FontWeight.w600),
                     ),
                   ),
-                  const Text("Revenir", style: TextStyle(color: Colors.white70)),
+                  Text(tr(context, 'return_to_call'), style: const TextStyle(color: Colors.white70)),
                 ],
               ),
             ),

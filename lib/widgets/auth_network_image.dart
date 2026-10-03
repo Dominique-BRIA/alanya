@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'image_octets.dart';
 import 'media/cached_media.dart';
+import '../l10n/app_localizations.dart';
 
 /// Charge une image protégée par JWT (Bearer) puis l'affiche en mémoire.
 /// Évite d'exposer le token dans l'URL et gère mieux les erreurs 401.
@@ -16,6 +17,8 @@ class AuthNetworkImage extends StatefulWidget {
     this.height,
     this.fit = BoxFit.cover,
     this.borderRadius,
+    this.onCharge,
+    this.onEchec,
   });
 
   final String url;
@@ -24,6 +27,19 @@ class AuthNetworkImage extends StatefulWidget {
   final double? height;
   final BoxFit fit;
   final BorderRadius? borderRadius;
+
+  /// Appelé dès que l'image est affichable.
+  ///
+  /// Ajouté pour la visionneuse de statuts : sa barre de progression ne doit
+  /// pas courir pendant le téléchargement, sinon une photo lente est passée
+  /// avant d'être apparue. Le widget ne disait rien de son chargement, il n'y
+  /// avait donc rien à attendre.
+  final VoidCallback? onCharge;
+
+  /// Appelé quand l'image ne sera jamais affichable (jeton absent, refus du
+  /// serveur, octets illisibles). Sans lui, celui qui attend l'image
+  /// attendrait pour toujours.
+  final VoidCallback? onEchec;
 
   @override
   State<AuthNetworkImage> createState() => _AuthNetworkImageState();
@@ -91,6 +107,7 @@ class _AuthNetworkImageState extends State<AuthNetworkImage> {
     final token = widget.token;
     if (token == null || token.isEmpty) {
       if (mounted) setState(() => _error = true);
+      widget.onEchec?.call();
       return;
     }
     try {
@@ -102,11 +119,14 @@ class _AuthNetworkImageState extends State<AuthNetworkImage> {
           _bytes = bytes;
           _error = false;
         });
+        widget.onCharge?.call();
       } else {
         setState(() => _error = true);
+        widget.onEchec?.call();
       }
     } catch (_) {
       if (mounted) setState(() => _error = true);
+      widget.onEchec?.call();
     }
   }
 
@@ -116,7 +136,7 @@ class _AuthNetworkImageState extends State<AuthNetworkImage> {
       height: widget.height ?? 120,
       color: Colors.black12,
       alignment: Alignment.center,
-      child: const Text("Image indisponible", style: TextStyle(fontSize: 12)),
+      child: Text(tr(context, 'image_unavailable'), style: const TextStyle(fontSize: 12)),
     );
   }
 

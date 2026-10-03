@@ -10,19 +10,24 @@ import '../../../core/api_client.dart';
 import '../../../core/downloader.dart';
 import '../../../core/media_cache.dart';
 import '../../../core/media_helper.dart';
-import '../../../core/token_storage.dart';
+import '../../../services/e2ee/e2ee_media.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/media/cached_media.dart';
-import '../chat_repository.dart';
+import '../medias_partages.dart';
+import '../widgets/bulle_media_chiffre.dart';
 import 'media_gallery_viewer.dart';
 import 'pdf_viewer_screen.dart';
 
 class _MediaEntry {
   _MediaEntry(this.id, this.url, this.downloadUrl, this.filename, this.isVideo,
-      this.durationMs);
+      this.durationMs, {this.chiffre});
   final String id, url, downloadUrl, filename;
   final bool isVideo;
   final int? durationMs;
+
+  /// Un média CHIFFRÉ : sa clé et son aperçu, gardés sur ce téléphone. Il se
+  /// déchiffre dans sa propre tuile ; la galerie ordinaire lirait le chiffré.
+  final DescripteurMedia? chiffre;
 }
 
 class _LinkEntry {
@@ -63,6 +68,11 @@ class _SharedContentScreenState extends State<SharedContentScreen>
   final List<_LinkEntry> _links = [];
   final List<_DocEntry> _docs = [];
   final Map<String, Uint8List> _thumbCache = {};
+  String _baseUrl = '';
+  String? _token;
+
+  /// Les mêmes médias, prêts pour la galerie (voir `mediasGalerie`).
+  List<ConvMediaItem> _galerie = const [];
 
   static final _urlRe = RegExp(r'(https?:\/\/[^\s]+)', caseSensitive: false);
 
@@ -80,9 +90,17 @@ class _SharedContentScreenState extends State<SharedContentScreen>
 
   Future<void> _load() async {
     final baseUrl = context.read<ApiClient>().baseUrl;
-    final token = await context.read<TokenStorage>().accessToken;
     try {
-      final msgs = await context.read<ChatRepository>().getMessages(widget.convId);
+      // Toutes les pages, le jeton lu APRÈS, les clés des médias chiffrés :
+      // le chargement commun à la fiche contact et à cet écran.
+      final fil = await chargerFilPourMedias(context, widget.convId);
+      final msgs = fil.messages;
+      final token = fil.token;
+      _baseUrl = baseUrl;
+      _token = token;
+      _galerie = mediasGalerie(msgs,
+          baseUrl: baseUrl, token: token, chiffreDe: fil.chiffreDe);
+
       for (final m in msgs) {
         final content = m.content;
         if (content != null) {
@@ -90,7 +108,25 @@ class _SharedContentScreenState extends State<SharedContentScreen>
             _links.add(_LinkEntry(match.group(0)!, m.createdAt));
           }
         }
+        // Une vue unique ne figure pas dans les médias partagés : la galerie
+        // la montrerait en vignette, sans limite, et le serveur la refuse.
+        if (m.vueUnique) continue;
         for (final media in m.media) {
+          /*
+           * Chiffré : le serveur n'a qu'un fichier illisible. On l'affiche
+           * avec la clé gardée localement ; sans elle (enveloppe jamais reçue
+           * sur ce téléphone), il n'y a rien à montrer.
+           */
+          if (media.chiffre) {
+            final d = fil.chiffreDe(m);
+            if (d != null &&
+                (d.mime.startsWith('image/') || d.mime.startsWith('video/'))) {
+              _media.add(_MediaEntry(media.id, '', '', d.nom ?? '',
+                  d.mime.startsWith('video/'), d.dureeMs,
+                  chiffre: d));
+            }
+            continue;
+          }
           final t = MediaHelper.detectType(media.mimeType, media.filename);
           final disp = '$baseUrl${media.url}?token=$token';
           final dl = '$baseUrl${media.url}?download=1&token=$token';
@@ -148,6 +184,15 @@ class _SharedContentScreenState extends State<SharedContentScreen>
       itemCount: _media.length,
       itemBuilder: (_, i) {
         final it = _media[i];
+        final d = it.chiffre;
+        if (d != null) {
+          // La tuile déchiffre la sienne ; le toucher ouvre la galerie.
+          return TuileMediaChiffre(
+              descripteur: d,
+              baseUrl: _baseUrl,
+              token: _token,
+              onOuvrir: () => _openMediaAt(i));
+        }
         return GestureDetector(
           onTap: () => _openMediaAt(i),
           child: ColoredBox(
@@ -172,18 +217,14 @@ class _SharedContentScreenState extends State<SharedContentScreen>
     );
   }
 
+  /// Ouvre la galerie sur le média touché — en clair ou chiffré, on glisse
+  /// de l'un à l'autre.
   void _openMediaAt(int index) {
-    final items = _media
-        .map((e) => ConvMediaItem(
-              id: e.id,
-              url: e.url,
-              downloadUrl: e.downloadUrl,
-              filename: e.filename,
-              isVideo: e.isVideo,
-            ))
-        .toList();
+    final id = _media[index].chiffre?.id ?? _media[index].id;
+    final debut = _galerie.indexWhere((e) => e.id == id);
+    if (debut < 0) return;
     Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => MediaGalleryViewer(items: items, initialIndex: index),
+      builder: (_) => MediaGalleryViewer(items: _galerie, initialIndex: debut),
     ));
   }
 

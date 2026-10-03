@@ -7,6 +7,7 @@ import '../features/contacts/contacts_repository.dart';
 import '../models/contact.dart';
 import '../theme/alanya_theme.dart';
 import 'avatar_circle.dart';
+import '../l10n/app_localizations.dart';
 
 /// Bottom sheet pour sélectionner des contacts avec recherche
 /// et possibilité de saisir un numéro manuellement.
@@ -15,20 +16,20 @@ import 'avatar_circle.dart';
 class ContactPickerSheet extends StatefulWidget {
   const ContactPickerSheet({
     super.key,
-    this.title = "Sélectionner des contacts",
-    this.confirmLabel = "Valider",
+    this.title,
+    this.confirmLabel,
     this.excludeNumbers = const [],
   });
 
-  final String title;
-  final String confirmLabel;
+  final String? title;
+  final String? confirmLabel;
   final List<String> excludeNumbers; // numéros à exclure (déjà membres)
 
   /// Affiche le sélecteur et retourne la liste de numéros sélectionnés.
   static Future<List<String>?> show(
     BuildContext context, {
-    String title = "Sélectionner des contacts",
-    String confirmLabel = "Valider",
+    String? title,
+    String? confirmLabel,
     List<String> excludeNumbers = const [],
   }) {
     return showModalBottomSheet<List<String>>(
@@ -110,9 +111,12 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
     final number = stripAlanyaId(_manualCtrl.text);
     if (!estAlanyaIdValide(number)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            "Alanya ID invalide ($alanyaIdMinLength à $alanyaIdMaxLength chiffres)",
+            tr(context, 'alanya_id_invalid_range', {
+              'min': '$alanyaIdMinLength',
+              'max': '$alanyaIdMaxLength',
+            }),
           ),
         ),
       );
@@ -167,7 +171,7 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Row(
               children: [
-                Text(widget.title,
+                Text(widget.title ?? tr(context, 'picker_title'),
                     style: const TextStyle(
                         fontSize: 18, fontWeight: FontWeight.bold)),
                 const Spacer(),
@@ -175,17 +179,20 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
                   onPressed: _selectedNumbers.isEmpty
                       ? null
                       : () => Navigator.pop(context, _selectedNumbers.toList()),
-                  child: Text(
+                  child: Builder(builder: (ctx) {
+                    final libelleValider = widget.confirmLabel ?? tr(ctx, 'validate');
+                    return Text(
                     _selectedNumbers.isEmpty
-                        ? widget.confirmLabel
-                        : "${widget.confirmLabel} (${_selectedNumbers.length})",
+                        ? libelleValider
+                        : "$libelleValider (${_selectedNumbers.length})",
                     style: TextStyle(
                       color: _selectedNumbers.isEmpty
                           ? mutedOf(context, AlanyaColors.grey400)
                           : accentOf(context),
                       fontWeight: FontWeight.bold,
                     ),
-                  ),
+                    );
+                  }),
                 ),
               ],
             ),
@@ -201,7 +208,7 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
                   child: TextField(
                     onChanged: (v) => setState(() => _search = v.trim()),
                     decoration: InputDecoration(
-                      hintText: "Rechercher un contact…",
+                      hintText: tr(context, 'search_contact_dots'),
                       prefixIcon: Icon(Icons.search,
                           size: 20,
                           color: mutedOf(context, AlanyaColors.grey400)),
@@ -234,7 +241,7 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
                     _showManualInput ? Icons.keyboard_hide : Icons.dialpad,
                     color: accentOf(context),
                   ),
-                  tooltip: "Saisir un Alanya ID",
+                  tooltip: tr(context, 'picker_enter_id'),
                 ),
               ],
             ),
@@ -252,7 +259,7 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
                       keyboardType: TextInputType.number,
                       inputFormatters: const [AlanyaIdInputFormatter()],
                       decoration: InputDecoration(
-                        hintText: "Alanya ID (ex : 67 64 15 99)",
+                        hintText: tr(context, 'picker_id_hint'),
                         contentPadding: const EdgeInsets.symmetric(
                             horizontal: 16, vertical: 10),
                         isDense: true,
@@ -320,15 +327,15 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
                     child: CircularProgressIndicator(color: accentOf(context)))
                 : _error
                     ? Center(
-                        child: Text("Erreur de chargement",
+                        child: Text(tr(context, 'load_error_short'),
                             style: TextStyle(
                                 color: mutedOf(context, AlanyaColors.grey500))))
                     : filtered.isEmpty
                         ? Center(
                             child: Text(
                                 _search.isEmpty
-                                    ? "Aucun contact"
-                                    : "Aucun résultat",
+                                    ? tr(context, 'no_contacts')
+                                    : tr(context, 'no_results'),
                                 style: TextStyle(
                                     color: mutedOf(
                                         context, AlanyaColors.grey400))))

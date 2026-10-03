@@ -13,6 +13,9 @@ import '../../../widgets/contact_picker_sheet.dart';
 import '../../auth/auth_controller.dart';
 import '../meeting_controller.dart';
 import '../meetings_repository.dart';
+import '../widgets/tuile_demande.dart';
+import '../../../models/meeting.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Écran de réunion active — style Google Meet.
 ///
@@ -51,10 +54,42 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   bool _joining = true;
   bool _joinAsAudio = false;
   StreamSubscription<MeetingAlerte>? _alertesSub;
+  StreamSubscription<MeetingCoupure>? _coupuresSub;
+  StreamSubscription<MeetingRefus>? _refusSub;
+  StreamSubscription<void>? _exclusionSub;
+
+  /// Le contrôleur, retenu dès que les dépendances sont prêtes.
+  ///
+  /// ⚠️ RETENU PLUTÔT QUE RELU DANS `dispose`. Un `context.read` au démontage
+  /// dépend d'un élément qu'on est justement en train de retirer de l'arbre :
+  /// c'est le dernier endroit où l'on veut apprendre que le contexte n'est plus
+  /// utilisable, puisque c'est là qu'on rend sa place au bandeau global. L'écran
+  /// d'appel retient déjà le sien de la même façon (`_calls`).
+  MeetingController? _mc;
+
+  /// Ce que CET écran pèse dans le compteur `_roomScreensOpen` : 0 ou 1.
+  bool _compteDansLeCompteur = false;
+
+  /// Fait que cet écran pèse exactement [visible] dans le compteur. Idempotent
+  /// dans les deux sens : le retour système et `dispose` peuvent tous deux
+  /// demander le retrait sans se marcher dessus.
+  void _signaleSalleVisible(bool visible) {
+    if (visible == _compteDansLeCompteur) return;
+    final mc = _mc;
+    if (mc == null) return;
+    _compteDansLeCompteur = visible;
+    mc.setRoomVisible(visible);
+  }
 
   @override
   void initState() {
     super.initState();
+    // La salle est affichée → le bandeau global s'efface. UNE SEULE FOIS, à
+    // l'entrée : le post-frame attend que `didChangeDependencies` ait retenu le
+    // contrôleur, et rien d'autre ne rearmera ce compteur.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _signaleSalleVisible(true);
+    });
     _join();
   }
 
@@ -83,17 +118,17 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         final retry = await showDialog<bool>(
           context: context,
           builder: (ctx) => AlertDialog(
-            title: const Text("Caméra indisponible"),
-            content: const Text(
-                "La caméra n'a pas pu être activée. Rejoindre la réunion en audio ?"),
+            title: Text(tr(ctx, 'meet_camera_unavailable')),
+            content: Text(
+                tr(ctx, 'meet_camera_failed_body')),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx, false),
-                child: const Text("Annuler"),
+                child: Text(tr(ctx, 'cancel')),
               ),
               TextButton(
                 onPressed: () => Navigator.pop(ctx, true),
-                child: const Text("Rejoindre en audio"),
+                child: Text(tr(ctx, 'meet_join_audio')),
               ),
             ],
           ),
@@ -107,8 +142,8 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
               content: Text(wantVideo
-                  ? "Impossible de rejoindre la réunion."
-                  : "Impossible de rejoindre la réunion en audio.")),
+                  ? tr(context, 'meet_join_failed')
+                  : tr(context, 'meet_join_audio_failed'))),
         );
         Navigator.of(context).maybePop();
       }
@@ -118,13 +153,122 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // La salle est affichée → masque le bandeau global. Posé en post-frame car
-    // il peut être appelé plusieurs fois au fil des dépendances.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) context.read<MeetingController>().setRoomVisible(true);
-    });
+    _mc ??= context.read<MeetingController>();
+
+    /* 🔴 LE COMPTEUR NE SE TOUCHE PLUS ICI, ET C'EST TOUT LE CORRECTIF.
+     *
+     * Ce corps-ci programmait un post-frame qui appelait
+     * `_signaleSalleVisible(true)`. Or `didChangeDependencies` est rejoué à
+     * CHAQUE `notifyListeners()` du contrôleur, et l'écran en dépend — mais
+     * SEULEMENT EN VIDÉO : `_localVideo`, `_remoteVideoSingle` et
+     * `_remoteVideoTile` appellent `context.watch<MeetingController>()` sur le
+     * contexte de l'écran, là où la grille audio reçoit `ctrl` en paramètre et
+     * passe par un `ListenableBuilder` qui n'inscrit rien.
+     *
+     * D'où un bandeau vert qui ne revenait QUE pour les réunions audio :
+     *   1. on réduit → `onPopInvokedWithResult` désarme le drapeau, compteur 0 ;
+     *   2. la salle vit encore le temps de l'animation de sortie, et en vidéo
+     *      `_onMeshUpdated` notifie sans arrêt → `didChangeDependencies` →
+     *      post-frame → `_signaleSalleVisible(true)` → compteur 1 ;
+     *   3. le bandeau, qui s'affiche sur `isActive && !roomVisible`, se
+     *      referme aussitôt.
+     * En audio, rien ne notifie pendant ces quelques centaines de millisecondes,
+     * la marche 2 n'existe pas, et le bandeau reste.
+     *
+     * ⚠️ NE PAS « RÉPARER » ÇA EN AJOUTANT UNE GARDE DE PLUS. Le drapeau
+     * `_compteDansLeCompteur` en était déjà une, et elle ne suffit pas : le
+     * retour la remet à faux, ce qui rouvre la porte au post-frame suivant. La
+     * seule forme correcte est celle-ci — on arme UNE fois à l'entrée, on
+     * désarme à la sortie, et la mise à jour des dépendances n'a pas voix au
+     * chapitre.
+     */
+
     // Une seule souscription, même si les dépendances changent plusieurs fois.
     _alertesSub ??= context.read<MeetingController>().alertes.listen(_onAlerte);
+    _coupuresSub ??=
+        context.read<MeetingController>().coupures.listen(_onCoupure);
+    _refusSub ??= context.read<MeetingController>().refus.listen(_onRefus);
+    _exclusionSub ??=
+        context.read<MeetingController>().exclusions.listen((_) => _onExclu());
+  }
+
+  /// L'organisateur m'a exclu : la salle se referme, et on dit pourquoi.
+  ///
+  /// ⚠️ LE MESSAGE PART APRÈS LA FERMETURE, pas avant. Affiché d'abord, il
+  /// disparaîtrait avec l'écran qu'on quitte dans la même image ; posé après, il
+  /// s'affiche sur la liste des réunions, où l'exclu se retrouve.
+  ///
+  /// Le contrôleur a déjà démonté la maille et arrêté le service de premier
+  /// plan — il n'y a plus rien à couper ici.
+  void _onExclu() {
+    if (!mounted) return;
+    Navigator.of(context).maybePop();
+    showAppSnackBar(tr(context, 'meet_removed'));
+  }
+
+  /// Le serveur a refusé l'entrée — salle pleine, le plus souvent.
+  ///
+  /// 🔴 SANS CET ÉCRAN-CI, IL NE SE PASSAIT RIEN. `ctrl.join()` rend la main dès
+  /// que le `meeting_join` est parti, sans attendre la réponse : `_joining`
+  /// retombait à `false`, la grille s'affichait avec notre seule vignette, et on
+  /// attendait indéfiniment des participants qui ne viendraient jamais — filmé,
+  /// micro ouvert, dans une salle où l'on n'était jamais entré.
+  ///
+  /// UN DIALOGUE ET NON UN BANDEAU, contrairement aux coupures de micro. Un
+  /// bandeau s'efface au bout de cinq secondes et laisse l'écran en place ; ici
+  /// il n'y a plus rien derrière, la salle est déjà démontée. L'échec est
+  /// bloquant, il se ferme d'un geste — c'est déjà ce que fait « Caméra
+  /// indisponible » au-dessus.
+  ///
+  /// Un seul bouton : il n'y a rien à réessayer tant qu'une place ne s'est pas
+  /// libérée, et un bouton « Réessayer » qui rejouerait le même refus ne serait
+  /// qu'une promesse en l'air.
+  Future<void> _onRefus(MeetingRefus refus) async {
+    if (!mounted) return;
+    // Le voile « Connexion en cours… » n'a plus lieu d'être : plus rien ne se
+    // connecte. Il resterait sinon derrière le dialogue, à promettre une entrée
+    // qui vient d'être refusée.
+    setState(() => _joining = false);
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(refus.titre),
+        content: Text(refus.texte),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(tr(ctx, 'close')),
+          ),
+        ],
+      ),
+    );
+    // On quitte la salle une fois le message lu, et pas avant : refermer
+    // l'écran d'abord ferait disparaître le dialogue avec lui.
+    if (mounted) Navigator.of(context).maybePop();
+  }
+
+  /// L'organisateur vient de couper mon micro ou ma caméra : on le DIT.
+  ///
+  /// La piste est déjà éteinte quand ce bandeau s'affiche — le contrôleur a
+  /// obéi avant de prévenir. Il ne reste ici qu'à expliquer, faute de quoi un
+  /// micro qui s'éteint seul passe pour une panne de l'application.
+  ///
+  /// Aucun bouton pour se rallumer : celui des contrôles est juste en dessous et
+  /// n'a pas été verrouillé. En proposer un second ferait croire à une faveur
+  /// que l'on accorde, alors que le droit n'a jamais été retiré.
+  void _onCoupure(MeetingCoupure c) {
+    if (!mounted) return;
+    final par = c.parNom ?? tr(context, 'meet_the_organizer');
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(c.estAudio
+            ? tr(context, 'meet_mic_muted_by', {'par': par})
+            : tr(context, 'meet_cam_off_by', {'par': par})),
+        duration: const Duration(seconds: 5),
+      ),
+    );
   }
 
   /// Réagit au franchissement d'un seuil de la durée prévue : une tonalité et un
@@ -135,8 +279,8 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     final ctrl = context.read<MeetingController>();
     final organisateur = ctrl.jeSuisOrganisateur;
     final texte = a == MeetingAlerte.finProche
-        ? "Il reste 2 minutes sur la durée prévue."
-        : "La durée prévue de la réunion est atteinte.";
+        ? tr(context, 'meet_2min_left')
+        : tr(context, 'meet_time_reached');
     final messenger = ScaffoldMessenger.of(context);
     // Le bandeau précédent n'a plus lieu d'être : « il reste 2 minutes » devient
     // faux à l'instant où le terme est atteint.
@@ -149,7 +293,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
             a == MeetingAlerte.depassement ? AlanyaColors.terracotta : null,
         action: organisateur
             ? SnackBarAction(
-                label: "Prolonger",
+                label: tr(context, 'meet_extend'),
                 textColor: Colors.white,
                 onPressed: () {
                   ctrl.prolonger();
@@ -158,7 +302,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                 },
               )
             : SnackBarAction(
-                label: "Ignorer",
+                label: tr(context, 'meet_ignore'),
                 textColor: Colors.white,
                 onPressed: messenger.hideCurrentSnackBar,
               ),
@@ -179,8 +323,8 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
 
     final numeros = await ContactPickerSheet.show(
       context,
-      title: "Ajouter à la réunion",
-      confirmLabel: "Ajouter",
+      title: tr(context, 'meet_add_to'),
+      confirmLabel: tr(context, 'meet_add_btn'),
     );
     if (numeros == null || numeros.isEmpty || !mounted) return;
 
@@ -191,10 +335,10 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       if (!mounted) return;
       showAppSnackBar(
         ajoutes == 0
-            ? "Ces contacts sont déjà dans la réunion"
+            ? tr(context, 'meet_already_in')
             : ajoutes == 1
-                ? "1 participant ajouté et prévenu"
-                : "$ajoutes participants ajoutés et prévenus",
+                ? tr(context, 'meet_added_one')
+                : tr(context, 'meet_added_many', {'n': '$ajoutes'}),
       );
     } on ApiException catch (e) {
       if (mounted) showAppSnackBar(e.message);
@@ -209,21 +353,86 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   Future<void> _proposerParticipant() async {
     final numeros = await ContactPickerSheet.show(
       context,
-      title: "Proposer à l'organisateur",
-      confirmLabel: "Proposer",
+      title: tr(context, 'meet_propose_to_org'),
+      confirmLabel: tr(context, 'meet_propose'),
     );
     if (numeros == null || numeros.isEmpty || !mounted) return;
 
     try {
-      await context
+      final entreeDirecte = await context
           .read<MeetingsRepository>()
           .requestInvite(widget.meetingId, numeros.first);
       if (mounted) {
-        showAppSnackBar(
-            "Demande envoyée. La personne n'est prévenue que si l'organisateur accepte.");
+        // Le message suit ce qui s'est RÉELLEMENT passé. Il annonçait une
+        // demande dans tous les cas, y compris quand la personne venait
+        // d'entrer — et celui qui proposait attendait alors une décision qui
+        // n'aurait jamais lieu.
+        showAppSnackBar(entreeDirecte
+            ? tr(context, 'meet_auto_added')
+            : tr(context, 'meet_request_sent'));
       }
     } on ApiException catch (e) {
       if (mounted) showAppSnackBar(e.message);
+    }
+  }
+
+  /// Vrai pendant qu'une décision part au serveur.
+  ///
+  /// ⚠️ IL BARRE LES BOUTONS DE TOUTES LES DEMANDES, pas seulement celle qu'on
+  /// vient de toucher. C'est voulu : trancher en accepte une et peut faire
+  /// franchir le plafond, ce qui rendrait la suivante irrecevable. Mieux vaut
+  /// attendre la réponse que laisser enchaîner des gestes dont le serveur
+  /// refusera la moitié.
+  bool _trancheEnCours = false;
+
+  /// L'organisateur tranche une demande SANS QUITTER LA SALLE (demande du user,
+  /// 26/08/2026). Il devait auparavant sortir jusqu'à la fiche de la réunion.
+  ///
+  /// La liste n'est pas rapiécée ici : le serveur annonce le changement, le
+  /// contrôleur relit, et la feuille se redessine d'elle-même. Retirer la ligne
+  /// à la main en plus ferait deux vérités.
+  Future<void> _trancheDepuisLaSalle(
+      MeetingInviteRequest d, bool accepter) async {
+    if (_trancheEnCours) return;
+    setState(() => _trancheEnCours = true);
+    try {
+      await context.read<MeetingsRepository>().decideInviteRequest(
+            widget.meetingId,
+            d.id,
+            accepter: accepter,
+          );
+      if (!mounted) return;
+      showAppSnackBar(accepter
+          ? tr(context, 'meet_invite_added', {'nom': d.invite.displayName})
+          // La portée du refus est rappelée : il vaut pour tout le monde et
+          // pour toujours, ce n'est pas un « pas maintenant ».
+          : tr(context, 'meet_request_refused', {'nom': d.invite.displayName}));
+    } on ApiException catch (e) {
+      showAppSnackBar(e.message);
+    } catch (_) {
+      showAppSnackBar(tr(context, 'server_unreachable'));
+    } finally {
+      if (mounted) setState(() => _trancheEnCours = false);
+    }
+  }
+
+  /// Le proposant retire sa demande depuis la salle.
+  ///
+  /// ⚠️ L'ÉCHEC EST NORMAL et doit se lire : si l'organisateur a tranché entre
+  /// les deux, le serveur refuse et le dit. C'est lui qui arbitre la course.
+  Future<void> _retireDepuisLaSalle(MeetingInviteRequest d) async {
+    if (_trancheEnCours) return;
+    setState(() => _trancheEnCours = true);
+    try {
+      await context
+          .read<MeetingsRepository>()
+          .cancelInviteRequest(widget.meetingId, d.id);
+    } on ApiException catch (e) {
+      showAppSnackBar(e.message);
+    } catch (_) {
+      showAppSnackBar(tr(context, 'server_unreachable'));
+    } finally {
+      if (mounted) setState(() => _trancheEnCours = false);
     }
   }
 
@@ -234,17 +443,21 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   }
 
   Future<void> _leave() async {
-    final ctrl = context.read<MeetingController>();
-    await ctrl.leave();
+    // Le contrôleur retenu, et non `context.read` : on part vers un `await`
+    // puis vers un démontage, et le contexte n'a pas à survivre à ça.
+    await _mc?.leave();
     if (mounted) Navigator.of(context).maybePop();
   }
 
   @override
   void dispose() {
     _alertesSub?.cancel();
+    _coupuresSub?.cancel();
+    _refusSub?.cancel();
+    _exclusionSub?.cancel();
     // L'écran disparaît : le bandeau global reprend si la réunion continue.
     // On ne quitte PAS la réunion ici — c'est le rôle du bouton rouge.
-    context.read<MeetingController>().setRoomVisible(false);
+    _signaleSalleVisible(false);
     super.dispose();
   }
 
@@ -256,27 +469,28 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       // continuer. Pour raccrocher, le bouton rouge reste le geste explicite.
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) {
-          context.read<MeetingController>().setRoomVisible(false);
+          _signaleSalleVisible(false);
         }
       },
       child: Scaffold(
         backgroundColor: const Color(0xFF1A1A1A),
         body: SafeArea(
           child: _joining
-              ? const Center(
+              ? Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      CircularProgressIndicator(color: Colors.white),
-                      SizedBox(height: 16),
-                      Text("Connexion en cours...",
-                          style: TextStyle(color: Colors.white70)),
+                      const CircularProgressIndicator(color: Colors.white),
+                      const SizedBox(height: 16),
+                      Text(tr(context, 'meet_connecting'),
+                          style: const TextStyle(color: Colors.white70)),
                     ],
                   ),
                 )
               : Column(
                   children: [
                     _buildHeader(),
+                    _buildMainsLevees(),
                     Expanded(child: _buildVideoGrid()),
                     _buildControls(),
                   ],
@@ -293,7 +507,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         children: [
           IconButton(
             icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white),
-            tooltip: "Réduire",
+            tooltip: tr(context, 'meet_reduce'),
             onPressed: _minimize,
           ),
           Expanded(
@@ -343,7 +557,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
               final ctrl = context.read<MeetingController>();
               final unread = ctrl.unreadChatCount;
               return IconButton(
-                tooltip: "Chat",
+                tooltip: tr(context, 'meet_chat'),
                 onPressed: _showChat,
                 icon: Stack(
                   clipBehavior: Clip.none,
@@ -410,13 +624,13 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         }
 
         if (restant >= 0) {
-          return "$compte · $t · ${fmt(restant)} restantes";
+          return tr(context, 'meet_time_remaining', {'compte': '$compte', 'temps': t, 'restant': fmt(restant)});
         }
-        return "$compte · $t · +${fmt(-restant)} de dépassement";
+        return tr(context, 'meet_overtime', {'compte': '$compte', 'temps': t, 'depassement': fmt(-restant)});
       }
-      return "$compte · $t";
+      return tr(context, 'meet_count_time', {'compte': '$compte', 'temps': t});
     }
-    return "$compte participant(s)";
+    return trN(context, 'meet_n_participants', compte);
   }
 
   /// Couleur du sous-titre : elle seule signale l'approche du terme sans qu'on
@@ -429,6 +643,79 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     if (restant <= 0) return AlanyaColors.terracotta;
     if (restant <= MeetingController.seuilFinProcheSec) return Colors.orange;
     return Colors.white54;
+  }
+
+  /// Bandeau des mains levées : QUI demande la parole, en une ligne.
+  ///
+  /// Les pastilles posées sur les vignettes ne suffisent pas sur un téléphone :
+  /// une main levée peut se trouver dans une case minuscule, dans la bande d'une
+  /// présentation, ou hors de l'écran quand la grille défile. Cette ligne, elle,
+  /// est toujours au même endroit et se lit d'un coup d'œil.
+  ///
+  /// Elle DISPARAÎT complètement dès qu'aucune main n'est levée : c'est ce qui
+  /// permet de la mettre là sans encombrer. Un toucher ouvre la fiche des
+  /// participants, où chaque main est de nouveau signalée nom par nom.
+  Widget _buildMainsLevees() {
+    return ListenableBuilder(
+      listenable: context.read<MeetingController>(),
+      builder: (_, __) {
+        final ctrl = context.read<MeetingController>();
+        // Les autres d'abord, moi en dernier : ce bandeau sert surtout à
+        // repérer qui attend la parole, pas à se relire soi-même.
+        final noms = <String>[
+          for (final id in ctrl.peerIds)
+            if (ctrl.isHandRaised(id))
+              ctrl.participantNames[id] ?? tr(context, 'meet_participant'),
+          if (ctrl.myHandRaised) tr(context, 'you'),
+        ];
+        if (noms.isEmpty) return const SizedBox.shrink();
+
+        return GestureDetector(
+          onTap: _showParticipants,
+          child: Container(
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              color: AlanyaColors.gold.withValues(alpha: 0.18),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.back_hand, color: AlanyaColors.gold, size: 16),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _texteMainsLevees(noms, ctrl.myHandRaised),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: AlanyaColors.gold,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// Phrase du bandeau des mains levées.
+  ///
+  /// Trois formes, et pas une de moins : au singulier la troisième personne
+  /// (« Awa demande »), pour soi seul la deuxième (« Vous demandez »), et au
+  /// pluriel un décompte suivi des noms — un verbe accordé sur une liste
+  /// mêlant « Vous » et des tiers n'existe pas en français correct.
+  String _texteMainsLevees(List<String> noms, bool laMienne) {
+    if (noms.length == 1) {
+      return laMienne
+          ? tr(context, 'meet_hand_you')
+          : tr(context, 'meet_hand_other', {'nom': noms.first});
+    }
+    return tr(context, 'meet_hands_raised', {'n': '${noms.length}', 'noms': noms.join(', ')});
   }
 
   /// Zone centrale : vignettes des participants.
@@ -446,6 +733,22 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
 
         if (!ctrl.activeIsVideo) {
           return _buildAudioGrid(ctrl);
+        }
+
+        // QUELQU'UN PRÉSENTE : son écran passe en grand tout seul, sans que
+        // personne ait à le demander, et les autres se rangent dans une bande
+        // dessous. C'est ce qu'on attend d'une réunion.
+        //
+        // ⚠️ Le présentateur est DÉSIGNÉ PAR LE SERVEUR (`meeting_screen`), il
+        // n'est jamais deviné d'une piste vidéo : rien dans WebRTC ne distingue
+        // un écran d'un visage, la piste emprunte le même tuyau que la caméra.
+        // Sans cette annonce, un écran partagé arriverait ici comme une vignette
+        // de plus, rognée pour remplir sa case.
+        final presentateurId = ctrl.presentateurId;
+        final fluxPresente =
+            presentateurId != null ? ctrl.remoteStreams[presentateurId] : null;
+        if (presentateurId != null && fluxPresente != null) {
+          return _buildPresentation(ctrl, presentateurId, fluxPresente);
         }
 
         final remoteIds = ctrl.remoteStreams.keys.toList();
@@ -466,8 +769,8 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
               children: [
                 _localVideo(isLarge: true),
                 const SizedBox(height: 16),
-                const Text("En attente d'autres participants...",
-                    style: TextStyle(color: Colors.white54)),
+                Text(tr(context, 'meet_waiting_others'),
+                    style: const TextStyle(color: Colors.white54)),
               ],
             ),
           );
@@ -513,6 +816,116 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     );
   }
 
+  /// Disposition « quelqu'un présente » : l'écran en grand, les autres dessous.
+  ///
+  /// Le grand cadre est en `contain` et jamais en miroir — voir
+  /// [RTCVideoRendererObject.estUnEcran], c'est là que se joue toute la
+  /// différence avec un visage.
+  ///
+  /// Le présentateur ne se retrouve PAS dans la bande du bas : il est déjà en
+  /// grand, sa vignette n'y ajouterait qu'un doublon plus petit. Ma propre image
+  /// ouvre la bande, comme elle ouvre la grille ordinaire.
+  Widget _buildPresentation(
+    MeetingController ctrl,
+    String presentateurId,
+    MediaStream flux,
+  ) {
+    final nom = ctrl.participantNames[presentateurId] ?? tr(context, 'meet_participant');
+    final autres = ctrl.peerIds.where((id) => id != presentateurId).toList();
+
+    return Column(
+      children: [
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  // Fond NOIR sous l'écran : affiché en entier, il ne remplit
+                  // pas la case et laisse deux bandes. Du noir franc les rend
+                  // muettes ; le gris des vignettes vides, lui, ferait croire à
+                  // un flux manquant.
+                  const ColoredBox(color: Colors.black),
+                  RTCVideoRendererObject(stream: flux, estUnEcran: true),
+                  // CE QUI DIT « ÉCRAN » ET NON « CAMÉRA ». Sans cette
+                  // étiquette, une présentation n'est qu'une image de plus, en
+                  // plus grand : rien ne la distinguerait d'un gros plan.
+                  Positioned(
+                    left: 10,
+                    bottom: 10,
+                    right: 10,
+                    child: Row(
+                      children: [
+                        Flexible(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.65),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.screen_share,
+                                    color: AlanyaColors.gold, size: 14),
+                                const SizedBox(width: 6),
+                                Flexible(
+                                  child: Text(
+                                    tr(context, 'meet_sharing_screen', {'nom': nom}),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        // La bande défile horizontalement plutôt que de se comprimer : sur un
+        // téléphone, six vignettes réparties de force sur la largeur ne
+        // montreraient plus personne.
+        SizedBox(
+          height: 96,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            children: [
+              SizedBox(
+                width: 124,
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: _localVideo(isLarge: false),
+                ),
+              ),
+              for (final id in autres)
+                SizedBox(
+                  width: 124,
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: _remoteVideoTile(id),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   /// Grille affichée en réunion AUDIO : avatars uniquement, pas de renderer.
   Widget _buildAudioGrid(MeetingController ctrl) {
     final me = context.read<AuthController>().user;
@@ -526,23 +939,26 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       String? avatar,
       bool muted,
       bool hand,
+      bool partage,
       bool me
     })>[
       (
         id: "me",
-        name: me?.pseudo ?? "Vous",
+        name: me?.pseudo ?? tr(context, 'you'),
         avatar: me?.avatarUrl,
         muted: ctrl.isMuted,
         hand: ctrl.myHandRaised,
+        partage: false,
         me: true,
       ),
       for (final id in ctrl.peerIds)
         (
           id: id,
-          name: ctrl.participantNames[id] ?? "Participant",
+          name: ctrl.participantNames[id] ?? tr(context, 'meet_participant'),
           avatar: ctrl.participantAvatars[id],
           muted: ctrl.isPeerMuted(id),
           hand: ctrl.isHandRaised(id),
+          partage: ctrl.isSharingScreen(id),
           me: false,
         ),
     ];
@@ -609,6 +1025,21 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                     style: const TextStyle(color: Colors.white70, fontSize: 13),
                   ),
                 ),
+                // Une MENTION et non une pastille : en réunion audio, aucune
+                // piste vidéo n'est demandée au correspondant, l'écran partagé
+                // ne nous parvient donc pas. On dit ce qui se passe plutôt que
+                // de faire croire à une image qu'on pourrait ouvrir.
+                if (e.partage)
+                  SizedBox(
+                    width: 96,
+                    child: Text(
+                      tr(context, 'meet_is_sharing'),
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: AlanyaColors.gold, fontSize: 10),
+                    ),
+                  ),
               ],
             );
           }).toList(),
@@ -669,10 +1100,14 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   Widget _remoteVideoTile(String peerId) {
     final ctrl = context.watch<MeetingController>();
     final stream = ctrl.remoteStreams[peerId];
-    final name = ctrl.participantNames[peerId] ?? "Participant";
+    final name = ctrl.participantNames[peerId] ?? tr(context, 'meet_participant');
     final avatarUrl = ctrl.participantAvatars[peerId];
     final muted = ctrl.isPeerMuted(peerId);
     final hand = ctrl.isHandRaised(peerId);
+    // Le serveur accepte DEUX présentateurs à la fois et laisse le client
+    // trancher : celui qui n'a pas le grand cadre garde sa vignette, mais son
+    // écran y reste montré en entier, pas rogné comme un visage.
+    final partage = ctrl.isSharingScreen(peerId);
     final hasVideo = stream != null;
 
     return ClipRRect(
@@ -680,9 +1115,10 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (hasVideo)
-            RTCVideoRendererObject(stream: stream)
-          else
+          if (hasVideo) ...[
+            if (partage) const ColoredBox(color: Colors.black),
+            RTCVideoRendererObject(stream: stream, estUnEcran: partage),
+          ] else
             _avatarPlaceholder(
                 name: name, isLarge: false, avatarUrl: avatarUrl),
           // Bandeau nom + état muet
@@ -732,6 +1168,18 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                         color: Colors.white, size: 14),
                   ),
                 ],
+                if (partage) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: const BoxDecoration(
+                      color: AlanyaColors.forest,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.screen_share,
+                        color: Colors.white, size: 14),
+                  ),
+                ],
               ],
             ),
           ),
@@ -776,7 +1224,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
               // Micro
               _controlButton(
                 icon: ctrl.isMuted ? Icons.mic_off : Icons.mic,
-                label: ctrl.isMuted ? "Activer" : "Muet",
+                label: ctrl.isMuted ? tr(context, 'meet_unmute') : tr(context, 'meet_mute'),
                 isActive: !ctrl.isMuted,
                 onTap: ctrl.toggleMute,
               ),
@@ -784,7 +1232,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
               if (ctrl.activeIsVideo)
                 _controlButton(
                   icon: ctrl.isCameraOff ? Icons.videocam_off : Icons.videocam,
-                  label: ctrl.isCameraOff ? "Caméra off" : "Caméra",
+                  label: ctrl.isCameraOff ? tr(context, 'camera_off') : tr(context, 'meet_camera'),
                   isActive: !ctrl.isCameraOff,
                   onTap: ctrl.toggleCamera,
                 ),
@@ -792,7 +1240,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
               if (ctrl.activeIsVideo)
                 _controlButton(
                   icon: Icons.cameraswitch,
-                  label: "Retourner",
+                  label: tr(context, 'meet_flip_camera'),
                   // Actif pour signaler que le bouton est utilisable (il
                   // paraissait désactivé avec son fond gris).
                   isActive: true,
@@ -801,7 +1249,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
               // Haut-parleur
               _controlButton(
                 icon: ctrl.isSpeakerOn ? Icons.volume_up : Icons.volume_off,
-                label: "Haut-parleur",
+                label: tr(context, 'meet_speaker'),
                 isActive: ctrl.isSpeakerOn,
                 onTap: () => ctrl.toggleSpeaker(),
               ),
@@ -810,14 +1258,14 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                 icon: ctrl.myHandRaised
                     ? Icons.back_hand
                     : Icons.back_hand_outlined,
-                label: "Main",
+                label: tr(context, 'meet_hand'),
                 isActive: ctrl.myHandRaised,
                 onTap: ctrl.toggleHandRaised,
               ),
               // Quitter
               _controlButton(
                 icon: Icons.call_end,
-                label: "Quitter",
+                label: tr(context, 'meet_leave'),
                 isActive: false,
                 isLeave: true,
                 onTap: _leave,
@@ -869,6 +1317,156 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     );
   }
 
+  /// Colonne de droite d'une ligne de la fiche participants : ce que fait la
+  /// personne, dans l'ordre où on le cherche — sa main, son écran, son micro.
+  ///
+  /// Le micro y figure TOUJOURS, les deux autres seulement quand ils ont lieu
+  /// d'être : c'est la fiche qu'on ouvre pour savoir qui demande la parole
+  /// quand le bandeau n'annonce qu'un décompte.
+  Widget _etatParticipant({
+    required bool muted,
+    required bool hand,
+    required bool partage,
+  }) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (hand) ...[
+          const Icon(Icons.back_hand, color: AlanyaColors.gold, size: 18),
+          const SizedBox(width: 10),
+        ],
+        if (partage) ...[
+          // `forestLight` et non `forest` : le vert du thème se lit mal sur le
+          // fond sombre de la salle — la palette le dit déjà pour l'écran
+          // d'appel. Ici l'icône n'a pas de pastille pleine pour la porter.
+          const Icon(Icons.screen_share,
+              color: AlanyaColors.forestLight, size: 18),
+          const SizedBox(width: 10),
+        ],
+        Icon(
+          muted ? Icons.mic_off : Icons.mic,
+          color: muted ? Colors.red : Colors.white54,
+          size: 20,
+        ),
+      ],
+    );
+  }
+
+  /// Les actions de l'organisateur sur un participant : couper son micro, ou sa
+  /// caméra.
+  ///
+  /// COUPER N'EST PAS BÂILLONNER. L'autre pourra se rallumer aussitôt, et c'est
+  /// voulu : ce geste sert à faire taire un micro oublié dans une pièce
+  /// bruyante. Les libellés le disent donc au présent — « Couper le micro » — et
+  /// jamais « Interdire » ou « Verrouiller », qui promettraient un pouvoir que
+  /// le protocole n'a pas.
+  ///
+  /// Pas de confirmation avant d'agir : le geste est immédiat et se répare d'un
+  /// mot, comme dans Meet. Le bandeau qui suit sert d'accusé de réception, sans
+  /// quoi l'organisateur ne saurait pas si sa demande est partie — le serveur,
+  /// lui, ne répond rien quand il refuse.
+  Widget _menuOrganisateur(MeetingController ctrl, String peerId, String nom) {
+    return PopupMenuButton<String>(
+      icon: const Icon(Icons.more_vert, color: Colors.white54, size: 20),
+      tooltip: tr(context, 'meet_actions'),
+      color: const Color(0xFF2A2A2A),
+      onSelected: (action) {
+        if (action == "exclure") {
+          _confirmeExclusion(peerId, nom);
+          return;
+        }
+        ctrl.couperParticipant(peerId, action);
+        showAppSnackBar(action == "audio"
+            ? tr(context, 'meet_mic_of', {'nom': nom})
+            : tr(context, 'meet_cam_of', {'nom': nom}));
+      },
+      itemBuilder: (_) => [
+        PopupMenuItem(
+          value: "audio",
+          child: ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.mic_off, color: Colors.white),
+            title:
+                Text(tr(context, 'meet_mute_mic'), style: const TextStyle(color: Colors.white)),
+          ),
+        ),
+        // ⚠️ `widget.isVideo` ET NON `ctrl.activeIsVideo` : le second dit
+        // comment MOI j'ai rejoint, pas ce qu'est la réunion. L'organisateur
+        // dont la caméra a échoué au démarrage entre en audio seul, et ne
+        // pourrait alors plus couper la caméra de personne dans une réunion qui
+        // en est pourtant une.
+        if (widget.isVideo)
+          PopupMenuItem(
+            value: "video",
+            child: ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.videocam_off, color: Colors.white),
+              title: Text(tr(context, 'meet_camera_off_action'),
+                  style: const TextStyle(color: Colors.white)),
+            ),
+          ),
+        const PopupMenuDivider(),
+        // Séparé des deux coupures, et en rouge : couper se répare d'un geste,
+        // exclure efface la place de quelqu'un. Deux gestes de nature
+        // différente ne se ressemblent pas dans un menu.
+        PopupMenuItem(
+          value: "exclure",
+          child: ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.person_remove, color: Colors.redAccent),
+            title: Text(tr(context, 'meet_expel_action'),
+                style: const TextStyle(color: Colors.redAccent)),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Exclure demande confirmation — couper, non.
+  ///
+  /// 🔴 LA DIFFÉRENCE EST DANS CE QUI SE RÉPARE. Un micro coupé se rallume ;
+  /// une exclusion efface la ligne du participant, et l'exclu ne peut plus
+  /// rentrer par la porte du `join`. Un geste sans retour se confirme.
+  Future<void> _confirmeExclusion(String peerId, String nom) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(tr(ctx, 'meet_expel_q')),
+        content: Text(
+            tr(ctx, 'meet_expel_body', {'nom': nom})),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(tr(ctx, 'cancel')),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(tr(ctx, 'meet_expel_confirm'),
+                style: TextStyle(color: dangerOf(context))),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await context
+          .read<MeetingsRepository>()
+          .exclureParticipant(widget.meetingId, peerId);
+      if (!mounted) return;
+      // Rien n'est retiré de la grille ici : c'est le serveur qui annonce le
+      // départ à toute la salle (`meeting_user_left`), et le contrôleur suit.
+      // Le faire aussi localement ferait disparaître la vignette deux fois.
+      showAppSnackBar(tr(context, 'meet_expelled', {'nom': nom}));
+    } on ApiException catch (e) {
+      showAppSnackBar(e.message);
+    } catch (_) {
+      showAppSnackBar(tr(context, 'server_unreachable'));
+    }
+  }
+
   void _showChat() {
     final ctrl = context.read<MeetingController>();
     ctrl.setChatOpen(true);
@@ -900,6 +1498,16 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
             final ctrl = context.read<MeetingController>();
             // Liste des participants présents (et non des seuls noms résolus).
             final peerIds = ctrl.peerIds;
+            // Et ceux qui sont ATTENDUS : invités, pas encore entrés. C'est la
+            // seule partie de cette fiche qui bouge quand l'organisateur ajoute
+            // quelqu'un en cours de séance — un ajouté n'est pas dans la salle
+            // tant qu'il n'a pas franchi la porte, et le compteur du haut, qui
+            // dit qui est là, n'a donc aucune raison de bouger avec lui.
+            final attendus = ctrl.invitesAbsents;
+            // Et ceux qui ne sont même pas encore invités : PROPOSÉS, en
+            // attente que l'organisateur tranche. Le serveur ne rend cette
+            // liste qu'à qui elle regarde — elle est donc vide pour les autres.
+            final demandes = ctrl.demandesEnAttente;
             return SafeArea(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -908,9 +1516,9 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                     padding: const EdgeInsets.all(16),
                     child: Row(
                       children: [
-                        const Expanded(
-                          child: Text("Participants",
-                              style: TextStyle(
+                        Expanded(
+                          child: Text(tr(context, 'meet_participants'),
+                              style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 18,
                                   fontWeight: FontWeight.bold)),
@@ -924,8 +1532,8 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                         const SizedBox(width: 8),
                         IconButton(
                           tooltip: ctrl.jeSuisOrganisateur
-                              ? "Ajouter un participant"
-                              : "Proposer un participant",
+                              ? tr(context, 'meet_add_one_participant')
+                              : tr(context, 'meet_propose_one_participant'),
                           icon: Icon(
                             ctrl.jeSuisOrganisateur
                                 ? Icons.person_add_alt_1
@@ -959,19 +1567,19 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                             radius: 18,
                             backgroundColor: AlanyaColors.terracotta,
                           ),
-                          title: Text(me?.pseudo ?? "Vous",
+                          title: Text(me?.pseudo ?? tr(context, 'you'),
                               style: const TextStyle(color: Colors.white)),
-                          trailing: Icon(
-                            ctrl.isMuted ? Icons.mic_off : Icons.mic,
-                            color: ctrl.isMuted ? Colors.red : Colors.white54,
-                            size: 20,
+                          trailing: _etatParticipant(
+                            muted: ctrl.isMuted,
+                            hand: ctrl.myHandRaised,
+                            partage: false,
                           ),
                         ),
                         const Divider(color: Colors.white12, height: 1),
                         // Autres
                         ...peerIds.map((peerId) {
                           final name =
-                              ctrl.participantNames[peerId] ?? "Participant";
+                              ctrl.participantNames[peerId] ?? tr(context, 'meet_participant');
                           final avatar = ctrl.participantAvatars[peerId];
                           final muted = ctrl.isPeerMuted(peerId);
                           return ListTile(
@@ -983,13 +1591,115 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                             ),
                             title: Text(name,
                                 style: const TextStyle(color: Colors.white)),
-                            trailing: Icon(
-                              muted ? Icons.mic_off : Icons.mic,
-                              color: muted ? Colors.red : Colors.white54,
-                              size: 20,
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _etatParticipant(
+                                  muted: muted,
+                                  hand: ctrl.isHandRaised(peerId),
+                                  partage: ctrl.isSharingScreen(peerId),
+                                ),
+                                // Réservé à l'organisateur, et c'est la fiche
+                                // des participants qui l'accueille : c'est déjà
+                                // là qu'on vient voir qui a la main levée et
+                                // quel micro reste ouvert.
+                                if (ctrl.jeSuisOrganisateur)
+                                  _menuOrganisateur(ctrl, peerId, name),
+                              ],
                             ),
                           );
                         }),
+                        // --- Invités qui ne sont pas encore là ---
+                        //
+                        // Séparés des présents, et jamais mêlés à eux : on ne
+                        // peut ni couper leur micro, ni leur donner la parole,
+                        // ni les voir. Les fondre dans la même liste ferait
+                        // croire à des gens muets plutôt qu'à des gens absents.
+                        if (attendus.isNotEmpty) ...[
+                          const Divider(color: Colors.white12, height: 1),
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                            child: Text(
+                              tr(context, 'meet_expected', {'n': '${attendus.length}'}),
+                              style: const TextStyle(
+                                color: Colors.white54,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ),
+                          ...attendus.map((invite) {
+                            return ListTile(
+                              leading: Opacity(
+                                // L'absence se voit d'abord : une pastille
+                                // seule se confondrait avec les autres états
+                                // déjà posés sur les avatars présents.
+                                opacity: 0.45,
+                                child: AvatarCircle(
+                                  name: invite.nom,
+                                  avatarUrl: invite.avatarUrl,
+                                  radius: 18,
+                                  backgroundColor: AlanyaColors.forest,
+                                ),
+                              ),
+                              title: Text(
+                                invite.nom,
+                                style: const TextStyle(color: Colors.white54),
+                              ),
+                              subtitle: Text(
+                                tr(context, 'meet_guest_not_arrived'),
+                                style: const TextStyle(
+                                    color: Colors.white38, fontSize: 12),
+                              ),
+                            );
+                          }),
+                        ],
+
+                        // --- Demandes en attente d'approbation ---
+                        //
+                        // 🔴 EN DERNIER, ET SÉPARÉES DES ATTENDUS. Un attendu
+                        // est ACQUIS : il viendra ou pas, mais sa place est
+                        // faite. Celui-ci n'est que PROPOSÉ — l'organisateur
+                        // n'a pas tranché, et il pourrait ne jamais entrer.
+                        // Les fondre ensemble ferait compter comme venant
+                        // quelqu'un qui n'a même pas été accepté.
+                        //
+                        // ⚠️ QUI VOIT CETTE SECTION : l'organisateur, qui
+                        // tranche, et le proposant, pour sa propre demande.
+                        // Personne d'autre — et ce n'est pas cet écran qui le
+                        // décide, c'est le serveur qui ne rend à chacun que ce
+                        // qui le regarde. La personne proposée, elle, n'est au
+                        // courant de rien : un refus doit lui rester invisible.
+                        if (demandes.isNotEmpty) ...[
+                          const Divider(color: Colors.white12, height: 1),
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                            child: Text(
+                              ctrl.jeSuisOrganisateur
+                                  ? tr(context, 'meet_to_approve', {'n': '${demandes.length}'})
+                                  : tr(context, 'meet_your_requests', {'n': '${demandes.length}'}),
+                              style: const TextStyle(
+                                color: Colors.white54,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ),
+                          ...demandes.map(
+                            (d) => TuileDemandeInvitation(
+                              demande: d,
+                              jeSuisOrganisateur: ctrl.jeSuisOrganisateur,
+                              jeSuisLeProposant: d.demandeur.id == me?.id,
+                              actif: !_trancheEnCours,
+                              surFondSombre: true,
+                              onAccepter: () => _trancheDepuisLaSalle(d, true),
+                              onRefuser: () => _trancheDepuisLaSalle(d, false),
+                              onRetirer: () => _retireDepuisLaSalle(d),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -1017,6 +1727,9 @@ class _MeetingChatPanelState extends State<_MeetingChatPanel> {
   final _inputCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
 
+  /// Nombre de messages au dernier recalage du défilement. Voir [build].
+  int _dernierCompte = 0;
+
   @override
   void dispose() {
     _inputCtrl.dispose();
@@ -1024,20 +1737,15 @@ class _MeetingChatPanelState extends State<_MeetingChatPanel> {
     super.dispose();
   }
 
+  /// Envoie et vide le champ. RIEN N'EST AFFICHÉ ICI : le message revient par le
+  /// serveur, qui le renvoie à toute la salle, l'expéditeur compris. C'est ce
+  /// retour qui l'ajoute au fil — et donc son arrivée, et non ce clic, qui fait
+  /// descendre le défilement.
   void _send() {
     final text = _inputCtrl.text;
     if (text.trim().isEmpty) return;
     widget.controller.sendChatMessage(text);
     _inputCtrl.clear();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollCtrl.hasClients) {
-        _scrollCtrl.animateTo(
-          _scrollCtrl.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-        );
-      }
-    });
   }
 
   @override
@@ -1049,11 +1757,22 @@ class _MeetingChatPanelState extends State<_MeetingChatPanel> {
         listenable: widget.controller,
         builder: (_, __) {
           final messages = widget.controller.chatMessages;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (_scrollCtrl.hasClients) {
-              _scrollCtrl.jumpTo(_scrollCtrl.position.maxScrollExtent);
-            }
-          });
+          /*
+           * ⚠️ LE DÉFILEMENT NE SE RECALE QUE SI UN MESSAGE EST ARRIVÉ.
+           *
+           * Le contrôleur notifie CHAQUE SECONDE — c'est son minuteur de salle
+           * qui bat — et ce panneau se reconstruit d'autant. Recaler à chaque
+           * reconstruction arrachait le fil des mains de qui remontait le lire :
+           * une seconde plus tard, il était rejeté tout en bas.
+           */
+          if (messages.length != _dernierCompte) {
+            _dernierCompte = messages.length;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (_scrollCtrl.hasClients) {
+                _scrollCtrl.jumpTo(_scrollCtrl.position.maxScrollExtent);
+              }
+            });
+          }
           return SafeArea(
             top: false,
             child: Column(
@@ -1069,12 +1788,12 @@ class _MeetingChatPanelState extends State<_MeetingChatPanel> {
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
-                const Padding(
-                  padding: EdgeInsets.all(16),
+                Padding(
+                  padding: const EdgeInsets.all(16),
                   child: Align(
                     alignment: Alignment.centerLeft,
-                    child: Text("Messages de la réunion",
-                        style: TextStyle(
+                    child: Text(tr(context, 'meet_room_messages'),
+                        style: const TextStyle(
                             color: Colors.white,
                             fontSize: 18,
                             fontWeight: FontWeight.bold)),
@@ -1083,12 +1802,12 @@ class _MeetingChatPanelState extends State<_MeetingChatPanel> {
                 const Divider(color: Colors.white12, height: 1),
                 Flexible(
                   child: messages.isEmpty
-                      ? const Center(
+                      ? Center(
                           child: Padding(
-                            padding: EdgeInsets.all(24),
+                            padding: const EdgeInsets.all(24),
                             child: Text(
-                              "Aucun message. Démarre la conversation.",
-                              style: TextStyle(color: Colors.white54),
+                              tr(context, 'meet_no_messages'),
+                              style: const TextStyle(color: Colors.white54),
                             ),
                           ),
                         )
@@ -1116,7 +1835,7 @@ class _MeetingChatPanelState extends State<_MeetingChatPanel> {
                           maxLines: 4,
                           onSubmitted: (_) => _send(),
                           decoration: InputDecoration(
-                            hintText: "Ton message…",
+                            hintText: tr(context, 'meet_your_message'),
                             hintStyle: const TextStyle(color: Colors.white38),
                             filled: true,
                             fillColor: Colors.white.withValues(alpha: 0.08),
@@ -1212,8 +1931,26 @@ class _ChatBubble extends StatelessWidget {
 
 /// Wrapper simple pour afficher un flux WebRTC.
 class RTCVideoRendererObject extends StatefulWidget {
-  const RTCVideoRendererObject({super.key, required this.stream});
+  const RTCVideoRendererObject({
+    super.key,
+    required this.stream,
+    this.estUnEcran = false,
+  });
   final MediaStream stream;
+
+  /// Ce flux est un ÉCRAN PARTAGÉ, et non un visage. Deux conséquences, et
+  /// c'est tout le sujet :
+  ///
+  ///  - l'image est montrée EN ENTIER (`contain`) au lieu d'être rognée pour
+  ///    remplir la case. Un visage recadré reste un visage ; un écran recadré
+  ///    perd la barre d'outils, la ligne de code ou la colonne du tableau
+  ///    qu'on partageait justement ;
+  ///  - elle n'est JAMAIS retournée en miroir : on y lit du texte.
+  ///
+  /// Le drapeau vient du verbe serveur `meeting_screen` et de nulle part
+  /// ailleurs : la piste d'un écran emprunte le même tuyau que celle d'une
+  /// caméra, et rien dans WebRTC ne dit ce qu'elle montre.
+  final bool estUnEcran;
 
   @override
   State<RTCVideoRendererObject> createState() => _RTCVideoRendererObjectState();
@@ -1261,7 +1998,15 @@ class _RTCVideoRendererObjectState extends State<RTCVideoRendererObject> {
       return const Center(
           child: CircularProgressIndicator(color: Colors.white));
     }
-    return RTCVideoView(_renderer,
-        objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover);
+    return RTCVideoView(
+      _renderer,
+      // Écrit noir sur blanc plutôt que laissé à la valeur par défaut : le jour
+      // où l'on retournera la vignette de sa propre caméra — c'est l'usage —,
+      // il faudra que ce faux-là reste vrai pour un écran.
+      mirror: false,
+      objectFit: widget.estUnEcran
+          ? RTCVideoViewObjectFit.RTCVideoViewObjectFitContain
+          : RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+    );
   }
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 
 import '../../../theme/alanya_theme.dart';
@@ -37,7 +38,7 @@ class _LoginHistoryScreenState extends State<LoginHistoryScreen> {
     } catch (_) {
       if (!mounted) return;
       setState(() {
-        _erreur = "Impossible de charger l'historique.\nVérifie ta connexion.";
+        _erreur = tr(context, 'hist_load_error');
         _acces = [];
       });
     }
@@ -53,9 +54,11 @@ class _LoginHistoryScreenState extends State<LoginHistoryScreen> {
     final ceJour = DateTime(aujourdhui.year, aujourdhui.month, aujourdhui.day);
     final ecart = ceJour.difference(jour).inDays;
 
-    if (ecart == 0) return "Aujourd'hui à $heure";
-    if (ecart == 1) return "Hier à $heure";
-    return "Le ${l.day.toString().padLeft(2, '0')}/${l.month.toString().padLeft(2, '0')}/${l.year} à $heure";
+    if (ecart == 0) return tr(context, 'time_today_at', {'heure': heure});
+    if (ecart == 1) return tr(context, 'time_yesterday_at', {'heure': heure});
+    final date =
+        "${l.day.toString().padLeft(2, '0')}/${l.month.toString().padLeft(2, '0')}/${l.year}";
+    return tr(context, 'date_on_at', {'date': date, 'heure': heure});
   }
 
   IconData _icone(LoginAccess a) {
@@ -74,16 +77,14 @@ class _LoginHistoryScreenState extends State<LoginHistoryScreen> {
     final acces = _acces;
 
     return Scaffold(
-      appBar: backAppBar(context, "Historique de connexion"),
+      appBar: backAppBar(context, tr(context, 'set_login_history')),
       body: RefreshIndicator(
         onRefresh: _charger,
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
           children: [
             Text(
-              "Chaque ouverture de session sur ton compte est enregistrée ici. "
-              "Si tu vois une connexion que tu ne reconnais pas, change ton mot "
-              "de passe et déconnecte l'appareil concerné.",
+              tr(context, 'hist_intro'),
               style: TextStyle(
                 fontSize: 13.5,
                 height: 1.5,
@@ -102,7 +103,7 @@ class _LoginHistoryScreenState extends State<LoginHistoryScreen> {
               _message(_erreur!, dangerOf(context))
             else if (acces.isEmpty)
               _message(
-                "Aucune connexion enregistrée pour le moment.",
+                tr(context, 'hist_empty'),
                 mutedOf(context, Colors.black54),
               )
             else
@@ -178,9 +179,9 @@ class _LoginHistoryScreenState extends State<LoginHistoryScreen> {
                   color: accentOf(context),
                   borderRadius: BorderRadius.circular(20),
                 ),
-                child: const Text(
-                  "La plus récente",
-                  style: TextStyle(
+                child: Text(
+                  tr(context, 'hist_latest'),
+                  style: const TextStyle(
                       fontSize: 10.5,
                       fontWeight: FontWeight.w700,
                       color: Colors.white),

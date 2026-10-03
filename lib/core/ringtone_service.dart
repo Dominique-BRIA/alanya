@@ -31,6 +31,16 @@ class RingtoneService {
   AudioPlayer? _player;
   String? _currentAsset;
 
+  /// Abonnement à la FIN d'un aperçu, pour prévenir l'écran qui l'a lancé.
+  ///
+  /// 🔴 SANS LUI, LE BOUTON MENT. Un aperçu s'arrête tout seul en arrivant au
+  /// bout, mais rien ne le disait à l'écran : son icône restait sur « stop »,
+  /// sur un lecteur pourtant arrêté. Le geste suivant servait alors à défaire un
+  /// état qui n'existait plus, et il fallait un SECOND appui pour entendre
+  /// quelque chose — le « pause puis play » que les utilisateurs avaient trouvé
+  /// tout seuls.
+  StreamSubscription<void>? _finApercuSub;
+
   /// Génération de la sonnerie en cours.
   ///
   /// ⚠️ CE COMPTEUR CORRIGE UNE SONNERIE QUI NE S'ARRÊTAIT PLUS APRÈS LE
@@ -68,9 +78,42 @@ class RingtoneService {
   /// fois pour un même message.
   static const _messageCueGap = Duration(milliseconds: 1500);
 
-  Future<void> startOutgoing() => _play(_outgoingAsset);
+  /// Tonalité d'attente d'un appel SORTANT.
+  ///
+  /// ⚠️ [hautParleur] est passé par l'appelant, et vaut faux par défaut : sur un
+  /// appel sortant, le téléphone est déjà à l'oreille. Ce son partageait le
+  /// contexte de la sonnerie entrante, donc `isSpeakerphoneOn: true` : le
+  /// « bip bip » partait au haut-parleur, fort, pendant que l'écran affichait
+  /// « écouteur ». Un appel VIDÉO, lui, passe `true` — la route doit suivre ce
+  /// que l'écran annonce, dans les deux sens.
+  Future<void> startOutgoing({bool hautParleur = false}) =>
+      _play(_outgoingAsset, hautParleur: hautParleur);
 
-  Future<void> startIncoming() => _play(_incomingAsset);
+  /// Sonnerie d'un appel ENTRANT — toujours au haut-parleur : le téléphone est
+  /// dans une poche ou sur une table, il faut l'entendre.
+  ///
+  /// [url] est la sonnerie propre à une LISTE DE CONTACTS, déjà rendue jouable
+  /// (base + jeton) par `SonneriesDeListes`. Absente ou injouable, on retombe
+  /// sur l'asset embarqué : une sonnerie personnalisée qui ne se télécharge pas
+  /// ne doit jamais produire un appel silencieux.
+  ///
+  /// [asset] sert le même besoin pour une sonnerie LIVRÉE avec l'application —
+  /// celles des quatre listes créées d'office. ⚠️ Ne pas la faire passer par
+  /// [url] : elle n'est sur AUCUN serveur, et la route des médias répondrait 404
+  /// après un aller-retour réseau inutile, pour finir par le repli. Une sonnerie
+  /// qui est déjà dans le paquet doit se jouer sans toucher au réseau.
+  ///
+  /// [asset] l'emporte quand les deux sont fournis : le local est toujours plus
+  /// sûr et plus rapide que le distant.
+  Future<void> startIncoming({String? url, String? asset}) {
+    if (asset != null && asset.isNotEmpty) {
+      return _play(asset, hautParleur: true);
+    }
+    if (url == null || url.isEmpty) {
+      return _play(_incomingAsset, hautParleur: true);
+    }
+    return _playUrl(url, hautParleur: true);
+  }
 
   /// Son bref signalant l'**arrivée d'un message** (one-shot, non bloquant,
   /// échec silencieux).
@@ -79,13 +122,32 @@ class RingtoneService {
   /// d'écrire » : le destinataire l'entendait pendant que l'expéditeur tapait,
   /// donc avant que le message existe, et n'entendait rien à sa réception.
   /// Il ne marque désormais que la réception.
-  Future<void> playMessageReceived() async {
+  /// [url] et [asset] portent le son propre à la LISTE DE CONTACTS de
+  /// l'expéditeur, déjà rendu jouable par `SonneriesDeListes`. Même convention
+  /// que [startIncoming] : [asset] pour un son LIVRÉ avec l'application, [url]
+  /// pour un son importé, et [asset] l'emporte si les deux sont fournis — le
+  /// local est toujours plus sûr et plus rapide que le distant.
+  ///
+  /// ⚠️ TOUT ÉCHEC RETOMBE SUR LE SON EMBARQUÉ, jamais sur le silence : un son
+  /// personnalisé qui ne se télécharge pas ne doit pas faire disparaître le
+  /// signal d'arrivée d'un message.
+  ///
+  /// ⚠️ NE COUVRE QUE L'APPLICATION AU PREMIER PLAN. Message reçu écran éteint
+  /// ou application fermée, c'est Android qui sonne, d'après le canal de
+  /// notification — un canal ne peut PAS changer de son après sa création, il
+  /// faut en créer un par sonnerie. Ce n'est pas fait, et cela reste à faire.
+  Future<void> playMessageReceived({String? url, String? asset}) async {
     final now = DateTime.now();
     if (_lastMessageCueAt != null &&
         now.difference(_lastMessageCueAt!) < _messageCueGap) {
       return;
     }
     _lastMessageCueAt = now;
+    final personnalise = (asset != null && asset.isNotEmpty)
+        ? AssetSource(asset)
+        : (url != null && url.isNotEmpty)
+            ? UrlSource(url)
+            : null;
     try {
       final p = _cuePlayer ??= AudioPlayer();
       await p.setReleaseMode(ReleaseMode.release);
@@ -94,8 +156,23 @@ class RingtoneService {
       // événement que l'utilisateur doit remarquer.
       await p.setVolume(1.0);
       await p.stop();
-      await p.play(AssetSource(_cueAsset));
-    } catch (_) {}
+      await p.play(personnalise ?? AssetSource(_cueAsset));
+    } catch (e) {
+      if (personnalise == null) return;
+      debugPrint("[RingtoneService] ❌ son de message personnalisé: $e");
+      // Le lecteur a pu rester dans un état bancal après l'échec : on le jette
+      // plutôt que de le réutiliser pour le repli.
+      try {
+        await _cuePlayer?.release();
+      } catch (_) {}
+      _cuePlayer = null;
+      try {
+        final p = _cuePlayer = AudioPlayer();
+        await p.setReleaseMode(ReleaseMode.release);
+        await p.setVolume(1.0);
+        await p.play(AssetSource(_cueAsset));
+      } catch (_) {}
+    }
   }
 
   /// Ton bref joué quand un participant **rejoint** une réunion (style Google
@@ -159,8 +236,14 @@ class RingtoneService {
   int _generationIvr = 0;
 
   /// Invite vocale du standard : « tapez 1 pour… ». En boucle par défaut.
-  Future<void> playIvrPrompt(String url, {bool loop = true}) =>
-      _playIvr(url, loop: loop);
+  /// [onComplete] n'est appelé que si [loop] vaut faux — une boucle n'a pas de
+  /// fin. Il sert au BIP de la plainte vocale : l'enregistrement doit démarrer
+  /// quand l'annonce se termine, et le lecteur est le seul à le savoir. Le
+  /// mécanisme existait déjà en interne pour enchaîner les musiques d'attente ;
+  /// il est simplement rendu accessible plutôt que réécrit.
+  Future<void> playIvrPrompt(String url,
+          {bool loop = true, void Function()? onComplete}) =>
+      _playIvr(url, loop: loop, onComplete: onComplete);
 
   /// Musique d'attente pendant que l'agent sonne. En boucle.
   Future<void> playIvrHold(String url, {bool loop = true}) =>
@@ -200,6 +283,32 @@ class RingtoneService {
   Future<void> stopIvr() async {
     // Avant le retour anticipé : annule aussi une lecture encore en préparation.
     _generationIvr++;
+    /*
+     * 🐛 ON OUBLIE CE QUI JOUAIT — signalé par le user le 25/08/2026, sous
+     * TROIS symptômes qui n'en font qu'un :
+     *
+     *  1. centre d'appels, agent déjà en ligne : appuyer sur le haut-parleur
+     *     fait repartir LA MUSIQUE D'ATTENTE par-dessus la conversation ;
+     *  2. centre vocal, pendant l'enregistrement d'une plainte : le même appui
+     *     relance LE VOCAL D'ANNONCE dans le micro ;
+     *  3. et dans les deux cas le son reprenait AU DÉBUT.
+     *
+     * `reglerHautParleurIvr` rejoue `_urlIvrEnCours` pour porter le son sur
+     * l'autre sortie. Or cette URL ne s'effaçait qu'à la FIN de l'appel
+     * (`reinitialiserIvr`) : elle survivait donc à l'arrêt de la lecture, et
+     * l'appui ressuscitait un son que plus rien ne jouait — l'agent décroche
+     * (`call_controller.dart:568`), ou l'enregistrement commence
+     * (`plainte_recorder.dart:147`), les deux passent par ici.
+     *
+     * Une lecture arrêtée n'a plus de sortie à choisir. L'oublier ici est donc
+     * la règle, et non une précaution : c'est la seule chose qui distingue
+     * « rien ne joue » de « quelque chose joue à l'écouteur ».
+     *
+     * ⚠️ Sans effet sur le cas normal : `_playIvr` commence par appeler cette
+     * méthode, puis repose immédiatement l'URL du son qu'il lance.
+     */
+    _urlIvrEnCours = null;
+    _onCompleteIvrEnCours = null;
     // Avant tout le reste : un relais laissé vivant relancerait la lecture que
     // l'on est en train d'arrêter.
     _finIvrSub?.cancel();
@@ -242,45 +351,207 @@ class RingtoneService {
         }
       }
 
-      final response = await http
-          .get(Uri.parse(url))
-          .timeout(const Duration(seconds: 8));
-      if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {
-        await file.writeAsBytes(response.bodyBytes, flush: true);
-        return DeviceFileSource(file.path);
-      }
+      /*
+       * 🔴 ON NE TÉLÉCHARGE PLUS AVANT DE JOUER — correction du 18/08/2026.
+       *
+       * Le user : « très souvent, dès le premier appel, le vocal ne se met pas
+       * à chanter ». Le mot qui compte est PREMIER, et il désignait le cache.
+       *
+       * Ce code attendait les 256 Ko du fichier complet avant la première note,
+       * avec 8 secondes de patience. Au premier appel, le cache est vide : il y
+       * avait donc un silence long, puis un repli sur `UrlSource` — c'est-à-dire
+       * sur le streaming qu'il aurait fallu faire d'emblée, mais huit secondes
+       * trop tard. Aux appels suivants le fichier était sur le disque et
+       * démarrait instantanément, ce qui explique exactement le « premier ».
+       *
+       * Pire, l'attente se transformait en silence DÉFINITIF : l'appelant qui
+       * n'entend rien tape une touche, `stopIvr()` change la génération, et le
+       * téléchargement qui s'achève est jeté. L'invite n'aura jamais joué.
+       *
+       * L'optimisation inversait donc ce qu'elle cherchait à améliorer. On rend
+       * la source réseau IMMÉDIATEMENT — la lecture commence dès les premiers
+       * octets — et on remplit le cache EN ARRIÈRE-PLAN pour la fois suivante.
+       * Les deux cas y gagnent : le premier appel démarre tout de suite, les
+       * suivants lisent le disque.
+       */
+      unawaited(_remplirCache(url, file));
     } catch (e) {
-      debugPrint("[RingtoneService] Cache fallback for $url: $e");
+      debugPrint("[RingtoneService] cache indisponible pour $url : $e");
     }
     return UrlSource(url);
   }
 
+  /// Télécharge le son pour la PROCHAINE lecture. N'est jamais attendu.
+  ///
+  /// ⚠️ Écrit dans un fichier temporaire puis renomme : une écriture
+  /// interrompue — application tuée, disque plein — laisserait sinon un fichier
+  /// tronqué que `_resoudreSourceIvr` prendrait pour un cache valide, et le son
+  /// serait coupé à chaque appel suivant sans que rien ne l'explique.
+  Future<void> _remplirCache(String url, File destination) async {
+    try {
+      final r =
+          await http.get(Uri.parse(url)).timeout(const Duration(seconds: 30));
+      if (r.statusCode != 200 || r.bodyBytes.isEmpty) return;
+      final partiel = File('${destination.path}.part');
+      await partiel.writeAsBytes(r.bodyBytes, flush: true);
+      await partiel.rename(destination.path);
+    } catch (_) {
+      // Sans conséquence : la lecture en cours passe par le réseau, et la
+      // prochaine retentera.
+    }
+  }
+
+  /// Le son du standard sort-il par le HAUT-PARLEUR ?
+  ///
+  /// 🔴 CE DRAPEAU EXISTE PARCE QUE `Helper.setSpeakerphoneOn` NE SUFFIT PAS.
+  /// Cette fonction route la session **WebRTC** ; or l'audio d'un standard est
+  /// joué par `audioplayers`, avec son propre contexte. Tant que celui-ci
+  /// forçait `isSpeakerphoneOn: true` en dur, couper le haut-parleur pendant un
+  /// appel de centre ne changeait strictement rien — la bascule agissait sur un
+  /// flux qui ne jouait rien (signalé par le user le 18/08/2026).
+  ///
+  /// Même famille que le défaut du 12/08 : quand un son se comporte mal, la
+  /// question n'est pas ce qu'il contient, c'est PAR OÙ il sort.
+  bool _hautParleurIvr = true;
+
+  /// Bascule la sortie du son du standard, et l'applique à la lecture EN COURS.
+  ///
+  /// ⚠️ Le contexte est reposé **puis la lecture est relancée**. Android ne
+  /// réoriente pas un flux déjà démarré sur un simple changement de contexte :
+  /// sans reprise, le réglage ne prendrait qu'au son suivant, c'est-à-dire
+  /// jamais du point de vue de quelqu'un qui écoute une invite en boucle.
+  Future<void> reglerHautParleurIvr(bool actif) async {
+    if (_hautParleurIvr == actif) return;
+    _hautParleurIvr = actif;
+    final url = _urlIvrEnCours;
+    // Rien ne joue : il n'y a aucune sortie à changer. C'est `stopIvr` qui a
+    // effacé l'URL, et c'est ce qui empêche l'appui de ressusciter la musique
+    // d'attente ou le vocal d'annonce par-dessus une conversation.
+    if (url == null) return;
+
+    /*
+     * 🐛 ON REPREND OÙ ON EN ÉTAIT — signalé par le user le 25/08/2026 : « quand
+     * je clique sur le haut-parleur, le vocal recommence à zéro ».
+     *
+     * Changer de sortie impose de REJOUER : le routage Android est porté par
+     * l'`AudioContext` du lecteur (`_contexteIvr`), et `audioplayers` ne le
+     * change pas sur un lecteur en cours — c'est pour cela que la bascule passe
+     * par un nouveau lecteur. Mais rejouer n'oblige pas à revenir au début : on
+     * relève la position avant de tout défaire, et on y retourne après.
+     *
+     * ⚠️ Relevée AVANT `_playIvr`, qui commence par `stopIvr()` et libère le
+     * lecteur : après, il n'y a plus personne à interroger.
+     *
+     * Une annonce qui reprend au début n'est pas une gêne mineure sur un
+     * standard : elle réénumère les touches, et l'appelant qui vient de choisir
+     * son service se demande si son appui a été perdu.
+     */
+    Duration? position;
+    try {
+      position = await _ivrPlayer?.getCurrentPosition();
+    } catch (_) {}
+
+    await _playIvr(
+      url,
+      loop: _loopIvrEnCours,
+      // ⚠️ LE RELAIS DE FIN DOIT SURVIVRE À LA BASCULE. `playIvrPrompt` et
+      // `_playIvrSequence` s'en servent pour enchaîner ; le perdre laisserait
+      // le standard muet après l'invite, et seulement pour les appelants ayant
+      // touché au haut-parleur — le genre de panne qu'on ne reproduit jamais.
+      onComplete: _onCompleteIvrEnCours,
+      depart: position,
+    );
+  }
+
+  /// La lecture en cours, pour pouvoir la reprendre sur l'autre sortie.
+  ///
+  /// ⚠️ Effacés par [stopIvr] : une lecture arrêtée n'a plus de sortie à
+  /// choisir, et les garder revenait à rejouer un son que rien ne jouait.
+  String? _urlIvrEnCours;
+  bool _loopIvrEnCours = true;
+  void Function()? _onCompleteIvrEnCours;
+
+  /// Oublie l'état du standard — à appeler à la FIN d'un appel, jamais entre
+  /// deux sons du même appel.
+  ///
+  /// ⚠️ Sans elle, `_hautParleurIvr` survivait d'un appel à l'autre. En
+  /// pratique le défaut se rattrapait tout seul, l'ouverture d'un menu forçant
+  /// le haut-parleur ; mais c'était une correction accidentelle, pas une
+  /// garantie, et elle aurait disparu au premier standard qui n'appelle pas
+  /// `_hautParleurPourStandard`.
+  ///
+  /// Volontairement séparée de [stopIvr], qui est appelée à CHAQUE appui sur une
+  /// touche : y remettre le drapeau annulerait le choix de l'appelant dès qu'il
+  /// change de son.
+  void reinitialiserIvr() {
+    _hautParleurIvr = true;
+    _urlIvrEnCours = null;
+    _loopIvrEnCours = true;
+    _onCompleteIvrEnCours = null;
+  }
+
+  /// Le contexte audio du standard, selon la sortie choisie.
+  ///
+  /// ⚠️ LES DEUX SORTIES NE DIFFÈRENT PAS QUE PAR UN BOOLÉEN. Le type d'usage
+  /// commande le routage sous Android : `media`/`music` sort au haut-parleur,
+  /// `voiceCommunication`/`speech` à l'écouteur. Ne changer que
+  /// `isSpeakerphoneOn` laisserait le son sortir au mauvais endroit — c'est
+  /// exactement ce qui avait fait croire à un problème de format le 12/08/2026,
+  /// où trois causes plausibles ont été avancées avant de constater que le son
+  /// sortait par l'écouteur.
+  AudioContext _contexteIvr() {
+    if (_hautParleurIvr) {
+      return AudioContext(
+        android: const AudioContextAndroid(
+          isSpeakerphoneOn: true,
+          stayAwake: true,
+          contentType: AndroidContentType.music,
+          usageType: AndroidUsageType.media,
+          audioFocus: AndroidAudioFocus.gainTransientMayDuck,
+        ),
+        iOS: AudioContextIOS(
+          category: AVAudioSessionCategory.playback,
+          options: const {
+            AVAudioSessionOptions.duckOthers,
+            AVAudioSessionOptions.defaultToSpeaker,
+          },
+        ),
+      );
+    }
+    return AudioContext(
+      android: const AudioContextAndroid(
+        isSpeakerphoneOn: false,
+        stayAwake: true,
+        contentType: AndroidContentType.speech,
+        usageType: AndroidUsageType.voiceCommunication,
+        audioFocus: AndroidAudioFocus.gainTransientMayDuck,
+      ),
+      iOS: AudioContextIOS(
+        category: AVAudioSessionCategory.playAndRecord,
+        options: const {AVAudioSessionOptions.duckOthers},
+      ),
+    );
+  }
+
+  /// [depart] : position à laquelle reprendre. Renseignée uniquement par la
+  /// bascule du haut-parleur, qui rejoue le MÊME son sur l'autre sortie et ne
+  /// doit pas le faire recommencer.
   Future<void> _playIvr(String url,
-      {required bool loop, void Function()? onComplete}) async {
+      {required bool loop,
+      void Function()? onComplete,
+      Duration? depart}) async {
     await stopIvr();
     final gen = _generationIvr;
     try {
+      // Mémorisé AVANT la lecture : c'est ce qui permet de reprendre le même
+      // son sur l'autre sortie quand l'appelant bascule le haut-parleur.
+      // ⚠️ Posé APRÈS `stopIvr()`, qui vient justement de l'effacer.
+      _urlIvrEnCours = url;
+      _loopIvrEnCours = loop;
+      _onCompleteIvrEnCours = onComplete;
+
       final p = AudioPlayer();
-      // Configuration mains-libres & média robuste : force le haut-parleur principal
-      // et empêche le basculement silencieux vers l'écouteur d'oreille sur Android/iOS.
-      await p.setAudioContext(
-        AudioContext(
-          android: const AudioContextAndroid(
-            isSpeakerphoneOn: true,
-            stayAwake: true,
-            contentType: AndroidContentType.music,
-            usageType: AndroidUsageType.media,
-            audioFocus: AndroidAudioFocus.gainTransientMayDuck,
-          ),
-          iOS: AudioContextIOS(
-            category: AVAudioSessionCategory.playback,
-            options: const {
-              AVAudioSessionOptions.duckOthers,
-              AVAudioSessionOptions.defaultToSpeaker,
-            },
-          ),
-        ),
-      );
+      await p.setAudioContext(_contexteIvr());
       await p.setReleaseMode(loop ? ReleaseMode.loop : ReleaseMode.release);
       await p.setVolume(1.0);
       if (gen != _generationIvr) return _jeter(p);
@@ -290,6 +561,20 @@ class RingtoneService {
       if (gen != _generationIvr) return _jeter(p);
 
       await p.play(source);
+      // Reprise après une bascule du haut-parleur. Après `play` et non avant :
+      // il n'y a rien où chercher tant que la source n'est pas chargée.
+      //
+      // `Duration.zero` est écarté comme une absence de reprise — y « revenir »
+      // ne ferait qu'ajouter un aller-retour inutile au démarrage normal.
+      if (depart != null && depart > Duration.zero) {
+        try {
+          await p.seek(depart);
+          traceAppel("IVR audio ⏩ reprise à ${depart.inSeconds}s");
+        } catch (_) {
+          // Une source qui refuse le déplacement (flux non « seekable ») joue
+          // depuis le début : c'est le comportement d'avant, pas une panne.
+        }
+      }
       if (loop) await p.setReleaseMode(ReleaseMode.loop);
       if (gen != _generationIvr) {
         traceAppel("IVR audio ANNULÉ pendant le chargement (loop=$loop)");
@@ -327,9 +612,53 @@ class RingtoneService {
     }
   }
 
-  Future<void> _play(String asset) async {
-    // Si on rejoue le même son (ex: 2 events consécutifs), on ne relance pas.
-    if (_currentAsset == asset && _player != null) return;
+  /// Contexte audio d'une sonnerie d'appel, partagé par l'asset et l'URL.
+  ///
+  /// Sur Android, on force le flux « appel » pour que la sonnerie reste audible
+  /// quand le mode « silencieux médias » est actif, et pour qu'elle sorte au
+  /// haut-parleur. ⚠️ **Le type d'usage commande le routage, pas seulement le
+  /// booléen** — même règle que pour l'audio du standard : `notificationRingtone`
+  /// sort au haut-parleur, `voiceCommunication` à l'écouteur.
+  AudioContext _contexteSonnerie(bool hautParleur) => AudioContext(
+        android: AudioContextAndroid(
+          isSpeakerphoneOn: hautParleur,
+          stayAwake: true,
+          contentType: AndroidContentType.sonification,
+          usageType: hautParleur
+              ? AndroidUsageType.notificationRingtone
+              : AndroidUsageType.voiceCommunication,
+          audioFocus: AndroidAudioFocus.gainTransientMayDuck,
+        ),
+        iOS: AudioContextIOS(
+          category: AVAudioSessionCategory.playback,
+          options: const {
+            AVAudioSessionOptions.duckOthers,
+            AVAudioSessionOptions.mixWithOthers,
+          },
+        ),
+      );
+
+  Future<void> _play(String asset,
+      {required bool hautParleur, bool boucle = true, VoidCallback? onFin}) async {
+  /*
+   * 🐛 « RIEN NE SE JOUE TANT QU'ON N'A PAS APPUYÉ SUR STOP PUIS SUR ÉCOUTER. »
+   *
+   * Cette garde évite de relancer un son DÉJÀ EN TRAIN DE JOUER — deux
+   * événements qui se suivent ne doivent pas redémarrer la sonnerie. Mais elle
+   * se contentait de vérifier qu'un lecteur EXISTE.
+   *
+   * Or un aperçu est en `ReleaseMode.stop` : quand il arrive au bout, le lecteur
+   * reste en place, arrêté. `_currentAsset` désigne donc toujours l'accueil, et
+   * le rappui sur « écouter » repartait ici sans rien jouer. L'écran, lui,
+   * passait bien son icône sur « stop » — d'où un bouton qui prétend jouer
+   * pendant qu'il ne sort aucun son. Appuyer sur stop puis sur écouter remettait
+   * tout à zéro, ce que les utilisateurs avaient trouvé tout seuls.
+   *
+   * ⚠️ C'EST L'ÉTAT QUI DÉCIDE, PAS L'EXISTENCE. Un lecteur arrêté ou terminé
+   * doit se relancer ; seul un lecteur qui joue vraiment n'a rien à faire de
+   * plus.
+   */
+    if (_currentAsset == asset && _player?.state == PlayerState.playing) return;
 
     await stop();
     // Retenu APRÈS l'arrêt, qui vient lui-même d'incrémenter le compteur : tout
@@ -338,28 +667,11 @@ class RingtoneService {
 
     try {
       final p = AudioPlayer();
-      // AudioContext : sur Android, on force le stream "voice call" pour que
-      // la sonnerie soit audible même quand le mode "silencieux médias" est
-      // actif, et pour qu'elle sorte sur haut-parleur (routing appel).
-      await p.setAudioContext(
-        AudioContext(
-          android: const AudioContextAndroid(
-            isSpeakerphoneOn: true,
-            stayAwake: true,
-            contentType: AndroidContentType.sonification,
-            usageType: AndroidUsageType.notificationRingtone,
-            audioFocus: AndroidAudioFocus.gainTransientMayDuck,
-          ),
-          iOS: AudioContextIOS(
-            category: AVAudioSessionCategory.playback,
-            options: const {
-              AVAudioSessionOptions.duckOthers,
-              AVAudioSessionOptions.mixWithOthers,
-            },
-          ),
-        ),
-      );
-      await p.setReleaseMode(ReleaseMode.loop);
+      await p.setAudioContext(_contexteSonnerie(hautParleur));
+      // ⚠️ `ReleaseMode.stop` ET NON `release` pour un apercu : `release`
+      // libere les ressources natives en fin de lecture, et le meme lecteur ne
+      // repartirait pas si l on reappuie sur ecouter.
+      await p.setReleaseMode(boucle ? ReleaseMode.loop : ReleaseMode.stop);
       await p.setVolume(1.0);
       // Un arrêt est-il passé pendant la préparation ? Alors ce lecteur ne doit
       // jamais commencer : c'est ici que se jouait la sonnerie fantôme.
@@ -369,6 +681,15 @@ class RingtoneService {
       if (gen != _generation) return _jeter(p);
       _player = p;
       _currentAsset = asset;
+      // ⚠️ APRÈS le contrôle de génération : un lecteur abandonné ne doit
+      // prévenir personne. La garde sur la génération au moment de l'appel
+      // évite aussi qu'un aperçu périmé remette un bouton à zéro sous le nez
+      // d'un écran qui en a relancé un autre.
+      if (onFin != null) {
+        _finApercuSub = p.onPlayerComplete.listen((_) {
+          if (gen == _generation) onFin();
+        });
+      }
       debugPrint("[RingtoneService] ▶️ $asset (loop)");
     } catch (e) {
       debugPrint("[RingtoneService] ❌ échec play $asset: $e");
@@ -377,8 +698,97 @@ class RingtoneService {
     }
   }
 
+  /// Même chose que [_play], mais depuis une URL distante.
+  ///
+  /// ⚠️ Il ne suffisait PAS de remplacer `AssetSource` par `UrlSource` : une
+  /// source distante ajoute un chargement réseau au milieu des quatre allers-
+  /// retours natifs, donc une fenêtre bien plus large pour que le décrochage
+  /// arrive avant le début de la lecture. Le compteur de génération est vérifié
+  /// aux mêmes endroits, et un échec retombe sur l'asset — sans ce repli, une
+  /// sonnerie de liste injoignable rendrait l'appel muet.
+  Future<void> _playUrl(String url,
+      {required bool hautParleur, bool boucle = true, VoidCallback? onFin}) async {
+    if (_currentAsset == url && _player?.state == PlayerState.playing) return;
+
+    await stop();
+    final gen = _generation;
+
+    try {
+      final p = AudioPlayer();
+      await p.setAudioContext(_contexteSonnerie(hautParleur));
+      // ⚠️ `ReleaseMode.stop` ET NON `release` pour un apercu : `release`
+      // libere les ressources natives en fin de lecture, et le meme lecteur ne
+      // repartirait pas si l on reappuie sur ecouter.
+      await p.setReleaseMode(boucle ? ReleaseMode.loop : ReleaseMode.stop);
+      await p.setVolume(1.0);
+      if (gen != _generation) return _jeter(p);
+      /*
+       * ⚠️ UN CHEMIN LOCAL N'EST PAS UNE URL, et `UrlSource` ne sait pas le
+       * lire : il en ferait une adresse réseau, qui échouerait en silence.
+       * L'accueil du répondeur arrive désormais PRÉCHARGÉ sous forme de fichier
+       * — c'est ce qui lui permet de démarrer sans latence — donc ce cas doit
+       * être reconnu ici, et nulle part ailleurs.
+       */
+      final estLocal = url.startsWith("/") || url.startsWith("file://");
+      await p.play(estLocal
+          ? DeviceFileSource(url.replaceFirst("file://", ""))
+          : UrlSource(url));
+      if (gen != _generation) return _jeter(p);
+      _player = p;
+      _currentAsset = url;
+      // ⚠️ APRÈS le contrôle de génération : un lecteur abandonné ne doit
+      // prévenir personne. La garde sur la génération au moment de l'appel
+      // évite aussi qu'un aperçu périmé remette un bouton à zéro sous le nez
+      // d'un écran qui en a relancé un autre.
+      if (onFin != null) {
+        _finApercuSub = p.onPlayerComplete.listen((_) {
+          if (gen == _generation) onFin();
+        });
+      }
+      debugPrint("[RingtoneService] ▶️ ${_finDe(url)} (liste, loop)");
+    } catch (e) {
+      debugPrint("[RingtoneService] ❌ sonnerie de liste ${_finDe(url)}: $e");
+      _player = null;
+      _currentAsset = null;
+      // L'arrêt qui a pu survenir pendant l'échec doit rester prioritaire :
+      // sans ce contrôle, le repli relancerait une sonnerie déjà annulée.
+      if (gen == _generation) {
+        await _play(_incomingAsset, hautParleur: hautParleur);
+      }
+    }
+  }
+
+  /// Fait ÉCOUTER une sonnerie, pour qu'on la choisisse en connaissance de
+  /// cause. [asset] pour un son livré, [url] pour un son importé.
+  ///
+  /// 🔴 UNE SEULE FOIS, ET C'EST LA DIFFÉRENCE AVEC `startIncoming`. Une
+  /// sonnerie d'appel BOUCLE, parce que rien d'autre ne dit à l'appelé qu'on le
+  /// demande. Un aperçu, lui, a une fin : il répond à « à quoi ça ressemble ? ».
+  /// Le faire boucler reprendrait le défaut que ce dépôt a déjà payé deux fois —
+  /// la lecture d'un centre vocal et la vidéo d'un statut : une boucle
+  /// n'arrivant jamais à son terme, rien ne vient jamais la refermer.
+  ///
+  /// ⚠️ AU HAUT-PARLEUR, toujours : on écoute un son en tenant le téléphone
+  /// devant soi, pas contre l'oreille.
+  ///
+  /// ⚠️ `stop()` L'ARRÊTE, comme n'importe quelle sonnerie — c'est le même
+  /// lecteur et le même compteur de génération. L'appelant DOIT l'appeler en
+  /// quittant son écran, sans quoi l'aperçu continuerait derrière lui.
+  /// [onFin] est appelé quand l'aperçu arrive AU BOUT de lui-même — jamais
+  /// quand c'est [stop] qui l'interrompt, l'appelant sachant déjà ce qu'il a
+  /// demandé. Il sert à remettre un bouton « stop » sur « écouter ».
+  Future<void> apercu({String? url, String? asset, VoidCallback? onFin}) {
+    if (asset != null && asset.isNotEmpty) {
+      return _play(asset, hautParleur: true, boucle: false, onFin: onFin);
+    }
+    if (url == null || url.isEmpty) return stop();
+    return _playUrl(url, hautParleur: true, boucle: false, onFin: onFin);
+  }
+
   /// Abandonne un lecteur qu'un arrêt a rendu caduc pendant sa préparation.
   Future<void> _jeter(AudioPlayer p) async {
+    unawaited(_finApercuSub?.cancel());
+    _finApercuSub = null;
     try {
       await p.stop();
       await p.release();
@@ -394,6 +804,9 @@ class RingtoneService {
     // qui est en train de se préparer. C'est exactement le cas du décrochage
     // qui arrive plus vite que le démarrage de la sonnerie.
     _generation++;
+    // L'écran n'a pas à être prévenu d'une fin qu'il vient lui-même de causer.
+    unawaited(_finApercuSub?.cancel());
+    _finApercuSub = null;
     final p = _player;
     if (p == null) return;
     _player = null;

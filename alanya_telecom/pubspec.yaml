@@ -1,0 +1,21 @@
+name: alanya_telecom
+description: >-
+  Module natif Telecom (ConnectionService self-managed) pour Alanya —
+  sonnerie d'appel entrant fiable même app en arrière-plan/gelée.
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+  flutter: ">=3.3.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.alanya.telecom
+        pluginClass: AlanyaTelecomPlugin

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/realtime_client.dart';
@@ -6,12 +7,13 @@ import '../../../core/realtime_client.dart';
 import '../../../core/device_registry.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
+import '../dissocier_telephone.dart';
 
 /// Écran « Appareils connectés » : les sessions ouvertes sur le compte, avec
 /// déconnexion à distance.
 ///
-/// L'appareil courant est marqué et non déconnectable depuis cet écran — s'en
-/// déconnecter soi-même est le rôle du bouton « Se déconnecter » des réglages.
+/// L'appareil courant est marqué ; il ne se déconnecte pas d'ici — c'est le
+/// rôle de « Se déconnecter » des réglages — mais s'y DISSOCIE.
 class DevicesScreen extends StatefulWidget {
   const DevicesScreen({super.key});
 
@@ -44,7 +46,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
     } catch (_) {
       if (!mounted) return;
       setState(() {
-        _erreur = "Impossible de charger tes appareils.\nVérifie ta connexion.";
+        _erreur = tr(context, 'dev_load_error');
         _appareils = [];
       });
     }
@@ -55,19 +57,18 @@ class _DevicesScreenState extends State<DevicesScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: const Text("Déconnecter cet appareil ?"),
+        title: Text(tr(context, 'dev_disconnect_q')),
         content: Text(
-          "${a.libelle} n'aura plus accès à ton compte. "
-          "Il faudra s'y reconnecter avec ton mot de passe.",
+          tr(context, 'dev_disconnect_body', {'appareil': a.libelle}),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text("Annuler"),
+            child: Text(tr(context, 'cancel')),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text("Déconnecter", style: TextStyle(color: dangerOf(context))),
+            child: Text(tr(context, 'disconnect'), style: TextStyle(color: dangerOf(context))),
           ),
         ],
       ),
@@ -88,26 +89,31 @@ class _DevicesScreenState extends State<DevicesScreen> {
         _enCours = null;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("${a.libelle} a été déconnecté.")),
+        SnackBar(content: Text(tr(context, 'dev_disconnected', {'appareil': a.libelle}))),
       );
     } catch (_) {
       if (!mounted) return;
       setState(() => _enCours = null);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Déconnexion impossible. Réessaie.")),
+        SnackBar(content: Text(tr(context, 'dev_disconnect_failed'))),
       );
     }
   }
 
   /// « À l'instant », « Il y a 3 h », puis la date complète.
   String _derniereActivite(DateTime? d) {
-    if (d == null) return "Jamais connecté";
+    if (d == null) return tr(context, 'dev_never');
     final minutes = DateTime.now().difference(d).inMinutes;
-    if (minutes < 2) return "À l'instant";
-    if (minutes < 60) return "Il y a $minutes min";
-    if (minutes < 24 * 60) return "Il y a ${minutes ~/ 60} h";
-    if (minutes < 7 * 24 * 60) return "Il y a ${minutes ~/ 1440} j";
-    return "Le ${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}";
+    if (minutes < 2) return tr(context, 'time_just_now');
+    if (minutes < 60) return tr(context, 'time_min_ago', {'n': '$minutes'});
+    if (minutes < 24 * 60) return tr(context, 'time_hour_ago', {'n': '${minutes ~/ 60}'});
+    if (minutes < 7 * 24 * 60) return tr(context, 'time_day_ago', {'n': '${minutes ~/ 1440}'});
+    // La DATE reste au format local du code ; seule la tournure qui l'entoure
+    // se traduit — « Le 04/09/2026 », « On 04/09/2026 », et rien du tout en
+    // chinois, où la date se suffit à elle-même.
+    final date =
+        "${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}";
+    return tr(context, 'date_on', {'date': date});
   }
 
   IconData _icone(int type) {
@@ -127,16 +133,14 @@ class _DevicesScreenState extends State<DevicesScreen> {
     final appareils = _appareils;
 
     return Scaffold(
-      appBar: backAppBar(context, "Appareils connectés"),
+      appBar: backAppBar(context, tr(context, 'home_devices')),
       body: RefreshIndicator(
         onRefresh: _charger,
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
           children: [
             Text(
-              "Ton compte Alanya est ouvert sur les appareils ci-dessous. "
-              "Si tu n'en reconnais pas un, déconnecte-le : il devra se "
-              "reconnecter avec ton mot de passe.",
+              tr(context, 'dev_intro'),
               style: TextStyle(
                 fontSize: 13.5,
                 height: 1.5,
@@ -156,7 +160,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
               _message(_erreur!, dangerOf(context))
             else if (appareils.isEmpty)
               _message(
-                "Aucun appareil enregistré pour le moment.",
+                tr(context, 'dev_empty'),
                 mutedOf(context, Colors.black54),
               )
             else
@@ -230,9 +234,9 @@ class _DevicesScreenState extends State<DevicesScreen> {
                   color: accentOf(context),
                   borderRadius: BorderRadius.circular(20),
                 ),
-                child: const Text(
-                  "Cet appareil",
-                  style: TextStyle(
+                child: Text(
+                  tr(context, 'dev_this_device'),
+                  style: const TextStyle(
                       fontSize: 10.5, fontWeight: FontWeight.w700, color: Colors.white),
                 ),
               ),
@@ -250,10 +254,25 @@ class _DevicesScreenState extends State<DevicesScreen> {
                 fontSize: 12, color: mutedOf(context, Colors.black54)),
           ),
         ),
-        // L'appareil courant n'est pas déconnectable ici : ce serait une
-        // déconnexion déguisée, avec un libellé qui ne le dit pas.
+        /*
+         * La ligne de CE téléphone porte « Dissocier ce téléphone » — demande
+         * du user du 28/09/2026. Ce n'est pas une déconnexion déguisée : le
+         * libellé dit exactement ce que fait le geste, qui est le même que
+         * dans les Paramètres.
+         *
+         * Les autres lignes gardent « Déconnecter ». Ce sont des navigateurs,
+         * ou d'anciennes installations : le téléphone lié, c'est celui-ci —
+         * sinon on n'aurait pas pu s'y connecter depuis ce téléphone.
+         */
         trailing: courant
-            ? null
+            ? (a.typeDevice == 1 || a.typeDevice == 2)
+                ? IconButton(
+                    tooltip: tr(context, 'dissoc_title'),
+                    icon: Icon(Icons.phonelink_erase_outlined,
+                        size: 20, color: dangerOf(context)),
+                    onPressed: () => dissocierCeTelephone(context),
+                  )
+                : null
             : occupe
                 ? const SizedBox(
                     width: 18,
@@ -261,7 +280,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : IconButton(
-                    tooltip: "Déconnecter",
+                    tooltip: tr(context, 'disconnect'),
                     icon: Icon(Icons.logout, size: 20, color: dangerOf(context)),
                     onPressed: () => _deconnecter(a),
                   ),

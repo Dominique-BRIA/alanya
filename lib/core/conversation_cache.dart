@@ -115,5 +115,18 @@ class ConversationCache {
         'lastCall': c.lastCall?.toJson(),
         'unread': c.unread,
         'updatedAt': c.updatedAt.toIso8601String(),
+        /*
+         * ⚠️ CES TROIS DRAPEAUX MANQUAIENT, et ils portent tous un choix de
+         * l'utilisateur. Sans eux, l'affichage depuis le cache — le premier,
+         * celui qu'on voit au lancement — montrait une conversation épinglée
+         * en bas de liste et une sourdine éteinte, jusqu'à la réponse du
+         * serveur. Un réglage qui clignote se lit comme un réglage perdu.
+         */
+        'isPinned': c.isPinned,
+        'isArchived': c.isArchived,
+        'sourdine': c.sourdine,
+        // L’état chiffré : sans lui, l’affichage depuis le cache ne saurait pas
+        // qu’il faut chercher le dernier texte en local (fil chiffré).
+        'e2eeActif': c.e2eeActif,
       };
 }
