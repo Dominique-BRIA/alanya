@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart' show MediaType;
 
+import 'locale_controller.dart';
 import 'server_config.dart';
 
 /// Exception levée quand l'API renvoie une erreur (status >= 400).
@@ -160,6 +161,7 @@ class ApiClient {
       onProgress: onProgress,
     );
     if (bearer != null) request.headers["Authorization"] = "Bearer $bearer";
+    request.headers["Accept-Language"] = LocaleController.codeCourant;
     if (fields != null) request.fields.addAll(fields);
     request.files.add(http.MultipartFile.fromBytes(
       "file",
@@ -195,6 +197,7 @@ class ApiClient {
       onProgress: onProgress,
     );
     if (bearer != null) request.headers["Authorization"] = "Bearer $bearer";
+    request.headers["Accept-Language"] = LocaleController.codeCourant;
     if (fields != null) request.fields.addAll(fields);
     request.files.add(await http.MultipartFile.fromPath(
       "file",
@@ -215,8 +218,12 @@ class ApiClient {
   static Never _expire() =>
       throw ApiException(408, "Le serveur n'a pas repondu a temps.");
 
+  /// ⚠️ `Accept-Language` porte la langue CHOISIE DANS L'APPLICATION : le
+  /// serveur écrit les courriels dans cette langue. Sans lui, un code
+  /// d'inscription demandé en russe arrivait en français.
   Map<String, String> _headers(String? bearer) => {
         "Content-Type": "application/json",
+        "Accept-Language": LocaleController.codeCourant,
         if (bearer != null) "Authorization": "Bearer $bearer",
       };
 
