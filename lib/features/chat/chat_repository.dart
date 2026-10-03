@@ -53,8 +53,13 @@ class ChatRepository {
     return data["id"] as String;
   }
 
-  Future<List<Message>> getMessages(String convId, {String? cursor}) async {
-    final path = "/api/conversations/$convId/messages${cursor != null ? "?cursor=$cursor" : ""}";
+  /// [limit] : taille de la page (50 par défaut côté serveur, 100 au plus).
+  Future<List<Message>> getMessages(String convId, {String? cursor, int? limit}) async {
+    final params = [
+      if (cursor != null) "cursor=$cursor",
+      if (limit != null) "limit=$limit",
+    ];
+    final path = "/api/conversations/$convId/messages${params.isEmpty ? "" : "?${params.join("&")}"}";
     final data = await _api.get(path);
     return ((data["messages"] as List?) ?? [])
         .map((m) => Message.fromJson(m as Map<String, dynamic>))

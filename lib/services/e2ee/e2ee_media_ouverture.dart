@@ -7,6 +7,10 @@ import 'package:http/http.dart' as http;
 import '../../core/media_cache.dart';
 import 'e2ee_media.dart';
 
+/// Donne le jeton d'accès À JOUR ; [renouveler] le fait rafraîchir après un
+/// 401. Voir `AuthedApi.jeton`.
+typedef FournisseurJeton = Future<String?> Function({bool renouveler});
+
 /// OUVRIR UN MÉDIA CHIFFRÉ — le télécharger, le vérifier, le déchiffrer.
 ///
 /// Jumeau de `STAGE-WEB/src/services/e2ee-media-ouverture.ts` (cours,
@@ -32,6 +36,7 @@ class OuvertureMediaChiffre {
     DescripteurMedia d, {
     required String baseUrl,
     required String? token,
+    FournisseurJeton? jeton,
   }) {
     final deja = _enCours[d.id];
     if (deja != null) return deja;
@@ -50,7 +55,7 @@ class OuvertureMediaChiffre {
      * `test/e2ee_media_ouverture_test.dart` : le banc d'interopérabilité
      * déchiffrait sans passer par `ouvrir`, il ne pouvait pas le voir.
      */
-    final f = _ouvrir(d, baseUrl, token).whenComplete(() {
+    final f = _ouvrir(d, baseUrl, token, jeton).whenComplete(() {
       _enCours.remove(d.id);
     });
     _enCours[d.id] = f;
@@ -80,6 +85,7 @@ class OuvertureMediaChiffre {
     DescripteurMedia d,
     String baseUrl,
     String? token,
+    FournisseurJeton? jeton,
   ) async {
     final garde = await MediaCache.get(_cle(d), _extension(d));
     if (garde != null) return File(garde);
@@ -87,6 +93,7 @@ class OuvertureMediaChiffre {
     final chiffre = await _telecharger(
       Uri.parse('$baseUrl/api/media/${d.id}'),
       token,
+      jeton,
     );
 
     final cle = d.cle;
@@ -124,17 +131,39 @@ class OuvertureMediaChiffre {
   ///
   /// ⚠️ VÉRIFIÉ, ET ÉCARTÉ : un jeton invalide ne bloque pas. Le serveur
   /// répond en moins d'une seconde (401 sans jeton, 400 avec un faux).
-  static Future<Uint8List> _telecharger(Uri adresse, String? token) async {
-    final entetes = <String, String>{
-      if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
-    };
+  ///
+  /// 🔴 LE JETON EST DEMANDÉ AU MOMENT DU TÉLÉCHARGEMENT, pas reçu de l'écran.
+  ///
+  /// 🐛 « A envoie un média à B : impossible de télécharger, il faut rouvrir
+  /// la conversation » (user, 03/10/2026). L'écran passait le jeton lu à son
+  /// ouverture ; expiré entre-temps (15 min), le serveur répondait 401. Avec
+  /// [jeton], on lit le jeton du stockage — que le reste de l'application tient
+  /// à jour — et, sur un 401, on le fait rafraîchir UNE fois avant de
+  /// réessayer. [token] ne sert plus que de repli, sans fournisseur.
+  static Future<Uint8List> _telecharger(
+    Uri adresse,
+    String? token,
+    FournisseurJeton? jeton,
+  ) async {
+    var courant = jeton != null ? await jeton() : token;
+    var renouvele = false;
     var essai = 0;
     while (true) {
       final client = http.Client();
       try {
         final rep = await client
-            .send(http.Request('GET', adresse)..headers.addAll(entetes))
+            .send(http.Request('GET', adresse)
+              ..headers.addAll({
+                if (courant != null && courant.isNotEmpty)
+                  'Authorization': 'Bearer $courant',
+              }))
             .timeout(delaiInactivite);
+        // Jeton expiré : on le renouvelle une fois, et on rejoue.
+        if (rep.statusCode == 401 && jeton != null && !renouvele) {
+          renouvele = true;
+          courant = await jeton(renouveler: true);
+          if (courant != null) continue;
+        }
         // Un refus du serveur ne se répare pas en réessayant.
         if (rep.statusCode != 200) throw MediaIndisponible(rep.statusCode);
         final octets = BytesBuilder(copy: false);

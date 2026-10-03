@@ -6,9 +6,11 @@ import 'dart:ui' show ImageFilter;
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../../core/authed_api.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../services/e2ee/e2ee_media.dart';
 import '../../../services/e2ee/e2ee_media_ouverture.dart';
@@ -92,6 +94,7 @@ class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
         d,
         baseUrl: widget.baseUrl,
         token: widget.token,
+        jeton: fournisseurJeton(context),
       );
       if (!mounted) return f;
       setState(() {
@@ -487,7 +490,9 @@ class _TuileMediaChiffreState extends State<TuileMediaChiffre> {
     }
     try {
       final f = await OuvertureMediaChiffre.ouvrir(d,
-          baseUrl: widget.baseUrl, token: widget.token);
+          baseUrl: widget.baseUrl,
+          token: widget.token,
+          jeton: fournisseurJeton(context));
       if (mounted) {
         setState(() {
           _fichier = f;
@@ -591,4 +596,15 @@ class LotMediasChiffres extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// Le jeton À JOUR pour télécharger un média chiffré (voir
+/// `OuvertureMediaChiffre._telecharger`), ou `null` hors de l'application
+/// (tests de widgets), où le jeton passé par l'écran sert de repli.
+FournisseurJeton? fournisseurJeton(BuildContext context) {
+  try {
+    return context.read<AuthedApi>().jeton;
+  } catch (_) {
+    return null;
+  }
 }

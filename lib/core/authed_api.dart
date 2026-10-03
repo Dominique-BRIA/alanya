@@ -85,6 +85,19 @@ class AuthedApi {
     }
   }
 
+  /// Le jeton d'accès À JOUR, pour qui télécharge sans passer par cette classe
+  /// (médias chiffrés). [renouveler] force le rafraîchissement, sous le MÊME
+  /// verrou que `_withAuth` : à n'appeler qu'après un 401.
+  ///
+  /// 🐛 POURQUOI ELLE EXISTE (03/10/2026). L'écran de conversation lisait le
+  /// jeton UNE fois, à l'ouverture, puis chargeait les messages — chargement
+  /// qui, si ce jeton avait expiré (15 min), le rafraîchissait dans le
+  /// stockage. L'écran gardait l'ancien : chaque média chiffré reçu ensuite
+  /// partait avec un jeton mort, 401, « impossible de télécharger ». Il
+  /// fallait rouvrir la conversation pour relire le bon.
+  Future<String?> jeton({bool renouveler = false}) =>
+      renouveler ? _refreshLocked() : _storage.accessToken;
+
   /// Refresh protégé par un verrou : un seul à la fois, les autres attendent.
   ///
   /// ⚠️ LE VERROU EST DÉSORMAIS PARTAGÉ avec `AuthController.bootstrap()`, qui

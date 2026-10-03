@@ -116,4 +116,35 @@ void main() {
     );
     expect(recues.length, 1);
   });
+
+  test('un jeton EXPIRÉ est renouvelé une fois, puis la photo arrive', () async {
+    // Le banc de Flutter remplace le client HTTP par un faux à chaque test.
+    HttpOverrides.global = null;
+    final clair = Uint8List.fromList(List.generate(300, (i) => i % 13));
+    final f = chiffrerFichier(clair);
+    repondre = (r) async {
+      if (r.headers.value('authorization') != 'Bearer neuf') {
+        r.response.statusCode = 401;
+      } else {
+        r.response.add(f.chiffre);
+      }
+      await r.response.close();
+    };
+    var renouvellements = 0;
+    Future<String?> jeton({bool renouveler = false}) async {
+      if (!renouveler) return 'vieux';
+      renouvellements++;
+      return 'neuf';
+    }
+
+    final fichier = await OuvertureMediaChiffre.ouvrir(
+        descripteur('expire', f, clair.length),
+        baseUrl: base,
+        token: 'ignore',
+        jeton: jeton);
+    expect(await fichier.readAsBytes(), clair);
+    expect(renouvellements, 1);
+    expect(recues.map((r) => r.headers.value('authorization')),
+        ['Bearer vieux', 'Bearer neuf']);
+  });
 }
