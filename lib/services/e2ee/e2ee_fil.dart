@@ -218,8 +218,6 @@ class E2eeFil {
       throw const E2eeImpossible('Aucun appareil chiffré chez ce correspondant.');
     }
 
-    final enveloppes = await _enveloppesPour(pairId, appareils, texte);
-
     /*
      * 🐛 J'AVAIS INVENTÉ `POST /api/messages/chiffre`. Cette route n'existe pas.
      * Le vrai chemin est celui du web, et il tient en DEUX appels :
@@ -236,6 +234,21 @@ class E2eeFil {
       'chiffre': true,
     });
     final messageId = message['id'] as String;
+
+    /*
+     * 🔴 LE TEXTE PART EN CHARGE v2, AVEC L'IDENTIFIANT DU MESSAGE DEDANS
+     * (lot D, chapitre 26). En v1, l'identifiant ne voyageait qu'À CÔTÉ du
+     * chiffré : le serveur pouvait rattacher le texte de Bob à un AUTRE
+     * message de Bob du même fil. Chiffré avec le texte, il est hors de sa
+     * portée, et `lireCharge` refuse une enveloppe mal rattachée.
+     *
+     * ⚠️ D'OÙ LE CHIFFREMENT APRÈS LA LIGNE, et non plus avant : il faut
+     * l'identifiant pour écrire la charge. C'était déjà l'ordre du média
+     * (lot C) et celui du web. Les sessions, elles, sont ouvertes plus haut,
+     * avant la ligne : c'est là que l'échec est probable (réseau, pré-clés).
+     */
+    final enveloppes =
+        await _enveloppesPour(pairId, appareils, ecrireCharge(messageId, texte));
 
     await _api('POST', '/api/e2ee/enveloppes', {
       'convId': convId,
@@ -306,10 +319,9 @@ class E2eeFil {
   /// du message et les enveloppes portant la charge v2 : clé, empreinte,
   /// aperçu, légende.
   ///
-  /// ⚠️ L'ORDRE EST INVERSE DE CELUI DU TEXTE : la ligne d'abord, les
-  /// enveloppes ensuite. La charge v2 porte l'identifiant du message — il
-  /// faut donc l'avoir avant de chiffrer. Jumeau de `envoyerMediaChiffre`
-  /// côté web.
+  /// La ligne d'abord, les enveloppes ensuite — comme le texte depuis le
+  /// lot D : la charge v2 porte l'identifiant du message, il faut donc l'avoir
+  /// avant de chiffrer. Jumeau de `envoyerMediaChiffre` côté web.
   Future<String> envoyerMedia({
     required String convId,
     required String pairId,

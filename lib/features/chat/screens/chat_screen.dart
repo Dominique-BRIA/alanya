@@ -3296,7 +3296,18 @@ class _ChatScreenState extends State<ChatScreen>
      * Un message par fichier (décision du user) : la charge ne porte qu'un
      * descripteur. Rien ne passe par le magasin d'envois — sa file hors ligne
      * renverrait le fichier EN CLAIR au retour du réseau.
+     *
+     * 🔴 ÉTAT INCONNU → ON DEMANDE AVANT DE TÉLÉVERSER (lot D, chapitre 26).
+     * Le serveur refuse désormais un fichier en clair dans un fil chiffré,
+     * mais au moment du MESSAGE, après le téléversement : le fichier en clair
+     * serait déjà sur le stockage. Seul l'expéditeur peut l'éviter. Même
+     * garde que pour le texte.
      */
+    final pileAvant = context.e2ee;
+    if (pileAvant != null && !_filChiffre && !pileAvant.fil.etatConnu(widget.convId)) {
+      await _lireEtatChiffrement();
+      if (!mounted) return;
+    }
     final pile = context.e2ee;
     final pair = widget.otherUserId;
     final moi = _myId;
