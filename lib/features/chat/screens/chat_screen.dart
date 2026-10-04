@@ -7,6 +7,7 @@ import '../../../services/e2ee/e2ee_media.dart';
 import '../../../services/e2ee/e2ee_media_envoi.dart';
 import '../../../widgets/e2ee/e2ee_widgets.dart';
 import '../frontiere_chiffrement.dart';
+import '../envois_chiffres_fil.dart';
 import '../fusion_releve.dart';
 import '../statut_envoi.dart';
 import 'dart:typed_data';
@@ -1663,9 +1664,14 @@ class _ChatScreenState extends State<ChatScreen>
        * cet appareil », et la relève ne remplissait ensuite que les nouveaux
        * messages (test T5 du user, 29/09/2026).
        */
-      final latest = _garderLeClairConnu(
+      final duServeur = _garderLeClairConnu(
           (await repo.getMessages(widget.convId)).reversed.toList(), _messages);
       if (!mounted) return;
+      // 🐛 La page du serveur n'a pas les bulles d'attente des médias
+      // chiffrés : sans cette garde, un PDF envoyé au retour du sélecteur de
+      // fichiers disparaissait (voir `envois_chiffres_fil.dart`).
+      final latest = garderEnvoisEnCours(
+          duServeur, _messages, _envoisChiffres.keys.toSet());
       if (_signature(latest) == _signature(_messages)) return;
       final hadMore = latest.length > _messages.length;
       final atBottom = !_scrollCtrl.hasClients ||
@@ -3524,13 +3530,9 @@ class _ChatScreenState extends State<ChatScreen>
       );
       if (!mounted) return;
       setState(() {
-        final vus = <String>{};
-        _messages = [
-          for (final m in _messages)
-            // L'écho du serveur a pu arriver d'abord : pas de doublon.
-            if (vus.add(m.id == tempId ? envoye.id : m.id))
-              m.id == tempId ? envoye : m,
-        ];
+        // Ajouté même si la bulle d'attente a disparu, et à la place de la
+        // version du serveur arrivée d'abord : voir `envois_chiffres_fil.dart`.
+        _messages = remplacerEnvoiChiffre(_messages, tempId, envoye);
         _rebuildCombined();
       });
     } catch (e) {
