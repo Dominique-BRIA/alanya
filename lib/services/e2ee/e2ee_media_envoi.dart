@@ -1,4 +1,3 @@
-import 'dart:isolate';
 import 'dart:typed_data';
 
 import '../../core/message_cache.dart';
@@ -56,7 +55,7 @@ class EnvoiMediaChiffre {
     );
 
     // 2. Chiffrement, hors du fil de l'écran.
-    final f = await Isolate.run<FichierChiffre>(() => chiffrerFichier(octets));
+    final f = await chiffrerHorsDuFil(octets);
 
     // 3. Le fichier chiffré : nom et type neutres.
     final envoye = await medias.upload(

@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
@@ -96,16 +95,11 @@ class OuvertureMediaChiffre {
       jeton,
     );
 
-    final cle = d.cle;
-    final empreinte = d.empreinte;
-    final taille = d.taille;
-    final clair = await Isolate.run<Uint8List>(
-      () => dechiffrerFichier(
-        chiffre,
-        cle: cle,
-        empreinte: empreinte,
-        taille: taille,
-      ),
+    final clair = await dechiffrerHorsDuFil(
+      chiffre,
+      cle: d.cle,
+      empreinte: d.empreinte,
+      taille: d.taille,
     );
 
     return File(await MediaCache.put(_cle(d), _extension(d), clair));

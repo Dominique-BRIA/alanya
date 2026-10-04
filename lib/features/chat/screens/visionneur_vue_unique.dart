@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
@@ -121,9 +120,8 @@ class _VisionneurVueUniqueState extends State<VisionneurVueUnique> {
         final rep = await http.get(Uri.parse(_adresse(serveur)));
         if (rep.statusCode != 200) throw ApiException(rep.statusCode, 'HTTP');
         final chiffre = rep.bodyBytes;
-        final cle = d.cle, empreinte = d.empreinte, taille = d.taille;
-        clair = await Isolate.run<Uint8List>(() => dechiffrerFichier(chiffre,
-            cle: cle, empreinte: empreinte, taille: taille));
+        clair = await dechiffrerHorsDuFil(chiffre,
+            cle: d.cle, empreinte: d.empreinte, taille: d.taille);
         if (!mounted) return;
       }
 

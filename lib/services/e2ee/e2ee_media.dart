@@ -11,6 +11,7 @@
 library;
 
 import 'dart:convert';
+import 'dart:isolate';
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -317,3 +318,34 @@ Uint8List dechiffrerFichier(
   }
   return clair;
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// 4. HORS DU FIL DE L'ÉCRAN
+// ════════════════════════════════════════════════════════════════════════════
+//
+// 🔴 TOUJOURS PASSER PAR CES DEUX FONCTIONS, JAMAIS PAR UN `Isolate.run` ÉCRIT
+// SUR PLACE (cours, chapitre 27). Une fermeture envoyée à un isolat emporte
+// tout le CONTEXTE de la fonction qui l'a créée : les variables capturées par
+// ses voisines, et la chaîne des contextes parents. Dans `EnvoiMediaChiffre`,
+// la voisine était le rappel de progression de l'écran, qui tenait l'état du
+// chat, qui tenait un `Future` : « object is unsendable » (user, 04/10/2026).
+// Ici, le seul contexte est celui des paramètres.
+
+/// [chiffrerFichier] dans un isolat.
+Future<FichierChiffre> chiffrerHorsDuFil(Uint8List clair) =>
+    Isolate.run(() => chiffrerFichier(clair));
+
+/// [dechiffrerFichier] dans un isolat. Lève [FichierInvalide].
+Future<Uint8List> dechiffrerHorsDuFil(
+  Uint8List chiffre, {
+  required String cle,
+  required String empreinte,
+  required int taille,
+}) => Isolate.run(
+  () => dechiffrerFichier(
+    chiffre,
+    cle: cle,
+    empreinte: empreinte,
+    taille: taille,
+  ),
+);
