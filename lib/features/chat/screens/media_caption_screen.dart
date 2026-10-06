@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../../core/compression_envoi.dart';
 import '../../../core/compression_image.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/media/media_picker_sheet.dart';
@@ -485,6 +486,7 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
     try {
       final octets = await File(chemin).readAsBytes();
       if (!mounted) return;
+      final nom = chemin.split(Platform.pathSeparator).last;
       setState(() {
         _fichiers[_index] = courant.copieAvec(
           bytes: octets,
@@ -492,7 +494,10 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
           // choisit l'extension de stockage d'après le NOM, et des octets
           // d'origine sous un nom `.jpg` seraient servis avec le mauvais
           // en-tête. Même règle qu'à la compression, dans l'autre sens.
-          fileName: chemin.split(Platform.pathSeparator).last,
+          fileName: nom,
+          // Une capture `.png` ou une vidéo `.mov` rendue à l'original ne
+          // garde pas le type du JPEG ou du MP4 qui l'avait remplacée.
+          mimeType: mimeDepuisNom(nom, repli: courant.mimeType),
           compresse: false,
         );
       });

@@ -19,8 +19,12 @@
 /// correspondant, quand il est trop tard.
 library;
 
+import 'dart:io' show Platform;
+import 'dart:math' as math;
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:photo_manager/photo_manager.dart';
 
 /// Bord le plus long après réduction. Repère WhatsApp ; un grand téléphone
@@ -33,11 +37,21 @@ const int imageQualite = 82;
 /// En dessous, le gain ne vaut pas le risque de perte : on garde l'original.
 const double gainMinimum = 0.9;
 
+/// Poids au-delà duquel une image DÉJÀ PETITE est quand même ré-encodée.
+///
+/// Une photo passée par ici pèse 0,1 à 0,3 octet par pixel : elle reste sous
+/// ce seuil, et ne perd donc pas un peu de qualité à chaque transfert. Une
+/// image de 1500 px enregistrée en qualité maximale en pèse 1 à 2 — elle passe.
+/// Même valeur que `OCTETS_PAR_PIXEL_MAX` côté web.
+const double octetsParPixelMax = 0.5;
+
 /// Pourquoi la compression n'a rien fait. Sert au diagnostic, pas à l'affichage.
 enum RaisonSaut {
   pasUneImage,
   tropPetite,
-  png,
+
+  /// Un pixel au moins est transparent : en JPEG, il deviendrait noir.
+  transparente,
   animee,
   decodageImpossible,
   sansGain,
@@ -94,37 +108,64 @@ Future<ResultatCompression> compresserAsset(
 
   if (asset.type != AssetType.image) return intact(RaisonSaut.pasUneImage);
 
-  final type = mimeType.toLowerCase();
-  // Un GIF perdrait son animation en devenant une image fixe, et un PNG sa
-  // transparence : les deux ressortiraient sur fond noir chez le correspondant.
-  if (type.contains("gif")) return intact(RaisonSaut.animee);
-  if (type.contains("png")) return intact(RaisonSaut.png);
+  // Le format se lit dans les OCTETS : le type déclaré vient du nom du
+  // fichier, et une capture d'écran renommée ou sans extension le trompe.
+  final png = _signature(original, const [0x89, 0x50, 0x4e, 0x47]);
+  final gif = _signature(original, const [0x47, 0x49, 0x46, 0x38]);
+  // Un GIF perdrait son animation en devenant une image fixe.
+  if (gif || mimeType.toLowerCase().contains("gif")) {
+    return intact(RaisonSaut.animee);
+  }
 
   /*
-   * ⚠️ TEST SUR LES DIMENSIONS, PAS SUR LE POIDS. C'est lui qui empêche de
-   * recompresser indéfiniment une image déjà passée par ici : une photo reçue
-   * puis transférée perdrait un peu de qualité à chaque saut, jusqu'à devenir
-   * la photocopie de photocopie que tout le monde reconnaît.
+   * 🐛 LES CAPTURES D'ÉCRAN PARTAIENT INTACTES (signalé par le user le
+   * 06/10/2026 : « ça ne compresse pas »). Ce module laissait passer TOUT PNG,
+   * au nom de la transparence. Or le PNG est d'abord le format des captures —
+   * 400 Ko à 1 Mo pour un écran de téléphone, cinq fois le poids du même
+   * écran en JPEG. Seuls l'animé et le transparent restent intacts, et ils
+   * sont reconnus un par un. Même règle que le web, le même jour.
    */
-  final bordLong =
-      asset.width > asset.height ? asset.width : asset.height;
+  if (png) {
+    final refus = await pngIntouchable(original);
+    if (refus != null) return intact(refus);
+  }
+
+  var largeur = asset.width;
+  var hauteur = asset.height;
   /*
-   * 🐛 DIMENSIONS INCONNUES = ON TENTE QUAND MÊME (06/10/2026, photo envoyée
-   * depuis le mobile « trop lourde »). Android rend souvent 0 × 0 pour une photo
-   * que la galerie n'a pas encore indexée — typiquement celle qu'on vient de
-   * prendre et qu'on envoie aussitôt. On abandonnait alors la compression, en
-   * silence, et l'original partait : plusieurs mégaoctets.
-   *
-   * Le garde-fou contre la recompression reste en place sous une autre forme :
-   * une image déjà petite ressort presque aussi lourde, et le contrôle de gain
-   * plus bas (`gainMinimum`) la laisse intacte.
+   * 🐛 DIMENSIONS INCONNUES (06/10/2026, photo envoyée depuis le mobile « trop
+   * lourde »). Android rend souvent 0 × 0 pour une photo que la galerie n'a
+   * pas encore indexée — typiquement celle qu'on vient de prendre et qu'on
+   * envoie aussitôt. On les lit alors dans l'en-tête du fichier, sans le
+   * décoder.
    */
-  if (bordLong > 0 && bordLong <= imageBordMax) return intact(RaisonSaut.tropPetite);
+  if (largeur <= 0 || hauteur <= 0) {
+    final lues = await _dimensions(original);
+    if (lues != null) {
+      largeur = lues.$1;
+      hauteur = lues.$2;
+    }
+  }
+  final bordLong = math.max(largeur, hauteur);
+
+  /*
+   * ⚠️ UNE IMAGE DÉJÀ PETITE ET LÉGÈRE N'EST PAS RECOMPRESSÉE. C'est ce qui
+   * empêche une photo reçue puis transférée de perdre un peu de qualité à
+   * chaque saut, jusqu'à devenir la photocopie de photocopie que tout le monde
+   * reconnaît. Le PNG n'est jamais dans ce cas : il n'est pas encore passé par
+   * ici, puisque ce module rend du JPEG.
+   */
+  if (!png &&
+      bordLong > 0 &&
+      bordLong <= imageBordMax &&
+      original.length <= largeur * hauteur * octetsParPixelMax) {
+    return intact(RaisonSaut.tropPetite);
+  }
 
   Uint8List? reduit;
   try {
     reduit = await asset.thumbnailDataWithSize(
-      const ThumbnailSize(imageBordMax, imageBordMax),
+      consigneVignette(largeur, hauteur),
       format: ThumbnailFormat.jpeg,
       quality: imageQualite,
     );
@@ -156,6 +197,112 @@ Future<ResultatCompression> compresserAsset(
     tailleAvant: original.length,
     tailleApres: reduit.length,
   );
+}
+
+/*
+ * LA CONSIGNE DE TAILLE À DONNER À `thumbnailDataWithSize`, pour que le BORD
+ * LONG sorte à [imageBordMax] — et qu'aucune image ne soit jamais agrandie.
+ *
+ * 🐛 ANDROID AGRANDISSAIT (trouvé le 06/10/2026). Le paquet y passe par Glide,
+ * qui, sans transformation, REMPLIT le cadre demandé : c'est le bord COURT qui
+ * prend la consigne. Une photo 4000 × 3000 sortait donc en 2133 × 1600, et une
+ * capture 1080 × 2400 serait ressortie en 1600 × 3556 — agrandie, plus lourde
+ * que l'original. Un cadre carré dont le côté vaut le bord court visé donne le
+ * bon résultat quelle que soit l'orientation de l'image.
+ *
+ * iOS, lui, AJUSTE l'image dans le cadre : c'est le bord long qui prend la
+ * consigne.
+ */
+@visibleForTesting
+ThumbnailSize consigneVignette(int largeur, int hauteur, {bool? android}) {
+  final long = math.max(largeur, hauteur);
+  final court = math.min(largeur, hauteur);
+  if (long <= 0 || court <= 0) {
+    return const ThumbnailSize(imageBordMax, imageBordMax);
+  }
+  final facteur = math.min(1.0, imageBordMax / long);
+  final cote = (android ?? Platform.isAndroid)
+      ? math.max(1, (court * facteur).round())
+      : math.max(1, (long * facteur).round());
+  return ThumbnailSize(cote, cote);
+}
+
+bool _signature(Uint8List octets, List<int> attendus) {
+  if (octets.length < attendus.length) return false;
+  for (var i = 0; i < attendus.length; i++) {
+    if (octets[i] != attendus[i]) return false;
+  }
+  return true;
+}
+
+/// Un PNG qu'il ne faut PAS convertir en JPEG — animé ou transparent —, ou
+/// `null` s'il peut l'être.
+///
+/// Dans le doute, on répond « intouchable » : une capture qui part en PNG est
+/// un peu lourde, un logo qui arrive sur fond noir est un défaut.
+@visibleForTesting
+Future<RaisonSaut?> pngIntouchable(Uint8List octets) async {
+  // APNG : la norme place `acTL` AVANT le premier `IDAT`. Flutter ne décode
+  // pas toujours l'animation : on ne s'en remet pas à son décompte d'images.
+  final vue = ByteData.sublistView(octets);
+  var position = 8;
+  var idatAtteint = false;
+  while (position + 8 <= vue.lengthInBytes) {
+    final longueur = vue.getUint32(position);
+    final type = String.fromCharCodes(octets, position + 4, position + 8);
+    if (type == "acTL") return RaisonSaut.animee;
+    if (type == "IDAT") {
+      idatAtteint = true;
+      break;
+    }
+    position += 12 + longueur;
+  }
+  if (!idatAtteint) return RaisonSaut.decodageImpossible;
+
+  /*
+   * Transparence : on décode en PETIT (256 px de large suffisent — un pixel
+   * transparent le reste une fois réduit) et l'on cherche un alpha < 255. Une
+   * capture d'écran est entièrement opaque, même quand son PNG prévoit une
+   * couche alpha.
+   */
+  ui.Codec? codec;
+  ui.Image? image;
+  try {
+    codec = await ui.instantiateImageCodec(octets, targetWidth: 256);
+    if (codec.frameCount > 1) return RaisonSaut.animee;
+    image = (await codec.getNextFrame()).image;
+    final donnees = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+    if (donnees == null) return RaisonSaut.decodageImpossible;
+    final pixels = donnees.buffer
+        .asUint8List(donnees.offsetInBytes, donnees.lengthInBytes);
+    for (var i = 3; i < pixels.length; i += 4) {
+      if (pixels[i] < 255) return RaisonSaut.transparente;
+    }
+    return null;
+  } catch (_) {
+    return RaisonSaut.decodageImpossible;
+  } finally {
+    image?.dispose();
+    codec?.dispose();
+  }
+}
+
+/// Largeur et hauteur lues dans l'EN-TÊTE, sans décoder les pixels.
+Future<(int, int)?> _dimensions(Uint8List octets) async {
+  ui.ImmutableBuffer? tampon;
+  ui.ImageDescriptor? descripteur;
+  try {
+    tampon = await ui.ImmutableBuffer.fromUint8List(octets);
+    descripteur = await ui.ImageDescriptor.encoded(tampon);
+    final l = descripteur.width;
+    final h = descripteur.height;
+    return l > 0 && h > 0 ? (l, h) : null;
+  } catch (_) {
+    return null;
+  } finally {
+    descripteur?.dispose();
+    tampon?.dispose();
+  }
 }
 
 String _enJpg(String nom) {

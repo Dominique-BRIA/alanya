@@ -3,7 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
 
-import '../../../core/compression_image.dart';
+import '../../../core/compression_envoi.dart';
 import '../../../core/plafond_media.dart';
 import '../../../core/galerie.dart';
 import '../../../theme/alanya_theme.dart';
@@ -252,13 +252,15 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
          *
          * La règle vit dans `core/compression_image.dart`, miroir du module du
          * web : mêmes bornes, mêmes refus. Elle rend les octets d'origine à la
-         * moindre incertitude.
+         * moindre incertitude. Les vidéos passent par `compression_video.dart`
+         * depuis le 06/10/2026 — elles partaient entières.
          */
-        final compresse = await compresserAsset(
-          asset,
-          octets,
+        final compresse = await compresserPourEnvoi(
+          asset: asset,
+          octets: octets,
           nomFichier: asset.title ?? 'media_${asset.id}',
           mimeType: _mime(asset),
+          chemin: fichier?.path,
         );
         /*
          * ⚠️ LE PLAFOND SE MESURE APRÈS COMPRESSION, jamais avant.
@@ -266,7 +268,7 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
          * Une photo de 12 Mo sortie du capteur en fait 400 Ko une fois réduite :
          * la refuser sur sa taille d'origine interdirait d'envoyer des photos
          * parfaitement acceptables. Ce contrôle vise donc ce qui PART
-         * réellement — en pratique, les vidéos, que rien ne compresse ici.
+         * réellement — en pratique, les longues vidéos, même transcodées.
          */
         if (depassePlafondMedia(compresse.octets.length)) {
           tropGros.add(compresse.nomFichier);

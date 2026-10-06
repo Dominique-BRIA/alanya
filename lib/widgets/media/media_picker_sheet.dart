@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../core/compression_envoi.dart';
 import '../../core/compression_image.dart';
 import '../../core/galerie.dart';
 import '../../core/plafond_media.dart';
@@ -118,6 +119,7 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
   List<AssetEntity> _recentMedia = [];
   bool _loadingGallery = true;
   bool _permissionDenied = false;
+  bool _preparation = false;
   final Set<String> _selectedIds = {};
 
   @override
@@ -177,7 +179,18 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
    * jamais ici.
    */
   Future<void> _confirmSelection() async {
-    if (_selectedIds.isEmpty) return;
+    // Une vidéo se transcode en plusieurs secondes : sans ce verrou, un second
+    // appui relançait tout le lot, et la vidéo partait deux fois.
+    if (_selectedIds.isEmpty || _preparation) return;
+    setState(() => _preparation = true);
+    try {
+      await _prepareSelection();
+    } finally {
+      if (mounted) setState(() => _preparation = false);
+    }
+  }
+
+  Future<void> _prepareSelection() async {
     final results = <MediaPickResult>[];
     final tropGros = <String>[];
     for (final asset in _recentMedia) {
@@ -186,12 +199,15 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
       if (bytes == null) continue;
       final name = asset.title ?? 'media_${asset.id}';
       final mime = _mimeFromAsset(asset);
+      final chemin = (await asset.file)?.path;
 
-      final compresse = await compresserAsset(
-        asset,
-        bytes,
+      // Photo comme vidéo — voir `core/compression_envoi.dart`.
+      final compresse = await compresserPourEnvoi(
+        asset: asset,
+        octets: bytes,
         nomFichier: name,
         mimeType: mime,
+        chemin: chemin,
       );
 
       /* ⚠️ LE PLAFOND SE MESURE APRÈS COMPRESSION, jamais avant : une photo de
@@ -212,7 +228,11 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
         // Chemin réel de l'asset : c'est ce qui permet de LIRE une vidéo dans
         // l'aperçu au lieu d'afficher une icône — et de RELIRE l'original si
         // l'utilisateur refuse la compression depuis l'écran de légende.
-        path: (await asset.file)?.path,
+        path: chemin,
+        // Sans ces deux champs, l'écran de légende n'annonçait pas le gain et
+        // n'offrait pas « Envoyer l'original » depuis cette grille.
+        compresse: compresse.compresse,
+        tailleOriginale: compresse.compresse ? compresse.tailleAvant : null,
       ));
     }
     if (!mounted) return;
@@ -258,8 +278,8 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
    * `image_picker` ouvre le sélecteur photos d'Android, qui n'a besoin
    * d'aucune autorisation, et RÉDUIT LUI-MÊME l'image aux bornes de la
    * galerie (`core/compression_image.dart`) — exactement comme la prise de vue
-   * (`_prendrePhoto`, chat_screen.dart). Les vidéos passent telles quelles,
-   * comme dans les autres chemins de la discussion.
+   * (`_prendrePhoto`, chat_screen.dart). Les vidéos sont transcodées par
+   * `core/compression_envoi.dart`, comme dans les autres chemins.
    */
   Future<void> _pickFullGalleryParSysteme(NavigatorState navigator) async {
     try {
@@ -277,15 +297,25 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
         // ⚠️ MÊME PLAFOND QUE LES DOCUMENTS, plus bas. Ce chemin ne sert que si
         // l'accès à la galerie est refusé, ce qui l'avait fait oublier — mais
         // il envoie exactement les mêmes fichiers.
-        if (depassePlafondMedia(octets.length)) {
-          tropGros.add(file.name);
+        // Les photos sont déjà réduites par le sélecteur ; une vidéo, elle,
+        // arrive entière et se transcode ici.
+        final pret = await compresserPourEnvoi(
+          octets: octets,
+          nomFichier: file.name,
+          mimeType: _guessMime(file.name),
+          chemin: file.path,
+        );
+        if (depassePlafondMedia(pret.octets.length)) {
+          tropGros.add(pret.nomFichier);
           continue;
         }
         results.add(MediaPickResult(
-          bytes: octets,
-          fileName: file.name,
-          mimeType: _guessMime(file.name),
+          bytes: pret.octets,
+          fileName: pret.nomFichier,
+          mimeType: pret.mimeType,
           path: file.path,
+          compresse: pret.compresse,
+          tailleOriginale: pret.compresse ? pret.tailleAvant : null,
         ));
       }
       if (!mounted) return;
@@ -496,14 +526,20 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
                         color: AlanyaColors.terracotta,
                         borderRadius: BorderRadius.circular(16),
                       ),
-                      child: Text(
-                        tr(context, 'send_count', {'n': '${_selectedIds.length}'}),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
+                      child: _preparation
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white))
+                          : Text(
+                              tr(context, 'send_count', {'n': '${_selectedIds.length}'}),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                     ),
                   ),
               ],
