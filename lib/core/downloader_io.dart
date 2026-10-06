@@ -51,6 +51,19 @@ Future<String?> downloadOnly(String url, String filename,
 /// Ouvre un fichier local avec l'application système appropriée.
 Future<void> openLocalFile(String path) async => _openFile(path);
 
+/// Enregistre des octets DÉJÀ EN MAIN dans le dossier public Alanya, comme un
+/// téléchargement. Sert aux médias CHIFFRÉS : le fichier du serveur est
+/// illisible, c'est le clair déchiffré sur l'appareil qu'on enregistre.
+Future<String?> enregistrerOctets(List<int> octets, String filename) async {
+  try {
+    if (Platform.isAndroid) return _saveAndroid(octets, filename);
+    return _saveAppDocuments(octets, filename);
+  } catch (e) {
+    debugPrint('[Alanya] Erreur enregistrement: $e');
+    return null;
+  }
+}
+
 /// Cache "app-privé" : consulte le stockage privé de l'app (pour éviter de
 /// re-télécharger un fichier qu'on a déjà lu, sans polluer le stockage public).
 /// Utilisé par le viewer PDF/vidéo qui a besoin d'un fichier local temporaire.

@@ -3,6 +3,7 @@ import 'package:flutter_pdfview/flutter_pdfview.dart';
 
 import '../../../core/app_snackbar.dart';
 import '../../../core/downloader.dart';
+import '../../../widgets/media/bouton_telecharger.dart';
 import '../../../core/telechargement_suivi.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../l10n/app_localizations.dart';
@@ -100,18 +101,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                 ),
               ),
             ),
-          IconButton(
-            tooltip: tr(context, 'download'),
-            icon: _downloading
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: Colors.white),
-                  )
-                : const Icon(Icons.download_outlined),
-            onPressed: _downloading ? null : _saveToPublic,
-          ),
+          BoutonTelecharger(enCours: _downloading, onPressed: _saveToPublic),
         ],
       ),
       body: _error != null

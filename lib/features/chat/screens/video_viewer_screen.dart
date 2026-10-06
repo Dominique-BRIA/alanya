@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../../core/downloader.dart';
+import '../../../widgets/media/bouton_telecharger.dart';
 import '../../../core/telechargement_suivi.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../l10n/app_localizations.dart';
@@ -132,16 +133,7 @@ class _VideoViewerScreenState extends State<VideoViewerScreen> {
               foregroundColor: Colors.white,
               title: Text(widget.filename, style: const TextStyle(fontSize: 14)),
               actions: [
-                IconButton(
-                  icon: _downloading
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child:
-                              CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                      : const Icon(Icons.download),
-                  onPressed: _downloading ? null : _download,
-                ),
+                BoutonTelecharger(enCours: _downloading, onPressed: _download),
               ],
             )
           : null,

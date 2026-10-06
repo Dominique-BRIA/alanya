@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/downloader.dart';
 import '../../../core/telechargement_suivi.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../../widgets/media/bouton_telecharger.dart';
 import '../../../widgets/media/cached_media.dart';
 import '../../../l10n/app_localizations.dart';
 
@@ -77,14 +78,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
               foregroundColor: Colors.white,
               title: Text(widget.filename, style: const TextStyle(fontSize: 14)),
               actions: [
-                IconButton(
-                  icon: _downloading
-                      ? const SizedBox(
-                          width: 20, height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                      : const Icon(Icons.download),
-                  onPressed: _downloading ? null : _download,
-                ),
+                BoutonTelecharger(enCours: _downloading, onPressed: _download),
               ],
             )
           : null,

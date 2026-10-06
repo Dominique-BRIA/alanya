@@ -12,6 +12,7 @@ import '../../../core/app_snackbar.dart';
 import '../../../core/downloader.dart';
 import '../../../core/telechargement_suivi.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../../widgets/media/bouton_telecharger.dart';
 import '../../../widgets/media/cached_media.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../services/e2ee/e2ee_media.dart';
@@ -77,12 +78,31 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
   Future<void> _download() async {
     final item = widget.items[_index];
     setState(() => _downloading = true);
-    final path = await telechargerEnSuivant(item.downloadUrl, item.filename,
-        idTransfert: "dl-galerie-${item.filename}", ouvrirEnsuite: true);
+    final d = item.chiffre;
+    final nom = d == null ? item.filename : nomPourEnregistrer(d);
+    String? path;
+    if (d == null) {
+      path = await telechargerEnSuivant(item.downloadUrl, item.filename,
+          idTransfert: "dl-galerie-${item.filename}", ouvrirEnsuite: true);
+    } else {
+      /*
+       * 🔴 UN MÉDIA CHIFFRÉ S'ENREGISTRE DEPUIS LE CLAIR DE L'APPAREIL.
+       *
+       * 🐛 Le bouton était RETIRÉ pour lui (user, 06/10/2026) : télécharger le
+       * fichier du serveur aurait enregistré un fichier illisible. Le clair,
+       * lui, est déjà là — c'est lui que la page affiche.
+       */
+      try {
+        final f = await ouvrirMediaChiffre(context, d);
+        path = await enregistrerOctets(await f.readAsBytes(), nom);
+      } catch (_) {
+        path = null;
+      }
+    }
     if (!mounted) return;
     setState(() => _downloading = false);
     showAppSnackBar(path != null
-        ? tr(context, 'saved_to_alanya', {'nom': item.filename})
+        ? tr(context, 'saved_to_alanya', {'nom': nom})
         : tr(context, 'download_failed'));
   }
 
@@ -161,20 +181,9 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
                           style: const TextStyle(color: Colors.white),
                         ),
                       ),
-                      // Un média chiffré ne s'enregistre pas d'ici : le
-                      // fichier du serveur serait illisible.
-                      if (item?.chiffre == null)
-                      IconButton(
-                        icon: _downloading
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2, color: Colors.white),
-                              )
-                            : const Icon(Icons.download, color: Colors.white),
-                        onPressed: _downloading ? null : _download,
-                      ),
+                      if (item != null)
+                        BoutonTelecharger(
+                            enCours: _downloading, onPressed: _download),
                     ],
                   ),
                 ),
@@ -357,6 +366,39 @@ class _GalleryVideoPageState extends State<_GalleryVideoPage> {
       ],
     );
   }
+}
+
+/// Le nom sous lequel enregistrer un média chiffré.
+///
+/// Le nom d'origine voyage dans le descripteur quand l'expéditeur l'a mis
+/// (documents) ; une photo ou une vidéo n'en a souvent pas. On en fabrique un
+/// alors, daté, avec l'extension de son VRAI type — le fichier du serveur, lui,
+/// s'appelle « chiffre.bin ».
+String nomPourEnregistrer(DescripteurMedia d, {DateTime? maintenant}) {
+  final nom = (d.nom ?? '').trim();
+  if (nom.isNotEmpty) return nom;
+  const extensions = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/gif': 'gif',
+    'image/webp': 'webp',
+    'image/heic': 'heic',
+    'video/mp4': 'mp4',
+    'video/quicktime': 'mov',
+    'video/3gpp': '3gp',
+    'video/webm': 'webm',
+    'audio/mpeg': 'mp3',
+    'audio/mp4': 'm4a',
+    'audio/aac': 'aac',
+    'audio/ogg': 'ogg',
+    'application/pdf': 'pdf',
+  };
+  final ext = extensions[d.mime] ?? 'bin';
+  final t = maintenant ?? DateTime.now();
+  String deux(int n) => n.toString().padLeft(2, '0');
+  final horodatage = '${t.year}${deux(t.month)}${deux(t.day)}_'
+      '${deux(t.hour)}${deux(t.minute)}${deux(t.second)}';
+  return 'Alanya_$horodatage.$ext';
 }
 
 /// Ouvre un média chiffré pour la galerie : clair en cache, ou téléchargé

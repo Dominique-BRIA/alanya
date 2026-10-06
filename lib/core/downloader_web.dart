@@ -33,6 +33,9 @@ Future<String?> downloadOnly(String url, String filename,
 
 Future<void> openLocalFile(String path) async {}
 
+Future<String?> enregistrerOctets(List<int> octets, String filename) async =>
+    null;
+
 Future<String?> getCachedFile(String filename) async => null;
 
 Future<String?> downloadToCache(String url, String filename,
