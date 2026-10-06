@@ -636,6 +636,9 @@ class E2eeSauvegarde {
           texte: texte ?? '',
           quand: quand,
           media: media,
+          // Absents des archives d'avant le 06/10/2026.
+          genre: genresCharge.contains(m['genre']) ? m['genre'] as String : null,
+          replyToId: m['reponseA'] is String ? m['reponseA'] as String : null,
         );
       } catch (_) {
         // Ligne illisible : on passe à la suivante.

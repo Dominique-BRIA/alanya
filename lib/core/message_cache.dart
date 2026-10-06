@@ -483,6 +483,10 @@ class MessageCache {
     required String texte,
     required DateTime quand,
     DescripteurMedia? media,
+    /// CONTACT ou LOCATION, lu dans la charge : [texte] est alors une fiche.
+    String? genre,
+    /// Le message cité, lu dans la charge (06/10/2026).
+    String? replyToId,
   }) async {
     final mediaJson = media == null ? null : jsonEncode(media.toJson());
     final db = await _database();
@@ -499,6 +503,8 @@ class MessageCache {
         'content': texte,
         'chiffre': 1,
         if (mediaJson != null) 'e2ee_media_json': mediaJson,
+        if (genre != null) 'type': genre,
+        if (replyToId != null) 'reply_to_id': replyToId,
       },
       /*
        * ⚠️ `sender_id` ET `conv_id` AUSSI : l'identifiant vient du serveur,
@@ -520,18 +526,19 @@ class MessageCache {
     // serveur ait rendu la sienne.
     await db.rawInsert(
       'INSERT OR IGNORE INTO messages '
-      '(id, conv_id, sender_id, content, type, status, created_at, chiffre, media_json, e2ee_media_json) '
-      "SELECT ?, ?, ?, ?, ?, 'DELIVERED', ?, 1, ?, ? "
+      '(id, conv_id, sender_id, content, type, status, created_at, chiffre, media_json, e2ee_media_json, reply_to_id) '
+      "SELECT ?, ?, ?, ?, ?, 'DELIVERED', ?, 1, ?, ?, ? "
       'WHERE NOT EXISTS (SELECT 1 FROM effaces WHERE message_id = ?)',
       [
         id,
         convId,
         expediteurId,
         texte,
-        typeMessagePour(media),
+        genre ?? typeMessagePour(media),
         dateCache(quand),
         media == null ? null : jsonEncode([ligneMediaChiffre(media)]),
         mediaJson,
+        replyToId,
         id,
       ],
     );
@@ -560,6 +567,8 @@ class MessageCache {
     required String texte,
     required DateTime quand,
     DescripteurMedia? media,
+    String? genre,
+    String? replyToId,
   }) async {
     final db = await _database();
     final efface = (await db.query('effaces',
@@ -595,6 +604,8 @@ class MessageCache {
             'status': 'SENT',
             'created_at': dateCache(quand),
             'chiffre': 1,
+            if (genre != null) 'type': genre,
+            if (replyToId != null) 'reply_to_id': replyToId,
             if (media != null) ...{
               'type': typeMessagePour(media),
               'media_json': jsonEncode([ligneMediaChiffre(media)]),

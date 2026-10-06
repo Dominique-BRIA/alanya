@@ -74,9 +74,11 @@ import '../../services/e2ee/e2ee_media.dart'
           convId: m.convId,
           senderId: m.senderId,
           content: (m.content ?? '').isEmpty ? releveDe(m)!.texte : m.content,
-          type: m.type,
+          // La ligne du serveur a déjà son type ; la charge le complète si
+          // une version ancienne l'avait rangée en TEXT.
+          type: m.type == 'TEXT' ? (releveDe(m)!.genre ?? m.type) : m.type,
           status: m.status,
-          replyToId: m.replyToId,
+          replyToId: m.replyToId ?? releveDe(m)!.reponseA,
           media: m.media,
           createdAt: m.createdAt,
           deletedAt: m.deletedAt,
@@ -107,9 +109,11 @@ import '../../services/e2ee/e2ee_media.dart'
           content: m.texte,
           // Un média relevé arrive complet : son type, et la ligne de média
           // qu'aurait rendue le serveur, marquée chiffrée.
-          type: typeMessagePour(m.media),
+          type: m.genre ?? typeMessagePour(m.media),
           status: 'DELIVERED',
-          replyToId: null,
+          // 🐛 TOUJOURS `null` : une réponse relevée perdait sa citation
+          // jusqu'à la réouverture du fil (06/10/2026).
+          replyToId: m.reponseA,
           media: m.media == null
               ? const []
               : [MessageMedia.fromJson(ligneMediaChiffre(m.media!))],

@@ -4,6 +4,7 @@
 library;
 
 import '../../models/conversation.dart';
+import '../../models/message_payload.dart' show apercuStructure;
 
 /// Remplace l'aperçu des fils CHIFFRÉS par le dernier texte connu localement.
 ///
@@ -37,8 +38,22 @@ List<Conversation> appliquerDerniersTextes(
         else if (_serveurPlusRecent(c.lastMessage, locaux[c.id]!))
           c
         else
-          c.copieAvecDernier(locaux[c.id]),
+          c.copieAvecDernier(_lisible(locaux[c.id]!)),
     ];
+
+/// Un contact ou une position chiffrés sont rangés en JSON : la liste montre
+/// leur libellé (« 👤 Jean »), comme le serveur le fait pour un fil clair.
+LastMessage _lisible(LastMessage m) {
+  final libelle = apercuStructure(m.type, m.content);
+  if (libelle == null) return m;
+  return LastMessage(
+    id: m.id,
+    content: libelle,
+    type: m.type,
+    senderId: m.senderId,
+    createdAt: m.createdAt,
+  );
+}
 
 bool _serveurPlusRecent(LastMessage? serveur, LastMessage local) {
   if (serveur == null) return false;

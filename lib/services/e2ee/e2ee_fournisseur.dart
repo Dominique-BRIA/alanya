@@ -126,6 +126,8 @@ class PileE2ee {
             texte: m.texte,
             quand: DateTime.fromMillisecondsSinceEpoch(m.quand),
             media: m.media,
+            genre: m.genre,
+            replyToId: m.reponseA,
           );
           // ⚠️ Un texte écarté (ligne d'un autre expéditeur, supprimée…) ne
           // part pas dans l'archive : il y ressusciterait à la restauration.
@@ -145,6 +147,10 @@ class PileE2ee {
               // Le média et SA CLÉ : c'est ce qui le rend lisible sur un
               // autre téléphone (chapitre 23).
               if (m.media != null) 'media': m.media!.toJson(),
+              // Sans eux, un contact restauré redeviendrait du texte JSON, et
+              // une réponse perdrait sa citation (06/10/2026).
+              if (m.reponseA != null) 'reponseA': m.reponseA,
+              if (m.genre != null) 'genre': m.genre,
             },
         ]);
       });

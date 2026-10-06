@@ -104,6 +104,7 @@ class EnvoiMediaChiffre {
       texte: legende,
       quand: quand,
       media: d,
+      replyToId: replyToId,
     );
     await pile.sauvegarde.deposer([
       {
@@ -113,6 +114,7 @@ class EnvoiMediaChiffre {
         'texte': legende,
         'quand': quand.millisecondsSinceEpoch,
         'media': d.toJson(),
+        if (replyToId != null) 'reponseA': replyToId,
       },
     ]);
     if (!vueUnique) await OuvertureMediaChiffre.garderClair(d, octets);

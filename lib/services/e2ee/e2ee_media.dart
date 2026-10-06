@@ -126,13 +126,31 @@ class DescripteurMedia {
 
 /// Ce que porte une enveloppe une fois ouverte.
 class Charge {
-  const Charge({required this.texte, this.media, this.idAnnonce});
+  const Charge({
+    required this.texte,
+    this.media,
+    this.idAnnonce,
+    this.reponseA,
+    this.genre,
+  });
   final String texte;
   final DescripteurMedia? media;
 
   /// L'identifiant chiffré par l'expéditeur (v2), `null` pour un texte v1.
   final String? idAnnonce;
+
+  /// Le message AUQUEL CELUI-CI RÉPOND (06/10/2026), dans le chiffré comme
+  /// l'identifiant : le serveur ne peut pas faire répondre un message à un
+  /// autre. Seul l'identifiant voyage — le texte cité est relu sur l'appareil.
+  final String? reponseA;
+
+  /// `CONTACT` ou `LOCATION` : [texte] porte alors la fiche JSON (06/10/2026).
+  /// `null` pour un texte ou un média.
+  final String? genre;
 }
+
+/// Les messages STRUCTURÉS qu'une charge peut porter dans son texte.
+const genresCharge = {'CONTACT', 'LOCATION'};
 
 class ChargeInvalide implements Exception {
   const ChargeInvalide(this.message);
@@ -142,13 +160,26 @@ class ChargeInvalide implements Exception {
 }
 
 /// Construit la charge v2 à chiffrer pour le message [id].
-String ecrireCharge(String id, String texte, [DescripteurMedia? media]) =>
+///
+/// ⚠️ LES CHAMPS ABSENTS NE S'ÉCRIVENT PAS : sans citation ni genre, la charge
+/// reste octet pour octet celle d'avant le 06/10/2026, et dans le MÊME ORDRE
+/// que le web (`ecrireCharge`, e2ee-media.ts). Un ancien lecteur ignore les
+/// deux champs.
+String ecrireCharge(
+  String id,
+  String texte, [
+  DescripteurMedia? media,
+  String? reponseA,
+  String? genre,
+]) =>
     prefixeChargeV2 +
     jsonEncode({
       'v': 2,
       'id': id,
       'texte': texte,
       if (media != null) 'media': media.toJson(),
+      if (reponseA != null && reponseA.isNotEmpty) 'reponseA': reponseA,
+      if (genre != null) 'genre': genre,
     });
 
 /// Lit une enveloppe déchiffrée : texte nu (v1) tel quel, charge v2 décodée
@@ -176,6 +207,11 @@ Charge lireCharge(String clair, String? messageId) {
         ? null
         : DescripteurMedia.depuisJson(brut['media']),
     idAnnonce: brut['id'] as String,
+    reponseA: brut['reponseA'] is String && (brut['reponseA'] as String).isNotEmpty
+        ? brut['reponseA'] as String
+        : null,
+    // Un genre inconnu (version future) est ignoré : le texte s'affiche tel quel.
+    genre: genresCharge.contains(brut['genre']) ? brut['genre'] as String : null,
   );
 }
 

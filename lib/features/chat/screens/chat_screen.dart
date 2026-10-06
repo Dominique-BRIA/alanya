@@ -2433,9 +2433,14 @@ class _ChatScreenState extends State<ChatScreen>
             content: text,
             type: "TEXT",
             status: "PENDING",
-            // ⚠️ Le chemin chiffré ne porte pas encore les réponses citées : la
-            // citation voyagerait en clair. On ne fait pas semblant.
-            replyToId: null,
+            /*
+             * 🐛 C'ÉTAIT `null`, « la citation voyagerait en clair » (user,
+             * 06/10/2026 : « le reply ne marche pas »). Faux : seul
+             * l'IDENTIFIANT du message cité part — au serveur, et dans la
+             * charge chiffrée. Le texte cité est relu sur chaque appareil.
+             */
+            replyToId: replyId,
+            replyTo: _apercuReponse(_replyTo),
             media: const [],
             createdAt: quand,
           ),
@@ -2444,7 +2449,7 @@ class _ChatScreenState extends State<ChatScreen>
         _replyTo = null;
       });
       _scrollToBottom();
-      _envoyerChiffreEnFond(pile, pair, text, tempId, quand);
+      _envoyerChiffreEnFond(pile, pair, text, tempId, quand, replyToId: replyId);
       return;
     }
 
@@ -2550,15 +2555,20 @@ class _ChatScreenState extends State<ChatScreen>
   /// les afficherait dans le désordre chez le correspondant.
   Future<void> _fileEnvoisChiffres = Future<void>.value();
 
+  /// [type] : `TEXT`, ou `CONTACT` / `LOCATION` quand [texte] est une fiche
+  /// JSON (06/10/2026).
   void _envoyerChiffreEnFond(
     PileE2ee pile,
     String pair,
     String texte,
     String tempId,
-    DateTime quand,
-  ) {
+    DateTime quand, {
+    String type = "TEXT",
+    String? replyToId,
+  }) {
     _fileEnvoisChiffres = _fileEnvoisChiffres
-        .then((_) => _envoyerChiffreMaintenant(pile, pair, texte, tempId, quand))
+        .then((_) => _envoyerChiffreMaintenant(pile, pair, texte, tempId, quand,
+            type: type, replyToId: replyToId))
         .catchError((_) {});
   }
 
@@ -2567,20 +2577,26 @@ class _ChatScreenState extends State<ChatScreen>
     String pair,
     String texte,
     String tempId,
-    DateTime quand,
-  ) async {
+    DateTime quand, {
+    String type = "TEXT",
+    String? replyToId,
+  }) async {
     try {
-      final id = await pile.fil
-          .envoyer(convId: widget.convId, pairId: pair, texte: texte);
+      final id = await pile.fil.envoyer(
+          convId: widget.convId,
+          pairId: pair,
+          texte: texte,
+          type: type,
+          replyToId: replyToId);
       final envoye = Message(
         id: id,
         chiffre: true,
         convId: widget.convId,
         senderId: _myId ?? "",
         content: texte,
-        type: "TEXT",
+        type: type,
         status: "SENT",
-        replyToId: null,
+        replyToId: replyToId,
         media: const [],
         createdAt: quand,
       );
@@ -2616,6 +2632,8 @@ class _ChatScreenState extends State<ChatScreen>
           'expediteurId': _myId ?? '',
           'texte': texte,
           'quand': quand.millisecondsSinceEpoch,
+          if (replyToId != null) 'reponseA': replyToId,
+          if (type != "TEXT") 'genre': type,
         },
       ]));
       if (!mounted) return;
@@ -2709,7 +2727,8 @@ class _ChatScreenState extends State<ChatScreen>
     final texte = m.content;
     if (!_peutReessayer(m) || pile == null || pair == null || texte == null) return;
     _marquerStatut(m.id, "PENDING");
-    _envoyerChiffreEnFond(pile, pair, texte, m.id, m.createdAt);
+    _envoyerChiffreEnFond(pile, pair, texte, m.id, m.createdAt,
+        type: m.type, replyToId: m.replyToId);
   }
 
   void _setReplyTo(Message m) {
@@ -2875,16 +2894,25 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   ReplyPreview? _resolveReply(Message m) {
-    if (m.replyTo != null) return m.replyTo;
-    if (m.replyToId == null) return null;
-    final cached = _replySnapshots[m.replyToId];
-    if (cached != null) return cached;
-    final live = _findMessage(m.replyToId);
+    /*
+     * 🔴 L'APERÇU DU SERVEUR D'UN MESSAGE CHIFFRÉ EST VIDE (06/10/2026) : il
+     * n'a pas son texte. On ne le garde que s'il dit quelque chose ; sinon,
+     * le texte cité est relu ici, parmi les messages déjà déchiffrés.
+     */
+    final serveur = m.replyTo;
+    if (serveur != null && ((serveur.content ?? '').isNotEmpty || serveur.isDeleted)) {
+      return serveur;
+    }
+    final id = m.replyToId ?? serveur?.id;
+    if (id == null) return serveur;
+    final cached = _replySnapshots[id];
+    if (cached != null && (cached.content ?? '').isNotEmpty) return cached;
+    final live = _findMessage(id);
     if (live != null) {
       _cacheMsg(live);
       return _replySnapshots[live.id];
     }
-    return null;
+    return cached ?? serveur;
   }
 
   Future<void> _scrollToMessage(String id) async {
@@ -3646,6 +3674,11 @@ class _ChatScreenState extends State<ChatScreen>
     });
 
     final charge = encodeContacts(resultat.contacts);
+    if (await _envoyerStructureChiffree("CONTACT", charge, replyId, replySnapshot)) {
+      if (mounted) setState(() => _uploading = false);
+      return;
+    }
+    if (!mounted) return;
     final rt = context.read<RealtimeClient>();
     try {
       if (rt.connected) {
@@ -3692,6 +3725,66 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
+  /// 🔴 UN CONTACT OU UNE POSITION DANS UN FIL CHIFFRÉ (06/10/2026).
+  ///
+  /// 🐛 Ils partaient par le temps réel, EN CLAIR : le serveur les refuse
+  /// dans un fil chiffré (`CONVERSATION_CHIFFREE`), et l'envoi échouait. La
+  /// fiche part maintenant comme un texte chiffré, son type dans la charge.
+  ///
+  /// Rend `true` si le message a pris le chemin chiffré — l'appelant s'arrête
+  /// alors. Même garde que le texte : un fil dont l'état est inconnu est lu
+  /// d'abord.
+  Future<bool> _envoyerStructureChiffree(
+    String type,
+    String charge,
+    String? replyId,
+    ReplyPreview? replySnapshot,
+  ) async {
+    final pileAvant = context.e2ee;
+    if (pileAvant != null && !_filChiffre && !pileAvant.fil.etatConnu(widget.convId)) {
+      await _lireEtatChiffrement();
+      if (!mounted) return true;
+    }
+    final pile = context.e2ee;
+    final pair = widget.otherUserId;
+    if (!_filChiffre || pile == null || pair == null) return false;
+    final tempId = "tmp-${DateTime.now().microsecondsSinceEpoch}";
+    final quand = DateTime.now();
+    setState(() {
+      _messages = [
+        ..._messages,
+        Message(
+          id: tempId,
+          chiffre: true,
+          convId: widget.convId,
+          senderId: _myId ?? "",
+          content: charge,
+          type: type,
+          status: "PENDING",
+          replyToId: replyId,
+          replyTo: replySnapshot,
+          media: const [],
+          createdAt: quand,
+        ),
+      ];
+      _rebuildCombined();
+    });
+    _scrollToBottom();
+    _envoyerChiffreEnFond(pile, pair, charge, tempId, quand,
+        type: type, replyToId: replyId);
+    return true;
+  }
+
+  /// L'aperçu d'un message cité, tel que la bulle d'attente l'affiche.
+  ReplyPreview? _apercuReponse(Message? m) => m == null
+      ? null
+      : ReplyPreview(
+          id: m.id,
+          senderId: m.senderId,
+          type: m.type,
+          content: m.isDeleted ? null : m.content,
+          isDeleted: m.isDeleted);
+
   /// Contacts portés par un message, ou liste vide si la charge est illisible.
   List<SharedContact> _contactsDe(Message m) =>
       contactsDepuisContenu(m.content) ?? const [];
@@ -3722,6 +3815,11 @@ class _ChatScreenState extends State<ChatScreen>
     });
 
     final charge = encodeLocation(position);
+    if (await _envoyerStructureChiffree("LOCATION", charge, replyId, replySnapshot)) {
+      if (mounted) setState(() => _uploading = false);
+      return;
+    }
+    if (!mounted) return;
     final rt = context.read<RealtimeClient>();
     try {
       if (rt.connected) {

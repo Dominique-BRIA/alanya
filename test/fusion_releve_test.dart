@@ -31,6 +31,8 @@ MessageClair _releve(
       texte: texte,
       quand: DateTime(2026, 9, 28, 10, minute).millisecondsSinceEpoch,
       media: null,
+      reponseA: null,
+      genre: null,
     );
 
 void main() {

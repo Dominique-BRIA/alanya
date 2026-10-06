@@ -29,6 +29,10 @@ typedef MessageClair = ({
   int quand,
   /// Le média chiffré que porte le message (charge v2), avec sa clé.
   DescripteurMedia? media,
+  /// Le message auquel celui-ci répond, lu DANS la charge (06/10/2026).
+  String? reponseA,
+  /// CONTACT ou LOCATION : [texte] porte alors la fiche JSON.
+  String? genre,
 });
 
 /// Range des messages relevés — appelé AVANT leur acquittement.
@@ -207,6 +211,12 @@ class E2eeFil {
     required String convId,
     required String pairId,
     required String texte,
+    /// 🐛 LA RÉPONSE ET LE CONTACT N'EXISTAIENT PAS DANS UN FIL CHIFFRÉ (user,
+    /// 06/10/2026) : la citation n'était jamais transmise, et un contact
+    /// partait en clair — refusé par le serveur. [type] vaut `CONTACT` ou
+    /// `LOCATION` quand [texte] porte une fiche JSON.
+    String type = 'TEXT',
+    String? replyToId,
   }) async {
     var appareils = await _service.ouvrirSessions(pairId);
 
@@ -230,8 +240,9 @@ class E2eeFil {
      * chez le destinataire.
      */
     final message = await _api('POST', '/api/conversations/$convId/messages', {
-      'type': 'TEXT',
+      'type': type,
       'chiffre': true,
+      if (replyToId != null) 'replyToId': replyToId,
     });
     final messageId = message['id'] as String;
 
@@ -248,7 +259,8 @@ class E2eeFil {
      * avant la ligne : c'est là que l'échec est probable (réseau, pré-clés).
      */
     final enveloppes =
-        await _enveloppesPour(pairId, appareils, ecrireCharge(messageId, texte));
+        await _enveloppesPour(pairId, appareils,
+            ecrireCharge(messageId, texte, null, replyToId, type == 'TEXT' ? null : type));
 
     await _api('POST', '/api/e2ee/enveloppes', {
       'convId': convId,
@@ -343,7 +355,7 @@ class E2eeFil {
     });
     final messageId = message['id'] as String;
     final enveloppes =
-        await _enveloppesPour(pairId, appareils, ecrireCharge(messageId, legende, media));
+        await _enveloppesPour(pairId, appareils, ecrireCharge(messageId, legende, media, replyToId));
     await _api('POST', '/api/e2ee/enveloppes', {
       'convId': convId,
       'deviceId': await _monDeviceId(),
@@ -448,6 +460,8 @@ class E2eeFil {
           texte: charge.texte,
           quand: DateTime.parse(e['createdAt'] as String).millisecondsSinceEpoch,
           media: charge.media,
+          reponseA: charge.reponseA,
+          genre: charge.genre,
         );
         messages.add(clair);
         /*
