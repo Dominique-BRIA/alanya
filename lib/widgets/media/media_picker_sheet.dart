@@ -2,6 +2,8 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:image_picker/image_picker.dart';
+import '../../core/compression_image.dart';
 import '../../core/galerie.dart';
 import '../../core/plafond_media.dart';
 import '../../theme/alanya_theme.dart';
@@ -163,26 +165,62 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
   }
 
   // ══ CONFIRMER SÉLECTION GALERIE RÉCENTE ══
+  //
+  /* 🔴 CETTE GRILLE N'A LONGTEMPS PAS COMPRESSÉ, ET C'EST LE CHEMIN LE PLUS
+   * EMPRUNTÉ : il s'ouvre d'un seul geste, avant même la galerie plein écran.
+   * La compression du 31/08/2026 n'avait été posée que dans
+   * `MediaGalleryPickerScreen`, de sorte qu'une même photo partait réduite ou
+   * entière selon l'endroit où on l'avait touchée — sans que rien ne le dise.
+   *
+   * Les deux chemins appliquent désormais la MÊME règle, celle de
+   * `core/compression_image.dart`. Toute évolution se décide dans le module,
+   * jamais ici.
+   */
   Future<void> _confirmSelection() async {
     if (_selectedIds.isEmpty) return;
     final results = <MediaPickResult>[];
+    final tropGros = <String>[];
     for (final asset in _recentMedia) {
       if (!_selectedIds.contains(asset.id)) continue;
       final bytes = await asset.originBytes;
       if (bytes == null) continue;
       final name = asset.title ?? 'media_${asset.id}';
       final mime = _mimeFromAsset(asset);
-      results.add(MediaPickResult(
-        bytes: bytes,
-        fileName: name,
+
+      final compresse = await compresserAsset(
+        asset,
+        bytes,
+        nomFichier: name,
         mimeType: mime,
+      );
+
+      /* ⚠️ LE PLAFOND SE MESURE APRÈS COMPRESSION, jamais avant : une photo de
+       * 12 Mo sortie du capteur en fait 400 Ko une fois réduite, et la refuser
+       * sur sa taille d'origine interdirait un envoi parfaitement acceptable.
+       * Ce contrôle manquait ici alors que les trois autres chemins l'avaient.
+       */
+      if (depassePlafondMedia(compresse.octets.length)) {
+        tropGros.add(compresse.nomFichier);
+        continue;
+      }
+
+      results.add(MediaPickResult(
+        bytes: compresse.octets,
+        fileName: compresse.nomFichier,
+        mimeType: compresse.mimeType,
         durationMs: asset.type == AssetType.video ? (asset.duration * 1000).toInt() : null,
         // Chemin réel de l'asset : c'est ce qui permet de LIRE une vidéo dans
-        // l'aperçu au lieu d'afficher une icône.
+        // l'aperçu au lieu d'afficher une icône — et de RELIRE l'original si
+        // l'utilisateur refuse la compression depuis l'écran de légende.
         path: (await asset.file)?.path,
       ));
     }
-    if (mounted && results.isNotEmpty) Navigator.pop(context, results);
+    if (!mounted) return;
+    final avis = messageMediasEcartes(tropGros, context: context);
+    if (avis != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(avis)));
+    }
+    if (results.isNotEmpty) Navigator.pop(context, results);
   }
 
   // ══ CAMÉRA ══
@@ -210,27 +248,41 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
     Navigator.pop(context, const OuvrirGalerie());
   }
 
+  /*
+   * 🐛 CE CHEMIN ENVOYAIT LES PHOTOS SANS AUCUNE COMPRESSION (trouvé le
+   * 06/10/2026, en cherchant pourquoi une photo envoyée depuis le mobile
+   * arrivait trop lourde). Il ne sert que si l'accès aux photos est refusé —
+   * `compresserAsset` exige alors un `AssetEntity` qu'on n'a pas, et
+   * `FilePicker` rendait les octets d'origine : 3 à 8 Mo par photo.
+   *
+   * `image_picker` ouvre le sélecteur photos d'Android, qui n'a besoin
+   * d'aucune autorisation, et RÉDUIT LUI-MÊME l'image aux bornes de la
+   * galerie (`core/compression_image.dart`) — exactement comme la prise de vue
+   * (`_prendrePhoto`, chat_screen.dart). Les vidéos passent telles quelles,
+   * comme dans les autres chemins de la discussion.
+   */
   Future<void> _pickFullGalleryParSysteme(NavigatorState navigator) async {
     try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.media,
-        allowMultiple: true,
-        withData: true,
+      final choisis = await ImagePicker().pickMultipleMedia(
+        maxWidth: imageBordMax.toDouble(),
+        maxHeight: imageBordMax.toDouble(),
+        imageQuality: imageQualite,
       );
-      if (result == null || result.files.isEmpty || !mounted) return;
+      if (choisis.isEmpty || !mounted) return;
       final results = <MediaPickResult>[];
       final tropGros = <String>[];
-      for (final file in result.files) {
-        if (file.bytes == null) continue;
-        // ⚠️ MÊME PLAFOND QUE LES DOCUMENTS, quinze lignes plus bas. Ce chemin
-        // ne sert que si l'accès à la galerie est refusé, ce qui l'avait fait
-        // oublier — mais il envoie exactement les mêmes fichiers.
-        if (depassePlafondMedia(file.bytes!.length)) {
+      for (final file in choisis) {
+        final octets = await file.readAsBytes();
+        if (octets.isEmpty) continue;
+        // ⚠️ MÊME PLAFOND QUE LES DOCUMENTS, plus bas. Ce chemin ne sert que si
+        // l'accès à la galerie est refusé, ce qui l'avait fait oublier — mais
+        // il envoie exactement les mêmes fichiers.
+        if (depassePlafondMedia(octets.length)) {
           tropGros.add(file.name);
           continue;
         }
         results.add(MediaPickResult(
-          bytes: file.bytes!,
+          bytes: octets,
           fileName: file.name,
           mimeType: _guessMime(file.name),
           path: file.path,

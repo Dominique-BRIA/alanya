@@ -108,8 +108,18 @@ Future<ResultatCompression> compresserAsset(
    */
   final bordLong =
       asset.width > asset.height ? asset.width : asset.height;
-  if (bordLong <= 0) return intact(RaisonSaut.decodageImpossible);
-  if (bordLong <= imageBordMax) return intact(RaisonSaut.tropPetite);
+  /*
+   * 🐛 DIMENSIONS INCONNUES = ON TENTE QUAND MÊME (06/10/2026, photo envoyée
+   * depuis le mobile « trop lourde »). Android rend souvent 0 × 0 pour une photo
+   * que la galerie n'a pas encore indexée — typiquement celle qu'on vient de
+   * prendre et qu'on envoie aussitôt. On abandonnait alors la compression, en
+   * silence, et l'original partait : plusieurs mégaoctets.
+   *
+   * Le garde-fou contre la recompression reste en place sous une autre forme :
+   * une image déjà petite ressort presque aussi lourde, et le contrôle de gain
+   * plus bas (`gainMinimum`) la laisse intacte.
+   */
+  if (bordLong > 0 && bordLong <= imageBordMax) return intact(RaisonSaut.tropPetite);
 
   Uint8List? reduit;
   try {
