@@ -10,6 +10,7 @@ import '../frontiere_chiffrement.dart';
 import '../envois_chiffres_fil.dart';
 import '../fusion_releve.dart';
 import '../statut_envoi.dart';
+import 'dart:convert' show base64Decode;
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -3034,6 +3035,22 @@ class _ChatScreenState extends State<ChatScreen>
   /// ligne et n'applique pas les styles, or y laisser `*coucou*` afficherait la
   /// mécanique au lieu du message. WhatsApp procède de même.
   String _replyPreviewText(Message? original, ReplyPreview? snapshot) {
+    if (snapshot?.isDeleted == true) return tr(context, 'message_deleted');
+    /*
+     * 🐛 « LE REPLY DES FICHIERS AFFICHE chiffre.bin » (user, 07/10/2026). Un
+     * média chiffré n'a, pour le serveur, qu'un nom neutre ; son VRAI nom est
+     * dans le descripteur, sur l'appareil. Quand on a le message cité, on le
+     * lit donc lui, avant l'aperçu du serveur — comme WhatsApp : « 📄 nom.pdf »,
+     * « 📷 Photo ».
+     */
+    if (original != null && !original.isDeleted && original.mediaChiffre != null) {
+      return apercuMessage(
+        original.type,
+        original.content,
+        nomFichier: _nomFichierCite(original),
+        nettoyerTexte: sansMarqueursWhatsApp,
+      );
+    }
     if (snapshot != null) {
       if (snapshot.isDeleted) return tr(context, 'message_deleted');
       // ⚠️ Le libellé AVANT le contenu : un CONTACT ou une LOCATION porte du
@@ -3049,11 +3066,45 @@ class _ChatScreenState extends State<ChatScreen>
       original.type,
       original.content,
       // Le nom du fichier vient du média, que la charge utile ne porte pas.
-      nomFichier:
-          original.media.isNotEmpty ? original.media.first.filename : null,
+      nomFichier: _nomFichierCite(original),
       nettoyerTexte: sansMarqueursWhatsApp,
     );
   }
+
+  /// Le nom du fichier d'un message cité : le VRAI nom d'un média chiffré
+  /// (descripteur), jamais le « chiffre.bin » que le serveur connaît.
+  String? _nomFichierCite(Message m) {
+    final d = m.mediaChiffre;
+    if (d != null) return d.nom;
+    if (m.media.isEmpty || m.media.first.chiffre) return null;
+    return m.media.first.filename;
+  }
+
+  /// La vignette d'un média CHIFFRÉ cité, tirée de son aperçu (descripteur) :
+  /// photo, première image d'une vidéo, première page d'un PDF. `null` s'il
+  /// n'en a pas, ou pour une vue unique — la citer n'en montre rien.
+  Widget? _vignetteChiffreeCitee(Message? m) {
+    final a = m?.mediaChiffre?.apercu;
+    if (m == null || a == null || m.isDeleted || m.vueUnique) return null;
+    try {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: Image.memory(base64Decode(a),
+            width: 38, height: 38, fit: BoxFit.cover, gaplessPlayback: true),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Une citation texte, avec la vignette du média chiffré cité à droite.
+  Widget _avecVignette(Widget citation, Widget? vignette) => vignette == null
+      ? citation
+      : Row(mainAxisSize: MainAxisSize.min, children: [
+          Flexible(child: citation),
+          const SizedBox(width: 6),
+          vignette,
+        ]);
 
   String _replySenderName(Message? original, ReplyPreview? snapshot) {
     final senderId = snapshot?.senderId ?? original?.senderId;
@@ -3141,11 +3192,14 @@ class _ChatScreenState extends State<ChatScreen>
                   replyToSenderName: auteur,
                   isMe: false,
                 )
-              : _citationTexte(
-                  auteur,
-                  _replyPreviewText(original, null),
-                  false,
-                  largeurMax: double.infinity,
+              : _avecVignette(
+                  _citationTexte(
+                    auteur,
+                    _replyPreviewText(original, null),
+                    false,
+                    largeurMax: double.infinity,
+                  ),
+                  _vignetteChiffreeCitee(original),
                 ),
         ),
         const SizedBox(width: 8),
@@ -3210,7 +3264,9 @@ class _ChatScreenState extends State<ChatScreen>
 
   Widget _replyPreviewTextOnly(Message m, bool mine, dynamic snapshot,
           Message? original, String senderName) =>
-      _citationTexte(senderName, _replyPreviewText(original, snapshot), mine);
+      _avecVignette(
+          _citationTexte(senderName, _replyPreviewText(original, snapshot), mine),
+          _vignetteChiffreeCitee(original));
 
   /// Le rendu TEXTE d'une citation, partagé par la bulle et par la barre du
   /// composer — c'est ce partage qui tient la promesse « même visuel ».
