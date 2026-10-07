@@ -56,7 +56,10 @@ import '../../services/e2ee/e2ee_media.dart'
   bool aCompleter(Message m) {
     final r = releveDe(m);
     if (r == null || m.deletedAt != null) return false;
-    return (m.content ?? '').isEmpty || (m.mediaChiffre == null && r.media != null);
+    return (m.content ?? '').isEmpty ||
+        (m.mediaChiffre == null && r.media != null) ||
+        // Une MODIFICATION remplace un texte déjà là (07/10/2026).
+        (r.modifie && m.content != r.texte);
   }
 
 
@@ -73,7 +76,9 @@ import '../../services/e2ee/e2ee_media.dart'
           chiffre: true,
           convId: m.convId,
           senderId: m.senderId,
-          content: (m.content ?? '').isEmpty ? releveDe(m)!.texte : m.content,
+          content: (m.content ?? '').isEmpty || releveDe(m)!.modifie
+              ? releveDe(m)!.texte
+              : m.content,
           // La ligne du serveur a déjà son type ; la charge le complète si
           // une version ancienne l'avait rangée en TEXT.
           type: m.type == 'TEXT' ? (releveDe(m)!.genre ?? m.type) : m.type,
@@ -82,7 +87,9 @@ import '../../services/e2ee/e2ee_media.dart'
           media: m.media,
           createdAt: m.createdAt,
           deletedAt: m.deletedAt,
-          editedAt: m.editedAt,
+          editedAt: releveDe(m)!.modifie
+              ? DateTime.fromMillisecondsSinceEpoch(releveDe(m)!.quand)
+              : m.editedAt,
           expiresAt: m.expiresAt,
           replyTo: m.replyTo,
           reactions: m.reactions,

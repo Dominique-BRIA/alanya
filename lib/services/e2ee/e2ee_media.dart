@@ -132,6 +132,7 @@ class Charge {
     this.idAnnonce,
     this.reponseA,
     this.genre,
+    this.modifie = false,
   });
   final String texte;
   final DescripteurMedia? media;
@@ -147,6 +148,11 @@ class Charge {
   /// `CONTACT` ou `LOCATION` : [texte] porte alors la fiche JSON (06/10/2026).
   /// `null` pour un texte ou un média.
   final String? genre;
+
+  /// Le NOUVEAU texte d'un message déjà envoyé (07/10/2026, cours ch. 29) :
+  /// il remplace l'ancien, là où une enveloppe ordinaire ne remplit qu'une
+  /// bulle vide.
+  final bool modifie;
 }
 
 /// Les messages STRUCTURÉS qu'une charge peut porter dans son texte.
@@ -171,6 +177,7 @@ String ecrireCharge(
   DescripteurMedia? media,
   String? reponseA,
   String? genre,
+  bool modifie = false,
 ]) =>
     prefixeChargeV2 +
     jsonEncode({
@@ -180,6 +187,7 @@ String ecrireCharge(
       if (media != null) 'media': media.toJson(),
       if (reponseA != null && reponseA.isNotEmpty) 'reponseA': reponseA,
       if (genre != null) 'genre': genre,
+      if (modifie) 'modifie': true,
     });
 
 /// Lit une enveloppe déchiffrée : texte nu (v1) tel quel, charge v2 décodée
@@ -212,6 +220,7 @@ Charge lireCharge(String clair, String? messageId) {
         : null,
     // Un genre inconnu (version future) est ignoré : le texte s'affiche tel quel.
     genre: genresCharge.contains(brut['genre']) ? brut['genre'] as String : null,
+    modifie: brut['modifie'] == true,
   );
 }
 

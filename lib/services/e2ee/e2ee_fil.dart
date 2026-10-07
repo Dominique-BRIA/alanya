@@ -33,6 +33,8 @@ typedef MessageClair = ({
   String? reponseA,
   /// CONTACT ou LOCATION : [texte] porte alors la fiche JSON.
   String? genre,
+  /// [texte] REMPLACE celui du message (modification, 07/10/2026).
+  bool modifie,
 });
 
 /// Range des messages relevés — appelé AVANT leur acquittement.
@@ -274,6 +276,42 @@ class E2eeFil {
 
   /// Les enveloppes d'un clair : une par appareil du correspondant, puis une
   /// par AUTRE appareil de mon compte. Commun au texte et aux médias.
+  /// MODIFIER UN MESSAGE CHIFFRÉ (07/10/2026) — cours, chapitre 29.
+  ///
+  /// 🐛 « Modifier le message ne donne plus » : le serveur refusait toute
+  /// modification dans un fil chiffré — il n'a pas le texte, il ne peut pas le
+  /// remplacer. Le nouveau texte part donc comme un message : dans des
+  /// ENVELOPPES rattachées au MÊME message, avec `modifie: true` dans la charge.
+  /// Le serveur, lui, ne fait que dater la modification.
+  ///
+  /// ⚠️ DANS CET ORDRE : la date d'abord, les enveloppes ensuite. Le
+  /// destinataire relève dès la sonnette qui suit le dépôt ; la ligne doit
+  /// déjà dire « modifié ».
+  ///
+  /// Rend la date de modification du serveur.
+  Future<DateTime?> modifier({
+    required String convId,
+    required String pairId,
+    required String messageId,
+    required String texte,
+  }) async {
+    final appareils = await _service.ouvrirSessions(pairId);
+    if (appareils.isEmpty) {
+      throw const E2eeImpossible('Aucun appareil chiffré chez ce correspondant.');
+    }
+    final r = await _api(
+        'PATCH', '/api/conversations/$convId/messages/$messageId', {'chiffre': true});
+    final enveloppes = await _enveloppesPour(
+        pairId, appareils, ecrireCharge(messageId, texte, null, null, null, true));
+    await _api('POST', '/api/e2ee/enveloppes', {
+      'convId': convId,
+      'deviceId': await _monDeviceId(),
+      'enveloppes': enveloppes,
+      'messageId': messageId,
+    });
+    return DateTime.tryParse('${r['editedAt']}');
+  }
+
   Future<List<Map<String, dynamic>>> _enveloppesPour(
     String pairId,
     List<int> appareils,
@@ -462,6 +500,7 @@ class E2eeFil {
           media: charge.media,
           reponseA: charge.reponseA,
           genre: charge.genre,
+          modifie: charge.modifie,
         );
         messages.add(clair);
         /*

@@ -63,6 +63,7 @@ void main() {
           media: null,
           reponseA: reponseA,
           genre: genre,
+          modifie: false,
         );
 
     test('LE DÉFAUT : une réponse relevée garde sa citation', () {
@@ -92,6 +93,50 @@ void main() {
       final r = fusionnerReleve([vide], [releve(reponseA: _cite)], 'fil');
       expect(r.liste.single.replyToId, _cite);
       expect(r.liste.single.content, 'Oui');
+    });
+  });
+
+  group('la modification (07/10/2026)', () {
+    test('le drapeau voyage, et seulement quand il est vrai', () {
+      expect(ecrireCharge(_id, 'Salut'), isNot(contains('modifie')));
+      final c = lireCharge(ecrireCharge(_id, 'Bonsoir', null, null, null, true), _id);
+      expect(c.modifie, isTrue);
+      expect(c.texte, 'Bonsoir');
+    });
+
+    test('LE DÉFAUT : une modification REMPLACE le texte déjà affiché', () {
+      final bulle = Message(
+        id: 'neuf',
+        chiffre: true,
+        convId: 'fil',
+        senderId: 'bob',
+        content: 'Bonjour',
+        type: 'TEXT',
+        status: 'DELIVERED',
+        replyToId: null,
+        media: const [],
+        createdAt: DateTime(2026, 10, 7, 9),
+      );
+      final quand = DateTime(2026, 10, 7, 9, 5);
+      MessageClair edition(bool modifie) => (
+            id: 'neuf',
+            convId: 'fil',
+            expediteurId: 'bob',
+            texte: 'Bonsoir',
+            quand: quand.millisecondsSinceEpoch,
+            media: null,
+            reponseA: null,
+            genre: null,
+            modifie: modifie,
+          );
+      final r = fusionnerReleve([bulle], [edition(true)], 'fil');
+      expect(r.liste.single.content, 'Bonsoir');
+      expect(r.liste.single.editedAt, quand);
+      expect(r.ajoutes, isEmpty);
+
+      // Sans le drapeau, un texte connu n'est JAMAIS remplacé.
+      final sans = fusionnerReleve([bulle], [edition(false)], 'fil');
+      expect(sans.liste.single.content, 'Bonjour');
     });
   });
 

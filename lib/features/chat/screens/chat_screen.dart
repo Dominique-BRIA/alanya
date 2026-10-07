@@ -1857,8 +1857,16 @@ class _ChatScreenState extends State<ChatScreen>
   /// la liste, diffusé aux participants. Le serveur le refuse désormais
   /// (`CONVERSATION_CHIFFREE`) ; l'écran ne doit pas le proposer, d'autant qu'il
   /// affiche la modification AVANT la réponse du serveur.
+  ///
+  /// ⚠️ RÉTABLI DANS UN FIL CHIFFRÉ (07/10/2026, « modifier le message ne
+  /// donne plus ») pour un message CHIFFRÉ déjà envoyé : le nouveau texte part
+  /// chiffré (`_modifierChiffre`). Un ancien message écrit en clair avant
+  /// l'activation reste non modifiable — le serveur le refuse.
   bool _peutModifier(Message m) =>
-      m.senderId == _myId && m.type == 'TEXT' && !_filChiffre;
+      m.senderId == _myId &&
+      m.type == 'TEXT' &&
+      (!_filChiffre ||
+          (m.chiffre && !m.id.startsWith('tmp-') && m.status != 'FAILED'));
 
   /// Peut-on transférer ce message ?
   ///
@@ -2783,6 +2791,21 @@ class _ChatScreenState extends State<ChatScreen>
   void _submitEdit(String text) {
     final m = _editing;
     if (m == null) return;
+    final pile = context.e2ee;
+    final pair = widget.otherUserId;
+    if (_filChiffre && m.chiffre && pile != null && pair != null) {
+      setState(() {
+        final idx = _messages.indexWhere((x) => x.id == m.id);
+        if (idx >= 0) {
+          _messages[idx] = _withEdited(_messages[idx], text, DateTime.now());
+          _rebuildCombined();
+        }
+        _editing = null;
+      });
+      _inputCtrl.clear();
+      unawaited(_modifierChiffre(pile, pair, m, text));
+      return;
+    }
     final rt = context.read<RealtimeClient>();
     if (rt.connected) {
       rt.editMessage(m.id, text);
@@ -2805,6 +2828,49 @@ class _ChatScreenState extends State<ChatScreen>
       _editing = null;
     });
     _inputCtrl.clear();
+  }
+
+  /// Fait partir la modification d'un message CHIFFRÉ (voir
+  /// `E2eeFil.modifier`), puis la range : cache local et archive, sans quoi
+  /// l'ancien texte reviendrait au rechargement. En cas d'échec, l'ancien
+  /// texte revient à l'écran et on le dit.
+  Future<void> _modifierChiffre(
+      PileE2ee pile, String pair, Message avant, String texte) async {
+    try {
+      final le = await pile.fil.modifier(
+        convId: widget.convId,
+        pairId: pair,
+        messageId: avant.id,
+        texte: texte,
+      );
+      final apres = _withEdited(avant, texte, le ?? DateTime.now());
+      _cacheMsg(apres);
+      unawaited(MessageCache.upsert(apres, widget.convId));
+      unawaited(pile.sauvegarde.deposer([
+        {
+          'id': avant.id,
+          'convId': widget.convId,
+          'expediteurId': avant.senderId,
+          'texte': texte,
+          'quand': avant.createdAt.millisecondsSinceEpoch,
+          if (avant.replyToId != null) 'reponseA': avant.replyToId,
+        },
+      ]));
+      if (!mounted) return;
+      setState(() {
+        final idx = _messages.indexWhere((x) => x.id == avant.id);
+        if (idx >= 0) _messages[idx] = _withEdited(_messages[idx], texte, apres.editedAt!);
+        _rebuildCombined();
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        final idx = _messages.indexWhere((x) => x.id == avant.id);
+        if (idx >= 0) _messages[idx] = avant;
+        _rebuildCombined();
+      });
+      _showError(e is ApiException ? e.message : tr(context, 'send_failed'));
+    }
   }
 
   // ══════════════════════════════════════════════
