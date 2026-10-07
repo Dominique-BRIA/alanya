@@ -100,6 +100,9 @@ import '../../../widgets/media/sending_media_bubble.dart';
 import '../chat_media_integration.dart';
 import '../../../widgets/media/gps_preview.dart';
 import 'media_gallery_viewer.dart';
+import '../transfert_appareil.dart';
+import '../../../services/e2ee/e2ee_media_ouverture.dart';
+import 'dart:io' show File;
 import '../../../widgets/media/media_picker_sheet.dart';
 import '../../../core/erreur_lisible.dart';
 
@@ -1874,9 +1877,18 @@ class _ChatScreenState extends State<ChatScreen>
   /// produirait une bulle vide chez le destinataire. Les médias, eux, ne sont
   /// pas chiffrés et restent transférables — même règle que
   /// `backend-alanya/src/lib/e2ee-clair.mjs`.
+  ///
+  /// ⚠️ RÉTABLI POUR LES FILS CHIFFRÉS (07/10/2026) : le téléphone renvoie
+  /// lui-même le contenu en clair qu'il a (`transfert_appareil.dart`).
   bool _peutTransferer(Message m) =>
       // Une vue unique ne se transfère pas : le serveur le refuse aussi.
-      !m.vueUnique && !(_filChiffre && m.type == 'TEXT');
+      !m.vueUnique &&
+      !m.isDeleted &&
+      !m.id.startsWith('tmp-') &&
+      // Un message chiffré dont l'appareil n'a ni le texte ni le média.
+      ((m.content ?? '').trim().isNotEmpty ||
+          m.mediaChiffre != null ||
+          (m.media.isNotEmpty && !m.media.first.chiffre));
 
   Future<void> _lireEtatChiffrement() async {
     final pile = context.e2ee;
@@ -4412,29 +4424,106 @@ class _ChatScreenState extends State<ChatScreen>
              * pourtant « transféré ». On écarte donc ces fils d'avance. Un
              * média sans légende, lui, peut y aller — il n'est pas chiffré.
              */
-            conversations: conversations
-                .where((c) => c.id != widget.convId)
-                .where((c) => !(c.e2eeActif && (m.content ?? '').trim().isNotEmpty))
-                .toList(),
+            // Tous les fils, chiffrés compris : ce qui ne peut pas passer par
+            // le serveur passe par l'appareil (`transfert_appareil.dart`).
+            conversations:
+                conversations.where((c) => c.id != widget.convId).toList(),
             title: tr(context, 'forward_to'))).then((result) {
       if (result != null) picked.addAll(result);
     });
     if (picked.isEmpty || !mounted) return;
+    final cibles = [for (final c in conversations) if (picked.contains(c.id)) c];
+    final parLeServeur = [
+      for (final c in cibles)
+        if (!transfertParLAppareil(m,
+            sourceChiffree: _filChiffre, cibleChiffree: c.e2eeActif))
+          c.id,
+    ];
+    final parLAppareil = [
+      for (final c in cibles)
+        if (!parLeServeur.contains(c.id)) c,
+    ];
     final rt = context.read<RealtimeClient>();
+    final chat = context.read<ChatRepository>();
+    final medias = context.read<MediaRepository>();
+    final pile = context.e2ee;
+    final moi = _myId ?? '';
+    final erreurGenerique = tr(context, 'send_failed');
+    final reussi = tr(context, 'forwarded_success');
+    var echecs = 0;
     try {
-      if (rt.connected) {
-        rt.forwardMessage(m.id, picked.toList());
-      } else {
-        await context
-            .read<ChatRepository>()
-            .forwardMessage(widget.convId, m.id, picked.toList());
+      if (parLeServeur.isNotEmpty) {
+        if (rt.connected) {
+          rt.forwardMessage(m.id, parLeServeur);
+        } else {
+          await chat.forwardMessage(widget.convId, m.id, parLeServeur);
+        }
       }
-      if (mounted) showAppSnackBar(tr(context, 'forwarded_success'));
     } on ApiException catch (e) {
       _showError(e.message);
+      return;
     } catch (_) {
-      _showError(tr(context, 'send_failed'));
+      _showError(erreurGenerique);
+      return;
     }
+    // Le fichier n'est lu (déchiffré ou téléchargé) qu'une fois, quel que
+    // soit le nombre de fils chiffrés visés.
+    ({Uint8List octets, String nom, String mime, int? dureeMs})? fichier;
+    for (final c in parLAppareil) {
+      try {
+        await transfererDepuisLAppareil(
+          m: m,
+          cible: c,
+          moi: moi,
+          pile: pile,
+          chat: chat,
+          medias: medias,
+          octetsDuMedia: () async => fichier ??= await _fichierEnClair(m),
+        );
+      } catch (_) {
+        echecs++;
+      }
+    }
+    if (!mounted) return;
+    if (echecs == 0) {
+      showAppSnackBar(reussi);
+    } else {
+      _showError('$erreurGenerique ($echecs/${cibles.length})');
+    }
+  }
+
+  /// Le fichier EN CLAIR d'un message, pour le renvoyer d'ici : déchiffré
+  /// (média chiffré, clair en cache ou téléchargé), ou téléchargé.
+  Future<({Uint8List octets, String nom, String mime, int? dureeMs})>
+      _fichierEnClair(Message m) async {
+    final d = m.mediaChiffre;
+    if (d != null) {
+      final f = await OuvertureMediaChiffre.ouvrir(
+        d,
+        baseUrl: _baseUrl,
+        token: _token,
+        jeton: fournisseurJeton(context),
+      );
+      return (
+        octets: await f.readAsBytes(),
+        nom: nomPourEnregistrer(d),
+        mime: d.mime,
+        dureeMs: d.dureeMs,
+      );
+    }
+    final media = m.media.first;
+    final nom = (media.filename ?? '').isNotEmpty
+        ? media.filename!
+        : 'Alanya_${DateTime.now().millisecondsSinceEpoch}';
+    final chemin = await downloadToCache(
+        '$_baseUrl${media.url}?token=$_token', 'fwd_${media.id}_$nom');
+    if (chemin == null) throw StateError('Téléchargement impossible');
+    return (
+      octets: await File(chemin).readAsBytes(),
+      nom: nom,
+      mime: media.mimeType,
+      dureeMs: media.durationMs,
+    );
   }
 
   static const List<String> _reactionEmojis = [
