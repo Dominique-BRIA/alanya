@@ -57,6 +57,7 @@ import 'features/meetings/meeting_controller.dart';
 import 'features/meetings/meetings_repository.dart';
 import 'features/status/status_repository.dart';
 import 'core/liens_entrants.dart';
+import 'core/partage_entrant.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -112,6 +113,9 @@ void main() async {
   // Liens Alanya (QR, lien partagé) : abonnement AVANT tout écran, sans quoi
   // le lien qui a lancé l'application serait perdu. Voir `LiensEntrants`.
   LiensEntrants.instance.demarrer();
+  // Ce qu'une autre application partage vers Alanya : même règle, même
+  // raison. Voir `PartageEntrant`.
+  unawaited(PartageEntrant.instance.demarrer());
 
   runApp(
     MultiProvider(

@@ -84,6 +84,9 @@ import '../medias_partages.dart';
 import '../widgets/activity_indicator.dart';
 import 'pdf_viewer_screen.dart';
 import 'media_caption_screen.dart';
+import '../../../core/compression_envoi.dart';
+import '../../../core/partage_entrant.dart';
+import '../../../core/plafond_media.dart';
 import 'media_gallery_picker_screen.dart';
 import 'location_share_screen.dart';
 
@@ -103,6 +106,8 @@ import 'media_gallery_viewer.dart';
 import '../transfert_appareil.dart';
 import '../../../services/e2ee/e2ee_media_ouverture.dart';
 import 'dart:io' show File;
+import 'package:path_provider/path_provider.dart' show getTemporaryDirectory;
+import 'package:share_plus/share_plus.dart';
 import '../../../widgets/media/media_picker_sheet.dart';
 import '../../../core/erreur_lisible.dart';
 
@@ -122,8 +127,14 @@ class ChatScreen extends StatefulWidget {
     this.isBlocked = false,
     this.otherIsOnline = 0,
     this.otherLastSeen,
+    this.partage,
   });
   final String convId;
+
+  /// Ce qu'une autre application vient de partager vers cette conversation
+  /// (07/10/2026) : envoyé dès l'ouverture — aperçu pour un fichier, champ
+  /// pré-rempli pour un texte. Voir `partage_vers_alanya.dart`.
+  final PartageRecu? partage;
   final String title;
   final bool isGroup;
   final Map<String, String> memberNames;
@@ -515,6 +526,9 @@ class _ChatScreenState extends State<ChatScreen>
     _load();
     _loadPinned();
     _loadDisappearing();
+    if (widget.partage != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _traiterPartage());
+    }
     _scrollCtrl.addListener(_onScroll);
     // Le basculement micro ↔ envoi écoute le CONTRÔLEUR et non `onChanged` :
     // le texte change aussi sans frappe — mise en forme WhatsApp appliquée à
@@ -2378,6 +2392,7 @@ class _ChatScreenState extends State<ChatScreen>
   Future<void> _send() async {
     final text = _inputCtrl.text.trim();
     if (text.isEmpty) return;
+    _proposerEnHaut();
     // Les mentions encore présentes dans le texte — voir `_mentionsAEnvoyer`,
     // qui écarte celles que l'utilisateur a effacées après les avoir choisies.
     final mentions = _mentionsAEnvoyer(text);
@@ -3460,6 +3475,7 @@ class _ChatScreenState extends State<ChatScreen>
   Future<void> _lanceEnvoiMedias(List<MediaPickResult> fichiers, String? legende,
       [List<Map<String, String>> mentions = const [],
       bool vueUnique = false]) async {
+    _proposerEnHaut();
     final replyId = _replyTo?.id;
     if (_replyTo != null) setState(() => _replyTo = null);
 
@@ -3918,6 +3934,79 @@ class _ChatScreenState extends State<ChatScreen>
           type: m.type,
           content: m.isDeleted ? null : m.content,
           isDeleted: m.isDeleted);
+
+  bool _enHautPropose = false;
+
+  /// Cette conversation remonte EN HAUT de la feuille de partage d'Android
+  /// (07/10/2026) : on vient d'y écrire. Une fois par ouverture suffit.
+  void _proposerEnHaut() {
+    if (_enHautPropose) return;
+    _enHautPropose = true;
+    unawaited(PartageEntrant.instance.proposerEnHaut(widget.convId, widget.title));
+  }
+
+  /// Envoie ce qu'une autre application a partagé vers cette conversation.
+  ///
+  /// Un fichier suit le chemin d'un fichier choisi ici : plafond, compression,
+  /// écran d'aperçu et de légende, puis `_lanceEnvoiMedias` — chiffré si le
+  /// fil l'est. Un texte seul est posé dans le champ : on le relit avant de
+  /// l'envoyer, comme sur WhatsApp.
+  Future<void> _traiterPartage() async {
+    final partage = widget.partage;
+    if (partage == null || !mounted) return;
+    final texte = (partage.texte ?? '').trim();
+    if (partage.fichiers.isEmpty) {
+      if (texte.isNotEmpty) {
+        _inputCtrl.text = texte;
+        _inputFocus.requestFocus();
+      }
+      return;
+    }
+    final fichiers = <MediaPickResult>[];
+    final tropGros = <String>[];
+    for (final chemin in partage.fichiers) {
+      final nom = chemin.split(RegExp(r'[\\/]')).last;
+      try {
+        final f = File(chemin);
+        if (depassePlafondMedia(await f.length())) {
+          tropGros.add(nom);
+          continue;
+        }
+        final octets = await f.readAsBytes();
+        final pret = await compresserPourEnvoi(
+          octets: octets,
+          nomFichier: nom,
+          mimeType: mimeFichierRecu(nom),
+          chemin: chemin,
+        );
+        fichiers.add(MediaPickResult(
+          bytes: pret.octets,
+          fileName: pret.nomFichier,
+          mimeType: pret.mimeType,
+          path: chemin,
+        ));
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    final avis = messageMediasEcartes(tropGros, context: context);
+    if (avis != null) showAppSnackBar(avis);
+    if (fichiers.isEmpty) return;
+    final apercu = await MediaCaptionScreen.open(
+      context,
+      fichiers,
+      membres: widget.isGroup
+          ? {...widget.memberNames, ..._membresCharges}
+          : const {},
+      monId: _myId,
+    );
+    if (apercu == null || apercu.fichiers.isEmpty || !mounted) return;
+    await _lanceEnvoiMedias(
+      apercu.fichiers,
+      apercu.legende ?? (texte.isEmpty ? null : texte),
+      apercu.mentions,
+      apercu.vueUnique,
+    );
+  }
 
   /// Contacts portés par un message, ou liste vide si la charge est illisible.
   List<SharedContact> _contactsDe(Message m) =>
@@ -4492,6 +4581,56 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
+  /// PARTAGER UN MESSAGE VERS UNE AUTRE APPLICATION (07/10/2026, demande du
+  /// user) : la feuille de partage d'Android — WhatsApp, Gmail… et, en haut,
+  /// les conversations Alanya récentes.
+  ///
+  /// ⚠️ C'EST LE CLAIR QUI SORT : le texte déchiffré, le fichier déchiffré.
+  /// C'est le geste demandé — l'utilisateur choisit de faire sortir ce message
+  /// du chiffrement de bout en bout, comme une capture d'écran.
+  Future<void> _partagerMessage(Message m) async {
+    final erreur = tr(context, 'send_failed');
+    try {
+      final aUnMedia = m.mediaChiffre != null || m.media.isNotEmpty;
+      if (!aUnMedia) {
+        await SharePlus.instance.share(ShareParams(text: _texteAPartager(m)));
+        return;
+      }
+      final f = await _fichierEnClair(m);
+      final dossier = await getTemporaryDirectory();
+      final chemin =
+          '${dossier.path}/partage_${DateTime.now().millisecondsSinceEpoch}_${f.nom}';
+      await File(chemin).writeAsBytes(f.octets, flush: true);
+      final legende = (m.content ?? '').trim();
+      await SharePlus.instance.share(ShareParams(
+        files: [XFile(chemin, mimeType: f.mime)],
+        text: legende.isEmpty ? null : legende,
+      ));
+    } catch (_) {
+      if (mounted) _showError(erreur);
+    }
+  }
+
+  /// Ce qu'un message dit, en texte lisible hors d'Alanya : un contact devient
+  /// son nom et ses numéros, une position un lien de carte.
+  String _texteAPartager(Message m) {
+    final contenu = m.content ?? '';
+    if (m.type == 'CONTACT') {
+      final contacts = contactsDepuisContenu(contenu) ?? const <SharedContact>[];
+      return contacts
+          .map((c) => [c.name ?? '', ...c.phones].where((x) => x.isNotEmpty).join('\n'))
+          .join('\n\n');
+    }
+    if (m.type == 'LOCATION') {
+      final p = positionDepuisContenu(contenu);
+      if (p != null) {
+        final nom = (p.label ?? '').trim();
+        return '${nom.isEmpty ? '' : '$nom\n'}https://maps.google.com/?q=${p.lat},${p.lng}';
+      }
+    }
+    return sansMarqueursWhatsApp(contenu);
+  }
+
   /// Le fichier EN CLAIR d'un message, pour le renvoyer d'ici : déchiffré
   /// (média chiffré, clair en cache ou téléchargé), ou téléchargé.
   Future<({Uint8List octets, String nom, String mime, int? dureeMs})>
@@ -4931,6 +5070,14 @@ class _ChatScreenState extends State<ChatScreen>
                         Navigator.pop(ctx);
                         _forwardMessage(m);
                       }),
+                if (_peutTransferer(m))
+                  ListTile(
+                      leading: Icon(Icons.share_outlined, color: _positive),
+                      title: Text(tr(context, 'share')),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _partagerMessage(m);
+                      }),
                 ListTile(
                     leading: Icon(Icons.copy, color: _iconNeutral),
                     title: Text(tr(context, 'copy')),
@@ -5251,6 +5398,8 @@ class _ChatScreenState extends State<ChatScreen>
             if (v == 'copy' && m.content != null) {
               Clipboard.setData(ClipboardData(text: m.content!));
               showAppSnackBar(tr(context, 'copied'));
+            } else if (v == 'share') {
+              _partagerMessage(m);
             } else if (v == 'edit') {
               _startEdit(m);
             } else if (v == 'pin') {
@@ -5292,6 +5441,14 @@ class _ChatScreenState extends State<ChatScreen>
                     Icon(Icons.copy, size: 20, color: _iconNeutral),
                     const SizedBox(width: 12),
                     Text(tr(context, 'copy')),
+                  ])),
+            if (_peutTransferer(m))
+              PopupMenuItem(
+                  value: 'share',
+                  child: Row(children: [
+                    Icon(Icons.share_outlined, size: 20, color: _iconNeutral),
+                    const SizedBox(width: 12),
+                    Text(tr(context, 'share')),
                   ])),
             PopupMenuItem(
                 value: 'pin',

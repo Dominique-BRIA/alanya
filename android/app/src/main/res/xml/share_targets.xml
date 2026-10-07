@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Les conversations Alanya proposées EN HAUT de la feuille de partage
+     Android (raccourcis de partage, share_handler.recordSentMessage). -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <share-target android:targetClass="com.alanya237.work.MainActivity">
+        <data android:mimeType="*/*" />
+        <category android:name="com.alanya237.work.dynamic_share_target" />
+    </share-target>
+</shortcuts>

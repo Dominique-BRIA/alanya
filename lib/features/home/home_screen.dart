@@ -55,6 +55,8 @@ import '../contacts/screens/contact_lists_screen.dart';
 import '../contacts/screens/contacts_screen.dart';
 import '../contacts/fiche_lien_recu.dart';
 import '../../core/liens_entrants.dart';
+import '../../core/partage_entrant.dart';
+import '../chat/partage_vers_alanya.dart';
 import '../calls/call_controller.dart';
 import '../calls/ouvrir_appel_en_cours.dart';
 import '../calls/calls_repository.dart';
@@ -169,8 +171,20 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       _pretPourLiens = true;
       _traiterLienEnAttente();
+      _traiterPartageEnAttente();
     });
     LiensEntrants.instance.enAttente.addListener(_traiterLienEnAttente);
+    PartageEntrant.instance.enAttente.addListener(_traiterPartageEnAttente);
+  }
+
+  /// Une autre application a partagé quelque chose vers Alanya (07/10/2026) :
+  /// on choisit la conversation — ou on y va droit si un contact Alanya a été
+  /// choisi dans la feuille de partage. Après les questions du démarrage, comme
+  /// un lien. Voir `traiterPartageRecu`.
+  void _traiterPartageEnAttente() {
+    if (!mounted || !_pretPourLiens) return;
+    final partage = PartageEntrant.instance.prendre();
+    if (partage != null) unawaited(traiterPartageRecu(context, partage));
   }
 
   /// Faux tant que les questions du démarrage ne sont pas passées.
@@ -227,6 +241,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     MissedCalls.instance.removeListener(_onManquesChanges);
     LiensEntrants.instance.enAttente.removeListener(_traiterLienEnAttente);
+    PartageEntrant.instance.enAttente.removeListener(_traiterPartageEnAttente);
     // FIX: NE PAS déconnecter la WS ici.
     // HomeScreen peut être démonté/remonté (changement de langue via
     // LocaleController.notifyListeners, rotation, hot restart, etc.).
