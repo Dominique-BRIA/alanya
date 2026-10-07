@@ -5,7 +5,7 @@
 /// part en entier, prend plusieurs minutes, et se termine par un 413 que rien
 /// n'annonçait. L'utilisateur a payé la donnée pour un échec.
 ///
-/// ⚠️ ALIGNÉ SUR LE SERVEUR (`MEDIA_MAX_SIZE_MB`, 50 par défaut), et non choisi
+/// ⚠️ ALIGNÉ SUR LE SERVEUR (`MEDIA_MAX_SIZE_MB`, 250 par défaut depuis le 07/10/2026), et non choisi
 /// ici. Un plafond client plus HAUT ne servirait à rien — le serveur refuserait
 /// quand même. Un plafond plus BAS interdirait des envois parfaitement légitimes
 /// sans que personne ne comprenne pourquoi. Si la valeur du serveur change, ce
@@ -24,7 +24,7 @@ import 'package:flutter/material.dart';
 import '../l10n/app_localizations.dart';
 
 /// Taille maximale acceptée par le serveur, en octets.
-const int plafondMediaOctets = 50 * 1024 * 1024;
+const int plafondMediaOctets = 250 * 1024 * 1024;
 
 /// La même, en mégaoctets, pour les messages destinés à l'utilisateur.
 const int plafondMediaMo = plafondMediaOctets ~/ (1024 * 1024);
