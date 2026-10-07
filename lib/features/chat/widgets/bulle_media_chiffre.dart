@@ -12,6 +12,7 @@ import 'package:open_filex/open_filex.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../../core/authed_api.dart';
+import '../../../core/media_helper.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../services/e2ee/e2ee_media.dart';
 import '../../../services/e2ee/e2ee_media_ouverture.dart';
@@ -301,65 +302,115 @@ class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
     );
   }
 
+  /*
+   * DOCUMENT : LE MÊME CADRE QU'UN DOCUMENT EN CLAIR (`DocumentBubble`).
+   *
+   * 🐛 « TU AS RÉDUIT LE CADRE DES DOCUMENTS » (signalé par le user le
+   * 07/10/2026). Dans un fil chiffré, un document n'était qu'une ligne avec
+   * une vignette de 44 × 56 — la taille d'un message —, quand le même PDF en
+   * clair montre sa première page sur 240 × 180. Les fils étant désormais
+   * chiffrés, tous les documents avaient « rétréci ». La première page arrive
+   * dans l'enveloppe : on l'affiche en grand, sans rien télécharger.
+   *
+   * ⚠️ 240 AU PLUS, JAMAIS PLUS QUE LA BULLE : `maxWidth` borne, la bulle
+   * étroite d'un petit écran resserre la carte au lieu de la laisser déborder.
+   */
   Widget _document(BuildContext context) {
     final apercu = _apercu;
     final taille = d.taille < 1024 * 1024
         ? '${(d.taille / 1024).ceil()} Ko'
         : '${(d.taille / 1024 / 1024).toStringAsFixed(1)} Mo';
+    final nom = d.nom ?? tr(context, 'media_file');
+    final genre = MediaHelper.detectType(d.mime, nom);
+    final couleur = MediaHelper.colorForType(genre);
+    final ext = MediaHelper.extension(nom).toUpperCase().replaceAll('.', '');
     return InkWell(
       onLongPress: widget.onLongPress,
       onTap: () async {
         final f = _fichier ?? await _charger();
         if (f != null) await OpenFilex.open(f.path);
       },
-      child: Container(
-        constraints: const BoxConstraints(minWidth: 210, maxWidth: 260),
-        padding: const EdgeInsets.all(6),
-        child: Row(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 240),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            if (apercu != null)
+            if (apercu != null) ...[
               ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: Image.memory(
-                  apercu,
-                  width: 44,
-                  height: 56,
-                  fit: BoxFit.cover,
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  color: Colors.white,
+                  width: double.infinity,
+                  height: 180,
+                  child: Image.memory(
+                    apercu,
+                    fit: BoxFit.cover,
+                    alignment: Alignment.topCenter,
+                    gaplessPlayback: true,
+                  ),
                 ),
-              )
-            else
-              Icon(
-                Icons.description_outlined,
-                size: 40,
-                color: widget.couleurDiscrete,
               ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    d.nom ?? tr(context, 'media_file'),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w600),
+              const SizedBox(height: 8),
+            ],
+            Row(
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: couleur.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
                   ),
-                  Text(
-                    [taille, if (d.pages != null) '${d.pages} p.'].join(' · '),
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: widget.couleurDiscrete,
-                    ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(MediaHelper.iconForType(genre), color: couleur, size: 20),
+                      if (ext.isNotEmpty)
+                        Text(
+                          ext.length > 4 ? ext.substring(0, 4) : ext,
+                          style: TextStyle(
+                            fontSize: 7,
+                            fontWeight: FontWeight.w800,
+                            color: couleur,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        nom,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        [taille, if (d.pages != null) '${d.pages} p.'].join(' · '),
+                        style: TextStyle(fontSize: 11, color: widget.couleurDiscrete),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (_etat == _Etat.chargement)
+                  const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else
+                  Icon(Icons.file_download_outlined,
+                      color: widget.couleurDiscrete, size: 22),
+              ],
             ),
-            if (_etat == _Etat.chargement)
-              const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
           ],
         ),
       ),

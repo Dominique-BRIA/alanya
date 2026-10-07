@@ -18,6 +18,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import '../../../core/avec_reprises.dart';
 import '../../../core/compression_image.dart';
 import '../../../core/connectivity_service.dart';
+import '../../../core/delais_message.dart';
 import '../../../core/memoire_langues.dart';
 import '../../../core/message_cache.dart';
 import '../../../core/messages_systeme.dart';
@@ -445,6 +446,14 @@ class _ChatScreenState extends State<ChatScreen>
   Timer? _recordingTimeout;
   Message? _replyTo;
   Message? _editing; // message en cours d'édition (compose = mode édition)
+  /*
+   * Ce que l'écran a déjà affiché et que le serveur peut encore REFUSER —
+   * délai de 2 h ou de 24 h franchi selon SON horloge (07/10/2026). On garde
+   * le message d'avant jusqu'à la confirmation (`message_edited`,
+   * `message_deleted`), pour le remettre si le refus arrive.
+   */
+  final Map<String, Message> _modifsEnAttente = {};
+  final Map<String, Message> _suppressionsEnAttente = {};
 
   // ── Sélection d'un message (interaction long-press façon WhatsApp) ──
   String? _selectedMessageId;
@@ -987,9 +996,39 @@ class _ChatScreenState extends State<ChatScreen>
   // ══════════════════════════════════════════════
   // REALTIME
   // ══════════════════════════════════════════════
+  /// Le serveur REFUSE une modification ou une suppression que l'écran a déjà
+  /// affichée. On remet le message d'avant et on le dit. Rend `false` quand la
+  /// trame ne concerne aucune action en attente : d'autres la traitent.
+  bool _surRefus(Map<String, dynamic> e) {
+    final code = e["code"] as String?;
+    final messageId = e["messageId"] as String?;
+    if (code == null || messageId == null) return false;
+    final avant = _modifsEnAttente.remove(messageId);
+    final supprime = _suppressionsEnAttente.remove(messageId);
+    final retour = avant ?? supprime;
+    if (retour == null) return false;
+    setState(() {
+      final idx = _messages.indexWhere((x) => x.id == messageId);
+      if (idx >= 0) {
+        _messages[idx] = retour;
+        _rebuildCombined();
+      }
+    });
+    _cacheMsg(retour);
+    _showError(tr(
+        context,
+        code == delaiSuppressionDepasse
+            ? 'msg_suppr_trop_tard'
+            : code == delaiModificationDepasse
+                ? 'msg_modif_trop_tard'
+                : 'send_failed'));
+    return true;
+  }
+
   void _onRealtimeEvent(Map<String, dynamic> e) {
     if (!mounted) return;
     final type = e["type"];
+    if (type == "error" && _surRefus(e)) return;
     if (type == "message") {
       final recu = e["message"] as Map<String, dynamic>?;
       if (recu == null || recu["convId"] != widget.convId) return;
@@ -1246,6 +1285,7 @@ class _ChatScreenState extends State<ChatScreen>
       final messageId = e["messageId"] as String?;
       final scope = e["scope"] as String? ?? "me";
       if (messageId == null || e["convId"] != widget.convId) return;
+      _suppressionsEnAttente.remove(messageId);
       // L'accueil le fait aussi : c'est sans effet de le faire deux fois.
       unawaited(MessageCache.appliquerSuppression(messageId, scope)
           .catchError((_) {}));
@@ -1307,6 +1347,7 @@ class _ChatScreenState extends State<ChatScreen>
       final messageId = e["messageId"] as String?;
       final content = e["content"] as String?;
       if (messageId == null || content == null) return;
+      _modifsEnAttente.remove(messageId);
       final editedAtStr = e["editedAt"] as String?;
       final editedAt =
           (editedAtStr != null ? DateTime.tryParse(editedAtStr) : null) ??
@@ -1882,6 +1923,8 @@ class _ChatScreenState extends State<ChatScreen>
   bool _peutModifier(Message m) =>
       m.senderId == _myId &&
       m.type == 'TEXT' &&
+      // Deux heures pour modifier (décision du user, 07/10/2026).
+      peutEncoreModifier(m.createdAt) &&
       (!_filChiffre ||
           (m.chiffre && !m.id.startsWith('tmp-') && m.status != 'FAILED'));
 
@@ -2818,6 +2861,12 @@ class _ChatScreenState extends State<ChatScreen>
   void _submitEdit(String text) {
     final m = _editing;
     if (m == null) return;
+    // Le délai a pu passer pendant la saisie : on ne l'apprend pas du serveur.
+    if (!peutEncoreModifier(m.createdAt)) {
+      _cancelEdit();
+      _showError(tr(context, 'msg_modif_trop_tard'));
+      return;
+    }
     final pile = context.e2ee;
     final pair = widget.otherUserId;
     if (_filChiffre && m.chiffre && pile != null && pair != null) {
@@ -2835,6 +2884,7 @@ class _ChatScreenState extends State<ChatScreen>
     }
     final rt = context.read<RealtimeClient>();
     if (rt.connected) {
+      _modifsEnAttente[m.id] = m;
       rt.editMessage(m.id, text);
     } else {
       context
@@ -4433,12 +4483,17 @@ class _ChatScreenState extends State<ChatScreen>
   // DELETE / FORWARD / OPTIONS
   // ══════════════════════════════════════════════
   Future<void> _deleteMessage(Message m) async {
-    final canDeleteForAll = m.senderId == _myId && !m.isDeleted;
+    // Vingt-quatre heures pour supprimer pour tous (décision du user,
+    // 07/10/2026) ; « pour moi » reste possible sans délai.
+    final canDeleteForAll = m.senderId == _myId &&
+        !m.isDeleted &&
+        peutEncoreSupprimerPourTous(m.createdAt);
     final scope = await _showDeleteDialog(canDeleteForAll);
     if (scope == null || !mounted) return;
     final rt = context.read<RealtimeClient>();
     try {
       if (rt.connected) {
+        if (scope == "everyone") _suppressionsEnAttente[m.id] = m;
         rt.deleteMessage(m.id, scope: scope);
       } else {
         await context
