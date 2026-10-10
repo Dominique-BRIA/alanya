@@ -5485,10 +5485,16 @@ class _ChatScreenState extends State<ChatScreen>
         cursorColor: _onAppBar,
         textInputAction: TextInputAction.search,
         onChanged: _onSearchChanged,
+        // Le thème remplit tous les champs en blanc : ici, sur la barre, le
+        // texte est clair — sans fond ni bordure, sinon blanc sur blanc.
         decoration: InputDecoration(
           hintText: tr(context, 'search_hint_dots'),
           hintStyle: TextStyle(color: _onAppBarSub),
+          filled: false,
           border: InputBorder.none,
+          enabledBorder: InputBorder.none,
+          focusedBorder: InputBorder.none,
+          contentPadding: EdgeInsets.zero,
         ),
       ),
       actions: [

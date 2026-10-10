@@ -4,10 +4,17 @@ import '../../media/media_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/alanya_id_formatter.dart';
 import '../../../core/api_client.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
 import '../../../widgets/back_app_bar.dart';
+import '../../../widgets/glass_card.dart';
+import '../../../widgets/media/cached_media.dart';
+import '../../chat/medias_partages.dart';
+import '../../chat/screens/media_gallery_viewer.dart';
+import '../../chat/screens/shared_content_screen.dart';
+import '../../chat/widgets/bulle_media_chiffre.dart';
 import '../../auth/auth_controller.dart';
 import '../../chat/chat_repository.dart';
 import '../../../widgets/contact_picker_sheet.dart';
@@ -50,6 +57,30 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     _avatarUrl = widget.avatarUrl;
     _refreshMembers();
     _lireEtatChiffrement();
+    _chargerMedias();
+  }
+
+  /* ══════════════ LES MÉDIAS DU GROUPE (carte « Médias, liens et docs ») ══════════════ */
+
+  /// Les photos et vidéos du fil, en clair ou chiffrées — le même chargement
+  /// que la fiche contact (`medias_partages.dart`). `null` tant qu'il tourne.
+  List<ConvMediaItem>? _medias;
+  String _baseUrl = '';
+  String? _token;
+
+  Future<void> _chargerMedias() async {
+    _baseUrl = context.read<ApiClient>().baseUrl;
+    try {
+      final fil = await chargerFilPourMedias(context, widget.convId);
+      if (!mounted) return;
+      setState(() {
+        _token = fil.token;
+        _medias = mediasGalerie(fil.messages,
+            baseUrl: _baseUrl, token: fil.token, chiffreDe: fil.chiffreDe);
+      });
+    } catch (_) {
+      if (mounted) setState(() => _medias = const []);
+    }
   }
 
   /* ══════════════ LE CHIFFREMENT DU GROUPE (lot 5, chapitre 35) ══════════════ */
@@ -477,177 +508,327 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   }
 
   // ===================== BUILD =====================
+  //
+  // Des cartes arrondies sur fond uni, dans l'ordre de l'écran de Chris
+  // (demande du user, 10/10/2026) : en-tête, médias, membres, chiffrement,
+  // quitter.
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Scaffold(
+      backgroundColor:
+          themed(context, light: AlanyaColors.grey100, dark: surfacesOf(context).fond),
       appBar: backAppBar(context, "Infos du groupe"),
       body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
         children: [
-          // ====== EN-TÊTE : AVATAR + NOM ======
-          Container(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              children: [
-                GestureDetector(
-                  onTap: _amAdmin ? _editAvatar : null,
-                  child: Stack(
-                    children: [
-                      AvatarCircle(
-                        name: _title,
-                        avatarUrl: _avatarUrl,
-                        radius: 40,
-                        backgroundColor: positiveOf(context),
-                      ),
-                      if (_amAdmin)
-                        Positioned(
-                          bottom: 0,
-                          right: 0,
-                          child: Container(
-                            padding: const EdgeInsets.all(6),
-                            decoration: BoxDecoration(
-                              color: accentOf(context),
-                              shape: BoxShape.circle,
-                              border: Border.all(color: themed(context, light: Colors.white, dark: surfacesOf(context).fond), width: 2),
-                            ),
-                            child: const Icon(Icons.camera_alt, size: 16, color: Colors.white),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Flexible(
-                      child: Text(_title,
-                          style: const TextStyle(
-                              fontSize: 22, fontWeight: FontWeight.bold)),
-                    ),
-                    if (_amAdmin)
-                      IconButton(
-                        icon: Icon(Icons.edit, size: 20, color: mutedOf(context, AlanyaColors.grey500)),
-                        onPressed: _editName,
-                      ),
-                  ],
-                ),
-                Text(trN(context, 'grp_members', _members.length),
-                    style: TextStyle(color: mutedOf(context, AlanyaColors.grey500))),
-              ],
+          _carteEnTete(cs),
+          const SizedBox(height: 14),
+          _carteMedias(cs),
+          const SizedBox(height: 14),
+          _carteMembres(cs),
+          if (_chiffre != null) ...[
+            const SizedBox(height: 14),
+            _carteChiffrement(cs),
+          ],
+          const SizedBox(height: 14),
+          GlassCard(
+            radius: 22,
+            child: ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
+              leading: Icon(Icons.logout_rounded, color: dangerOf(context)),
+              title: Text(tr(context, 'grp_leave_action'),
+                  style: TextStyle(
+                      color: dangerOf(context), fontWeight: FontWeight.w600, fontSize: 16)),
+              onTap: _leaveGroup,
             ),
           ),
-
-          // ====== ACTIONS ======
-          Container(
-            margin: const EdgeInsets.symmetric(horizontal: 16),
-            decoration: BoxDecoration(
-              color: themed(context, light: Colors.white, dark: surfacesOf(context).surface),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: themed(context, light: AlanyaColors.grey200, dark: AlanyaColors.ligne), width: 0.5),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                _actionButton(Icons.person_add, "Ajouter", _addMembers),
-                // Administrateur seulement : chiffrer, puis changer la clé.
-                if (_amAdmin && _chiffre == false)
-                  _actionButton(Icons.shield_outlined, "Chiffrer", _activerChiffrement),
-                if (_amAdmin && _chiffre == true)
-                  _actionButton(Icons.key, "Clé", _changerCle),
-                _actionButton(Icons.exit_to_app, "Quitter", _leaveGroup,
-                    color: dangerOf(context)),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // ====== LISTE DES MEMBRES ======
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text(tr(context, 'members_label'),
-                style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: mutedOf(context, AlanyaColors.grey500))),
-          ),
-          const SizedBox(height: 8),
-
-          ..._members.map((m) {
-            final isMe = m['id'] == _myId;
-            final name = m['pseudo'] ?? m['publicNumber'] ?? tr(context, 'grp_member');
-            final online = (m['isOnline'] as int?) == 1;
-            final isAdmin = (m['role'] as String?) == 'ADMIN';
-
-            return ListTile(
-              leading: AvatarCircle(
-                name: name,
-                avatarUrl: m['avatarUrl'] as String?,
-                radius: 20,
-                backgroundColor: isMe ? accentOf(context) : AlanyaColors.gold,
-              ),
-              title: Row(
-                children: [
-                  Expanded(
-                    child: Text(name,
-                        style: const TextStyle(fontWeight: FontWeight.w500)),
-                  ),
-                  if (isAdmin)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: accentOf(context).withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(tr(context, 'grp_admin'),
-                          style: TextStyle(
-                              fontSize: 10,
-                              color: accentOf(context),
-                              fontWeight: FontWeight.w600)),
-                    ),
-                ],
-              ),
-              subtitle: Text(
-                online
-                    ? "en ligne"
-                    : (m['publicNumber'] as String? ?? ''),
-                style: TextStyle(
-                    fontSize: 12,
-                    color: online ? positiveOf(context) : mutedOf(context, AlanyaColors.grey500)),
-              ),
-              trailing: (!isMe)
-                  ? IconButton(
-                      icon: const Icon(Icons.more_vert, size: 20),
-                      onPressed: () => _showMemberOptions(m),
-                    )
-                  : null,
-            );
-          }),
-          const SizedBox(height: 32),
         ],
       ),
     );
   }
 
-  Widget _actionButton(IconData icon, String label, VoidCallback onTap,
-      {Color? color}) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        child: Column(
-          children: [
-            Icon(icon, color: color ?? positiveOf(context), size: 24),
-            const SizedBox(height: 4),
-            Text(label,
-                style: TextStyle(
-                    fontSize: 12,
-                    color: color ?? positiveOf(context),
-                    fontWeight: FontWeight.w500)),
+  /// Avatar (appareil photo pour l'admin), nom (crayon pour l'admin), compte.
+  Widget _carteEnTete(ColorScheme cs) {
+    return GlassCard(
+      radius: 22,
+      padding: const EdgeInsets.fromLTRB(16, 26, 16, 22),
+      child: Column(
+        children: [
+          GestureDetector(
+            onTap: _amAdmin ? _editAvatar : null,
+            child: Stack(
+              children: [
+                AvatarCircle(
+                  name: _title,
+                  avatarUrl: _avatarUrl,
+                  radius: 56,
+                  backgroundColor: positiveOf(context),
+                ),
+                if (_amAdmin)
+                  Positioned(
+                    bottom: 0,
+                    right: 0,
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: accentOf(context),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: cs.surface, width: 3),
+                      ),
+                      child: const Icon(Icons.camera_alt, size: 18, color: Colors.white),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Flexible(
+                child: Text(_title,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                        fontSize: 23, fontWeight: FontWeight.w700, color: cs.onSurface)),
+              ),
+              if (_amAdmin)
+                IconButton(
+                  icon: Icon(Icons.edit_outlined, size: 22, color: accentOf(context)),
+                  onPressed: _editName,
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text('Groupe • ${trN(context, 'grp_members', _members.length)}',
+              style: TextStyle(fontSize: 14, color: cs.onSurfaceVariant)),
+          if (_chiffre == true) ...[
+            const SizedBox(height: 10),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.lock_rounded, size: 14, color: positiveOf(context)),
+                const SizedBox(width: 5),
+                Text('Chiffré de bout en bout',
+                    style: TextStyle(
+                        fontSize: 12.5,
+                        color: positiveOf(context),
+                        fontWeight: FontWeight.w500)),
+              ],
+            ),
           ],
-        ),
+        ],
+      ),
+    );
+  }
+
+  Widget _carteMedias(ColorScheme cs) {
+    final recents = (_medias ?? const <ConvMediaItem>[]).take(8).toList();
+    void voirTout() => Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => SharedContentScreen(convId: widget.convId, title: _title)));
+    return GlassCard(
+      radius: 22,
+      padding: const EdgeInsets.fromLTRB(18, 10, 6, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text('Médias, liens et docs',
+                    style: TextStyle(
+                        fontWeight: FontWeight.w600, fontSize: 16, color: cs.onSurface)),
+              ),
+              TextButton(
+                onPressed: voirTout,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(tr(context, 'view_all'),
+                        style: TextStyle(
+                            color: accentOf(context), fontWeight: FontWeight.w600)),
+                    Icon(Icons.chevron_right_rounded, size: 20, color: accentOf(context)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (_medias == null)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 18),
+              child: Center(
+                  child: SizedBox(
+                      width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
+            )
+          else if (recents.isEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(0, 14, 12, 10),
+              child: Center(
+                child: Text(tr(context, 'no_shared_media'),
+                    style: TextStyle(color: cs.onSurfaceVariant, fontSize: 14)),
+              ),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.only(top: 6, right: 12),
+              child: SizedBox(
+                height: 76,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: recents.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                  itemBuilder: (_, i) {
+                    final it = recents[i];
+                    final d = it.chiffre;
+                    void ouvrir() => Navigator.of(context).push(MaterialPageRoute(
+                        builder: (_) => MediaGalleryViewer(items: _medias!, initialIndex: i)));
+                    return ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: SizedBox(
+                        width: 76,
+                        height: 76,
+                        child: d != null
+                            ? TuileMediaChiffre(
+                                descripteur: d, baseUrl: _baseUrl, token: _token, onOuvrir: ouvrir)
+                            : GestureDetector(
+                                onTap: ouvrir,
+                                child: it.isVideo
+                                    ? const ColoredBox(
+                                        color: Color(0xFF1A1A2E),
+                                        child: Icon(Icons.play_circle_fill_rounded,
+                                            color: Colors.white70, size: 30),
+                                      )
+                                    : CachedMedia(
+                                        url: it.url, width: 76, height: 76, fit: BoxFit.cover),
+                              ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Les membres : les administrateurs d'abord, puis l'ordre alphabétique ;
+  /// « Vous » à sa place. Toucher un membre ouvre ses actions.
+  Widget _carteMembres(ColorScheme cs) {
+    String nomDe(Map<String, dynamic> m) =>
+        '${m['pseudo'] ?? m['publicNumber'] ?? tr(context, 'grp_member')}';
+    final tries = [..._members]..sort((a, b) {
+        final adminA = (a['role'] as String?) == 'ADMIN' ? 0 : 1;
+        final adminB = (b['role'] as String?) == 'ADMIN' ? 0 : 1;
+        if (adminA != adminB) return adminA - adminB;
+        return nomDe(a).toLowerCase().compareTo(nomDe(b).toLowerCase());
+      });
+    return GlassCard(
+      radius: 22,
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 6, 18, 6),
+            child: Text(trN(context, 'grp_members', _members.length),
+                style: TextStyle(
+                    fontWeight: FontWeight.w600, fontSize: 16, color: cs.onSurface)),
+          ),
+          if (_amAdmin)
+            ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 18),
+              leading: CircleAvatar(
+                radius: 22,
+                backgroundColor: accentOf(context).withValues(alpha: 0.12),
+                child: Icon(Icons.person_add_alt_1_rounded, color: accentOf(context)),
+              ),
+              title: Text('Ajouter des participants',
+                  style: TextStyle(
+                      color: accentOf(context), fontWeight: FontWeight.w600, fontSize: 15.5)),
+              onTap: _addMembers,
+            ),
+          ...tries.map((m) => _ligneMembre(m, nomDe(m), cs)),
+        ],
+      ),
+    );
+  }
+
+  Widget _ligneMembre(Map<String, dynamic> m, String name, ColorScheme cs) {
+    final isMe = m['id'] == _myId;
+    final online = (m['isOnline'] as int?) == 1;
+    final isAdmin = (m['role'] as String?) == 'ADMIN';
+    final numero = (m['publicNumber'] as String?) ?? '';
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 18),
+      leading: AvatarCircle(
+        name: name,
+        avatarUrl: m['avatarUrl'] as String?,
+        radius: 22,
+        backgroundColor: isMe ? accentOf(context) : AlanyaColors.gold,
+      ),
+      title: Row(
+        children: [
+          Flexible(
+            child: Text(isMe ? 'Vous' : name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontWeight: FontWeight.w500, color: cs.onSurface)),
+          ),
+          if (isAdmin) ...[
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+              decoration: BoxDecoration(
+                color: accentOf(context).withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(tr(context, 'grp_admin'),
+                  style: TextStyle(
+                      fontSize: 11, color: accentOf(context), fontWeight: FontWeight.w600)),
+            ),
+          ],
+        ],
+      ),
+      subtitle: online
+          ? Text("en ligne", style: TextStyle(fontSize: 12, color: positiveOf(context)))
+          : (numero.isEmpty
+              ? null
+              : Text('Alanya ID : ${formatAlanyaId(numero)}',
+                  style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant))),
+      trailing: Icon(Icons.chevron_right_rounded, color: cs.onSurfaceVariant),
+      onTap: () => _showMemberOptions(m),
+    );
+  }
+
+  /// Le chiffrement : l'état pour tous, l'action pour l'administrateur
+  /// (chiffrer, puis changer la clé).
+  Widget _carteChiffrement(ColorScheme cs) {
+    final chiffre = _chiffre == true;
+    final String detail;
+    if (chiffre) {
+      detail = _amAdmin
+          ? 'Toucher pour changer la clé du groupe'
+          : 'Les messages sont chiffrés pour les seuls membres';
+    } else {
+      detail = _amAdmin
+          ? 'Toucher pour chiffrer ce groupe'
+          : 'Seul un administrateur peut l’activer';
+    }
+    return GlassCard(
+      radius: 22,
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
+        leading: Icon(chiffre ? Icons.lock_rounded : Icons.lock_open_rounded,
+            color: chiffre ? positiveOf(context) : accentOf(context)),
+        title: Text(chiffre ? 'Chiffré de bout en bout' : 'Chiffrement de bout en bout',
+            style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w500, color: cs.onSurface)),
+        subtitle: Text(detail, style: TextStyle(fontSize: 12.5, color: cs.onSurfaceVariant)),
+        trailing: _chiffrementEnCours
+            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+            : (_amAdmin ? Icon(Icons.chevron_right_rounded, color: cs.onSurfaceVariant) : null),
+        onTap: !_amAdmin ? null : (chiffre ? _changerCle : _activerChiffrement),
       ),
     );
   }

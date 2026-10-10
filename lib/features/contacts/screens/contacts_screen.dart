@@ -36,14 +36,10 @@ class _ContactsScreenState extends State<ContactsScreen> {
   String _recherche = "";
   final _rechercheCtrl = TextEditingController();
 
-  /// La barre de recherche occupe-t-elle l'en-tête ?
-  ///
-  /// ⚠️ ELLE A DÉMÉNAGÉ (demande du user, 19/08/2026). Elle vivait dans la
-  /// liste défilante, sous les actions rapides : il fallait donc remonter tout
-  /// en haut pour chercher, et sur un carnet un peu fourni elle était
-  /// simplement invisible. Elle est désormais dans l'en-tête, ouverte par une
-  /// loupe posée juste avant le bouton d'import — la disposition de WhatsApp.
-  bool _enRecherche = false;
+  /// ⚠️ LA BARRE DE RECHERCHE A ENCORE DÉMÉNAGÉ (10/10/2026). Le 19/08 elle
+  /// était passée dans l'en-tête, derrière une loupe ; elle est désormais
+  /// TOUJOURS visible en haut de la liste, comme chez Chris — plus de geste
+  /// pour l'ouvrir.
 
   /// Les contacts À AFFICHER : filtrés, puis classés alphabétiquement.
   ///
@@ -202,48 +198,26 @@ class _ContactsScreenState extends State<ContactsScreen> {
 
   void _snack(String m) => showAppSnackBar(m);
 
+  /*
+   * 🎨 DISPOSITION REFAITE (demande du user, 10/10/2026), sur le modèle de
+   * l'écran de Chris : la recherche TOUJOURS visible en haut, les actions en
+   * cartes côte à côte, puis « Moi », puis les contacts — chacun gardant son
+   * Alanya ID en dessous du nom. Nos actions sont plus nombreuses que les
+   * siennes (listes, import du répertoire) : elles tiennent en grille 2 × 2.
+   */
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: backAppBar(
         context,
         tr(context, 'contacts_title'),
-        titreWidget: _enRecherche ? _champRecherche() : null,
-        actions: _enRecherche
-            ? [
-                IconButton(
-                  tooltip: tr(context, 'search_close'),
-                  icon: const Icon(Icons.close),
-                  onPressed: _fermerRecherche,
-                ),
-              ]
-            : [
-                // La loupe précède l'import, comme sur WhatsApp : c'est le
-                // geste le plus fréquent du carnet, il tombe donc sous le
-                // pouce avant celui qu'on ne fait qu'une fois.
-                IconButton(
-                  tooltip: tr(context, 'search'),
-                  icon: const Icon(Icons.search),
-                  onPressed: () => setState(() => _enRecherche = true),
-                ),
-                // Synchronisation depuis le répertoire téléphonique
-                IconButton(
-                  tooltip: tr(context, 'import_from_phone'),
-                  icon: const Icon(Icons.contacts_outlined),
-                  onPressed: () async {
-                    final added = await Navigator.of(context).push<bool>(
-                      MaterialPageRoute(builder: (_) => const PhoneSyncScreen()),
-                    );
-                    if (added == true) _load();
-                  },
-                ),
-                // Bouton actualiser toujours visible
-                IconButton(
-                  tooltip: tr(context, 'refresh'),
-                  icon: const Icon(Icons.refresh),
-                  onPressed: _loading ? null : _load,
-                ),
-              ],
+        actions: [
+          IconButton(
+            tooltip: tr(context, 'refresh'),
+            icon: const Icon(Icons.refresh),
+            onPressed: _loading ? null : _load,
+          ),
+        ],
       ),
       body: MotifBackground(
         overlayOpacity: 0.92,
@@ -294,115 +268,48 @@ class _ContactsScreenState extends State<ContactsScreen> {
 
     final contacts = _contacts ?? [];
     final affiches = _contactsAffiches;
-    if (contacts.isEmpty) {
-      return ListView(
-        children: [
-          // --- Actions rapides (visibles même si aucun contact) ---
-          _actionTile(
-            icon: Icons.group_add,
-            color: themed(context,
-                light: AlanyaColors.forest, dark: AlanyaColors.indigoLight),
-            title: tr(context, 'new_group'),
-            subtitle: tr(context, 'new_group_sub'),
-            onTap: () async {
-              await Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const NewGroupScreen()),
-              );
-              _load();
-            },
-          ),
-          const Divider(height: 1),
-          _actionTile(
-            icon: Icons.person_add,
-            color: accentOf(context),
-            title: tr(context, 'add_contact'),
-            subtitle: tr(context, 'add_contact_sub'),
-            onTap: () async {
-              await Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const NewChatScreen()),
-              );
-              _load();
-            },
-          ),
-
-          Divider(height: 1, thickness: 8, color: surfacesOf(context).fond),
-          // --- Message d'état vide ---
-          const SizedBox(height: 60),
-          Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                children: [
-                  Icon(Icons.people_outline,
-                      size: 56, color: faintOf(context, Colors.black12)),
-                  const SizedBox(height: 12),
-                  Text(
-                    tr(context, 'contacts_empty'),
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: mutedOf(context, Colors.black54)),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      );
-    }
-
     return Stack(
       children: [
         ListView(
+          padding: const EdgeInsets.only(bottom: 24),
           children: [
-            // --- Actions rapides (style WhatsApp) ---
-            _actionTile(
-              icon: Icons.group_add,
-              color: themed(context,
-                  light: AlanyaColors.forest, dark: AlanyaColors.indigoLight),
-              title: tr(context, 'new_group'),
-              subtitle: tr(context, 'new_group_sub'),
-              onTap: () async {
-                await Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const NewGroupScreen()),
-                );
-                _load();
-              },
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: _champRecherche(),
             ),
-            const Divider(height: 1),
-            _actionTile(
-              icon: Icons.person_add,
-              color: accentOf(context),
-              title: tr(context, 'add_contact'),
-              subtitle: tr(context, 'add_contact_sub'),
-              onTap: () async {
-                await Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const NewChatScreen()),
-                );
-                _load();
-              },
-            ),
-
-            const Divider(height: 1),
-            _actionTile(
-              icon: Icons.playlist_add_check,
-              color: AlanyaColors.gold,
-              title: tr(context, 'contact_lists'),
-              subtitle: tr(context, 'contact_lists_sub'),
-              onTap: () async {
-                await Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const ContactListsScreen()),
-                );
-                _load();
-              },
-            ),
-            const Divider(height: 1),
-            _tuileMoi(),
-
-            Divider(height: 1, thickness: 8, color: surfacesOf(context).fond),
-            // --- Liste des contacts, filtrée et classée ---
+            // Les actions s'effacent pendant une recherche : on cherche
+            // quelqu'un, la liste doit remonter sous le doigt.
+            if (_recherche.trim().isEmpty) ...[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+                child: _grilleActions(),
+              ),
+              _tuileMoi(),
+            ],
+            if (contacts.isNotEmpty)
+              _titreSection(_recherche.trim().isEmpty
+                  ? '${tr(context, 'contacts_title')} · ${contacts.length}'
+                  : '${affiches.length}'),
             ...affiches.map((c) => _tile(c)),
+            if (contacts.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
+                child: Column(
+                  children: [
+                    Icon(Icons.people_outline,
+                        size: 56, color: faintOf(context, Colors.black12)),
+                    const SizedBox(height: 12),
+                    Text(
+                      tr(context, 'contacts_empty'),
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: mutedOf(context, Colors.black54)),
+                    ),
+                  ],
+                ),
+              )
             // Un filtre qui ne rend rien doit le DIRE. Une liste vide sans
             // explication se lit comme « vous n'avez aucun contact ».
-            if (affiches.isEmpty)
+            else if (affiches.isEmpty)
               Padding(
                 padding:
                     const EdgeInsets.symmetric(vertical: 32, horizontal: 24),
@@ -425,28 +332,151 @@ class _ContactsScreenState extends State<ContactsScreen> {
     );
   }
 
-  /// Ferme la recherche ET vide le filtre.
-  ///
-  /// Les deux ensemble, toujours : refermer la barre en laissant le filtre
-  /// actif donnerait un carnet amputé sans plus rien à l'écran pour l'expliquer.
-  void _fermerRecherche() {
+  /// Les quatre actions du carnet, en cartes : créer un groupe, ajouter un
+  /// contact, les listes, l'import du répertoire du téléphone.
+  Widget _grilleActions() {
+    final cartes = [
+      _carteAction(
+        icon: Icons.group_add_rounded,
+        label: tr(context, 'new_group'),
+        onTap: () async {
+          await Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const NewGroupScreen()),
+          );
+          _load();
+        },
+      ),
+      _carteAction(
+        icon: Icons.person_add_alt_1_rounded,
+        label: tr(context, 'add_contact'),
+        onTap: () async {
+          await Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const NewChatScreen()),
+          );
+          _load();
+        },
+      ),
+      _carteAction(
+        icon: Icons.playlist_add_check_rounded,
+        label: tr(context, 'contact_lists'),
+        onTap: () async {
+          await Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const ContactListsScreen()),
+          );
+          _load();
+        },
+      ),
+      _carteAction(
+        icon: Icons.contacts_rounded,
+        label: tr(context, 'import_from_phone'),
+        onTap: () async {
+          final added = await Navigator.of(context).push<bool>(
+            MaterialPageRoute(builder: (_) => const PhoneSyncScreen()),
+          );
+          if (added == true) _load();
+        },
+      ),
+    ];
+    return Column(
+      children: [
+        Row(children: [
+          Expanded(child: cartes[0]),
+          const SizedBox(width: 12),
+          Expanded(child: cartes[1]),
+        ]),
+        const SizedBox(height: 12),
+        Row(children: [
+          Expanded(child: cartes[2]),
+          const SizedBox(width: 12),
+          Expanded(child: cartes[3]),
+        ]),
+      ],
+    );
+  }
+
+  Widget _carteAction({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    final teinte = accentOf(context);
+    return Material(
+      color: teinte.withValues(alpha: 0.10),
+      borderRadius: BorderRadius.circular(18),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: onTap,
+        child: SizedBox(
+          height: 84,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, color: teinte, size: 26),
+                const SizedBox(height: 6),
+                Text(
+                  label,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      color: teinte, fontWeight: FontWeight.w600, fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _titreSection(String texte) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 4),
+      child: Text(
+        texte,
+        style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: mutedOf(context, Colors.black54)),
+      ),
+    );
+  }
+
+  /// Vide le filtre (la croix du champ).
+  void _viderRecherche() {
     _rechercheCtrl.clear();
-    setState(() {
-      _recherche = "";
-      _enRecherche = false;
-    });
+    setState(() => _recherche = "");
   }
 
   Widget _champRecherche() {
+    final teinte = accentOf(context);
     return TextField(
       controller: _rechercheCtrl,
-      autofocus: true,
       textInputAction: TextInputAction.search,
       onChanged: (v) => setState(() => _recherche = v),
       decoration: InputDecoration(
         isDense: true,
-        border: InputBorder.none,
         hintText: tr(context, 'search_contact'),
+        prefixIcon: Icon(Icons.search, color: mutedOf(context, Colors.black54)),
+        suffixIcon: _recherche.isEmpty
+            ? null
+            : IconButton(
+                tooltip: tr(context, 'search_close'),
+                icon: const Icon(Icons.close),
+                onPressed: _viderRecherche,
+              ),
+        contentPadding: const EdgeInsets.symmetric(vertical: 12),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide(color: teinte.withValues(alpha: 0.35)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide(color: teinte, width: 1.5),
+        ),
       ),
     );
   }
@@ -512,25 +542,6 @@ class _ContactsScreenState extends State<ContactsScreen> {
     } on ApiException catch (e) {
       showAppSnackBar(e.message);
     }
-  }
-
-  /// Tuile d'action rapide (style WhatsApp) placée au-dessus de la liste.
-  Widget _actionTile({
-    required IconData icon,
-    required Color color,
-    required String title,
-    required String subtitle,
-    required VoidCallback onTap,
-  }) {
-    return ListTile(
-      leading: CircleAvatar(
-        backgroundColor: color,
-        child: Icon(icon, color: Colors.white),
-      ),
-      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
-      subtitle: Text(subtitle, style: const TextStyle(fontSize: 13)),
-      onTap: onTap,
-    );
   }
 
   Widget _tile(Contact c) {
