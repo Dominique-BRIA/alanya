@@ -480,6 +480,29 @@ class CoffreE2ee implements SignalProtocolStore {
   Future<void> memoriserFilsChiffres(Set<String> fils) =>
       _ecrire('fils-chiffres', jsonEncode(fils.toList()));
 
+  /* ══════════════ LES TROUSSEAUX DE GROUPE (lot 3, chapitre 34) ══════════════ */
+
+  /// Le trousseau d'un groupe chiffré : `[{n, cle (base64), creeLe}]`.
+  ///
+  /// ⚠️ DANS LE COFFRE MATÉRIEL, comme les clés Signal : ce sont des clés, et
+  /// `oublier()` les efface avec le reste à la déconnexion.
+  Future<List<Map<String, dynamic>>> trousseauGroupe(String convId) async {
+    final brut = await _lire('groupe.cles.$convId');
+    if (brut == null) return const [];
+    try {
+      return (jsonDecode(brut) as List).cast<Map<String, dynamic>>();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<void> rangerTrousseauGroupe(String convId, List<Map<String, dynamic>> versions) =>
+      _ecrire('groupe.cles.$convId', jsonEncode(versions));
+
+  /// On a quitté le groupe, ou on en a été exclu (décision du user : les
+  /// messages déjà lus restent dans le cache).
+  Future<void> oublierTrousseauGroupe(String convId) => _effacer('groupe.cles.$convId');
+
 
   /* ══════════════ LA CLÉ MAÎTRESSE DE L'ARCHIVE ══════════════ */
 

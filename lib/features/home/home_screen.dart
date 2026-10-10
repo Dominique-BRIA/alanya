@@ -710,6 +710,17 @@ class _ConversationsTabState extends State<_ConversationsTab>
           } catch (_) {}
           if (mounted) await _poll();
         }());
+      } else if (t == "e2ee_membre_parti") {
+        /*
+         * Parti ou exclu d'un groupe chiffré (lot 3, chapitre 34) : ce
+         * téléphone oublie la clé du groupe. Les messages déjà lus restent
+         * dans le cache, comme sur WhatsApp (décision du user).
+         */
+        final convId = e["convId"];
+        final pile = context.e2ee;
+        if (convId is String && pile != null) {
+          unawaited(pile.fil.groupe.oublier(convId).then((_) {}, onError: (_) {}));
+        }
       } else if (t == "read") {
         _poll();
       } else if (t == "message_deleted") {

@@ -65,7 +65,9 @@ Future<void> transfererDepuisLAppareil({
   final texte = m.content ?? '';
   final aUnMedia = m.mediaChiffre != null || m.media.isNotEmpty;
   final pair = cible.e2eeActif ? correspondantDe(cible, moi) : null;
-  if (cible.e2eeActif && (pile == null || pair == null)) {
+  // Un GROUPE chiffré n'a pas de correspondant : `pair` nul y prend le chemin
+  // du groupe (lot 3, chapitre 34).
+  if (cible.e2eeActif && (pile == null || (pair == null && !cible.isGroup))) {
     throw StateError('Conversation chiffrée sans correspondant joignable');
   }
 
@@ -75,7 +77,7 @@ Future<void> transfererDepuisLAppareil({
     if (cible.e2eeActif) {
       final quand = DateTime.now();
       final id = await pile!.fil.envoyer(
-          convId: cible.id, pairId: pair!, texte: texte, type: m.type);
+          convId: cible.id, pairId: pair, texte: texte, type: m.type);
       // MA copie : le serveur n'a pas le texte, ce cache et l'archive sont
       // les seuls endroits où il existe pour moi.
       await MessageCache.upsert(
@@ -118,7 +120,7 @@ Future<void> transfererDepuisLAppareil({
       pile: pile!,
       medias: medias,
       convId: cible.id,
-      pairId: pair!,
+      pairId: pair,
       moi: moi,
       fichier: fichierDepuisOctets(f.octets, f.nom, f.mime, dureeMs: f.dureeMs),
       legende: texte,

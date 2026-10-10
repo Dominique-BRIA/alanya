@@ -17,6 +17,8 @@ import 'package:flutter/services.dart' show PlatformException;
 import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart'
     show DuplicateMessageException;
 
+import 'e2ee_groupe.dart' show estChargeTrousseau;
+import 'e2ee_groupe_fil.dart';
 import 'e2ee_media.dart';
 import 'e2ee_service.dart';
 
@@ -70,39 +72,49 @@ _Echec _natureDe(Object e) {
   return _Echec.definitif;
 }
 
-/// Les types de compte couverts par le chiffrement.
+/// Les types de compte couverts par le chiffrement — jumeau de
+/// `backend-alanya/src/lib/e2ee-perimetre.ts`.
 ///
 /// 🔴 UNE LISTE BLANCHE, JAMAIS UNE LISTE NOIRE. Le jour où un type de compte
 /// est ajouté, il est EXCLU par défaut — il faut un geste conscient pour
-/// l'inclure. Une liste noire l'aurait inclus par oubli, et un centre d'appels
-/// se serait retrouvé avec des conversations que l'organisation ne peut plus
-/// lire.
-const Set<int> typesPersonnels = {0};
+/// l'inclure.
+///
+/// ⚠️ ÉLARGIE LE 09/10/2026 (décision du user) : agents (2), numéros de centre
+/// d'appels (3) et centres vocaux (4) chiffrent aussi, à deux comme en groupe.
+/// L'administrateur de plateforme (9) reste dehors.
+const Set<int> typesAutorises = {0, 2, 3, 4};
 
-bool estComptePersonnel(int? typeCompte) => typesPersonnels.contains(typeCompte);
+bool peutChiffrer(int? typeCompte) => typesAutorises.contains(typeCompte);
 
 /// Pourquoi une conversation ne peut pas être chiffrée.
-enum MotifRefus { horsPerimetre, groupeNonSupporte }
-
-/// Décide si une conversation entre dans le périmètre.
 ///
-/// ⚠️ LES GROUPES SONT EXCLUS, et ce n'est pas une paresse : ils demanderaient
-/// les Sender Keys, c'est-à-dire un SECOND protocole, pas une extension du
-/// premier.
+/// ⚠️ `emetteurApi` est PROVISOIRE : un tête-à-tête avec un compte qui envoie
+/// des codes par l'API ne se chiffre pas (le serveur ne pourrait plus y
+/// écrire). Les groupes ne sont plus refusés par principe depuis le lot 2.
+enum MotifRefus { horsPerimetre, emetteurApi }
+
+/// Décide si une conversation entre dans le périmètre (le serveur fait foi ;
+/// ceci ne sert qu'à l'affichage hors ligne).
 MotifRefus? motifRefus({
   required bool estGroupe,
   required List<int?> typesDesParticipants,
+  bool emetteurApi = false,
 }) {
-  if (typesDesParticipants.any((t) => !estComptePersonnel(t))) {
+  if (typesDesParticipants.any((t) => !peutChiffrer(t))) {
     return MotifRefus.horsPerimetre;
   }
-  if (estGroupe) return MotifRefus.groupeNonSupporte;
+  if (!estGroupe && emetteurApi) return MotifRefus.emetteurApi;
   return null;
 }
 
 /// Le fil chiffré : ce que l'écran de conversation appelle.
 class E2eeFil {
-  E2eeFil(this._service, this._api, this._monDeviceId, {this.monCompte});
+  E2eeFil(this._service, this._api, this._monDeviceId, {this.monCompte})
+      : groupe = GroupeChiffre(_service, _api, _monDeviceId, monCompte);
+
+  /// Les GROUPES chiffrés (lot 3, chapitre 34) : un seul chiffré par message,
+  /// avec la clé du groupe — pas d'enveloppes par appareil.
+  final GroupeChiffre groupe;
 
   /// Mon compte — pour chiffrer aussi vers MES autres appareils. Sans lui,
   /// seul le correspondant reçoit le message.
@@ -211,7 +223,8 @@ class E2eeFil {
   /// de faire échouer le chiffrement pour lire.
   Future<String> envoyer({
     required String convId,
-    required String pairId,
+    /// Le correspondant d'un tête-à-tête ; `null` pour un GROUPE chiffré.
+    required String? pairId,
     required String texte,
     /// 🐛 LA RÉPONSE ET LE CONTACT N'EXISTAIENT PAS DANS UN FIL CHIFFRÉ (user,
     /// 06/10/2026) : la citation n'était jamais transmise, et un contact
@@ -220,6 +233,11 @@ class E2eeFil {
     String type = 'TEXT',
     String? replyToId,
   }) async {
+    // 🔴 UN GROUPE PREND SON PROPRE CHEMIN : un seul chiffré, signé, envoyé
+    // avec la ligne (lot 3).
+    if (pairId == null) {
+      return groupe.envoyer(convId: convId, texte: texte, type: type, replyToId: replyToId);
+    }
     var appareils = await _service.ouvrirSessions(pairId);
 
     if (appareils.isEmpty) {
@@ -291,10 +309,14 @@ class E2eeFil {
   /// Rend la date de modification du serveur.
   Future<DateTime?> modifier({
     required String convId,
-    required String pairId,
+    /// `null` pour un GROUPE : le nouveau chiffré remplace l'ancien.
+    required String? pairId,
     required String messageId,
     required String texte,
   }) async {
+    if (pairId == null) {
+      return groupe.modifier(convId: convId, messageId: messageId, texte: texte);
+    }
     final appareils = await _service.ouvrirSessions(pairId);
     if (appareils.isEmpty) {
       throw const E2eeImpossible('Aucun appareil chiffré chez ce correspondant.');
@@ -374,12 +396,23 @@ class E2eeFil {
   /// avant de chiffrer. Jumeau de `envoyerMediaChiffre` côté web.
   Future<String> envoyerMedia({
     required String convId,
-    required String pairId,
+    /// `null` pour un GROUPE : le descripteur voyage dans le chiffré de groupe.
+    required String? pairId,
     required DescripteurMedia media,
     String legende = '',
     String? replyToId,
     bool vueUnique = false,
   }) async {
+    if (pairId == null) {
+      return groupe.envoyer(
+        convId: convId,
+        texte: legende,
+        type: typeMessagePour(media),
+        replyToId: replyToId,
+        media: media,
+        vueUnique: vueUnique,
+      );
+    }
     final appareils = await _service.ouvrirSessions(pairId);
     if (appareils.isEmpty) {
       throw const E2eeImpossible('Aucun appareil chiffré chez ce correspondant.');
@@ -479,6 +512,21 @@ class E2eeFil {
           e['type'] as int,
           e['corps'] as String,
         );
+        /*
+         * 🔴 UN TROUSSEAU DE GROUPE, HORS FIL (lot 3). Contrôlé puis rangé
+         * dans le coffre AVANT l'acquittement : c'est la seule copie de ces
+         * clés que cet appareil recevra. Refusé (pas un administrateur, clé
+         * déjà connue autrement), il lève : acquitté, ignoré — sans toucher à
+         * la session, qui a bien déchiffré.
+         */
+        if (e['messageId'] == null && estChargeTrousseau(texte)) {
+          try {
+            await groupe.recevoirTrousseau(
+                e['convId'] as String, e['expediteurId'] as String, texte);
+          } catch (_) {}
+          aAcquitter.add(e['id'] as String);
+          continue;
+        }
         /*
          * ⚠️ LES NOMS VIENNENT DU SERVEUR, PAS DE MON SOUVENIR : `convId` et
          * `createdAt`, vérifiés dans la route. Une clé mal orthographiée ne se

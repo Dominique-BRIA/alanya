@@ -1132,6 +1132,14 @@ class _ChatScreenState extends State<ChatScreen>
        * serveur ne peut pas annoncer un contenu qu'il ne sait pas lire.
        */
       if (e["convId"] != widget.convId) return;
+      /*
+       * 🔴 GROUPE (lot 3) : pas d'enveloppe à relever, le chiffré est AVEC la
+       * ligne. On relit la page récente et on l'ouvre.
+       */
+      if (e["groupe"] == true) {
+        unawaited(_rafraichirGroupe());
+        return;
+      }
       unawaited(_releverChiffres());
     } else if (type == "read") {
       if (e["convId"] != widget.convId) return;
@@ -1543,6 +1551,95 @@ class _ChatScreenState extends State<ChatScreen>
     ];
   }
 
+  /// Ouvre les messages de GROUPE chiffrés d'une page (lot 3, chapitre 34).
+  ///
+  /// 🔴 RIEN NE SE CONSOMME : le chiffré reste sur le serveur et se relit à
+  /// chaque chargement, avec le trousseau du coffre. Le cache sert l'affichage
+  /// immédiat et hors ligne, comme pour un message en clair.
+  ///
+  /// ⚠️ UN ÉCHEC LAISSE LA BULLE VIDE (clé pas encore reçue, signature
+  /// refusée) : « indisponible sur cet appareil ». Jamais de texte deviné.
+  Future<List<Message>> _ouvrirGroupe(List<Message> page) async {
+    final pile = context.e2ee;
+    if (pile == null || !page.any((m) => m.chiffreGroupe != null)) return page;
+    final sortie = <Message>[];
+    for (final m in page) {
+      final c = m.chiffreGroupe;
+      if (c == null || m.isDeleted) {
+        sortie.add(m);
+        continue;
+      }
+      final (clair, _) = await pile.fil.groupe.lire(
+          convId: widget.convId, messageId: m.id, expediteurId: m.senderId, chiffre: c);
+      if (clair == null) {
+        sortie.add(m);
+        continue;
+      }
+      sortie.add(m.avecDechiffre(texte: clair.texte, media: clair.media));
+      unawaited(MessageCache.rangeTexteDechiffre(
+        id: m.id,
+        convId: widget.convId,
+        expediteurId: m.senderId,
+        texte: clair.texte,
+        quand: m.createdAt,
+        media: clair.media,
+        genre: clair.genre,
+        replyToId: clair.reponseA,
+      ).then((_) {}, onError: (_) {}));
+    }
+    return sortie;
+  }
+
+  /// Un message de GROUPE chiffré vient d'arriver (`e2ee_arrivee`, `groupe`) :
+  /// on relit la page récente, on l'ouvre, et on la fusionne.
+  ///
+  /// ⚠️ L'HISTORIQUE DÉJÀ REMONTÉ ET LES ENVOIS EN COURS RESTENT : la page du
+  /// serveur ne porte que les plus récents, et pas nos bulles d'attente.
+  Future<void> _rafraichirGroupe() async {
+    if (!mounted) return;
+    try {
+      final repo = context.read<ChatRepository>();
+      final page = await repo.getMessages(widget.convId);
+      if (!mounted) return;
+      final ouverts = _garderLeClairConnu(
+          (await _ouvrirGroupe(page)).reversed.toList(), _messages);
+      if (!mounted || ouverts.isEmpty) return;
+      final ids = {for (final m in ouverts) m.id};
+      final plusAncien = ouverts.first.createdAt;
+      final avant = [
+        for (final m in _messages)
+          if (!ids.contains(m.id) && m.createdAt.isBefore(plusAncien)) m,
+      ];
+      final attente = [
+        for (final m in _messages)
+          if (!ids.contains(m.id) && m.id.startsWith('tmp-') && !_envoisChiffres.containsKey(m.id)) m,
+      ];
+      final nouveaux = ouverts
+          .where((m) => !_messages.any((x) => x.id == m.id) && m.senderId != _myId)
+          .toList();
+      setState(() {
+        _messages = [
+          ...avant,
+          ...garderEnvoisEnCours(ouverts, _messages, _envoisChiffres.keys.toSet()),
+          ...attente,
+        ];
+        _rebuildCombined();
+      });
+      for (final m in ouverts) {
+        _cacheMsg(m);
+      }
+      if (nouveaux.isNotEmpty) {
+        _markReadRemote();
+        if (NotificationSettings.instance.messagesOn) {
+          _sonnerMessageRecu(nouveaux.last.senderId);
+        }
+        _scrollToBottom();
+      }
+    } catch (_) {
+      // Le réseau a bronché : la prochaine ouverture relira tout.
+    }
+  }
+
   Future<void> _load() async {
     // _myId est désormais un getter (toujours à jour) — plus besoin de le figer ici.
     _baseUrl = context.read<ApiClient>().baseUrl;
@@ -1599,7 +1696,10 @@ class _ChatScreenState extends State<ChatScreen>
 
     try {
       final repo = context.read<ChatRepository>();
-      final msgs = await repo.getMessages(widget.convId);
+      final page = await repo.getMessages(widget.convId);
+      if (!mounted) return;
+      // Groupe chiffré : chaque message porte son chiffré, relu ici (lot 3).
+      final msgs = await _ouvrirGroupe(page);
       if (!mounted) return;
       final reversed = _garderLeClairConnu(msgs.reversed.toList(), cached);
       await MessageCache.putConv(widget.convId, reversed);
@@ -1664,9 +1764,9 @@ class _ChatScreenState extends State<ChatScreen>
     setState(() => _loadingOlder = true);
     final cursor = _messages.first.id;
     try {
-      final older = await context
-          .read<ChatRepository>()
-          .getMessages(widget.convId, cursor: cursor);
+      final repoAncien = context.read<ChatRepository>();
+      final older = await _ouvrirGroupe(
+          await repoAncien.getMessages(widget.convId, cursor: cursor));
       if (!mounted) return;
       if (older.isEmpty) {
         _hasMoreOlder = false;
@@ -1723,8 +1823,10 @@ class _ChatScreenState extends State<ChatScreen>
        * cet appareil », et la relève ne remplissait ensuite que les nouveaux
        * messages (test T5 du user, 29/09/2026).
        */
+      final page = await repo.getMessages(widget.convId);
+      if (!mounted) return;
       final duServeur = _garderLeClairConnu(
-          (await repo.getMessages(widget.convId)).reversed.toList(), _messages);
+          (await _ouvrirGroupe(page)).reversed.toList(), _messages);
       if (!mounted) return;
       // 🐛 La page du serveur n'a pas les bulles d'attente des médias
       // chiffrés : sans cette garde, un PDF envoyé au retour du sélecteur de
@@ -2483,7 +2585,7 @@ class _ChatScreenState extends State<ChatScreen>
     }
     final pile = context.e2ee;
     final pair = widget.otherUserId;
-    if (_filChiffre && pile != null && pair != null) {
+    if (_filChiffre && pile != null && _cheminChiffre) {
       /*
        * 🔴 LE CHAMP SE LIBÈRE TOUT DE SUITE, L’ENVOI SE FAIT EN FOND.
        *
@@ -2627,6 +2729,11 @@ class _ChatScreenState extends State<ChatScreen>
 
   /* ══════════════ L'ENVOI CHIFFRÉ, EN FOND ══════════════ */
 
+  /// Ce fil a-t-il un chemin chiffré ? Un tête-à-tête a un correspondant ; un
+  /// GROUPE n'en a pas — `pair` y vaut `null`, et `E2eeFil` prend alors le
+  /// chemin du groupe (lot 3, chapitre 34).
+  bool get _cheminChiffre => widget.isGroup || widget.otherUserId != null;
+
   /// La file des envois chiffrés de cet écran : un à la fois, dans l'ordre.
   ///
   /// ⚠️ SANS ELLE, deux messages tapés vite partiraient en parallèle, et le
@@ -2638,7 +2745,7 @@ class _ChatScreenState extends State<ChatScreen>
   /// JSON (06/10/2026).
   void _envoyerChiffreEnFond(
     PileE2ee pile,
-    String pair,
+    String? pair,
     String texte,
     String tempId,
     DateTime quand, {
@@ -2653,7 +2760,7 @@ class _ChatScreenState extends State<ChatScreen>
 
   Future<void> _envoyerChiffreMaintenant(
     PileE2ee pile,
-    String pair,
+    String? pair,
     String texte,
     String tempId,
     DateTime quand, {
@@ -2804,7 +2911,7 @@ class _ChatScreenState extends State<ChatScreen>
     final pile = context.e2ee;
     final pair = widget.otherUserId;
     final texte = m.content;
-    if (!_peutReessayer(m) || pile == null || pair == null || texte == null) return;
+    if (!_peutReessayer(m) || pile == null || !_cheminChiffre || texte == null) return;
     _marquerStatut(m.id, "PENDING");
     _envoyerChiffreEnFond(pile, pair, texte, m.id, m.createdAt,
         type: m.type, replyToId: m.replyToId);
@@ -2869,7 +2976,7 @@ class _ChatScreenState extends State<ChatScreen>
     }
     final pile = context.e2ee;
     final pair = widget.otherUserId;
-    if (_filChiffre && m.chiffre && pile != null && pair != null) {
+    if (_filChiffre && m.chiffre && pile != null && _cheminChiffre) {
       setState(() {
         final idx = _messages.indexWhere((x) => x.id == m.id);
         if (idx >= 0) {
@@ -2912,7 +3019,7 @@ class _ChatScreenState extends State<ChatScreen>
   /// l'ancien texte reviendrait au rechargement. En cas d'échec, l'ancien
   /// texte revient à l'écran et on le dit.
   Future<void> _modifierChiffre(
-      PileE2ee pile, String pair, Message avant, String texte) async {
+      PileE2ee pile, String? pair, Message avant, String texte) async {
     try {
       final le = await pile.fil.modifier(
         convId: widget.convId,
@@ -3068,9 +3175,9 @@ class _ChatScreenState extends State<ChatScreen>
         try {
           final cursor = _messages.isNotEmpty ? _messages.first.id : null;
           if (cursor == null) break;
-          final older = await context
-              .read<ChatRepository>()
-              .getMessages(widget.convId, cursor: cursor);
+          final repoSaut = context.read<ChatRepository>();
+          final older = await _ouvrirGroupe(
+              await repoSaut.getMessages(widget.convId, cursor: cursor));
           if (older.isEmpty) break;
           final newMsgs = older.reversed.toList();
           setState(() => _messages = [...newMsgs, ..._messages]);
@@ -3550,7 +3657,7 @@ class _ChatScreenState extends State<ChatScreen>
     final pile = context.e2ee;
     final pair = widget.otherUserId;
     final moi = _myId;
-    if (_filChiffre && pile != null && pair != null && moi != null) {
+    if (_filChiffre && pile != null && _cheminChiffre && moi != null) {
       final medias = context.read<MediaRepository>();
       for (var i = 0; i < fichiers.length; i++) {
         await _envoyerMediaChiffre(
@@ -3707,7 +3814,8 @@ class _ChatScreenState extends State<ChatScreen>
   Future<void> _envoyerMediaChiffre({
     required PileE2ee pile,
     required MediaRepository medias,
-    required String pair,
+    /// `null` pour un GROUPE chiffré (lot 3).
+    required String? pair,
     required String moi,
     required MediaPickResult fichier,
     required String legende,
@@ -3947,7 +4055,7 @@ class _ChatScreenState extends State<ChatScreen>
     }
     final pile = context.e2ee;
     final pair = widget.otherUserId;
-    if (!_filChiffre || pile == null || pair == null) return false;
+    if (!_filChiffre || pile == null || !_cheminChiffre) return false;
     final tempId = "tmp-${DateTime.now().microsecondsSinceEpoch}";
     final quand = DateTime.now();
     setState(() {

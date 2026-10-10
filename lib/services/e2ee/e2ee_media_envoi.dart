@@ -32,7 +32,8 @@ class EnvoiMediaChiffre {
     required PileE2ee pile,
     required MediaRepository medias,
     required String convId,
-    required String pairId,
+    /// `null` pour un GROUPE chiffré (lot 3).
+    required String? pairId,
     required String moi,
     required MediaPickResult fichier,
     String legende = '',

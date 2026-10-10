@@ -189,7 +189,17 @@ class Message {
     this.vueUniqueOuverte = false,
     this.vueUniqueEffacee = false,
     this.mediaChiffre,
+    this.chiffreGroupe,
   });
+
+  /// Le chiffré d'un message de GROUPE chiffré, tel que le serveur le rend :
+  /// `{version, expediteurAppareil, corps}` (lot 3, chapitre 34).
+  ///
+  /// ⚠️ UN SEUL POUR TOUS LES MEMBRES, ET JAMAIS CONSOMMÉ : l'écran le
+  /// déchiffre après chaque chargement (`GroupeChiffre.lire`). Il ne sert qu'à
+  /// ce passage : une copie de message faite APRÈS le déchiffrement peut le
+  /// perdre sans dommage.
+  final Map<String, dynamic>? chiffreGroupe;
 
   /// Le média CHIFFRÉ de bout en bout, tel que l'enveloppe l'a livré : sa clé,
   /// son empreinte, son aperçu (cours, chapitre 23). Présent = le fichier du
@@ -256,6 +266,7 @@ class Message {
         vueUniqueOuverte: ouverte ?? vueUniqueOuverte,
         vueUniqueEffacee: effacee ?? vueUniqueEffacee,
         mediaChiffre: mediaChiffre,
+        chiffreGroupe: chiffreGroupe,
       );
 
   /// Vrai si le message a été supprimé pour tout le monde.
@@ -287,6 +298,7 @@ class Message {
           vueUniqueOuverte: vueUniqueOuverte,
           vueUniqueEffacee: vueUniqueEffacee,
           mediaChiffre: mediaChiffre,
+          chiffreGroupe: chiffreGroupe,
         );
 
   factory Message.fromJson(Map<String, dynamic> j) => Message(
@@ -304,6 +316,9 @@ class Message {
             ? StatutCite.fromJson(j["statutCite"] as Map<String, dynamic>)
             : null,
         chiffre: j["chiffre"] == true,
+        chiffreGroupe: j["groupe"] is Map<String, dynamic>
+            ? j["groupe"] as Map<String, dynamic>
+            : null,
         vueUnique: j["vueUnique"] == true,
         vueUniqueOuverte: j["vueUniqueOuverte"] == true,
         vueUniqueEffacee: j["vueUniqueEffacee"] == true,
