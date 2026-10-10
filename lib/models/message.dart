@@ -1,3 +1,5 @@
+import '../services/e2ee/e2ee_media.dart' show DescripteurMedia;
+
 class MessageMedia {
   final String id;
   final String url; // chemin servi par /api/media/:id
@@ -6,6 +8,9 @@ class MessageMedia {
   final int? sizeBytes;
   final int? durationMs;
 
+  /// Chiffré de bout en bout : à déchiffrer, JAMAIS à afficher tel quel.
+  final bool chiffre;
+
   MessageMedia({
     required this.id,
     required this.url,
@@ -13,6 +18,7 @@ class MessageMedia {
     this.filename,
     this.sizeBytes,
     this.durationMs,
+    this.chiffre = false,
   });
 
   bool get isImage => mimeType.startsWith("image/");
@@ -24,6 +30,7 @@ class MessageMedia {
         mimeType: j["mimeType"] as String,
         sizeBytes: (j["sizeBytes"] as num?)?.toInt(),
         durationMs: (j["durationMs"] as num?)?.toInt(),
+        chiffre: j["chiffre"] == true,
       );
 }
 
@@ -66,6 +73,53 @@ class ReplyPreview {
       );
 }
 
+/// Le statut qu'un message cite, tel que le serveur l'a RECOPIÉ à l'envoi.
+///
+/// 🔴 C'EST UN INSTANTANÉ, PAS UNE RÉFÉRENCE. Un statut vit 24 h puis est
+/// purgé : une citation qui pointerait vers lui deviendrait un trou dans la
+/// conversation le lendemain. L'aperçu reste donc lisible indéfiniment, même
+/// une fois le statut disparu — et c'est aussi pourquoi le client ne peut pas
+/// le fabriquer : seul le serveur le remplit.
+class StatutCite {
+  final String statusId;
+  final String authorId;
+
+  /// TEXT, IMAGE ou VIDEO — celui du statut, pas celui du message.
+  final String type;
+  final String? text;
+  final String? mediaUrl;
+  final String? bgColor;
+
+  StatutCite({
+    required this.statusId,
+    required this.authorId,
+    required this.type,
+    this.text,
+    this.mediaUrl,
+    this.bgColor,
+  });
+
+  factory StatutCite.fromJson(Map<String, dynamic> j) => StatutCite(
+        statusId: j["statusId"] as String,
+        authorId: j["authorId"] as String,
+        type: j["type"] as String? ?? "TEXT",
+        text: j["text"] as String?,
+        mediaUrl: j["mediaUrl"] as String?,
+        bgColor: j["bgColor"] as String?,
+      );
+
+  /// Ce que la citation affiche quand le statut n'a pas de texte.
+  String get apercu {
+    final t = text?.trim();
+    if (t != null && t.isNotEmpty) return t;
+    return switch (type) {
+      "IMAGE" => "Photo",
+      "VIDEO" => "Vidéo",
+      _ => "Statut",
+    };
+  }
+}
+
 class Message {
   final String id;
   final String convId;
@@ -77,7 +131,8 @@ class Message {
   final ReplyPreview? replyTo; // snapshot du message cité (venant du backend)
   final DateTime? deletedAt; // non-null = message supprimé pour tous
   final DateTime? editedAt; // non-null = message modifié (affiche « modifié »)
-  final DateTime? expiresAt; // non-null = message éphémère (disparaît à échéance)
+  final DateTime?
+      expiresAt; // non-null = message éphémère (disparaît à échéance)
   final List<MessageMedia> media;
   final DateTime createdAt;
   // Réactions emoji — mutable : mises à jour en place à la réception des events
@@ -85,6 +140,31 @@ class Message {
   List<MessageReaction> reactions;
   // Favori (étoile) pour MOI — mutable : basculé en place au tap.
   bool starred;
+
+  /// LES MENTIONS `@` DU MESSAGE — groupes seulement.
+  ///
+  /// 🔴 LE TEXTE PORTE « @Dominique » EN CLAIR ; cette liste dit QUEL compte
+  /// est visé. Sans elle, mettre en évidence reviendrait à chercher un pseudo
+  /// dans une phrase, et notifier reviendrait à le deviner — ce qui échoue dès
+  /// que deux membres portent le même nom.
+  ///
+  /// Vide quand le serveur ne connaît pas encore les mentions : le message
+  /// s'affiche alors comme une phrase ordinaire, sans rien perdre.
+  final List<MentionMessage> mentions;
+
+  /// Le statut auquel ce message répond, recopié par le serveur à l'envoi.
+  final StatutCite? statutCite;
+
+  /// Le message est-il chiffré de bout en bout ?
+  ///
+  /// Le serveur le déduit de l’existence d’une enveloppe (`chiffre` dans
+  /// `GET …/messages`) ; localement, un message dont le texte vient d’une
+  /// enveloppe l’est par définition.
+  ///
+  /// ⚠️ C’EST LUI QUI PLACE LA BANDE « À PARTIR D’ICI, CHIFFRÉ » : juste avant
+  /// le PREMIER message chiffré, comme sur le web. Toute copie d’un message
+  /// doit le transmettre, sinon la bande glisse plus bas.
+  final bool chiffre;
 
   Message({
     required this.id,
@@ -102,10 +182,124 @@ class Message {
     this.replyTo,
     this.reactions = const [],
     this.starred = false,
+    this.mentions = const [],
+    this.statutCite,
+    this.chiffre = false,
+    this.vueUnique = false,
+    this.vueUniqueOuverte = false,
+    this.vueUniqueEffacee = false,
+    this.mediaChiffre,
+    this.chiffreGroupe,
   });
+
+  /// Le chiffré d'un message de GROUPE chiffré, tel que le serveur le rend :
+  /// `{version, expediteurAppareil, corps}` (lot 3, chapitre 34).
+  ///
+  /// ⚠️ UN SEUL POUR TOUS LES MEMBRES, ET JAMAIS CONSOMMÉ : l'écran le
+  /// déchiffre après chaque chargement (`GroupeChiffre.lire`). Il ne sert qu'à
+  /// ce passage : une copie de message faite APRÈS le déchiffrement peut le
+  /// perdre sans dommage.
+  final Map<String, dynamic>? chiffreGroupe;
+
+  /// Le média CHIFFRÉ de bout en bout, tel que l'enveloppe l'a livré : sa clé,
+  /// son empreinte, son aperçu (cours, chapitre 23). Présent = le fichier du
+  /// serveur est illisible, et c'est ce descripteur qui permet de l'ouvrir.
+  final DescripteurMedia? mediaChiffre;
+
+  /// Copie avec le texte et le média déchiffrés.
+  Message avecDechiffre({String? texte, DescripteurMedia? media}) => Message(
+        id: id,
+        convId: convId,
+        senderId: senderId,
+        content: texte ?? content,
+        type: type,
+        status: status,
+        replyToId: replyToId,
+        media: this.media,
+        createdAt: createdAt,
+        deletedAt: deletedAt,
+        editedAt: editedAt,
+        expiresAt: expiresAt,
+        replyTo: replyTo,
+        reactions: reactions,
+        starred: starred,
+        mentions: mentions,
+        statutCite: statutCite,
+        chiffre: chiffre,
+        vueUnique: vueUnique,
+        vueUniqueOuverte: vueUniqueOuverte,
+        vueUniqueEffacee: vueUniqueEffacee,
+        mediaChiffre: media ?? mediaChiffre,
+      );
+
+  /// Photo, vidéo ou vocal À VUE UNIQUE (02/10/2026). Le média ne s'affiche
+  /// jamais dans la bulle : il s'ouvre une fois, dans un visionneur protégé.
+  final bool vueUnique;
+
+  /// Expéditeur : quelqu'un l'a ouverte. Destinataire : JE l'ai ouverte.
+  final bool vueUniqueOuverte;
+
+  /// Le serveur a effacé le fichier : plus rien à ouvrir, pour personne.
+  final bool vueUniqueEffacee;
+
+  /// Copie de ce message avec l'état de vue unique changé.
+  Message avecVueUnique({bool? ouverte, bool? effacee}) => Message(
+        id: id,
+        convId: convId,
+        senderId: senderId,
+        content: content,
+        type: type,
+        status: status,
+        replyToId: replyToId,
+        media: media,
+        createdAt: createdAt,
+        deletedAt: deletedAt,
+        editedAt: editedAt,
+        expiresAt: expiresAt,
+        replyTo: replyTo,
+        reactions: reactions,
+        starred: starred,
+        mentions: mentions,
+        statutCite: statutCite,
+        chiffre: chiffre,
+        vueUnique: vueUnique,
+        vueUniqueOuverte: ouverte ?? vueUniqueOuverte,
+        vueUniqueEffacee: effacee ?? vueUniqueEffacee,
+        mediaChiffre: mediaChiffre,
+        chiffreGroupe: chiffreGroupe,
+      );
 
   /// Vrai si le message a été supprimé pour tout le monde.
   bool get isDeleted => deletedAt != null;
+
+  /// Le même message, dans un autre état — tout le reste est gardé.
+  Message avecStatut(String nouveau) => nouveau == status
+      ? this
+      : Message(
+          id: id,
+          convId: convId,
+          senderId: senderId,
+          content: content,
+          type: type,
+          status: nouveau,
+          replyToId: replyToId,
+          media: media,
+          createdAt: createdAt,
+          deletedAt: deletedAt,
+          editedAt: editedAt,
+          expiresAt: expiresAt,
+          replyTo: replyTo,
+          reactions: reactions,
+          starred: starred,
+          mentions: mentions,
+          statutCite: statutCite,
+          chiffre: chiffre,
+          vueUnique: vueUnique,
+          vueUniqueOuverte: vueUniqueOuverte,
+          vueUniqueEffacee: vueUniqueEffacee,
+          mediaChiffre: mediaChiffre,
+          chiffreGroupe: chiffreGroupe,
+        );
 
   factory Message.fromJson(Map<String, dynamic> j) => Message(
         id: j["id"] as String,
@@ -118,9 +312,25 @@ class Message {
         replyTo: j["replyTo"] != null
             ? ReplyPreview.fromJson(j["replyTo"] as Map<String, dynamic>)
             : null,
-        deletedAt: j["deletedAt"] != null ? DateTime.tryParse(j["deletedAt"] as String) : null,
-        editedAt: j["editedAt"] != null ? DateTime.tryParse(j["editedAt"] as String) : null,
-        expiresAt: j["expiresAt"] != null ? DateTime.tryParse(j["expiresAt"] as String) : null,
+        statutCite: j["statutCite"] != null
+            ? StatutCite.fromJson(j["statutCite"] as Map<String, dynamic>)
+            : null,
+        chiffre: j["chiffre"] == true,
+        chiffreGroupe: j["groupe"] is Map<String, dynamic>
+            ? j["groupe"] as Map<String, dynamic>
+            : null,
+        vueUnique: j["vueUnique"] == true,
+        vueUniqueOuverte: j["vueUniqueOuverte"] == true,
+        vueUniqueEffacee: j["vueUniqueEffacee"] == true,
+        deletedAt: j["deletedAt"] != null
+            ? DateTime.tryParse(j["deletedAt"] as String)
+            : null,
+        editedAt: j["editedAt"] != null
+            ? DateTime.tryParse(j["editedAt"] as String)
+            : null,
+        expiresAt: j["expiresAt"] != null
+            ? DateTime.tryParse(j["expiresAt"] as String)
+            : null,
         media: ((j["media"] as List?) ?? [])
             .map((m) => MessageMedia.fromJson(m as Map<String, dynamic>))
             .toList(),
@@ -129,5 +339,30 @@ class Message {
             .map((r) => MessageReaction.fromJson(r as Map<String, dynamic>))
             .toList(),
         starred: (j["starred"] as bool?) ?? false,
+        mentions: ((j["mentions"] as List?) ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .map(MentionMessage.fromJson)
+            .toList(),
       );
+}
+
+/// UNE MENTION `@` : le compte visé, et le texte écrit dans le message.
+///
+/// ⚠️ [libelle] N'EST PAS LE PSEUDO COURANT, c'est ce qui a été inséré à
+/// l'envoi, figé par le serveur. Deux raisons : c'est ce texte qu'il faut
+/// retrouver dans le message pour le mettre en évidence — un pseudo changé
+/// depuis ne s'y trouverait plus — et cela garde lisible la mention d'une
+/// personne qui a quitté le groupe.
+class MentionMessage {
+  const MentionMessage({required this.userId, required this.libelle});
+
+  final String userId;
+  final String libelle;
+
+  factory MentionMessage.fromJson(Map<String, dynamic> j) => MentionMessage(
+        userId: (j["userId"] as String?) ?? "",
+        libelle: (j["libelle"] as String?) ?? "",
+      );
+
+  Map<String, dynamic> toJson() => {"userId": userId, "libelle": libelle};
 }

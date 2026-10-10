@@ -10,6 +10,7 @@ import '../../../core/media_helper.dart';
 import '../../../widgets/media/cached_media.dart';
 import 'media_gallery_viewer.dart';
 import 'pdf_viewer_screen.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Galerie des médias — grille propre style WhatsApp (cellules carrées, SANS
 /// nom au-dessus). Les images/vidéos ouvrent la visionneuse navigable (swipe) ;
@@ -48,7 +49,7 @@ class _GalleryScreenState extends State<GalleryScreen> {
         foregroundColor: Colors.white,
         elevation: 0,
         title: Text(
-          '${widget.items.length} média${widget.items.length > 1 ? "s" : ""}',
+          tr(context, 'media_count_many', {'n': '${widget.items.length}'}),
           style: const TextStyle(fontSize: 16),
         ),
       ),

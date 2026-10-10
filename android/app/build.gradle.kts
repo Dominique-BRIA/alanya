@@ -115,4 +115,18 @@ flutter {
 dependencies {
     // Requis par flutter_local_notifications (core library desugaring)
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+
+    // ⚠️ MÊME ARTEFACT ET MÊME VERSION que ceux de `flutter_webrtc`
+    // (android/build.gradle : io.github.webrtc-sdk:android:125.6422.03).
+    //
+    // POURQUOI LE REDÉCLARER. `AppelEnregistreur.kt` enregistre les appels en
+    // branchant un `org.webrtc.AudioTrackSink` sur les pistes audio. Or
+    // `flutter_webrtc` déclare le SDK WebRTC en `implementation` : ses classes
+    // `org.webrtc.*` ne sont donc PAS exposées transitivement à ce module, et le
+    // code ne compilerait pas. On rajoute la dépendance ici — Gradle résout une
+    // seule et même copie (versions identiques), sans conflit de classes.
+    // Les classes du greffon lui-même (`com.cloudwebrtc.webrtc.*`) restent
+    // visibles sans rien ajouter : ce sont ses classes propres, pas une
+    // dépendance transitive.
+    implementation("io.github.webrtc-sdk:android:125.6422.03")
 }

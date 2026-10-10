@@ -1,12 +1,23 @@
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../../core/api_client.dart';
 import '../../../core/app_snackbar.dart';
 import '../../../core/downloader.dart';
+import '../../../core/telechargement_suivi.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../../widgets/media/bouton_telecharger.dart';
 import '../../../widgets/media/cached_media.dart';
+import '../../../l10n/app_localizations.dart';
+import '../../../services/e2ee/e2ee_media.dart';
+import '../../../services/e2ee/e2ee_media_ouverture.dart';
+import '../widgets/bulle_media_chiffre.dart' show fournisseurJeton;
 
 /// Un média (image ou vidéo) d'une conversation, pour la galerie navigable.
 class ConvMediaItem {
@@ -16,6 +27,7 @@ class ConvMediaItem {
     required this.downloadUrl,
     required this.filename,
     required this.isVideo,
+    this.chiffre,
   });
 
   final String id;
@@ -23,6 +35,14 @@ class ConvMediaItem {
   final String downloadUrl;
   final String filename;
   final bool isVideo;
+
+  /// Un média CHIFFRÉ : la page le déchiffre avec ce descripteur, et [url]
+  /// reste vide — le fichier du serveur est illisible tel quel.
+  ///
+  /// 🐛 SANS LUI, LA GALERIE ÉCARTAIT LES MÉDIAS CHIFFRÉS, et toucher l'un
+  /// d'eux ouvrait une page qui ne montrait que lui : on ne pouvait plus
+  /// glisser d'un média à l'autre (user, 03/10/2026).
+  final DescripteurMedia? chiffre;
 }
 
 /// Visionneuse plein écran **navigable** (swipe) sur tous les médias
@@ -58,12 +78,32 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
   Future<void> _download() async {
     final item = widget.items[_index];
     setState(() => _downloading = true);
-    final path = await downloadUrl(item.downloadUrl, item.filename);
+    final d = item.chiffre;
+    final nom = d == null ? item.filename : nomPourEnregistrer(d);
+    String? path;
+    if (d == null) {
+      path = await telechargerEnSuivant(item.downloadUrl, item.filename,
+          idTransfert: "dl-galerie-${item.filename}", ouvrirEnsuite: true);
+    } else {
+      /*
+       * 🔴 UN MÉDIA CHIFFRÉ S'ENREGISTRE DEPUIS LE CLAIR DE L'APPAREIL.
+       *
+       * 🐛 Le bouton était RETIRÉ pour lui (user, 06/10/2026) : télécharger le
+       * fichier du serveur aurait enregistré un fichier illisible. Le clair,
+       * lui, est déjà là — c'est lui que la page affiche.
+       */
+      try {
+        final f = await ouvrirMediaChiffre(context, d);
+        path = await enregistrerOctets(await f.readAsBytes(), nom);
+      } catch (_) {
+        path = null;
+      }
+    }
     if (!mounted) return;
     setState(() => _downloading = false);
     showAppSnackBar(path != null
-        ? "Enregistré dans Alanya/"
-        : "Échec du téléchargement");
+        ? tr(context, 'saved_to_alanya', {'nom': nom})
+        : tr(context, 'download_failed'));
   }
 
   @override
@@ -81,6 +121,10 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
               onPageChanged: (i) => setState(() => _index = i),
               itemBuilder: (_, i) {
                 final it = widget.items[i];
+                if (it.chiffre != null && !it.isVideo) {
+                  return _PageImageChiffree(
+                      key: ValueKey(it.id), descripteur: it.chiffre!);
+                }
                 if (it.isVideo) {
                   return _GalleryVideoPage(
                     key: ValueKey(it.id),
@@ -137,17 +181,9 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
                           style: const TextStyle(color: Colors.white),
                         ),
                       ),
-                      IconButton(
-                        icon: _downloading
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2, color: Colors.white),
-                              )
-                            : const Icon(Icons.download, color: Colors.white),
-                        onPressed: _downloading ? null : _download,
-                      ),
+                      if (item != null)
+                        BoutonTelecharger(
+                            enCours: _downloading, onPressed: _download),
                     ],
                   ),
                 ),
@@ -205,9 +241,15 @@ class _GalleryVideoPageState extends State<_GalleryVideoPage> {
     if (_starting) return;
     setState(() => _starting = true);
     try {
-      final name = 'vid_${CachedMedia.cacheKey(widget.item.url)}';
-      String? path = await getCachedFile(name);
-      path ??= await downloadToCache(widget.item.url, name);
+      String? path;
+      final d = widget.item.chiffre;
+      if (d != null) {
+        path = (await ouvrirMediaChiffre(context, d)).path;
+      } else {
+        final name = 'vid_${CachedMedia.cacheKey(widget.item.url)}';
+        path = await getCachedFile(name);
+        path ??= await downloadToCache(widget.item.url, name);
+      }
       _ctrl = path != null
           ? VideoPlayerController.file(File(path))
           : VideoPlayerController.networkUrl(Uri.parse(widget.item.url));
@@ -240,7 +282,11 @@ class _GalleryVideoPageState extends State<_GalleryVideoPage> {
     }
     if (!_ready || _ctrl == null) {
       // Miniature + bouton play (ou spinner pendant l'init).
-      return Center(
+      final apercu = _apercuChiffre(widget.item.chiffre);
+      return Stack(fit: StackFit.expand, children: [
+        if (apercu != null)
+          Center(child: Image.memory(apercu, fit: BoxFit.contain)),
+        Center(
         child: _starting
             ? const CircularProgressIndicator(color: Colors.white)
             : IconButton(
@@ -248,7 +294,8 @@ class _GalleryVideoPageState extends State<_GalleryVideoPage> {
                     color: Colors.white, size: 72),
                 onPressed: _start,
               ),
-      );
+        ),
+      ]);
     }
     return Stack(
       fit: StackFit.expand,
@@ -318,5 +365,120 @@ class _GalleryVideoPageState extends State<_GalleryVideoPage> {
           ),
       ],
     );
+  }
+}
+
+/// Le nom sous lequel enregistrer un média chiffré.
+///
+/// Le nom d'origine voyage dans le descripteur quand l'expéditeur l'a mis
+/// (documents) ; une photo ou une vidéo n'en a souvent pas. On en fabrique un
+/// alors, daté, avec l'extension de son VRAI type — le fichier du serveur, lui,
+/// s'appelle « chiffre.bin ».
+String nomPourEnregistrer(DescripteurMedia d, {DateTime? maintenant}) {
+  final nom = (d.nom ?? '').trim();
+  if (nom.isNotEmpty) return nom;
+  const extensions = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/gif': 'gif',
+    'image/webp': 'webp',
+    'image/heic': 'heic',
+    'video/mp4': 'mp4',
+    'video/quicktime': 'mov',
+    'video/3gpp': '3gp',
+    'video/webm': 'webm',
+    'audio/mpeg': 'mp3',
+    'audio/mp4': 'm4a',
+    'audio/aac': 'aac',
+    'audio/ogg': 'ogg',
+    'application/pdf': 'pdf',
+  };
+  final ext = extensions[d.mime] ?? 'bin';
+  final t = maintenant ?? DateTime.now();
+  String deux(int n) => n.toString().padLeft(2, '0');
+  final horodatage = '${t.year}${deux(t.month)}${deux(t.day)}_'
+      '${deux(t.hour)}${deux(t.minute)}${deux(t.second)}';
+  return 'Alanya_$horodatage.$ext';
+}
+
+/// Ouvre un média chiffré pour la galerie : clair en cache, ou téléchargé
+/// et déchiffré, avec le jeton À JOUR (voir `OuvertureMediaChiffre`).
+Future<File> ouvrirMediaChiffre(BuildContext context, DescripteurMedia d) =>
+    OuvertureMediaChiffre.ouvrir(
+      d,
+      baseUrl: context.read<ApiClient>().baseUrl,
+      token: null,
+      jeton: fournisseurJeton(context),
+    );
+
+Uint8List? _apercuChiffre(DescripteurMedia? d) {
+  final a = d?.apercu;
+  if (a == null) return null;
+  try {
+    return base64Decode(a);
+  } catch (_) {
+    return null;
+  }
+}
+
+/// Une PHOTO CHIFFRÉE dans la galerie : son aperçu flou tout de suite, puis
+/// l'image déchiffrée, zoomable comme les autres.
+class _PageImageChiffree extends StatefulWidget {
+  const _PageImageChiffree({super.key, required this.descripteur});
+
+  final DescripteurMedia descripteur;
+
+  @override
+  State<_PageImageChiffree> createState() => _PageImageChiffreeState();
+}
+
+class _PageImageChiffreeState extends State<_PageImageChiffree> {
+  File? _fichier;
+  bool _echec = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _charger();
+  }
+
+  Future<void> _charger() async {
+    setState(() => _echec = false);
+    try {
+      final f = await ouvrirMediaChiffre(context, widget.descripteur);
+      if (mounted) setState(() => _fichier = f);
+    } catch (_) {
+      if (mounted) setState(() => _echec = true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final fichier = _fichier;
+    if (fichier != null) {
+      return InteractiveViewer(
+        minScale: 0.8,
+        maxScale: 4,
+        child: Center(child: Image.file(fichier, fit: BoxFit.contain)),
+      );
+    }
+    final apercu = _apercuChiffre(widget.descripteur);
+    return Stack(fit: StackFit.expand, children: [
+      if (apercu != null)
+        ImageFiltered(
+          imageFilter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+          child: Center(child: Image.memory(apercu, fit: BoxFit.contain)),
+        ),
+      Center(
+        child: _echec
+            ? TextButton.icon(
+                onPressed: _charger,
+                icon: const Icon(Icons.refresh, color: Colors.white),
+                label: Text(tr(context, 'e2ee_media_echec'),
+                    style: const TextStyle(color: Colors.white)),
+              )
+            : const CircularProgressIndicator(color: Colors.white),
+      ),
+    ]);
   }
 }

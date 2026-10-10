@@ -35,13 +35,34 @@ const Map<StyleWhatsApp, TextStyle> _styles = {
   StyleWhatsApp.manuscrit: TextStyle(fontFamily: 'Caveat'),
 };
 
-List<InlineSpan> _versSpans(List<NoeudTexte> noeuds) {
+/// LE MANUSCRIT EST AGRANDI : 1,45 fois le texte qui l'entoure.
+///
+/// Caveat a un œil très petit — à taille égale, ses minuscules font à peine
+/// les deux tiers de celles du texte voisin, et le user les trouvait
+/// illisibles (02/10/2026). Même facteur que le web (`.mf-manuscrit`).
+///
+/// ⚠️ UN FACTEUR ET NON UNE TAILLE : Flutter n'a pas d'unité relative, la
+/// taille du texte voisin est donc passée par l'appelant ([tailleBase]).
+const double facteurManuscrit = 1.45;
+
+List<InlineSpan> _versSpans(List<NoeudTexte> noeuds, double tailleBase) {
   return noeuds.map<InlineSpan>((n) {
     if (n.texte != null) return TextSpan(text: n.texte);
-    return TextSpan(style: _styles[n.style], children: _versSpans(n.enfants));
+    final style = n.style == StyleWhatsApp.manuscrit
+        ? _styles[n.style]!.copyWith(
+            fontSize: tailleBase * facteurManuscrit,
+            // Interligne resserré : sans lui, une ligne manuscrite écarterait
+            // ses voisines de toute la hausse de taille.
+            height: 1.05,
+          )
+        : _styles[n.style];
+    return TextSpan(style: style, children: _versSpans(n.enfants, tailleBase));
   }).toList();
 }
 
 /// Transforme [source] en `InlineSpan` prêts pour un `Text.rich`.
-List<InlineSpan> spansWhatsApp(String source) =>
-    _versSpans(analyseWhatsApp(source));
+///
+/// [tailleBase] : la taille du texte qui entoure ces fragments — c'est d'elle
+/// que le manuscrit tire la sienne. 14 est celle du corps des bulles.
+List<InlineSpan> spansWhatsApp(String source, {double tailleBase = 14}) =>
+    _versSpans(analyseWhatsApp(source), tailleBase);

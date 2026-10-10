@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../models/message_payload.dart';
 import '../../theme/alanya_theme.dart';
 import '../avatar_circle.dart';
+import '../../l10n/app_localizations.dart';
 
 /// Ce que le destinataire peut faire d'un contact reçu.
 ///
@@ -95,7 +96,7 @@ class ContactBubble extends StatelessWidget {
             multiple
                 ? _bouton(
                     context,
-                    label: "Voir tout",
+                    label: tr(context, 'view_all'),
                     icone: Icons.list_rounded,
                     onTap: () => ContactListSheet.show(
                       context,
@@ -157,7 +158,7 @@ class ContactBubble extends StatelessWidget {
             ],
             if (contact.alanyaId != null) ...[
               const SizedBox(height: 2),
-              Text("Sur Alanya",
+              Text(tr(context, 'on_alanya'),
                   style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
@@ -219,7 +220,7 @@ class ContactBubble extends StatelessWidget {
         Expanded(
           child: _bouton(
             context,
-            label: "Message",
+            label: tr(context, 'message'),
             icone: Icons.chat_bubble_outline_rounded,
             onTap: () => actions.onOuvrirDiscussion(contact),
             onText: onText,
@@ -229,7 +230,7 @@ class ContactBubble extends StatelessWidget {
         Expanded(
           child: _bouton(
             context,
-            label: "Appeler",
+            label: tr(context, 'call'),
             icone: Icons.call_outlined,
             onTap: () => actions.onAppeler(contact),
             onText: onText,
@@ -239,7 +240,7 @@ class ContactBubble extends StatelessWidget {
         Expanded(
           child: _bouton(
             context,
-            label: "Ajouter",
+            label: tr(context, 'add'),
             icone: Icons.person_add_alt_1_outlined,
             onTap: () => actions.onAjouter(contact),
             onText: onText,
@@ -251,7 +252,7 @@ class ContactBubble extends StatelessWidget {
         Expanded(
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Text("Contact hors Alanya",
+            child: Text(tr(context, 'off_alanya'),
                 textAlign: TextAlign.center,
                 style: TextStyle(
                     fontSize: 12,
@@ -340,7 +341,7 @@ class ContactListSheet extends StatelessWidget {
             borderRadius: BorderRadius.circular(2),
           ),
         ),
-        Text("${contacts.length} contacts",
+        Text(trN(context, 'contacts_count', contacts.length),
             style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
         const SizedBox(height: 6),
         Flexible(
@@ -367,7 +368,7 @@ class ContactListSheet extends StatelessWidget {
                 trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                   if (c.alanyaId != null)
                     IconButton(
-                      tooltip: "Message",
+                      tooltip: tr(context, 'message'),
                       icon: const Icon(Icons.chat_bubble_outline_rounded,
                           size: 20),
                       onPressed: () {
@@ -377,7 +378,7 @@ class ContactListSheet extends StatelessWidget {
                     ),
                   if (c.alanyaId != null)
                     IconButton(
-                      tooltip: "Ajouter à mes contacts",
+                      tooltip: tr(context, 'add_to_contacts'),
                       icon:
                           const Icon(Icons.person_add_alt_1_outlined, size: 20),
                       onPressed: () => actions.onAjouter(c),

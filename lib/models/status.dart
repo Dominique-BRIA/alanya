@@ -1,3 +1,5 @@
+import '../core/alanya_id_formatter.dart';
+
 class StatusItem {
   final String id;
   final String type; // TEXT, IMAGE, VIDEO
@@ -51,7 +53,8 @@ class StatusGroup {
     required this.statuses,
   });
 
-  String get displayName => pseudo ?? publicNumber;
+  /// Repli FORMATE — voir la note detaillee sur `Contact.displayName`.
+  String get displayName => pseudo ?? formatAlanyaId(publicNumber);
 
   factory StatusGroup.fromJson(Map<String, dynamic> j) => StatusGroup(
         userId: j["userId"] as String,
@@ -71,7 +74,9 @@ class StatusFeed {
   StatusFeed({required this.me, required this.others});
 
   factory StatusFeed.fromJson(Map<String, dynamic> j) => StatusFeed(
-        me: j["me"] == null ? null : StatusGroup.fromJson(j["me"] as Map<String, dynamic>),
+        me: j["me"] == null
+            ? null
+            : StatusGroup.fromJson(j["me"] as Map<String, dynamic>),
         others: ((j["others"] as List?) ?? [])
             .map((g) => StatusGroup.fromJson(g as Map<String, dynamic>))
             .toList(),

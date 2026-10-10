@@ -1,15 +1,20 @@
+import 'dart:async';
+import 'services/e2ee/e2ee_fournisseur.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:path_provider/path_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:media_store_plus/media_store_plus.dart';
 import 'package:provider/provider.dart';
 
 import 'core/api_client.dart';
+import 'core/centre_transferts.dart';
 import 'core/authed_api.dart';
 import 'core/connectivity_service.dart';
 import 'core/data_saver_service.dart';
 import 'core/debug_overlay.dart';
 import 'core/geo_service.dart';
+import 'core/traduction_auto.dart';
 import 'core/notification_settings.dart';
 import 'core/locale_controller.dart';
 import 'core/outbox.dart';
@@ -17,6 +22,8 @@ import 'core/presence_store.dart';
 import 'core/device_registry.dart';
 import 'core/push_service.dart';
 import 'core/realtime_client.dart';
+import 'core/service_transferts.dart';
+import 'core/sonneries_listes.dart';
 import 'core/theme_controller.dart';
 import 'core/token_storage.dart';
 import 'features/auth/auth_controller.dart';
@@ -28,17 +35,34 @@ import 'features/calls/call_banner.dart';
 import 'features/calls/call_controller.dart';
 import 'features/calls/call_listener.dart';
 import 'features/calls/calls_repository.dart';
+import 'features/calls/repondeur_repository.dart';
+import 'features/calls/enregistrements_repository.dart';
+import 'features/calls/plaintes_repository.dart';
 import 'features/chat/chat_repository.dart';
+import 'features/settings/export_medias_repository.dart';
+import 'features/chat/envoi_media_store.dart';
+import 'features/status/publication_statuts.dart';
+import 'core/pays_repository.dart';
+import 'features/collegues/collegues_repository.dart';
+import 'features/entreprises/entreprises_repository.dart';
+import 'features/contacts/contact_lists_repository.dart';
 import 'features/contacts/contacts_repository.dart';
 import 'features/home/home_screen.dart';
 import 'widgets/offline_banner.dart';
 import 'widgets/biometric_gate.dart';
 import 'features/media/media_repository.dart';
+import 'features/settings/ringtones_repository.dart';
 import 'features/blocked/blocked_repository.dart';
 import 'features/meetings/meeting_banner.dart';
 import 'features/meetings/meeting_controller.dart';
 import 'features/meetings/meetings_repository.dart';
 import 'features/status/status_repository.dart';
+import 'core/liens_entrants.dart';
+import 'core/partage_entrant.dart';
+import 'core/server_config.dart';
+import 'features/chat/envoi_morceaux/envoi_morceaux_api.dart';
+import 'features/chat/envoi_morceaux/envoi_morceaux_chiffre.dart';
+import 'features/chat/envoi_morceaux/transport_morceaux.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -62,6 +86,51 @@ void main() async {
   final realtime = RealtimeClient(storage);
 
   await PushService.instance.tryInitialize(api: api, storage: storage);
+
+  /*
+   * L'ENVOI DES FICHIERS EN MORCEAUX (cours, chapitre 44). Les morceaux sont
+   * confiés à Android, qui les envoie application fermée ; au démarrage, on
+   * relit ceux restés sur le disque — terminés, on nettoie ; en cours, on
+   * redonne à Android ce qu'il n'a plus.
+   *
+   * ⚠️ SANS ATTENDRE : la reprise parle au réseau, et le premier écran ne doit
+   * pas l'attendre. Un échec ici laisse simplement l'envoi d'un seul bloc.
+   */
+  if (!kIsWeb) {
+    try {
+      final documents = await getApplicationDocumentsDirectory();
+      final transport = TransportArrierePlan(ServerConfig.apiBase);
+      SuiviEnvoisMorceaux.instance.brancher(
+        api: EnvoiMorceauxApi(authedApi),
+        transport: transport,
+        racineDocuments: documents.path,
+      );
+      unawaited(transport
+          .demarrer()
+          .then((_) => SuiviEnvoisMorceaux.instance.reprendre())
+          .catchError((_) {}));
+    } catch (_) {}
+  }
+  // Les transferts s'annoncent dans les notifications. Le lien se fait ICI et
+  // non dans le magasin : lui ne doit connaître ni l'écran ni le système, c'est
+  // ce qui lui permet de servir aussi bien un envoi qu'un modèle de langue.
+  // Et ils SURVIVENT à la fermeture de l'application : un service de premier
+  // plan tient le processus — donc l'isolat Dart, donc la requête — en vie.
+  // Une barre de progression montre l'avancement, elle ne le produit pas.
+  ServiceTransferts.brancher();
+  CentreTransferts.instance.surChangement = (transfert, {required retire}) {
+    if (retire) {
+      PushService.instance.retireTransfert(transfert.id);
+      return;
+    }
+    PushService.instance.showTransfert(
+      id: transfert.id,
+      titre: transfert.titreNotification,
+      sousTitre: transfert.sousTitreNotification,
+      fraction: transfert.fraction,
+      echoue: transfert.echoue,
+    );
+  };
   // Registre des appareils : simple câblage, aucun appel réseau ici.
   // L'enregistrement a lieu à l'authentification (voir AuthController).
   DeviceRegistry.instance.init(api: api, storage: storage);
@@ -70,6 +139,13 @@ void main() async {
   GeoService.instance.init(authedApi);
   await DataSaverService.instance.load();
   await NotificationSettings.instance.load();
+  await TraductionAuto.instance.load();
+  // Liens Alanya (QR, lien partagé) : abonnement AVANT tout écran, sans quoi
+  // le lien qui a lancé l'application serait perdu. Voir `LiensEntrants`.
+  LiensEntrants.instance.demarrer();
+  // Ce qu'une autre application partage vers Alanya : même règle, même
+  // raison. Voir `PartageEntrant`.
+  unawaited(PartageEntrant.instance.demarrer());
 
   runApp(
     MultiProvider(
@@ -82,12 +158,51 @@ void main() async {
         Provider<AuthedApi>.value(value: authedApi),
         Provider<ContactsRepository>.value(
             value: ContactsRepository(authedApi)),
+        // Table de reference des pays, lue a l inscription.
+        // Route PUBLIQUE : elle doit repondre avant toute session.
+        Provider<PaysRepository>.value(value: PaysRepository(api)),
+        // Annuaire des collegues — reserve aux agents, le serveur le controle.
+        Provider<ColleguesRepository>.value(value: ColleguesRepository(authedApi)),
+        // Annuaire public des entreprises — la route ne refuse personne.
+        Provider<EntreprisesRepository>.value(value: EntreprisesRepository(authedApi)),
+        Provider<ContactListsRepository>.value(
+            value: ContactListsRepository(authedApi)),
+        // La sonnerie d'un appelant se lit dans SES listes de contacts, et la
+        // rangée de filtres des conversations affiche les MÊMES listes. Ce
+        // service en est la source unique : il les garde en mémoire — un appel
+        // ne doit jamais attendre le réseau pour sonner — et prévient ce qui les
+        // affiche dès qu'elles changent.
+        //
+        // ⚠️ `ChangeNotifierProvider` et non `Provider` : avec ce dernier, un
+        // `context.watch` ne serait jamais rebâti et la rangée resterait figée
+        // — exactement le défaut que ce lot corrige.
+        ChangeNotifierProvider<SonneriesDeListes>.value(
+            value: SonneriesDeListes(
+                ContactListsRepository(authedApi), api, storage)),
         Provider<ChatRepository>.value(value: ChatRepository(authedApi)),
+        Provider<ExportMediasRepository>.value(
+            value: ExportMediasRepository(authedApi)),
         Provider<AccountRepository>.value(value: AccountRepository(authedApi)),
         Provider<StatusRepository>.value(value: StatusRepository(authedApi)),
         Provider<AiRepository>.value(value: AiRepository(authedApi)),
         Provider<MediaRepository>.value(value: MediaRepository(authedApi)),
+        // Le catalogue de sonneries s'appuie sur le téléversement de médias :
+        // l'import se fait en deux temps, fichier puis inscription.
+        Provider<RingtonesRepository>.value(
+            value: RingtonesRepository(authedApi, MediaRepository(authedApi))),
         Provider<CallsRepository>.value(value: CallsRepository(authedApi)),
+        // Plaintes vocales laissées sur la touche 0 d'un centre vocal.
+        Provider<PlaintesRepository>.value(
+            value: PlaintesRepository(authedApi)),
+        // Enregistrement des conversations d'agent : deux pistes téléversées,
+        // le serveur les mélange.
+        Provider<EnregistrementsRepository>.value(
+            value: EnregistrementsRepository(
+                authedApi, MediaRepository(authedApi))),
+        // Le repondeur, vu par l'APPELANT : lire l'accueil de celui qu'on
+        // vient d'appeler, et lui laisser un message.
+        Provider<RepondeurRepository>.value(
+            value: RepondeurRepository(authedApi)),
         Provider<MeetingsRepository>.value(
             value: MeetingsRepository(authedApi)),
         Provider<BlockedRepository>.value(value: BlockedRepository(authedApi)),
@@ -104,6 +219,37 @@ void main() async {
         ChangeNotifierProvider<ConnectivityService>(
           create: (ctx) => ConnectivityService(ctx.read<RealtimeClient>()),
         ),
+        /*
+         * REPREND LES ENVOIS DE MEDIAS INTERROMPUS PAR UNE FERMETURE.
+         *
+         * ⚠️ `lazy: false` EST LE POINT ENTIER DE CE BLOC. Un provider paresseux
+         * n'est construit qu'a sa premiere lecture — or personne ne lit ce
+         * magasin par le `context` : les ecrans passent par son singleton. Il ne
+         * serait donc JAMAIS construit, et les envois relus du disque
+         * n'existeraient pas.
+         */
+        Provider<EnvoiMediaStore>(
+          lazy: false,
+          create: (ctx) => EnvoiMediaStore.instance
+            ..brancher(
+              media: ctx.read<MediaRepository>(),
+              chat: ctx.read<ChatRepository>(),
+              rt: ctx.read<RealtimeClient>(),
+              conn: ctx.read<ConnectivityService>(),
+            ),
+        ),
+        // Même raison, même `lazy: false` : ce publieur est un singleton que
+        // personne ne lit par le `context`, et les statuts relus du disque ne
+        // repartiraient jamais sans ce branchement.
+        Provider<PublicationStatuts>(
+          lazy: false,
+          create: (ctx) => PublicationStatuts.instance
+            ..brancher(
+              media: ctx.read<MediaRepository>(),
+              statuts: ctx.read<StatusRepository>(),
+              conn: ctx.read<ConnectivityService>(),
+            ),
+        ),
         ChangeNotifierProvider<Outbox>(
           create: (ctx) => Outbox(
             ctx.read<ChatRepository>(),
@@ -114,6 +260,9 @@ void main() async {
           create: (ctx) => CallController(
             ctx.read<CallsRepository>(),
             ctx.read<RealtimeClient>(),
+            ctx.read<SonneriesDeListes>(),
+            ctx.read<EnregistrementsRepository>(),
+            ctx.read<RepondeurRepository>(),
           ),
         ),
         ChangeNotifierProvider<MeetingController>(
@@ -129,6 +278,51 @@ void main() async {
             storage,
             realtime: ctx.read<RealtimeClient>(),
           )..bootstrap(),
+        ),
+        /*
+         * 🔴 LA PILE DE CHIFFREMENT SUIT LE COMPTE CONNECTÉ, elle n'est plus
+         * figée au démarrage.
+         *
+         * 🐛 DEFAUT SIGNALÉ LE 27/09/2026 : « je me connecte, j'ouvre l'info
+         * contact, je ne vois pas Vérifier le code de sécurité ; il faut
+         * relancer l'application ».
+         *
+         * L'identifiant du compte était lu UNE FOIS, avant `runApp`, dans le
+         * profil déjà rangé. Application ouverte déconnectée : cet identifiant
+         * valait `null`, le fournisseur n'était donc PAS ENREGISTRÉ, et il ne
+         * pouvait pas apparaître plus tard. Se connecter n'y changeait rien —
+         * seul un redémarrage relisait le profil.
+         *
+         * ⚠️ TOUT CE QUI TOUCHE AU CHIFFREMENT DISPARAISSAIT DE L'INTERFACE,
+         * et silencieusement : les écrans testent `context.e2ee != null` pour
+         * ne pas planter avant la connexion, donc l'absence ressemblait à une
+         * fonctionnalité désactivée.
+         *
+         * 🔴 LA PILE EST LIÉE AU COMPTE, PAS À L'APPLICATION. Le coffre préfixe
+         * ses clés par l'identifiant : la reconstruire quand le compte change
+         * n'est pas une commodité, c'est ce qui empêche les messages de l'un de
+         * s'ouvrir chez l'autre.
+         *
+         * ⚠️ ON GARDE LA PRÉCÉDENTE TANT QUE LE COMPTE NE CHANGE PAS. Sans ce
+         * test, chaque `notifyListeners` d'`AuthController` — il y en a à
+         * chaque changement de profil — rebâtirait la pile et relancerait une
+         * publication de clés.
+         */
+        ProxyProvider<AuthController, PileE2ee?>(
+          update: (_, auth, precedente) {
+            final id = auth.user?.id;
+            if (id == null) return null;
+            if (precedente != null && precedente.compteId == id) {
+              return precedente;
+            }
+            final pile = PileE2ee.pour(authedApi, id);
+            /*
+             * ⚠️ SANS ATTENDRE : `update` est appelé pendant la construction de
+             * l'arbre. Y attendre le réseau figerait l'affichage.
+             */
+            unawaited(pile.demarrer());
+            return pile;
+          },
         ),
       ],
       child: const AlanyaApp(),

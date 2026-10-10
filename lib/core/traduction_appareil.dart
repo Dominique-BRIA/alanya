@@ -1,0 +1,678 @@
+/// Traduction SUR L'APPAREIL, par ML Kit.
+///
+/// Miroir Dart de `src/services/traduction-locale.ts` du client web : le
+/// navigateur y expose `Translator`/`LanguageDetector`, Android expose ML Kit.
+/// Les deux répondent à la même promesse — les modèles sont téléchargés puis
+/// gardés localement, le texte ne sort jamais de l'appareil, et rien n'est
+/// facturé. Les décisions qui ne se devinent pas ont été reprises telles
+/// quelles du web plutôt que redécouvertes ; celles qui DIFFÈRENT sont
+/// signalées ci-dessous.
+///
+/// Ce fichier ne connaît ni l'écran, ni les préférences, ni la langue de
+/// l'interface : il ne répond qu'à « cet appareil sait-il traduire ce couple,
+/// et comment ».
+library;
+
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:google_mlkit_language_id/google_mlkit_language_id.dart';
+import 'package:google_mlkit_translation/google_mlkit_translation.dart';
+
+import 'centre_transferts.dart';
+import 'data_saver_service.dart';
+import 'texte_recherche.dart';
+
+/// Faut-il exiger le Wi-Fi pour installer un modèle ?
+///
+/// 🔴 **C'ÉTAIT `true` EN DUR, ET C'EST CE QUI CASSAIT TOUT** (signalé le
+/// 19/08/2026 : « ce message continue de s'afficher malgré que la langue est
+/// déjà téléchargée »). Sur un téléphone en données mobiles, ML Kit ne
+/// téléchargeait JAMAIS : Play Services met la tâche en attente d'un Wi-Fi qui
+/// ne vient pas. L'utilisateur appuyait sur « Télécharger », rien ne se passait,
+/// et le dialogue revenait au message suivant — indéfiniment.
+///
+/// La règle est désormais celle que l'application applique déjà à ses médias :
+/// **l'économie de données décide**. Activée, on attend le Wi-Fi ; désactivée,
+/// on télécharge par n'importe quel réseau. Un seul interrupteur pour toutes les
+/// dépenses de données, à l'endroit où l'utilisateur le cherche.
+bool get wifiExige => DataSaverService.instance.isOn;
+
+/// Au-delà, on considère l'installation perdue.
+///
+/// ⚠️ **SANS CETTE BORNE, L'ATTENTE ÉTAIT INFINIE.** `downloadModel` rend une
+/// tâche qui ne se termine qu'au succès : conditionnée au Wi-Fi et sans Wi-Fi,
+/// elle reste en attente pour toujours. La bulle affichait « Traduction… » à vie
+/// — c'est visible sur la capture du 19/08. Cinq minutes couvrent largement
+/// quelques dizaines de mégaoctets, même sur un réseau lent.
+const _delaiInstallationMax = Duration(minutes: 5);
+
+/// Le moteur n'existe que sur mobile : ML Kit n'a pas d'implémentation web ni
+/// bureau. Ailleurs, il n'y a PAS de repli vers un service en ligne — envoyer
+/// le contenu d'un message à un tiers est précisément ce que ce lot supprime.
+bool get moteurAppareilPresent {
+  if (kIsWeb) return false;
+  return Platform.isAndroid || Platform.isIOS;
+}
+
+/// Codes de langue.
+///
+/// Même normalisation que le web, et pour la même raison : le détecteur rend
+/// `nb` (bokmål) là où le catalogue du projet — et ML Kit lui-même — dit `no`,
+/// et décline le chinois en `zh-Hans`/`zh-CN` là où les deux ne connaissent que
+/// `zh`. Sans elle, une détection correcte serait lue comme une langue inconnue
+/// et le bouton « Traduire » ne servirait jamais à rien.
+///
+/// `und` est le code que ML Kit renvoie quand il ne se prononce pas : il vaut
+/// une absence de réponse, pas une langue.
+String normaliserLangue(String? code) {
+  if (code == null || code.isEmpty) return "";
+  final court = code.toLowerCase().replaceAll("_", "-");
+  if (court == "und") return "";
+  if (court == "nb" || court.startsWith("nb-") || court.startsWith("nn")) {
+    return "no";
+  }
+  if (court.startsWith("zh")) return "zh";
+  return court.length > 2 ? court.substring(0, 2) : court;
+}
+
+/// La langue, si ML Kit sait la traduire hors ligne — 59 langues, pas plus.
+TranslateLanguage? langueSupportee(String? code) {
+  final normalise = normaliserLangue(code);
+  if (normalise.isEmpty) return null;
+  return BCP47Code.fromRawValue(normalise);
+}
+
+/// État d'un couple de langues.
+enum EtatCouple {
+  /// Moteur absent, langue non prise en charge, ou source identique à la cible.
+  indisponible,
+
+  /// Traduisible, mais au moins un des deux modèles reste à installer.
+  aTelecharger,
+
+  /// Les deux modèles sont sur l'appareil : la traduction est immédiate.
+  pret,
+}
+
+final OnDeviceTranslatorModelManager _gestionnaire =
+    OnDeviceTranslatorModelManager();
+
+/// Modèles constatés présents PENDANT CETTE SESSION.
+///
+/// Jamais persisté, exactement comme côté web : Android supprime les modèles
+/// ML Kit quand l'espace disque devient rare, une réponse d'hier ne dit donc
+/// rien d'aujourd'hui. Seule la réponse « présent » est mise en cache — un
+/// « absent » doit pouvoir devenir vrai dès la fin d'un téléchargement.
+final Map<String, bool> _modelesPresents = {};
+
+/// Oublie les sondages, pour réévaluer après un téléchargement.
+void reevaluerModeles() => _modelesPresents.clear();
+
+Future<bool> _modelePresent(TranslateLanguage langue) async {
+  final cle = langue.bcpCode;
+  final connu = _modelesPresents[cle];
+  if (connu == true) return true;
+  try {
+    final present = await _gestionnaire.isModelDownloaded(cle);
+    _modelesPresents[cle] = present;
+    return present;
+  } catch (_) {
+    // Services Google Play absents ou trop anciens, politique d'entreprise :
+    // dans tous les cas, on ne sait pas traduire.
+    return false;
+  }
+}
+
+/// Ce que l'appareil sait faire de ce couple, ici et maintenant.
+///
+/// ⚠️ **Différence avec le navigateur** : Chrome raisonne par COUPLE, ML Kit
+/// par LANGUE. Un couple est prêt quand ses DEUX modèles sont là — et il en
+/// coûte donc deux téléchargements, jamais un seul. Le pivot par l'anglais est
+/// interne à ML Kit : ne jamais l'écrire à la main, ce serait deux traductions
+/// au lieu d'une et une qualité moindre.
+Future<EtatCouple> etatCouple(String source, String cible) async {
+  if (!moteurAppareilPresent) return EtatCouple.indisponible;
+  final s = langueSupportee(source);
+  final c = langueSupportee(cible);
+  if (s == null || c == null || s == c) return EtatCouple.indisponible;
+  final presents = await Future.wait([_modelePresent(s), _modelePresent(c)]);
+  return presents.every((p) => p) ? EtatCouple.pret : EtatCouple.aTelecharger;
+}
+
+/// Les langues du couple qui restent à installer — souvent UNE SEULE.
+///
+/// 🐛 **LE DIALOGUE NOMMAIT LES DEUX** (signalé le 19/08/2026) : « j'ai déjà
+/// téléchargé ma langue et on me propose quand même un téléchargement ». C'était
+/// exact et trompeur à la fois — il manquait bien un modèle, celui de la langue
+/// du MESSAGE, mais le texte réclamait aussi celui qu'on venait d'installer. On
+/// ne cite désormais que ce qui manque réellement.
+///
+/// Rend des NOMS et non des `TranslateLanguage` : l'appelant est un écran, et
+/// lui faire importer le paquet ML Kit ferait fuir la dépendance jusque dans le
+/// fil de discussion pour l'unique besoin d'afficher un mot.
+Future<List<String>> nomsLanguesManquantes(String source, String cible) async {
+  final s = langueSupportee(source);
+  final c = langueSupportee(cible);
+  if (s == null || c == null || s == c) return const [];
+  final manquantes = <String>[];
+  for (final langue in {s, c}) {
+    if (!await _modelePresent(langue)) {
+      manquantes.add(nomAutonyme(langue.bcpCode));
+    }
+  }
+  return manquantes;
+}
+
+/// Installe les modèles manquants d'un couple.
+///
+/// **DOIT partir d'un geste de l'utilisateur** : chaque modèle pèse quelques
+/// dizaines de mégaoctets. Le déclencher depuis un `initState` ferait payer un
+/// téléchargement à quelqu'un qui n'a rien demandé — c'est la même règle que
+/// côté web, où Chrome la fait respecter lui-même en refusant hors clic.
+///
+/// ⚠️ ML Kit **n'expose aucune progression** : la seule information disponible
+/// est « terminé » ou « échoué ». L'écran ne peut donc afficher qu'une attente
+/// indéterminée, là où le web a une fraction.
+///
+/// `wifiSeulement` suit l'**économie de données** — voir [wifiExige].
+Future<bool> telechargerCouple(
+  String source,
+  String cible, {
+  bool? wifiSeulement,
+}) async {
+  final s = langueSupportee(source);
+  final c = langueSupportee(cible);
+  if (s == null || c == null || s == c) return false;
+  try {
+    for (final langue in {s, c}) {
+      if (await _modelePresent(langue)) continue;
+      if (!await telechargerLangue(langue, wifiSeulement: wifiSeulement)) {
+        return false;
+      }
+    }
+    return true;
+  } catch (_) {
+    // Un échec ne doit pas laisser un « présent » optimiste derrière lui.
+    _modelesPresents.remove(s.bcpCode);
+    _modelesPresents.remove(c.bcpCode);
+    return false;
+  }
+}
+
+/* ------------------------------------------------- Gestion des langues */
+
+/// Nom d'une langue **dans sa propre langue** (autonyme).
+///
+/// Choix assumé : l'interface existe en 9 langues, ML Kit en traduit 59.
+/// Traduire 59 noms × 9 langues, ce sont 531 libellés à écrire et à tenir à
+/// jour — pour un écran que l'on ouvre trois fois dans sa vie. L'autonyme, lui,
+/// ne dépend d'aucune langue d'interface : « Deutsch » se lit Deutsch en
+/// français comme en chinois, et c'est précisément le mot que cherche celui qui
+/// installe SA langue. La recherche accepte en plus le code et le nom anglais,
+/// pour que « arabe » se trouve en tapant « ar » ou « arabic ».
+const Map<String, String> _autonymes = {
+  'af': 'Afrikaans',
+  'sq': 'Shqip',
+  'ar': 'العربية',
+  'be': 'Беларуская',
+  'bn': 'বাংলা',
+  'bg': 'Български',
+  'ca': 'Català',
+  'zh': '中文',
+  'hr': 'Hrvatski',
+  'cs': 'Čeština',
+  'da': 'Dansk',
+  'nl': 'Nederlands',
+  'en': 'English',
+  'eo': 'Esperanto',
+  'et': 'Eesti',
+  'fi': 'Suomi',
+  'fr': 'Français',
+  'gl': 'Galego',
+  'ka': 'ქართული',
+  'de': 'Deutsch',
+  'el': 'Ελληνικά',
+  'gu': 'ગુજરાતી',
+  'ht': 'Kreyòl ayisyen',
+  'he': 'עברית',
+  'hi': 'हिन्दी',
+  'hu': 'Magyar',
+  'is': 'Íslenska',
+  'id': 'Bahasa Indonesia',
+  'ga': 'Gaeilge',
+  'it': 'Italiano',
+  'ja': '日本語',
+  'kn': 'ಕನ್ನಡ',
+  'ko': '한국어',
+  'lv': 'Latviešu',
+  'lt': 'Lietuvių',
+  'mk': 'Македонски',
+  'ms': 'Bahasa Melayu',
+  'mt': 'Malti',
+  'mr': 'मराठी',
+  'no': 'Norsk',
+  'fa': 'فارسی',
+  'pl': 'Polski',
+  'pt': 'Português',
+  'ro': 'Română',
+  'ru': 'Русский',
+  'sk': 'Slovenčina',
+  'sl': 'Slovenščina',
+  'es': 'Español',
+  'sw': 'Kiswahili',
+  'sv': 'Svenska',
+  'tl': 'Tagalog',
+  'ta': 'தமிழ்',
+  'te': 'తెలుగు',
+  'th': 'ไทย',
+  'tr': 'Türkçe',
+  'uk': 'Українська',
+  'ur': 'اردو',
+  'vi': 'Tiếng Việt',
+  'cy': 'Cymraeg',
+};
+
+/// Nom lisible d'une langue, ou son code si on ne le connaît pas.
+String nomAutonyme(String bcpCode) =>
+    _autonymes[bcpCode] ?? bcpCode.toUpperCase();
+
+/// Les 59 langues traduisibles hors ligne, rangées par autonyme.
+///
+/// Le tri passe par `comparePourTri` et non par `compareTo` : Dart compare les
+/// points de code, ce qui placerait « Íslenska » et « Čeština » après
+/// « Türkçe ». Même helper que le carnet d'adresses, pour la même raison.
+List<TranslateLanguage> languesTraduisibles() {
+  final liste = TranslateLanguage.values.toList();
+  liste.sort(
+    (a, b) => comparePourTri(nomAutonyme(a.bcpCode), nomAutonyme(b.bcpCode)),
+  );
+  return liste;
+}
+
+/// La langue correspond-elle à ce que l'utilisateur a tapé ?
+///
+/// On accepte l'autonyme, le code BCP-47 et le nom anglais de l'énumération :
+/// « arabe » ne se trouverait pas dans « العربية », mais « ar » et « arabic »
+/// y mènent tous les deux.
+bool langueCorrespond(TranslateLanguage langue, String recherche) {
+  if (recherche.trim().isEmpty) return true;
+  return contientRecherche(nomAutonyme(langue.bcpCode), recherche) ||
+      contientRecherche(langue.bcpCode, recherche) ||
+      contientRecherche(langue.name, recherche);
+}
+
+/// Les langues réellement installées sur l'appareil, sondées maintenant.
+///
+/// ⚠️ Le greffon n'expose **aucune liste** : `ModelManager` ne sait répondre
+/// que « ce modèle-ci est-il là ? ». Il faut donc poser les 59 questions. Elles
+/// partent par paquets de dix plutôt que toutes d'un coup — le pont natif est
+/// unique, et l'inonder ne rendrait pas la réponse plus rapide.
+Future<Set<String>> languesInstallees() async {
+  if (!moteurAppareilPresent) return {};
+  const toutes = TranslateLanguage.values;
+  final installees = <String>{};
+  for (var debut = 0; debut < toutes.length; debut += 10) {
+    final lot = toutes.skip(debut).take(10).toList();
+    final presents = await Future.wait(lot.map(_modelePresent));
+    for (var i = 0; i < lot.length; i++) {
+      if (presents[i]) installees.add(lot[i].bcpCode);
+    }
+  }
+  return installees;
+}
+
+/// Installe UNE langue. Voir [telechargerCouple] pour la règle du geste
+/// utilisateur et celle du Wi-Fi.
+Future<bool> telechargerLangue(
+  TranslateLanguage langue, {
+  bool? wifiSeulement,
+}) async {
+  if (!moteurAppareilPresent) return false;
+  // L'installation s'annonce dans les notifications, au même titre qu'un envoi
+  // ou un téléchargement : c'est une attente de plusieurs dizaines de Mo, et
+  // rien ne la signalait hors de l'écran.
+  //
+  // 🚫 **SANS POURCENTAGE, ET C'EST DÉFINITIF** : `downloadModel` ne rend qu'un
+  // booléen, à la fin. Aucune API ML Kit n'expose l'avancement — le navigateur,
+  // lui, le donne. Une barre indéterminée est la seule chose honnête ici.
+  final idTransfert = "langue-${langue.bcpCode}";
+  CentreTransferts.instance.demarrer(
+    id: idTransfert,
+    sorte: SorteTransfert.langue,
+    titre: nomAutonyme(langue.bcpCode),
+  );
+  try {
+    final ok = await _gestionnaire
+        .downloadModel(
+          langue.bcpCode,
+          isWifiRequired: wifiSeulement ?? wifiExige,
+        )
+        .timeout(_delaiInstallationMax);
+    if (ok) {
+      _modelesPresents[langue.bcpCode] = true;
+      CentreTransferts.instance.reussir(idTransfert);
+    } else {
+      CentreTransferts.instance.echouer(idTransfert);
+    }
+    return ok;
+  } catch (_) {
+    _modelesPresents.remove(langue.bcpCode);
+    CentreTransferts.instance.echouer(idTransfert);
+    return false;
+  }
+}
+
+/// Désinstalle une langue et libère l'espace disque qu'elle occupait.
+///
+/// ⚠️ Les traducteurs du pool qui s'appuyaient dessus deviennent caducs : on
+/// les ferme tous, sinon le suivant échouerait sur un modèle disparu.
+Future<bool> supprimerLangue(TranslateLanguage langue) async {
+  if (!moteurAppareilPresent) return false;
+  try {
+    final ok = await _gestionnaire.deleteModel(langue.bcpCode);
+    if (ok) {
+      _modelesPresents[langue.bcpCode] = false;
+      await libererTraducteurs();
+    }
+    return ok;
+  } catch (_) {
+    return false;
+  }
+}
+
+/* ------------------------------------------------------------------ Instances */
+
+/// Un traducteur par couple, gardé en mémoire.
+///
+/// En créer un par message serait le défaut le plus coûteux possible : chaque
+/// instance recharge le modèle côté natif. Le pool est libéré à la sortie de
+/// la conversation.
+final Map<String, OnDeviceTranslator> _pool = {};
+
+String _cleCouple(TranslateLanguage s, TranslateLanguage c) =>
+    "${s.bcpCode}>${c.bcpCode}";
+
+OnDeviceTranslator _traducteur(TranslateLanguage s, TranslateLanguage c) {
+  return _pool.putIfAbsent(
+    _cleCouple(s, c),
+    () => OnDeviceTranslator(sourceLanguage: s, targetLanguage: c),
+  );
+}
+
+/// Ferme les traducteurs et le détecteur. Les modèles téléchargés, eux, restent.
+Future<void> libererTraducteurs() async {
+  final instances = _pool.values.toList();
+  _pool.clear();
+  for (final t in instances) {
+    try {
+      await t.close();
+    } catch (_) {
+      // Une fermeture ratée ne doit pas empêcher les suivantes.
+    }
+  }
+  final detecteurs = _detecteurs.values.toList();
+  _detecteurs.clear();
+  for (final d in detecteurs) {
+    try {
+      await d.close();
+    } catch (_) {
+      // idem
+    }
+  }
+}
+
+/* ---------------------------------------------------------------------- File */
+
+/// File séquentielle globale : deux écrans qui traduisent en même temps ne
+/// doivent pas se disputer le pont natif.
+Future<void> _file = Future<void>.value();
+
+Future<T> _enfiler<T>(Future<T> Function() travail) {
+  final suivant = _file.then((_) => travail());
+  // La file ne doit pas s'arrêter sur l'échec de l'un de ses maillons.
+  _file = suivant.then((_) {}, onError: (_) {});
+  return suivant;
+}
+
+/* ----------------------------------------------------------------- Traduction */
+
+/// Levée quand le couple n'est pas traduisible sur l'appareil. L'appelant
+/// décide quoi en faire — proposer le téléchargement, ou renoncer.
+class TraductionIndisponible implements Exception {
+  const TraductionIndisponible(this.etat);
+  final EtatCouple etat;
+
+  @override
+  String toString() => "TraductionIndisponible($etat)";
+}
+
+/// Traduit une liste de textes sur l'appareil, dans l'ordre reçu.
+///
+/// L'état du couple est vérifié AVANT : `aTelecharger` n'est pas une erreur,
+/// mais l'installation ne peut partir que d'un geste de l'utilisateur —
+/// traduire ici la déclencherait en douce.
+Future<List<String>> traduireSurAppareil(
+  String source,
+  String cible,
+  List<String> textes,
+) async {
+  final etat = await etatCouple(source, cible);
+  if (etat != EtatCouple.pret) throw TraductionIndisponible(etat);
+  final s = langueSupportee(source)!;
+  final c = langueSupportee(cible)!;
+  return _enfiler(() async {
+    final traducteur = _traducteur(s, c);
+    final resultats = <String>[];
+    for (final texte in textes) {
+      try {
+        resultats.add(await traducteur.translateText(texte));
+      } catch (_) {
+        // Le modèle a pu être évincé entre le sondage et l'appel : on cesse
+        // de le croire présent, et l'appelant pourra reproposer l'installation.
+        _modelesPresents.remove(s.bcpCode);
+        _modelesPresents.remove(c.bcpCode);
+        _pool.remove(_cleCouple(s, c));
+        throw const TraductionIndisponible(EtatCouple.aTelecharger);
+      }
+    }
+    return resultats;
+  });
+}
+
+/// Traduit un texte. Raccourci de [traduireSurAppareil] pour l'usage courant.
+Future<String> traduireUnTexte(
+  String source,
+  String cible,
+  String texte,
+) async {
+  final resultats = await traduireSurAppareil(source, cible, [texte]);
+  return resultats.first;
+}
+
+/* ------------------------------------------------------------------ Détection */
+
+/// Un détecteur par seuil : le seuil est figé à la construction de
+/// `LanguageIdentifier`, il ne se règle pas appel par appel.
+final Map<double, LanguageIdentifier> _detecteurs = {};
+
+/// Seuil de confiance quasi nul : on veut TOUS les candidats que ML Kit a
+/// envisagés, y compris les plus faibles, et c'est nous qui trions ensuite.
+const double _seuilOuvert = 0.01;
+
+/// La langue SOURCE à utiliser pour traduire [texte] vers [cible], ou `null`.
+///
+/// 🔴 **CETTE FONCTION NE REFUSE JAMAIS RIEN** (demande du user, 19/08/2026 :
+/// « je ne veux pas de ce comportement… tu laisses le mécanisme de traduction
+/// faire son travail »). L'ancienne version rendait `null` dans deux cas qui
+/// remontaient jusqu'à l'écran sous forme de refus :
+///
+///  - « Langue non reconnue » : la détection n'osait pas se prononcer, faute
+///    d'atteindre un seuil de confiance, ou parce que le texte faisait moins de
+///    trois caractères. Ces deux garde-fous sont **retirés** — on interroge
+///    désormais `identifyPossibleLanguages`, qui rend la liste ORDONNÉE des
+///    candidats avec leur score, et on prend simplement le meilleur exploitable ;
+///  - « Ce message est déjà dans ta langue » : la source valait la cible, et ML
+///    Kit ne sait pas traduire X → X. On **écarte la cible des candidats** et on
+///    descend dans la liste plutôt que de s'arrêter là.
+///
+/// `null` ne veut donc plus dire « je refuse » mais « il n'y a rien à traduire » :
+/// le texte est déjà dans la langue voulue, ou ne porte aucune langue
+/// identifiable (chiffres, émojis). ⚠️ L'appelant doit alors afficher le texte
+/// TEL QUEL en guise de traduction — c'est littéralement ce que « traduire vers
+/// sa propre langue » produit — et surtout pas un message d'erreur.
+/// Raccourci sans indice ni apprentissage — voir [detecterSource], qui porte
+/// la règle. Conservé pour un appelant qui n'aurait pas d'expéditeur à citer.
+Future<String?> sourceProbable(String texte, String cible) async =>
+    (await detecterSource(texte, cible)).source;
+
+/// Ce qu'une détection a donné, et si l'on peut s'y fier.
+///
+/// [fiable] ne décrit PAS la qualité de la traduction à venir : il dit
+/// seulement si cette détection mérite d'être RETENUE comme la langue du
+/// correspondant. Une détection douteuse traduit quand même — elle n'enseigne
+/// simplement rien.
+typedef Detection = ({String? source, bool fiable});
+
+/// Seuil au-dessus duquel une détection se décide toute seule.
+///
+/// En dessous, ML Kit devine plus qu'il ne reconnaît : sur « ok » ou « merci »,
+/// ses trois premiers candidats sont à quelques points les uns des autres.
+const double _seuilSur = 0.5;
+
+/// Longueur minimale pour APPRENDRE d'une détection.
+///
+/// Plus exigeante que pour traduire : se tromper en traduisant coûte une bulle,
+/// se tromper en apprenant contamine tous les messages suivants du même
+/// correspondant.
+const int _longueurFiable = 20;
+
+/// La langue SOURCE à utiliser pour traduire [texte] vers [cible], ou `null`.
+///
+/// 🔴 **NE REFUSE TOUJOURS RIEN** (règle du user, 19/08/2026). `null` ne veut
+/// pas dire « je ne sais pas » mais « il n'y a rien à traduire » : le texte est
+/// déjà dans la langue voulue, ou ne porte aucune langue. L'appelant affiche
+/// alors le texte TEL QUEL, jamais une erreur.
+///
+/// 🔴 CE QUI A CHANGÉ LE 31/08/2026, et pourquoi le détecteur se trompait si
+/// souvent (constaté par le user) :
+///
+///  1. **La langue cible n'est plus écartée des candidats.** Elle l'était pour
+///     ne jamais buter sur « déjà dans ta langue » — mais quand le message EST
+///     dans la langue du lecteur, ce qui est courant dans un groupe, la bonne
+///     réponse était retirée d'office et la fonction était FORCÉE de descendre
+///     au candidat suivant, c'est-à-dire à du bruit. Elle ne se trompait pas :
+///     on lui interdisait d'avoir raison. Le prix de cette erreur n'était pas
+///     seulement une traduction fausse, mais le téléchargement de plusieurs
+///     dizaines de mégaoctets pour une langue dont personne n'avait besoin.
+///
+///  2. **Un plancher de confiance, qui ne refuse pas pour autant.** Sous
+///     [_seuilSur], on ne dit pas « je ne sais pas » : on retombe sur
+///     [langueConnue], la langue observée chez ce correspondant, et seulement à
+///     défaut sur le meilleur candidat — l'ancien comportement, conservé comme
+///     dernier recours.
+///
+/// [langueConnue] vient de `core/memoire_langues.dart`. C'est le vrai levier :
+/// un message de trois mots est indécidable, son auteur ne l'est pas.
+///
+/// [langueImposee] est la langue FIXÉE À LA MAIN pour ce correspondant. Elle ne
+/// se discute pas : voir le bloc en tête de fonction.
+Future<Detection> detecterSource(
+  String texte,
+  String cible, {
+  String? langueConnue,
+  String? langueImposee,
+}) async {
+  const rien = (source: null, fiable: false);
+  if (!moteurAppareilPresent) return rien;
+  final propre = texte.trim();
+  if (propre.isEmpty) return rien;
+  final cibleNormalisee = normaliserLangue(cible);
+
+  /*
+   * 🔴 UNE LANGUE FIXÉE PAR L'UTILISATEUR EST CRUE À 100 % (règle du user,
+   * 31/08/2026, mot pour mot : « donc de l'autre est fixé fait lui confiance
+   * 100% »). AUCUNE détection n'est même tentée.
+   *
+   * Ce n'était qu'un repli jusqu'ici — utilisé seulement quand ML Kit n'osait
+   * pas se prononcer — et le défaut s'est vu sur device : « Hello guy », écrit
+   * par un contact dont la langue était fixée à l'anglais, a été détecté comme
+   * du VIETNAMIEN avec assez d'assurance pour l'emporter, et l'application a
+   * proposé d'installer Tiếng Việt.
+   *
+   * Sur un texte court, ML Kit est confiant ET faux ; l'utilisateur qui a pris
+   * la peine de désigner la langue de son correspondant en sait plus que lui.
+   * Un seuil ne réglait pas ce cas : seule la priorité absolue le règle.
+   */
+  if (langueImposee != null && langueImposee.isNotEmpty) {
+    final code = normaliserLangue(langueImposee);
+    // Fixée sur MA langue : il n'y a rien à traduire, et c'est une réponse
+    // juste — pas un refus.
+    if (code == cibleNormalisee) return rien;
+    if (code.isNotEmpty && langueSupportee(code) != null) {
+      // `fiable: false` : rien n'a été observé, donc rien à apprendre. La
+      // consigne de l'utilisateur n'a pas besoin d'être confirmée par une
+      // mémoire qui, de toute façon, ne la contredira plus.
+      return (source: code, fiable: false);
+    }
+    // Langue fixée mais non traduisible : on ne la force pas, on redescend sur
+    // la détection ordinaire plutôt que de ne rien rendre du tout.
+  }
+
+  try {
+    final detecteur = _detecteurs.putIfAbsent(
+      _seuilOuvert,
+      () => LanguageIdentifier(confidenceThreshold: _seuilOuvert),
+    );
+    final candidats = await _enfiler(
+      () => detecteur.identifyPossibleLanguages(propre),
+    );
+    if (candidats.isEmpty) return _repli(langueConnue, cibleNormalisee);
+
+    // La liste vient triée par confiance décroissante.
+    final meilleur = candidats.first;
+    final code = normaliserLangue(meilleur.languageTag);
+    final sur = meilleur.confidence >= _seuilSur && code.isNotEmpty;
+
+    if (sur) {
+      // Le message est dans la langue du lecteur : il n'y a rien à traduire, et
+      // le dire est la réponse JUSTE. C'est ce refus-là qui manquait.
+      if (code == cibleNormalisee) return rien;
+      if (langueSupportee(code) != null) {
+        return (
+          source: code,
+          // On n'apprend que d'un texte assez long : une détection sûre sur
+          // cinq caractères reste une coïncidence.
+          fiable: propre.length >= _longueurFiable,
+        );
+      }
+    }
+
+    // Détection incertaine : la langue connue du correspondant vaut mieux que
+    // le meilleur candidat d'un texte que ML Kit n'a pas su lire.
+    final connue = _repli(langueConnue, cibleNormalisee);
+    if (connue.source != null) return connue;
+
+    // Dernier recours — l'ancien comportement : le premier candidat exploitable,
+    // aussi faible soit son score. On ne refuse rien.
+    for (final candidat in candidats) {
+      final c = normaliserLangue(candidat.languageTag);
+      if (c.isEmpty || c == cibleNormalisee) continue;
+      if (langueSupportee(c) != null) return (source: c, fiable: false);
+    }
+  } catch (_) {
+    // Détecteur indisponible : la langue connue, sinon rien.
+    return _repli(langueConnue, cibleNormalisee);
+  }
+  return rien;
+}
+
+Detection _repli(String? langueConnue, String cibleNormalisee) {
+  if (langueConnue == null) return (source: null, fiable: false);
+  final code = normaliserLangue(langueConnue);
+  if (code.isEmpty || code == cibleNormalisee) {
+    return (source: null, fiable: false);
+  }
+  if (langueSupportee(code) == null) return (source: null, fiable: false);
+  return (source: code, fiable: false);
+}

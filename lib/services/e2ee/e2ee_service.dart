@@ -27,8 +27,80 @@ import 'e2ee_coffre.dart';
 const int lotPreKeys = 50;
 const int seuilReappro = 10;
 
+/// Lit une liste dans une réponse du serveur, en NOMMANT ce qui manque.
+///
+/// 🔴 UN `as List` NU DIT « Null n'est pas List<dynamic> » ET RIEN D'AUTRE.
+/// Ni quel champ, ni quelle route, ni quel appel. C'est le message qui s'est
+/// affiché en production — impossible à relier à quoi que ce soit sans lire le
+/// code ligne à ligne.
+///
+/// ⚠️ LES NOMS DE CHAMPS SONT LE TROU QUE `outils/contrat_routes.py` NE
+/// COUVRE PAS : il vérifie le verbe et le chemin, pas le contenu. Tant que ce
+/// contrôle n'existe pas, le moins qu'on doive faire est d'échouer en disant
+/// QUOI.
+List<Map<String, dynamic>> listeDe(Map<String, dynamic> reponse, String champ) {
+  final v = reponse[champ];
+  if (v is! List) {
+    throw StateError(
+      "Le serveur n'a pas rendu « $champ » "
+      '(reçu : ${v.runtimeType}, champs présents : ${reponse.keys.join(", ")})',
+    );
+  }
+  return v.cast<Map<String, dynamic>>();
+}
+
 class E2eeService {
   E2eeService(this.coffre, this.api);
+
+  /* ══════════════ UN SEUL ACCÈS AU COFFRE À LA FOIS ══════════════ */
+
+  /// La file des opérations qui ÉCRIVENT dans le coffre.
+  ///
+  /// 🔴 LE COFFRE N'A AUCUN VERROU, ET IL EN FAUT UN. Il range ses pré-clés et
+  /// ses sessions sous forme de TABLES ENTIÈRES : chaque écriture relit la
+  /// table, la modifie, la réécrit. Deux opérations entrelacées — un envoi et
+  /// une relève sur le même correspondant, une relève et un réapprovisionnement
+  /// — écrivent chacune leur version, et la dernière efface l'autre : un cliquet
+  /// qui recule, ou cinquante pré-clés publiées dont la clé privée n'existe plus.
+  ///
+  /// ⚠️ LE WEB N'EN A PAS BESOIN : sa bibliothèque sérialise elle-même les
+  /// opérations par correspondant (`SessionLock`). Celle du mobile ne le fait
+  /// pas.
+  ///
+  /// ⚠️ AUCUNE DE CES MÉTHODES N'EN APPELLE UNE AUTRE : ce serait attendre son
+  /// propre tour, et ne jamais l'obtenir.
+  Future<void> _file = Future<void>.value();
+
+  Future<T> _enSerie<T>(Future<T> Function() operation) {
+    final tour = _file.then((_) => operation());
+    _file = tour.then((_) {}, onError: (_) {});
+    return tour;
+  }
+
+  Future<void> publierMesCles({required int deviceId}) =>
+      _enSerie(() => _publierMesCles(deviceId: deviceId));
+
+  /// [exclure] : CET appareil, quand on vise son propre compte.
+  Future<List<int>> ouvrirSessions(String pairId, {int? exclure}) =>
+      _enSerie(() => _ouvrirSessions(pairId, exclure: exclure));
+
+  Future<void> oublierSession(String pairId, int deviceId) =>
+      _enSerie(() => _oublierSession(pairId, deviceId));
+
+  Future<({int type, String corps})> chiffrer(
+    String pairId,
+    int deviceId,
+    String texte,
+  ) =>
+      _enSerie(() => _chiffrer(pairId, deviceId, texte));
+
+  Future<String> dechiffrer(
+    String pairId,
+    int deviceId,
+    int type,
+    String corpsB64,
+  ) =>
+      _enSerie(() => _dechiffrer(pairId, deviceId, type, corpsB64));
 
   final CoffreE2ee coffre;
 
@@ -49,35 +121,150 @@ class E2eeService {
   /// 🔴 SEULES DES CLÉS PUBLIQUES SORTENT D'ICI. Si une clé privée passait par
   /// cette fonction, tout l'édifice serait faux — c'est le contrôle à faire en
   /// relecture avant tout autre.
-  Future<void> publierMesCles({required int deviceId}) async {
+  /// ⚠️ LES IDENTIFIANTS NE REPARTENT JAMAIS DE ZÉRO, ET CE N'EST PAS COSMÉTIQUE.
+  ///
+  /// 🐛 Ils partaient de zéro : `generatePreKeys(0, 50)` rendait toujours
+  /// 0…50. Republier un lot produisait donc EXACTEMENT les mêmes numéros, et
+  /// le serveur les écarte (`skipDuplicates`) — sans erreur, sans message. Le
+  /// stock ne se serait jamais reconstitué, et rien ne l'aurait dit.
+  ///
+  /// La borne reprend celle du web : le protocole veut un entier moyen, pas un
+  /// entier 64 bits.
+  ///
+  /// 🐛 Puis ils ont été TIRÉS AU SORT, ce qui laissait deux lots se chevaucher
+  /// (voir `CoffreE2ee.reserverIdentifiants`). Depuis le 28/09/2026, ils sont
+  /// réservés à un compteur.
+  Future<void> _publierMesCles({required int deviceId}) async {
     await coffre.preparer();
 
     final identite = await coffre.identiteLocale();
-    final signee = generateSignedPreKey(identite, 0);
+    // Numéros RÉSERVÉS, plus tirés au sort — voir `reserverIdentifiants`.
+    final signee =
+        generateSignedPreKey(identite, await coffre.reserverIdentifiants(1));
     await coffre.storeSignedPreKey(signee.id, signee);
 
-    final uniques = generatePreKeys(0, lotPreKeys);
-    for (final p in uniques) {
-      await coffre.storePreKey(p.id, p);
-    }
+    final uniques = generatePreKeys(
+        await coffre.reserverIdentifiants(lotPreKeys), lotPreKeys);
+    /*
+     * 🐛 ELLES ÉTAIENT RANGÉES UNE PAR UNE : 50 relectures et réécritures de la
+     * table entière, soit 100 allers-retours vers le coffre sécurisé — le
+     * défaut A-2 du registre, que `storePreKeys` existait pour éviter et que
+     * personne n’appelait. Un seul passage désormais.
+     */
+    await coffre.storePreKeys(uniques);
 
-    await api('POST', '/api/e2ee/cles', {
+    /*
+     * 🔴 `PUT`, ET NON `POST` — ET C'EST LA CAUSE D'UNE PANNE ENTIÈRE.
+     *
+     * 🐛 La route `/api/e2ee/cles` n'exporte que `GET`, `PUT` et `DELETE`. Un
+     * `POST` recevait donc 405, et le mobile n'a JAMAIS publié la moindre clé.
+     * Personne ne pouvait lui écrire — en ligne ou non.
+     *
+     * ⚠️ ET LES NOMS DE CHAMPS DIVERGEAIENT AUSSI : le serveur lit `prekeys`
+     * et `id`, pas `prekeysUniques` et `prekeyId`. Trois erreurs sur le même
+     * appel, dont aucune n'était visible : `dart analyze` ne connaît pas les
+     * routes, et le banc d'interopérabilité branche une fausse fonction
+     * réseau — il éprouve le PROTOCOLE, jamais le CONTRAT HTTP.
+     */
+    await api('PUT', '/api/e2ee/cles', {
       'deviceId': deviceId,
       'registrationId': await coffre.getLocalRegistrationId(),
       'cleIdentite': base64.encode(identite.getPublicKey().serialize()),
       'prekeySignee': {
-        'prekeyId': signee.id,
+        'id': signee.id,
         'clePublique': base64.encode(signee.getKeyPair().publicKey.serialize()),
         'signature': base64.encode(signee.signature),
       },
-      'prekeysUniques': uniques
+      'prekeys': uniques
           .map((p) => {
-                'prekeyId': p.id,
+                'id': p.id,
                 'clePublique':
                     base64.encode(p.getKeyPair().publicKey.serialize()),
               })
           .toList(),
     });
+  }
+
+  /// Republie un lot si le SERVEUR dit que le stock est bas.
+  ///
+  /// 🐛 LE SERVEUR RÉCLAMAIT DÉJÀ, ET LE MOBILE N'ÉCOUTAIT PAS.
+  /// `GET /api/e2ee/cles` rend `reapproNecessaire` depuis le premier jour ; le
+  /// web s'en sert, le mobile l'ignorait.
+  ///
+  /// ⚠️ CE QUE ÇA DONNAIT : les 50 pré-clés à usage unique s'épuisent au fil
+  /// des nouveaux correspondants, et le jour où il n'en reste plus, PLUS
+  /// PERSONNE ne peut ouvrir de conversation avec cet appareil. Panne muette :
+  /// rien ne casse chez celui qui la subit, ce sont les AUTRES qui n'arrivent
+  /// plus à lui écrire.
+  ///
+  /// ⚠️ C'EST LE SERVEUR QUI RÉCLAME, PAS LE CLIENT QUI DEVINE. Deux appareils
+  /// consomment le même stock : un client qui compterait tout seul se
+  /// tromperait dès le second.
+  ///
+  /// ⚠️ NE LÈVE JAMAIS. C'est un entretien de fond ; l'échouer ne doit pas
+  /// empêcher d'envoyer le message qu'on est en train d'écrire.
+  Future<bool> reapprovisionnerSiNecessaire({required int deviceId}) async {
+    try {
+      final etat = await api('GET', '/api/e2ee/cles', null);
+      final appareils = (etat['appareils'] as List?) ?? const [];
+      for (final a in appareils) {
+        final m = a as Map<String, dynamic>;
+        if (m['deviceId'] != deviceId) continue;
+        if (m['reapproNecessaire'] != true) return false;
+        /*
+         * ⚠️ ON REPASSE PAR `publierMesCles`, ON NE DUPLIQUE PAS. Elle publie
+         * un lot neuf ET fait tourner la pré-clé signée. Un second chemin
+         * « juste pour les pré-clés » divergerait le jour où l'un changerait.
+         *
+         * ⚠️ ELLE NE REGÉNÈRE PAS L'IDENTITÉ : `preparer()` sort si elle
+         * existe. C'est ce qui rend ce rappel sans danger.
+         */
+        await publierMesCles(deviceId: deviceId);
+        return true;
+      }
+      /*
+       * 🔴 ABSENT DE LA LISTE : LE SERVEUR NOUS A OUBLIÉS, ON SE REPUBLIE.
+       *
+       * 🐛 ON RENDAIT `false` SANS RIEN FAIRE. Or un appareil disparaît du
+       * serveur sans que le coffre le sache : dissociation, déconnexion à
+       * distance, balayage des trente jours de silence. Le coffre gardant
+       * « publié », plus rien ne republiait : les correspondants obtenaient
+       * « Aucun appareil chiffré », en silence. Prouvé par
+       * `test/e2ee_releve_test.dart` ⑨ le 29/09/2026.
+       *
+       * ⚠️ MÊME IDENTITÉ : `preparer()` ne la régénère pas si elle existe —
+       * aucune alerte « clé changée » chez les correspondants.
+       */
+      await publierMesCles(deviceId: deviceId);
+      return true;
+    } catch (_) {
+      // Réseau coupé, serveur ancien : on réessaiera au prochain démarrage.
+      return false;
+    }
+  }
+
+  /// Quitte cet appareil : retire son identité du serveur, puis vide le coffre.
+  ///
+  /// 🐛 `CoffreE2ee.oublier()` N'AVAIT AUCUN APPELANT. Les commentaires
+  /// affirmaient que la déconnexion vidait le coffre — l'avertissement de
+  /// déconnexion le disait même à l'utilisateur —, et rien ne le faisait :
+  /// l'identité privée, les sessions et la clé de l'archive restaient sur un
+  /// téléphone dissocié ou déconnecté. Même geste que le web
+  /// (`oublierCetAppareil`, `e2ee-service.ts`).
+  ///
+  /// ⚠️ LE SERVEUR D'ABORD, tant que le jeton vaut encore ; le coffre ensuite,
+  /// car il porte le numéro d'appareil à retirer.
+  ///
+  /// ⚠️ NE LÈVE JAMAIS : se déconnecter ne doit pas échouer parce que le
+  /// réseau est coupé. Le balayage des trente jours retirera l'identité.
+  Future<void> oublierCetAppareil() async {
+    try {
+      final numero = await coffre.deviceId();
+      await api('DELETE', '/api/e2ee/cles?deviceId=$numero', null);
+    } catch (_) {}
+    try {
+      await coffre.oublier();
+    } catch (_) {}
   }
 
   /* ══════════════ OUVRIR UNE SESSION ══════════════ */
@@ -87,13 +274,122 @@ class E2eeService {
   /// ⚠️ UNE SESSION PAR APPAREIL, PAS PAR PERSONNE. Bob peut avoir un téléphone
   /// et un navigateur ; un message doit être chiffré séparément pour chacun,
   /// sinon l'un des deux ne le lira jamais.
-  Future<List<int>> ouvrirSessions(String pairId) async {
-    final r = await api('GET', '/api/e2ee/cles/$pairId', null);
-    final paquets = (r['appareils'] as List).cast<Map<String, dynamic>>();
+  ///
+  /// 🔴 EN DEUX TEMPS DEPUIS LE LOT 3 (28/09/2026) — jumeau du web.
+  ///
+  /// 🐛 Le correctif précédent évitait de REFAIRE une session existante, mais
+  /// demandait toujours le paquet de chaque appareil pour savoir lesquels
+  /// viser. Or demander un paquet CONSOMME une pré-clé du correspondant : il
+  /// en perdait une par message reçu, session ou non. Prouvé par
+  /// `test/e2ee_releve_test.dart`, groupe ④ (3 envois → 3 pré-clés).
+  ///
+  ///   ① `?liste=1` : les appareils vivants et leur clé d'identité, sans rien
+  ///     consommer ;
+  ///   ② `?deviceIds=` : un paquet seulement pour ceux sans session, ou dont la
+  ///     clé a changé — un appareil RÉINSTALLÉ garde son numéro, mais sa
+  ///     session d'avant ne vaut plus rien (groupe ④, second test).
+  Future<List<int>> _ouvrirSessions(String pairId, {int? exclure}) async {
+    final liste = await api('GET', '/api/e2ee/cles/$pairId?liste=1', null);
+
+    // Serveur antérieur : il ignore `liste` et rend directement des paquets.
+    if (liste['appareils'] is! List) {
+      return _ouvrirDepuisPaquets(pairId, {
+        'paquets': listeDe(liste, 'paquets')
+            .where((p) => p['deviceId'] != exclure)
+            .toList(),
+      }, remplacer: false);
+    }
+
+    // ⚠️ S’ouvrir une session vers soi-même consommerait une de ses propres
+    // pré-clés pour rien : cet appareil a déjà le texte.
+    final appareils = listeDe(liste, 'appareils')
+        .where((a) => a['deviceId'] != exclure)
+        .toList();
+    final aOuvrir = <int>[];
+    for (final a in appareils) {
+      final adresse = SignalProtocolAddress(pairId, a['deviceId'] as int);
+      final connue = await coffre.getIdentity(adresse);
+      final meme = connue != null &&
+          base64.encode(connue.serialize()) == a['cleIdentite'];
+      if (!await coffre.containsSession(adresse) || !meme) {
+        aOuvrir.add(a['deviceId'] as int);
+      }
+    }
+
+    if (aOuvrir.isNotEmpty) {
+      final r = await api(
+          'GET', '/api/e2ee/cles/$pairId?deviceIds=${aOuvrir.join(',')}', null);
+      await _ouvrirDepuisPaquets(pairId, r, remplacer: true);
+    }
+
+    /*
+     * ⚠️ SEULS LES APPAREILS DE LA LISTE : une session ancienne vers un
+     * appareil retiré ou muet depuis trente jours ne doit plus servir — ce
+     * serait chiffrer pour personne.
+     */
+    final prets = <int>[];
+    for (final a in appareils) {
+      final d = a['deviceId'] as int;
+      if (await coffre.containsSession(SignalProtocolAddress(pairId, d))) {
+        prets.add(d);
+      }
+    }
+    return prets;
+  }
+
+  /// Ouvre une session par paquet reçu (X3DH, signature vérifiée).
+  ///
+  /// [remplacer] : `true` quand l'appelant a DÉJÀ décidé que ces appareils ont
+  /// besoin d'une session neuve (absente, ou clé d'identité changée). `false`
+  /// pour la réponse d'un serveur antérieur, qui rend tous les paquets : on
+  /// garde alors les sessions existantes, comme avant.
+  Future<List<int>> _ouvrirDepuisPaquets(
+    String pairId,
+    Map<String, dynamic> r, {
+    required bool remplacer,
+  }) async {
+    /*
+     * 🐛 LE CHAMP S'APPELLE `paquets`, PAS `appareils`. On lisait le mauvais
+     * nom : la valeur était `null`, et le `as List` levait un
+     * `_TypeError: type 'Null' is not a subtype of type 'List<dynamic>'` —
+     * illisible pour qui le reçoit, et muet sur ce qui manque.
+     *
+     * ⚠️ `GET /api/e2ee/cles` (mes appareils) rend bien `appareils` ; c'est
+     * `GET /api/e2ee/cles/<compte>` (le paquet d'un correspondant) qui rend
+     * `paquets`. Deux routes voisines, deux noms — et rien pour le rappeler.
+     */
+    final paquets = listeDe(r, 'paquets');
     final ouverts = <int>[];
 
     for (final p in paquets) {
       final adresse = SignalProtocolAddress(pairId, p['deviceId'] as int);
+
+      /*
+       * 🔴 UNE SESSION QUI EXISTE NE SE REFAIT PAS. C'ÉTAIT LE CAS, À CHAQUE
+       * ENVOI, ET C'EST UNE FAUTE DE PROTOCOLE.
+       *
+       * 🐛 `processPreKeyBundle` REMPLACE la session. On l'appelait sans
+       * regarder s'il y en avait une : chaque message repartait donc d'un
+       * X3DH neuf, consommait une pré-clé du correspondant, et surtout
+       * ORPHELINAIT la session que lui avait de son côté.
+       *
+       * ⚠️ UNE SESSION SIGNAL EST UN ÉTAT À DEUX. Un seul des deux ne peut pas
+       * la refaire dans son coin : ses messages ordinaires deviennent
+       * indéchiffrables pour l'autre, en silence et définitivement.
+       *
+       * 🐛 C'est ce qui s'est produit en ouvrant l'écran de vérification : il
+       * appelle `ouvrirSessions` pour pouvoir calculer le code, ce qui
+       * remplaçait la session — et les messages suivants du correspondant,
+       * chiffrés avec l'ancienne, n'étaient plus lisibles.
+       *
+       * ⚠️ LE RATCHET EST FAIT POUR DURER. Le refaire à chaque message annule
+       * ce qu'il apporte et coûte une pré-clé à chaque fois.
+       */
+      if (!remplacer && await coffre.containsSession(adresse)) {
+        ouverts.add(p['deviceId'] as int);
+        continue;
+      }
+
       final signee = p['prekeySignee'] as Map<String, dynamic>;
       final unique = p['prekeyUnique'] as Map<String, dynamic>?;
 
@@ -126,10 +422,19 @@ class E2eeService {
     return ouverts;
   }
 
+  /// Jette la session d'un correspondant pour que la prochaine reparte à neuf.
+  ///
+  /// ⚠️ À N'APPELER QUE SUR UN ÉCHEC DE DÉCHIFFREMENT. Une session qui marche
+  /// ne se jette pas : la refaire coûte une pré-clé au correspondant et
+  /// orpheline la sienne. C'est exactement la faute qu'on vient de corriger
+  /// dans `ouvrirSessions`.
+  Future<void> _oublierSession(String pairId, int deviceId) =>
+      coffre.deleteSession(SignalProtocolAddress(pairId, deviceId));
+
   /* ══════════════ CHIFFRER / DÉCHIFFRER ══════════════ */
 
   /// Chiffre un texte pour un appareil donné.
-  Future<({int type, String corps})> chiffrer(
+  Future<({int type, String corps})> _chiffrer(
     String pairId,
     int deviceId,
     String texte,
@@ -139,8 +444,37 @@ class E2eeService {
     final e = await chiffreur.encrypt(
       Uint8List.fromList(utf8.encode(texte)),
     );
-    return (type: e.getType(), corps: base64.encode(e.serialize()));
+    return (type: _typeSurLeFil(e.getType()), corps: base64.encode(e.serialize()));
   }
+
+  /// Traduit le type de la bibliothèque Dart vers celui du FIL.
+  ///
+  /// 🔴 LES DEUX BIBLIOTHÈQUES NE NUMÉROTENT PAS PAREIL, ET PERSONNE NE L'AVAIT
+  /// REMARQUÉ :
+  ///
+  /// ```
+  ///   libsignal_protocol_dart   whisperType = 2   prekeyType = 3
+  ///   libsignal-protocol-ts     WHISPER     = 1   PREKEY     = 3
+  /// ```
+  ///
+  /// 🐛 Le mobile posait donc **2** sur le fil pour un message ordinaire. Le
+  /// serveur n'accepte que 1 ou 3 et répondait 400 « enveloppe mal formée » :
+  /// le PREMIER message d'une session passait (type 3), tous les suivants
+  /// tombaient.
+  ///
+  /// ⚠️ LE BANC D'INTEROPÉRABILITÉ NE POUVAIT PAS LE VOIR. Son faux serveur
+  /// RELAYAIT le nombre sans le valider, et le web traite tout ce qui n'est pas
+  /// 3 comme un message ordinaire — donc 2 fonctionnait entre les deux
+  /// bibliothèques. Seul le vrai serveur, qui contrôle, refusait.
+  ///
+  /// 🔴 C'EST LE FIL QUI FAIT FOI, PAS LA BIBLIOTHÈQUE. Le format d'échange est
+  /// celui du web et du serveur ; chaque client traduit à sa frontière. Aligner
+  /// le serveur sur le Dart aurait cassé le web, et l'inverse était impossible.
+  ///
+  /// ⚠️ LA RÉCEPTION N'A RIEN À TRADUIRE : `dechiffrer` ne teste que « est-ce
+  /// 3 ? », ce qui vaut des deux côtés.
+  static int _typeSurLeFil(int type) =>
+      type == CiphertextMessage.prekeyType ? 3 : 1;
 
   /// Déchiffre une enveloppe.
   ///
@@ -148,7 +482,7 @@ class E2eeService {
   /// session porte le matériel X3DH (type 3) et s'ouvre autrement que les
   /// suivants (type 1). Se tromper donne une erreur de déchiffrement qui fait
   /// chercher du côté des clés alors que le format seul est en cause.
-  Future<String> dechiffrer(
+  Future<String> _dechiffrer(
     String pairId,
     int deviceId,
     int type,

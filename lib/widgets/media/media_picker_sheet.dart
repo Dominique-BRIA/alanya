@@ -2,7 +2,14 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:image_picker/image_picker.dart';
+import '../../core/compression_envoi.dart';
+import 'avancement_compression.dart';
+import '../../core/compression_image.dart';
+import '../../core/galerie.dart';
+import '../../core/plafond_media.dart';
 import '../../theme/alanya_theme.dart';
+import '../../l10n/app_localizations.dart';
 
 /// Résultat de la sélection de médias.
 class MediaPickResult {
@@ -21,13 +28,46 @@ class MediaPickResult {
   /// l'icône, ce qui reste correct.
   final String? path;
 
+  /// L'image a été RÉDUITE avant l'envoi, et [path] mène encore à l'original.
+  ///
+  /// Sert à deux choses, toutes deux à l'écran d'envoi : annoncer le gain, et
+  /// rendre l'original accessible en un appui. Faux pour une vidéo, un GIF, un
+  /// PNG et pour toute image déjà assez petite — voir
+  /// `core/compression_image.dart`.
+  final bool compresse;
+
+  /// Poids de l'original, quand il a été réduit. `null` sinon.
+  ///
+  /// ⚠️ ON NE GARDE PAS LES OCTETS D'ORIGINE EN MÉMOIRE. Dix photos de 8 Mo
+  /// tenues en double sont 160 Mo dans un téléphone : l'original se relit
+  /// depuis [path] au moment où on le demande, et pas avant.
+  final int? tailleOriginale;
+
   const MediaPickResult({
     required this.bytes,
     required this.fileName,
     required this.mimeType,
     this.durationMs,
     this.path,
+    this.compresse = false,
+    this.tailleOriginale,
   });
+
+  MediaPickResult copieAvec({
+    Uint8List? bytes,
+    String? fileName,
+    String? mimeType,
+    bool? compresse,
+  }) =>
+      MediaPickResult(
+        bytes: bytes ?? this.bytes,
+        fileName: fileName ?? this.fileName,
+        mimeType: mimeType ?? this.mimeType,
+        durationMs: durationMs,
+        path: path,
+        compresse: compresse ?? this.compresse,
+        tailleOriginale: tailleOriginale,
+      );
 
   bool get estImage => mimeType.startsWith('image/');
   bool get estVideo => mimeType.startsWith('video/');
@@ -80,6 +120,11 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
   List<AssetEntity> _recentMedia = [];
   bool _loadingGallery = true;
   bool _permissionDenied = false;
+  bool _preparation = false;
+  /// Avancement de la vidéo en cours de compression (0 à 1), `null` sinon.
+  double? _avancement;
+  int _videoRang = 0;
+  int _videosTotal = 0;
   final Set<String> _selectedIds = {};
 
   @override
@@ -90,7 +135,11 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
 
   Future<void> _loadRecentMedia() async {
     final permission = await PhotoManager.requestPermissionExtend();
-    if (!permission.isAuth) {
+    // 🔴 `hasAccess` et NON `isAuth` : l'accès PARTIEL d'Android 14+ est un oui.
+    // Avec `isAuth`, choisir « Sélectionner des photos » faisait déclarer la
+    // permission refusée, la bande des récents restait vide et le bouton
+    // « Galerie » ouvrait le sélecteur du système. Voir `core/galerie.dart`.
+    if (!accesUtilisable(permission)) {
       if (mounted) setState(() { _loadingGallery = false; _permissionDenied = true; });
       return;
     }
@@ -98,6 +147,8 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
       final albums = await PhotoManager.getAssetPathList(
         type: RequestType.common,
         hasAll: true,
+        // Sans cet ordre, « récents » montrait les plus VIEILLES photos.
+        filterOption: ordreRecentDAbord,
       );
       if (albums.isEmpty) {
         if (mounted) setState(() => _loadingGallery = false);
@@ -121,26 +172,95 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
   }
 
   // ══ CONFIRMER SÉLECTION GALERIE RÉCENTE ══
+  //
+  /* 🔴 CETTE GRILLE N'A LONGTEMPS PAS COMPRESSÉ, ET C'EST LE CHEMIN LE PLUS
+   * EMPRUNTÉ : il s'ouvre d'un seul geste, avant même la galerie plein écran.
+   * La compression du 31/08/2026 n'avait été posée que dans
+   * `MediaGalleryPickerScreen`, de sorte qu'une même photo partait réduite ou
+   * entière selon l'endroit où on l'avait touchée — sans que rien ne le dise.
+   *
+   * Les deux chemins appliquent désormais la MÊME règle, celle de
+   * `core/compression_image.dart`. Toute évolution se décide dans le module,
+   * jamais ici.
+   */
   Future<void> _confirmSelection() async {
-    if (_selectedIds.isEmpty) return;
+    // Une vidéo se transcode en plusieurs secondes : sans ce verrou, un second
+    // appui relançait tout le lot, et la vidéo partait deux fois.
+    if (_selectedIds.isEmpty || _preparation) return;
+    setState(() => _preparation = true);
+    try {
+      await _prepareSelection();
+    } finally {
+      if (mounted) setState(() => _preparation = false);
+    }
+  }
+
+  Future<void> _prepareSelection() async {
     final results = <MediaPickResult>[];
+    final tropGros = <String>[];
+    _videosTotal = _recentMedia
+        .where((a) => _selectedIds.contains(a.id) && a.type == AssetType.video)
+        .length;
+    _videoRang = 0;
     for (final asset in _recentMedia) {
       if (!_selectedIds.contains(asset.id)) continue;
       final bytes = await asset.originBytes;
       if (bytes == null) continue;
       final name = asset.title ?? 'media_${asset.id}';
       final mime = _mimeFromAsset(asset);
-      results.add(MediaPickResult(
-        bytes: bytes,
-        fileName: name,
+      final chemin = (await asset.file)?.path;
+
+      // Photo comme vidéo — voir `core/compression_envoi.dart`.
+      final video = asset.type == AssetType.video;
+      if (video && mounted) {
+        setState(() {
+          _videoRang++;
+          _avancement = 0;
+        });
+      }
+      final compresse = await compresserPourEnvoi(
+        asset: asset,
+        octets: bytes,
+        nomFichier: name,
         mimeType: mime,
+        chemin: chemin,
+        onProgression: (p) {
+          if (mounted) setState(() => _avancement = p);
+        },
+      );
+      if (video && mounted) setState(() => _avancement = null);
+
+      /* ⚠️ LE PLAFOND SE MESURE APRÈS COMPRESSION, jamais avant : une photo de
+       * 12 Mo sortie du capteur en fait 400 Ko une fois réduite, et la refuser
+       * sur sa taille d'origine interdirait un envoi parfaitement acceptable.
+       * Ce contrôle manquait ici alors que les trois autres chemins l'avaient.
+       */
+      if (depassePlafondMedia(compresse.octets.length)) {
+        tropGros.add(compresse.nomFichier);
+        continue;
+      }
+
+      results.add(MediaPickResult(
+        bytes: compresse.octets,
+        fileName: compresse.nomFichier,
+        mimeType: compresse.mimeType,
         durationMs: asset.type == AssetType.video ? (asset.duration * 1000).toInt() : null,
         // Chemin réel de l'asset : c'est ce qui permet de LIRE une vidéo dans
-        // l'aperçu au lieu d'afficher une icône.
-        path: (await asset.file)?.path,
+        // l'aperçu au lieu d'afficher une icône — et de RELIRE l'original si
+        // l'utilisateur refuse la compression depuis l'écran de légende.
+        path: chemin,
+        // Sans ces deux champs, l'écran de légende n'annonçait pas le gain et
+        // n'offrait pas « Envoyer l'original » depuis cette grille.
+        compresse: compresse.compresse,
+        tailleOriginale: compresse.compresse ? compresse.tailleAvant : null,
       ));
     }
-    if (mounted && results.isNotEmpty) Navigator.pop(context, results);
+    if (!mounted) return;
+    final avis = messageMediasEcartes(tropGros, context: context);
+    if (avis != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(avis)));
+    }
+    if (results.isNotEmpty) Navigator.pop(context, results);
   }
 
   // ══ CAMÉRA ══
@@ -168,25 +288,63 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
     Navigator.pop(context, const OuvrirGalerie());
   }
 
+  /*
+   * 🐛 CE CHEMIN ENVOYAIT LES PHOTOS SANS AUCUNE COMPRESSION (trouvé le
+   * 06/10/2026, en cherchant pourquoi une photo envoyée depuis le mobile
+   * arrivait trop lourde). Il ne sert que si l'accès aux photos est refusé —
+   * `compresserAsset` exige alors un `AssetEntity` qu'on n'a pas, et
+   * `FilePicker` rendait les octets d'origine : 3 à 8 Mo par photo.
+   *
+   * `image_picker` ouvre le sélecteur photos d'Android, qui n'a besoin
+   * d'aucune autorisation, et RÉDUIT LUI-MÊME l'image aux bornes de la
+   * galerie (`core/compression_image.dart`) — exactement comme la prise de vue
+   * (`_prendrePhoto`, chat_screen.dart). Les vidéos sont transcodées par
+   * `core/compression_envoi.dart`, comme dans les autres chemins.
+   */
   Future<void> _pickFullGalleryParSysteme(NavigatorState navigator) async {
     try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.media,
-        allowMultiple: true,
-        withData: true,
+      final choisis = await ImagePicker().pickMultipleMedia(
+        maxWidth: imageBordMax.toDouble(),
+        maxHeight: imageBordMax.toDouble(),
+        imageQuality: imageQualite,
       );
-      if (result == null || result.files.isEmpty || !mounted) return;
+      if (choisis.isEmpty || !mounted) return;
       final results = <MediaPickResult>[];
-      for (final file in result.files) {
-        if (file.bytes == null) continue;
-        results.add(MediaPickResult(
-          bytes: file.bytes!,
-          fileName: file.name,
+      final tropGros = <String>[];
+      for (final file in choisis) {
+        final octets = await file.readAsBytes();
+        if (octets.isEmpty) continue;
+        // ⚠️ MÊME PLAFOND QUE LES DOCUMENTS, plus bas. Ce chemin ne sert que si
+        // l'accès à la galerie est refusé, ce qui l'avait fait oublier — mais
+        // il envoie exactement les mêmes fichiers.
+        // Les photos sont déjà réduites par le sélecteur ; une vidéo, elle,
+        // arrive entière et se transcode ici.
+        final pret = await compresserPourEnvoi(
+          octets: octets,
+          nomFichier: file.name,
           mimeType: _guessMime(file.name),
+          chemin: file.path,
+        );
+        if (depassePlafondMedia(pret.octets.length)) {
+          tropGros.add(pret.nomFichier);
+          continue;
+        }
+        results.add(MediaPickResult(
+          bytes: pret.octets,
+          fileName: pret.nomFichier,
+          mimeType: pret.mimeType,
           path: file.path,
+          compresse: pret.compresse,
+          tailleOriginale: pret.compresse ? pret.tailleAvant : null,
         ));
       }
-      if (mounted && results.isNotEmpty) navigator.pop(results);
+      if (!mounted) return;
+      final avis = messageMediasEcartes(tropGros, context: context);
+      if (avis != null) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(avis)));
+      }
+      if (results.isNotEmpty) navigator.pop(results);
     } catch (_) {}
   }
 
@@ -208,10 +366,10 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
     final tropGros = <String>[];
     for (final file in result.files) {
       if (file.bytes == null) continue;
-      // ⚠️ Plafond du serveur (MEDIA_MAX_SIZE_MB, 50 par défaut) : sans ce
-      // contrôle, un fichier de 200 Mo était intégralement TÉLÉVERSÉ avant de
-      // se faire refuser par un 413. On le dit avant, en nommant le fichier.
-      if (file.bytes!.length > _maxOctets) {
+      // Le plafond et le message vivent dans `core/plafond_media.dart` : ce
+      // contrôle n'existait qu'ICI, et les trois autres chemins de sélection
+      // laissaient tout passer.
+      if (depassePlafondMedia(file.bytes!.length)) {
         tropGros.add(file.name);
         continue;
       }
@@ -223,18 +381,12 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
       ));
     }
     if (!mounted) return;
-    if (tropGros.isNotEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(tropGros.length == 1
-            ? "« ${tropGros.first} » dépasse 50 Mo et n'a pas été joint"
-            : "${tropGros.length} fichiers dépassent 50 Mo et n'ont pas été joints"),
-      ));
+    final avis = messageMediasEcartes(tropGros, context: context);
+    if (avis != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(avis)));
     }
     if (results.isNotEmpty) Navigator.pop(context, results);
   }
-
-  /// Taille maximale acceptée par le serveur, en octets.
-  static const int _maxOctets = 50 * 1024 * 1024;
 
   // ══ CONTACT — fiche de contact partagée (type de message CONTACT) ══
   //
@@ -341,31 +493,31 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
               children: [
                 _optionButton(
                   icon: Icons.photo_library,
-                  label: "Galerie",
+                  label: tr(context, 'gallery'),
                   color: AlanyaColors.forest,
                   onTap: _pickFullGallery,
                 ),
                 _optionButton(
                   icon: Icons.camera_alt,
-                  label: "Caméra",
+                  label: tr(context, 'camera_short'),
                   color: const Color(0xFFE53935),
                   onTap: _pickCamera,
                 ),
                 _optionButton(
                   icon: Icons.insert_drive_file,
-                  label: "Document",
+                  label: tr(context, 'document'),
                   color: const Color(0xFF7B1FA2),
                   onTap: _pickDocuments,
                 ),
                 _optionButton(
                   icon: Icons.person,
-                  label: "Contact",
+                  label: tr(context, 'contacts'),
                   color: const Color(0xFF2196F3),
                   onTap: _pickContact,
                 ),
                 _optionButton(
                   icon: Icons.location_on,
-                  label: "Position",
+                  label: tr(context, 'position'),
                   color: const Color(0xFF009688),
                   onTap: _pickLocation,
                 ),
@@ -380,9 +532,9 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             child: Row(
               children: [
-                const Text(
-                  "Récents",
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                Text(
+                  tr(context, 'status_recent'),
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
                 ),
                 const Spacer(),
                 if (_selectedIds.isNotEmpty)
@@ -394,14 +546,31 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
                         color: AlanyaColors.terracotta,
                         borderRadius: BorderRadius.circular(16),
                       ),
-                      child: Text(
-                        "Envoyer (${_selectedIds.length})",
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
+                      child: _preparation && _avancement != null
+                          ? AvancementCompression(
+                              avancement: _avancement!,
+                              rang: _videoRang,
+                              total: _videosTotal,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            )
+                          : _preparation
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white))
+                          : Text(
+                              tr(context, 'send_count', {'n': '${_selectedIds.length}'}),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                     ),
                   ),
               ],
@@ -419,18 +588,18 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
                           children: [
                             Icon(Icons.folder_off, size: 48, color: AlanyaColors.grey400),
                             const SizedBox(height: 12),
-                            Text("Accès aux fichiers refusé",
+                            Text(tr(context, 'files_access_denied'),
                                 style: TextStyle(color: AlanyaColors.grey500, fontSize: 14)),
                             const SizedBox(height: 8),
                             TextButton(
                               onPressed: () => PhotoManager.openSetting(),
-                              child: const Text("Ouvrir les paramètres"),
+                              child: Text(tr(context, 'open_settings')),
                             ),
                           ],
                         ),
                       )
                     : _recentMedia.isEmpty
-                        ? Center(child: Text("Aucun média récent",
+                        ? Center(child: Text(tr(context, 'no_recent_media'),
                             style: TextStyle(color: AlanyaColors.grey400)))
                         : _buildGalleryGrid(),
           ),

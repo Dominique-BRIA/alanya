@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../theme/alanya_theme.dart';
 import 'cached_media.dart';
+import '../../l10n/app_localizations.dart';
 
 /// Bulle image style WhatsApp :
 /// - Image plein bulle (pas de bouton download visible)
@@ -75,7 +76,7 @@ class ImageBubble extends StatelessWidget {
                           children: [
                             Icon(Icons.broken_image, color: AlanyaColors.grey400, size: 36),
                             const SizedBox(height: 4),
-                            Text('Image indisponible',
+                            Text(tr(context, 'image_unavailable'),
                                 style: TextStyle(fontSize: 12, color: AlanyaColors.grey500)),
                           ],
                         ),

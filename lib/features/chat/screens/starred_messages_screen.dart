@@ -5,6 +5,7 @@ import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../chat_repository.dart';
 import 'chat_screen.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Liste des messages favoris (étoile) — toutes conversations confondues.
 class StarredMessagesScreen extends StatefulWidget {
@@ -37,13 +38,13 @@ class _StarredMessagesScreenState extends State<StarredMessagesScreen> {
     final type = m["type"] as String? ?? "TEXT";
     switch (type) {
       case "IMAGE":
-        return "Photo";
+        return tr(context, 'photo');
       case "VIDEO":
-        return "Vidéo";
+        return tr(context, 'video');
       case "AUDIO":
-        return "Message vocal";
+        return tr(context, 'voice_message');
       case "FILE":
-        return "Fichier";
+        return tr(context, 'file');
       default:
         return (m["content"] as String?) ?? "";
     }
@@ -65,17 +66,17 @@ class _StarredMessagesScreenState extends State<StarredMessagesScreen> {
   Widget build(BuildContext context) {
     final items = _items;
     return Scaffold(
-      appBar: backAppBar(context, "Messages favoris"),
+      appBar: backAppBar(context, tr(context, 'starred_title')),
       body: _error
-          ? const Center(child: Text("Erreur de chargement"))
+          ? Center(child: Text(tr(context, 'load_error_short')))
           : items == null
               ? const Center(child: CircularProgressIndicator())
               : items.isEmpty
-                  ? const Center(
+                  ? Center(
                       child: Padding(
-                        padding: EdgeInsets.all(24),
+                        padding: const EdgeInsets.all(24),
                         child: Text(
-                          "Aucun message favori.\nAppuie longuement sur un message, puis sur l'étoile.",
+                          tr(context, 'no_starred'),
                           textAlign: TextAlign.center,
                         ),
                       ),

@@ -1,3 +1,4 @@
+import '../core/alanya_id_formatter.dart';
 import 'call_record.dart';
 
 class LastMessage {
@@ -39,7 +40,8 @@ class ConvMember {
     this.lastSeen,
   });
 
-  String get displayName => pseudo ?? publicNumber;
+  /// Repli FORMATE — voir la note detaillee sur `Contact.displayName`.
+  String get displayName => pseudo ?? formatAlanyaId(publicNumber);
   bool get online => isOnline == 1;
 
   /// "en ligne" ou "vu il y a 5 min"
@@ -58,7 +60,9 @@ class ConvMember {
         pseudo: j["pseudo"] as String?,
         publicNumber: j["publicNumber"] as String,
         isOnline: (j["isOnline"] as num?)?.toInt() ?? 0,
-        lastSeen: j["lastSeen"] != null ? DateTime.tryParse(j["lastSeen"] as String) : null,
+        lastSeen: j["lastSeen"] != null
+            ? DateTime.tryParse(j["lastSeen"] as String)
+            : null,
       );
 }
 
@@ -90,6 +94,29 @@ class Conversation {
   final bool isPinned;
   final bool isArchived;
 
+  /// Notifications coupées pour MOI dans cette conversation.
+  ///
+  /// 🔴 PAR PARTICIPANT, pas par conversation : c'est un choix personnel, et
+  /// mettre en sourdine ne doit rien changer pour les autres membres. La
+  /// colonne vit sur `participant`, côté serveur.
+  ///
+  /// ⚠️ ÊTRE EN SOURDINE, C'EST NE PAS ÊTRE DÉRANGÉ — pas cesser de recevoir.
+  /// Le serveur écarte le destinataire de la POUSSÉE ; la conversation continue
+  /// de se mettre à jour en direct chez qui la regarde, et le compteur de non
+  /// lus fait son travail.
+  ///
+  /// Facultatif dans la charge : un serveur antérieur ne l'envoie pas, et
+  /// l'interrupteur part alors de « non ».
+  final bool sourdine;
+
+  /// La conversation est-elle chiffrée de bout en bout ?
+  ///
+  /// ⚠️ LU ICI POUR LE TRANSFERT : un texte ne peut pas entrer en clair dans un
+  /// fil chiffré, et le serveur le refuse. Le sélecteur écarte donc ces fils
+  /// d’avance, plutôt que d’annoncer un transfert réussi qui ne l’est pas.
+  /// Facultatif dans la charge : absent, il vaut « non ».
+  final bool e2eeActif;
+
   Conversation({
     required this.id,
     required this.isGroup,
@@ -103,7 +130,53 @@ class Conversation {
     this.lastCallFourni = false,
     this.isPinned = false,
     this.isArchived = false,
+    this.sourdine = false,
+    this.e2eeActif = false,
   });
+
+  /// Copie avec la sourdine changée — le reste est intact.
+  ///
+  /// La liste des conversations est reconstruite à partir de ces objets : sans
+  /// copie, basculer l'interrupteur n'aurait aucun effet visible avant le
+  /// prochain rafraîchissement complet.
+  Conversation copieAvecSourdine(bool valeur) => Conversation(
+        id: id,
+        isGroup: isGroup,
+        title: title,
+        avatarUrl: avatarUrl,
+        members: members,
+        lastMessage: lastMessage,
+        unread: unread,
+        updatedAt: updatedAt,
+        lastCall: lastCall,
+        lastCallFourni: lastCallFourni,
+        isPinned: isPinned,
+        isArchived: isArchived,
+        sourdine: valeur,
+        e2eeActif: e2eeActif,
+      );
+
+  /// Copie avec un autre dernier message — le reste est intact.
+  ///
+  /// ⚠️ SERT AUX FILS CHIFFRÉS : le serveur n’a pas leur texte et rend
+  /// `lastMessage: null` ; le dernier texte vient du cache LOCAL, où la relève
+  /// range chaque message déchiffré. Voir `dernier_message_local.dart`.
+  Conversation copieAvecDernier(LastMessage? dernier) => Conversation(
+        id: id,
+        isGroup: isGroup,
+        title: title,
+        avatarUrl: avatarUrl,
+        members: members,
+        lastMessage: dernier,
+        unread: unread,
+        updatedAt: updatedAt,
+        lastCall: lastCall,
+        lastCallFourni: lastCallFourni,
+        isPinned: isPinned,
+        isArchived: isArchived,
+        sourdine: sourdine,
+        e2eeActif: e2eeActif,
+      );
 
   Map<String, String> get memberNames => {
         for (final m in members) m.id: m.displayName,
@@ -130,5 +203,7 @@ class Conversation {
         updatedAt: DateTime.parse(j["updatedAt"] as String),
         isPinned: (j["isPinned"] as bool?) ?? false,
         isArchived: (j["isArchived"] as bool?) ?? false,
+        sourdine: (j["sourdine"] as bool?) ?? false,
+        e2eeActif: (j["e2eeActif"] as bool?) ?? false,
       );
 }

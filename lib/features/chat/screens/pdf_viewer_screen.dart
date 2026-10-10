@@ -3,7 +3,10 @@ import 'package:flutter_pdfview/flutter_pdfview.dart';
 
 import '../../../core/app_snackbar.dart';
 import '../../../core/downloader.dart';
+import '../../../widgets/media/bouton_telecharger.dart';
+import '../../../core/telechargement_suivi.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Visionneuse PDF plein écran (style WhatsApp).
 ///
@@ -62,11 +65,13 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     if (_downloading) return;
     setState(() => _downloading = true);
     try {
-      final path = await downloadUrl(widget.downloadUrl, widget.filename);
+      final path = await telechargerEnSuivant(
+          widget.downloadUrl, widget.filename,
+          idTransfert: "dl-pdf-${widget.filename}");
       if (!mounted) return;
       showAppSnackBar(path != null
-          ? "Enregistré dans Alanya/"
-          : "Échec du téléchargement");
+          ? tr(context, 'saved_to_alanya', {'nom': widget.filename})
+          : tr(context, 'download_failed'));
     } finally {
       if (mounted) setState(() => _downloading = false);
     }
@@ -96,18 +101,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                 ),
               ),
             ),
-          IconButton(
-            tooltip: "Télécharger",
-            icon: _downloading
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: Colors.white),
-                  )
-                : const Icon(Icons.download_outlined),
-            onPressed: _downloading ? null : _saveToPublic,
-          ),
+          BoutonTelecharger(enCours: _downloading, onPressed: _saveToPublic),
         ],
       ),
       body: _error != null
@@ -126,7 +120,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                     ),
                     onPressed: _saveToPublic,
                     icon: const Icon(Icons.download),
-                    label: const Text("Télécharger quand même"),
+                    label: Text(tr(context, 'download_anyway')),
                   ),
                 ],
               ),

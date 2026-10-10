@@ -1,10 +1,30 @@
 // chat_screen.dart — WhatsApp previews COMPLET (thumbnails vidéo, PDF, waveform, grille)
 import 'dart:async';
+import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
+import '../../../services/e2ee/e2ee_fil.dart' show MessageClair;
+import '../../../services/e2ee/e2ee_fournisseur.dart';
+import '../../../services/e2ee/e2ee_groupe_fil.dart' show EchecGroupe;
+import '../../../services/e2ee/e2ee_media.dart';
+import '../../../services/e2ee/e2ee_media_envoi.dart';
+import '../../../widgets/e2ee/e2ee_widgets.dart';
+import '../frontiere_chiffrement.dart';
+import '../envois_chiffres_fil.dart';
+import '../envoi_morceaux/envoi_morceaux_chiffre.dart';
+import '../fusion_releve.dart';
+import '../statut_envoi.dart';
+import 'dart:convert' show base64Decode;
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 
+import '../../../core/avec_reprises.dart';
+import '../../../core/compression_image.dart';
+import '../../../core/connectivity_service.dart';
+import '../../../core/delais_message.dart';
+import '../../../core/memoire_langues.dart';
 import '../../../core/message_cache.dart';
+import '../../../core/texte_recherche.dart';
+import '../../../core/messages_systeme.dart';
 import '../../../core/whatsapp_text.dart';
 import '../../../core/whatsapp_format_input.dart';
 import '../../../core/whatsapp_editing_controller.dart';
@@ -13,6 +33,7 @@ import '../../../core/call_cache.dart';
 import '../../../core/call_status.dart';
 import '../../../models/call_record.dart';
 import '../../calls/calls_repository.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -22,38 +43,54 @@ import '../../../core/api_client.dart';
 import '../../../core/app_snackbar.dart';
 import '../../../core/audio_player.dart';
 import '../../../core/downloader.dart';
+import '../../../core/telechargement_suivi.dart';
 import '../../../core/notification_settings.dart';
 import '../../../core/presence_store.dart';
 import '../../../core/realtime_client.dart';
 import '../../../core/ringtone_service.dart';
+import '../../../core/sonneries_listes.dart';
 import '../../../core/token_storage.dart';
 import '../../../core/voice_recorder.dart';
 import '../../../core/locale_controller.dart';
-import '../../../core/translate_service.dart';
+import '../../../core/traduction_appareil.dart';
+import '../../../core/traduction_auto.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../models/message.dart';
 import '../../../models/message_payload.dart';
 import '../../../models/conversation.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../../widgets/auth_network_image.dart';
 import '../../../widgets/avatar_circle.dart';
+import '../../../widgets/choix_langue_interlocuteur.dart';
 import '../../../widgets/contact_share_sheet.dart';
+import '../../../widgets/dialogues_traduction.dart';
 import '../../../widgets/motif_background.dart';
+import '../../../widgets/selecteur_emojis.dart';
+import '../widgets/bulle_media_chiffre.dart';
+import '../widgets/bulle_vue_unique.dart';
+import 'visionneur_vue_unique.dart';
 import '../../account/screens/avatar_viewer_screen.dart';
 import '../../auth/auth_controller.dart';
 import '../../calls/call_controller.dart';
 import '../../calls/message_erreur_appel.dart';
-import '../../calls/screens/active_call_screen.dart';
+import '../../calls/ouvrir_appel_en_cours.dart';
 import '../../contacts/contacts_repository.dart';
 import '../../contacts/screens/contact_info_screen.dart';
+import '../../contacts/verification_cle.dart';
 import '../../group/screens/group_info_screen.dart';
 import '../../media/media_repository.dart';
+import '../../settings/screens/translation_screen.dart';
 import '../chat_repository.dart';
 import '../envoi_media.dart';
 import '../envoi_media_store.dart';
 import '../groupe_medias.dart';
+import '../medias_partages.dart';
 import '../widgets/activity_indicator.dart';
 import 'pdf_viewer_screen.dart';
 import 'media_caption_screen.dart';
+import '../../../core/compression_envoi.dart';
+import '../../../core/partage_entrant.dart';
+import '../../../core/plafond_media.dart';
 import 'media_gallery_picker_screen.dart';
 import 'location_share_screen.dart';
 
@@ -67,11 +104,16 @@ import '../../../widgets/media/media_grid.dart';
 import '../../../widgets/media/contact_bubble.dart';
 import '../../../widgets/media/location_bubble.dart';
 import '../../../widgets/media/sending_media_bubble.dart';
-import '../../../core/media_helper.dart';
 import '../chat_media_integration.dart';
 import '../../../widgets/media/gps_preview.dart';
 import 'media_gallery_viewer.dart';
+import '../transfert_appareil.dart';
+import '../../../services/e2ee/e2ee_media_ouverture.dart';
+import 'dart:io' show File;
+import 'package:path_provider/path_provider.dart' show getTemporaryDirectory;
+import 'package:share_plus/share_plus.dart';
 import '../../../widgets/media/media_picker_sheet.dart';
+import '../../../core/erreur_lisible.dart';
 
 class ChatScreen extends StatefulWidget {
   static String? activeConvId;
@@ -89,8 +131,14 @@ class ChatScreen extends StatefulWidget {
     this.isBlocked = false,
     this.otherIsOnline = 0,
     this.otherLastSeen,
+    this.partage,
   });
   final String convId;
+
+  /// Ce qu'une autre application vient de partager vers cette conversation
+  /// (07/10/2026) : envoyé dès l'ouverture — aperçu pour un fichier, champ
+  /// pré-rempli pour un texte. Voir `partage_vers_alanya.dart`.
+  final PartageRecu? partage;
   final String title;
   final bool isGroup;
   final Map<String, String> memberNames;
@@ -127,8 +175,11 @@ class _ChatScreenState extends State<ChatScreen>
   List<Message> _messages = [];
   List<CallRecord> _callsForConv = [];
   List<dynamic> _combined = [];
+  /// Indice du premier message chiffré dans `_combined` — là où se place la
+  /// bande « à partir d’ici, chiffré ». Recalculé avec `_combined`, pas à
+  /// chaque bulle affichée.
+  int? _frontiere;
   bool _loading = true;
-  bool _sending = false;
 
   /// Barre de mise en forme dépliée par le bouton « A » du composeur.
   bool _formatBarOpen = false;
@@ -146,6 +197,9 @@ class _ChatScreenState extends State<ChatScreen>
   bool _micHeld = false;
   Timer? _pollTimer;
   StreamSubscription<Map<String, dynamic>>? _rtSub;
+  /// Les relèves lancées ailleurs (l’accueil, pour l’aperçu de la liste).
+  StreamSubscription<List<MessageClair>>? _relevesSub;
+  StreamSubscription<Set<String>>? _restaurationsSub;
   bool _wasBusy = false;
   // _myId reflète TOUJOURS l'utilisateur courant. Un getter (au lieu d'un champ
   // figé au chargement) évite un état périmé/null : si l'auth se charge en
@@ -157,6 +211,127 @@ class _ChatScreenState extends State<ChatScreen>
     } catch (_) {
       return null;
     }
+  }
+
+  /// Noms des membres du GROUPE, lus sur le serveur à l'ouverture.
+  ///
+  /// 🔴 « MEMBRE » S'AFFICHAIT À LA PLACE DES NOMS (signalé sur device le
+  /// 30/08/2026). Le nom d'un expéditeur ne vient PAS du message — le serveur
+  /// n'envoie que `senderId` — mais d'une carte `id → nom` que l'écran reçoit à
+  /// sa construction, `widget.memberNames`. Elle a deux trous :
+  ///   1. **elle est figée** : quelqu'un ajouté au groupe après l'ouverture de
+  ///      l'écran n'y est jamais, et reste « Membre » tant qu'on ne ressort pas ;
+  ///   2. **elle est parfois vide** : l'écran s'ouvre aussi depuis l'écran
+  ///      d'appel, qui ne la passe pas — là, TOUT LE MONDE est « Membre ».
+  ///
+  /// On lit donc les membres à l'ouverture, et cette carte-ci prime. Elle ne
+  /// remplace pas `widget.memberNames` : celle-ci sert pendant le temps de
+  /// l'aller-retour réseau, et de repli si l'appel échoue.
+  Map<String, String> _membresCharges = const {};
+
+  /// Vrai pendant une relecture des membres, pour ne pas en lancer dix.
+  bool _relitLesMembres = false;
+
+  /// JUSQU'OÙ CHAQUE MEMBRE A LU, en millisecondes.
+  ///
+  /// 🔴 UN COMPTEUR, ET NON DES COCHES BLEUES, et ce n'est pas cosmétique : la
+  /// règle « tous ont lu » se laisse BLOQUER PAR UN SEUL membre qui a coupé ses
+  /// accusés de lecture. Son horodatage n'avance jamais, et les coches du
+  /// groupe entier ne passeraient plus — sans que personne comprenne pourquoi.
+  /// Un compteur, lui, ne se bloque pas : le discret n'est simplement pas
+  /// compté.
+  ///
+  /// Semée par les membres à l'ouverture, avancée par les trames `read`.
+  /// Même règle que le web (`260ccd2`), à qui elle est reprise.
+  final Map<String, int> _lecturesParMembre = {};
+
+  /// Note qu'un membre a lu jusqu'à [quandMs], sans jamais reculer.
+  ///
+  /// ⚠️ LE `max` COMPTE : les trames arrivent dans le désordre, et une trame
+  /// ancienne rejouée ferait reculer un membre, donc baisser le compteur sous
+  /// les yeux de l'expéditeur.
+  void _avanceLecture(String userId, int quandMs) {
+    final connu = _lecturesParMembre[userId] ?? 0;
+    if (quandMs > connu) _lecturesParMembre[userId] = quandMs;
+  }
+
+  /// Combien de membres ont lu ce message — hors moi.
+  ///
+  /// Rend `0` hors groupe : la bulle n'affiche alors rien, les deux coches
+  /// suffisent à deux.
+  int _nbLectures(Message m) {
+    if (!widget.isGroup || m.senderId != _myId) return 0;
+    final envoye = m.createdAt.millisecondsSinceEpoch;
+    var n = 0;
+    for (final entree in _lecturesParMembre.entries) {
+      if (entree.key == _myId) continue;
+      if (entree.value >= envoye) n++;
+    }
+    return n;
+  }
+
+  /// Relit les membres du groupe.
+  ///
+  /// Silencieux en cas d'échec : un nom manquant se replie sur « Membre », ce
+  /// qui reste lisible — alors qu'une erreur à l'ouverture d'une conversation
+  /// ne servirait à rien à personne.
+  Future<void> _chargeMembres() async {
+    if (_relitLesMembres) return;
+    _relitLesMembres = true;
+    try {
+      final membres =
+          await context.read<ChatRepository>().getGroupMembers(widget.convId);
+      if (!mounted) return;
+      if (!mounted) return;
+      setState(() {
+        _membresCharges = {
+          for (final m in membres)
+            if (m["id"] is String)
+              m["id"] as String:
+                  (m["pseudo"] as String?) ?? (m["publicNumber"] as String? ?? ""),
+        };
+        // Suis-je ADMINISTRATEUR de ce groupe ? Seul lui peut écrire
+        // « @tout le monde » — la route des membres rend déjà le rôle.
+        _jeSuisAdmin = membres.any((m) =>
+            m["id"] == _myId && (m["role"] as String?)?.toUpperCase() == "ADMIN");
+        /*
+         * SEMENCE DU COMPTEUR DE LECTURES : ce que les membres avaient déjà lu
+         * AVANT qu'on ouvre. Les trames `read` ne racontent que la suite.
+         *
+         * Sans elle, le compteur repartirait de zéro à chaque ouverture du
+         * groupe, et tout ce qui a été lu pendant qu'on regardait ailleurs
+         * serait invisible.
+         */
+        for (final m in membres) {
+          final id = m["id"];
+          final brut = m["lastReadAt"];
+          if (id is! String || brut is! String) continue;
+          final quand = DateTime.tryParse(brut);
+          if (quand == null) continue;
+          _avanceLecture(id, quand.millisecondsSinceEpoch);
+        }
+      });
+    } catch (_) {
+      // Repli sur `widget.memberNames` : rien à dire à l'utilisateur.
+    } finally {
+      _relitLesMembres = false;
+    }
+  }
+
+  /// Nom à afficher pour un expéditeur, dans un groupe.
+  ///
+  /// ⚠️ Une seule relecture est déclenchée par identifiant inconnu, et jamais
+  /// depuis `build` — un appel réseau dans une méthode de construction
+  /// repartirait à chaque image. D'où le report par `addPostFrameCallback`.
+  String _nomExpediteur(String? senderId) {
+    if (senderId == null) return "Membre";
+    final connu = _membresCharges[senderId] ?? widget.memberNames[senderId];
+    if (connu != null && connu.isNotEmpty) return connu;
+    // Inconnu : c'est probablement quelqu'un qui vient d'être ajouté au groupe.
+    if (!_relitLesMembres) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _chargeMembres());
+    }
+    return "Membre";
   }
 
   // Couleurs theme-aware (mode Nuit).
@@ -240,6 +415,11 @@ class _ChatScreenState extends State<ChatScreen>
       : Colors.red.shade50;
 
   String? _token;
+
+  /// Les envois de médias CHIFFRÉS en cours, par identifiant provisoire : le
+  /// fichier (pour la vignette) et l'avancement du téléversement.
+  final Map<String, ({MediaPickResult fichier, ValueNotifier<double> progression})>
+      _envoisChiffres = {};
   String _baseUrl = "";
   bool _uploading = false;
 
@@ -250,6 +430,10 @@ class _ChatScreenState extends State<ChatScreen>
   bool _recording = false;
   DateTime? _recordStarted;
   bool _recordLocked = false;
+
+  /// Le vocal verrouillé partira à VUE UNIQUE (le « 1 » de la barre
+  /// d'enregistrement). Remis à faux à chaque nouvel enregistrement.
+  bool _vocalVueUnique = false;
   Duration _recordDuration = Duration.zero;
   Timer? _recordTimer;
   bool _voiceActive = false;
@@ -265,6 +449,14 @@ class _ChatScreenState extends State<ChatScreen>
   Timer? _recordingTimeout;
   Message? _replyTo;
   Message? _editing; // message en cours d'édition (compose = mode édition)
+  /*
+   * Ce que l'écran a déjà affiché et que le serveur peut encore REFUSER —
+   * délai de 2 h ou de 24 h franchi selon SON horloge (07/10/2026). On garde
+   * le message d'avant jusqu'à la confirmation (`message_edited`,
+   * `message_deleted`), pour le remettre si le refus arrive.
+   */
+  final Map<String, Message> _modifsEnAttente = {};
+  final Map<String, Message> _suppressionsEnAttente = {};
 
   // ── Sélection d'un message (interaction long-press façon WhatsApp) ──
   String? _selectedMessageId;
@@ -286,8 +478,43 @@ class _ChatScreenState extends State<ChatScreen>
   String? _highlightedMessageId;
   final Map<String, GlobalKey> _messageKeys = {};
   final Map<String, ReplyPreview> _replySnapshots = {};
-  final _translateService = TranslateService();
+  /// Les traductions AFFICHÉES, par identifiant de message.
+  ///
+  /// 🔴 ELLES SURVIVENT À L'ÉCRAN depuis le 31/08/2026 : la carte est semée
+  /// depuis `MessageCache` à l'ouverture et écrite à chaque traduction. Avant,
+  /// elle ne vivait que le temps de la conversation ouverte — sortir et revenir
+  /// effaçait tout, et il fallait retraduire chaque message un par un.
   final Map<String, String> _translations = {};
+
+  /// La langue D'ORIGINE de chaque message traduit, pour l'afficher.
+  ///
+  /// Absente quand il n'y avait rien à traduire : la bulle n'annonce alors
+  /// aucune traduction, puisqu'il n'y en a pas eu.
+  final Map<String, String> _sourceTraduction = {};
+
+  /// Charge les traductions déjà faites pour cette conversation.
+  ///
+  /// ⚠️ FILTRÉ SUR LA LANGUE DE LECTURE COURANTE : une traduction faite vers
+  /// une autre langue n'est pas affichée. Elle reste en base — revenir à sa
+  /// langue précédente y retrouve son fil déjà traduit.
+  Future<void> _chargeTraductions() async {
+    if (!mounted) return;
+    final cible = context.read<LocaleController>().languageCode;
+    try {
+      final connues = await MessageCache.traductionsDe(widget.convId, cible);
+      if (!mounted || connues.isEmpty) return;
+      setState(() {
+        for (final e in connues.entries) {
+          _translations[e.key] = e.value.texte;
+          final src = e.value.source;
+          if (src != null) _sourceTraduction[e.key] = src;
+        }
+      });
+    } catch (_) {
+      // Cache illisible : on repart sans traduction, elles se referont à la
+      // demande. Rien à dire à l'utilisateur.
+    }
+  }
   final Set<String> _translating = {};
 
   // Lot D — scroll infini (chargement des messages plus anciens).
@@ -303,9 +530,17 @@ class _ChatScreenState extends State<ChatScreen>
       duration: const Duration(milliseconds: 900),
     )..repeat(reverse: true);
     ChatScreen.activeConvId = widget.convId;
+    if (widget.isGroup) _chargeMembres();
+    // Avant `_load()` : les traductions n'attendent pas le réseau, et une bulle
+    // qui s'affiche traduite dès la première image vaut mieux qu'une bulle qui
+    // se traduit sous les yeux une seconde plus tard.
+    _chargeTraductions();
     _load();
     _loadPinned();
     _loadDisappearing();
+    if (widget.partage != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _traiterPartage());
+    }
     _scrollCtrl.addListener(_onScroll);
     // Le basculement micro ↔ envoi écoute le CONTRÔLEUR et non `onChanged` :
     // le texte change aussi sans frappe — mise en forme WhatsApp appliquée à
@@ -320,6 +555,13 @@ class _ChatScreenState extends State<ChatScreen>
     // `_rebuildCombined` en refait les bulles.
     EnvoiMediaStore.instance.addListener(_surEnvois);
     _rtSub = rt.events.listen(_onRealtimeEvent);
+    // ⚠️ Une relève faite par un AUTRE écran doit aussi remplir ce fil : une
+    // enveloppe ne se relève qu’une fois. Voir `PileE2ee.releves`.
+    _relevesSub = context.e2ee?.releves.listen(_appliquerReleve);
+    // ⚠️ La reprise de l'archive au démarrage peut finir APRÈS l'ouverture du
+    // fil : elle le dit ici. Voir `E2eeSauvegarde.restaurations`.
+    _restaurationsSub =
+        context.e2ee?.sauvegarde.restaurations.listen(_surRestauration);
     _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) => _poll());
     // Comme pour les messages : on utilise le serveur temps réel (WebSocket / WebRTC signaling)
     // pas de Timer polling pour les appels, juste event-driven
@@ -333,9 +575,238 @@ class _ChatScreenState extends State<ChatScreen>
   /// pas à chaque caractère : le listener se déclenche aussi à chaque
   /// déplacement du curseur.
   void _onInputTextChanged() {
+    _majRequeteMention();
     final rempli = _inputCtrl.text.trim().isNotEmpty;
     if (rempli == _hasText) return;
     setState(() => _hasText = rempli);
+  }
+
+  // ══════════════════════════════════════════════
+  // MENTIONS @ — GROUPES SEULEMENT
+  // ══════════════════════════════════════════════
+
+  /// Les comptes désignés par un `@` dans le texte en cours de rédaction.
+  ///
+  /// 🔴 UNE MENTION DÉSIGNE UNE PERSONNE, PAS UNE CHAÎNE. Le texte porte
+  /// « @Dominique » en clair — lisible partout, y compris par un client qui
+  /// ignore les mentions — et cette liste retient QUI a été choisi. Sans elle,
+  /// notifier reviendrait à deviner un pseudo, ce qui échoue dès que deux
+  /// membres portent le même nom.
+  final List<MentionMessage> _mentionsEnCours = [];
+
+  /// Ce qui suit le `@` en cours de frappe, ou `null` si l'on n'est pas dans
+  /// une mention. Chaîne VIDE = « @ » seul, la liste s'affiche entière.
+  String? _requeteMention;
+
+  /// Vrai si je suis ADMINISTRATEUR de ce groupe.
+  ///
+  /// Conditionne la seule entrée réservée : « @tout le monde ». Le reste des
+  /// mentions est ouvert à tous les membres, comme sur WhatsApp.
+  bool _jeSuisAdmin = false;
+
+  /// Le libellé de la mention collective.
+  ///
+  /// 🔴 CE N'EST PAS UN COMPTE : c'est un raccourci qui se DÉPLIE en une
+  /// mention par membre au moment de l'insertion. Le serveur n'a donc aucun cas
+  /// particulier à connaître, et un client plus ancien reçoit des mentions
+  /// ordinaires plutôt qu'un code qu'il ne saurait pas lire.
+  ///
+  /// ⚠️ Le texte du message, lui, garde « @tout le monde » — une phrase, pas
+  /// vingt noms collés. C'est ce que voit le lecteur.
+  static const String _libelleTousLesMembres = "tout le monde";
+
+  /// Position du `@` qui a ouvert la liste, pour savoir quoi remplacer.
+  int _debutMention = -1;
+
+  /// Détecte si le curseur est dans un `@…` et met la liste à jour.
+  ///
+  /// ⚠️ ON REMONTE DEPUIS LE CURSEUR, jamais depuis le début du texte : un
+  /// message peut contenir plusieurs mentions déjà posées, et repartir du début
+  /// rouvrirait la liste sur la première d'entre elles pendant qu'on écrit à la
+  /// fin.
+  ///
+  /// La mention s'arrête à la première ESPACE : « @Jean Dupont » n'est donc pas
+  /// cherché en entier. C'est le comportement de WhatsApp, et il évite qu'une
+  /// phrase entière soit prise pour une requête après un `@` isolé.
+  void _majRequeteMention() {
+    if (!widget.isGroup) return;
+    final sel = _inputCtrl.selection;
+    final texte = _inputCtrl.text;
+    if (!sel.isValid || !sel.isCollapsed || sel.start > texte.length) {
+      if (_requeteMention != null) setState(() => _requeteMention = null);
+      return;
+    }
+    final avant = texte.substring(0, sel.start);
+    final at = avant.lastIndexOf('@');
+    if (at < 0) {
+      if (_requeteMention != null) setState(() => _requeteMention = null);
+      return;
+    }
+    // Le `@` doit ouvrir un mot : « alanya@exemple.com » n'est pas une mention.
+    if (at > 0 && !RegExp(r'\s').hasMatch(avant[at - 1])) {
+      if (_requeteMention != null) setState(() => _requeteMention = null);
+      return;
+    }
+    final requete = avant.substring(at + 1);
+    if (requete.contains(RegExp(r'\s'))) {
+      if (_requeteMention != null) setState(() => _requeteMention = null);
+      return;
+    }
+    if (_requeteMention == requete && _debutMention == at) return;
+    setState(() {
+      _requeteMention = requete;
+      _debutMention = at;
+    });
+  }
+
+  /// Les membres proposés, filtrés par ce qui suit le `@`.
+  ///
+  /// Se mentionner soi-même est écarté : on ne se notifie pas.
+  List<MapEntry<String, String>> _membresProposes() {
+    final requete = (_requeteMention ?? "").toLowerCase();
+    final source = <String, String>{
+      ...widget.memberNames,
+      // Les noms relus priment : ils sont plus frais que ceux passés à l'écran.
+      ..._membresCharges,
+    };
+    final entrees = source.entries
+        .where((e) => e.key != _myId && e.value.trim().isNotEmpty)
+        .where((e) => requete.isEmpty || e.value.toLowerCase().contains(requete))
+        .toList()
+      ..sort((a, b) => a.value.toLowerCase().compareTo(b.value.toLowerCase()));
+    return entrees;
+  }
+
+  /// Remplace le `@requête` en cours par `@Nom `, et retient le compte visé.
+  void _insereMention(String userId, String nom) {
+    final texte = _inputCtrl.text;
+    final sel = _inputCtrl.selection;
+    final fin = sel.isValid ? sel.start : texte.length;
+    if (_debutMention < 0 || _debutMention > fin) return;
+
+    // L'espace final n'est pas cosmétique : sans lui, le curseur reste DANS la
+    // mention et la liste se rouvre aussitôt sur le nom qu'on vient de choisir.
+    final remplacement = "@$nom ";
+    final nouveau = texte.replaceRange(_debutMention, fin, remplacement);
+    _inputCtrl.value = TextEditingValue(
+      text: nouveau,
+      selection:
+          TextSelection.collapsed(offset: _debutMention + remplacement.length),
+    );
+    setState(() {
+      _requeteMention = null;
+      _debutMention = -1;
+      // Une même personne ne figure qu'une fois : la mentionner deux fois dans
+      // un message ne doit pas la notifier deux fois.
+      _mentionsEnCours.removeWhere((m) => m.userId == userId);
+      _mentionsEnCours.add(MentionMessage(userId: userId, libelle: nom));
+    });
+  }
+
+  /// Insère « @tout le monde » et vise TOUS les membres du groupe.
+  ///
+  /// 🔴 LE RACCOURCI SE DÉPLIE ICI, pas au serveur. Le message part donc avec
+  /// une mention par membre — ce que tout client sait déjà lire — et le serveur
+  /// n'a aucun cas particulier à connaître. Un code spécial aurait demandé de
+  /// modifier les trois clients ET le serveur pour le même résultat.
+  ///
+  /// ⚠️ LE TEXTE PORTE UNE SEULE PHRASE, « @tout le monde », et non vingt noms
+  /// collés : c'est ce que lit le destinataire. La mise en évidence retrouve ce
+  /// libellé parce que chaque mention le porte à l'identique.
+  void _insereMentionTous() {
+    final tous = _membresProposes();
+    if (tous.isEmpty) return;
+    final texte = _inputCtrl.text;
+    final sel = _inputCtrl.selection;
+    final fin = sel.isValid ? sel.start : texte.length;
+    if (_debutMention < 0 || _debutMention > fin) return;
+
+    final remplacement = "@$_libelleTousLesMembres ";
+    final nouveau = texte.replaceRange(_debutMention, fin, remplacement);
+    _inputCtrl.value = TextEditingValue(
+      text: nouveau,
+      selection:
+          TextSelection.collapsed(offset: _debutMention + remplacement.length),
+    );
+    setState(() {
+      _requeteMention = null;
+      _debutMention = -1;
+      for (final m in tous) {
+        _mentionsEnCours.removeWhere((x) => x.userId == m.key);
+        // Tous portent le MÊME libellé : c'est lui qui sera retrouvé dans le
+        // texte, aussi bien pour l'envoi que pour la mise en évidence.
+        _mentionsEnCours.add(MentionMessage(
+            userId: m.key, libelle: _libelleTousLesMembres));
+      }
+    });
+  }
+
+  /// Les mentions à ENVOYER, réduites à celles encore présentes dans le texte.
+  ///
+  /// 🔴 SANS CE FILTRE, EFFACER « @Dominique » DU TEXTE LE NOTIFIERAIT QUAND
+  /// MÊME : la liste retient ce qui a été choisi, pas ce qui reste écrit.
+  /// Quelqu'un qui se ravise et supprime la mention ne doit déranger personne.
+  List<Map<String, String>> _mentionsAEnvoyer(String texte) {
+    final vues = <String>{};
+    final sortie = <Map<String, String>>[];
+    for (final m in _mentionsEnCours) {
+      if (vues.contains(m.userId)) continue;
+      if (!texte.contains("@${m.libelle}")) continue;
+      vues.add(m.userId);
+      sortie.add({"userId": m.userId, "libelle": m.libelle});
+    }
+    return sortie;
+  }
+
+  /// La liste des membres, au-dessus du champ de saisie.
+  Widget _panneauMentions() {
+    if (!widget.isGroup || _requeteMention == null) {
+      return const SizedBox.shrink();
+    }
+    final membres = _membresProposes();
+    // « @tout le monde » n'apparaît que pour un administrateur, et seulement
+    // si la frappe le désigne encore.
+    final proposeTous = _jeSuisAdmin &&
+        _libelleTousLesMembres
+            .toLowerCase()
+            .contains((_requeteMention ?? "").toLowerCase());
+    // Aucun membre ne correspond : on referme plutôt que d'afficher un panneau
+    // vide au-dessus du clavier.
+    if (membres.isEmpty && !proposeTous) return const SizedBox.shrink();
+    return Container(
+      constraints: const BoxConstraints(maxHeight: 200),
+      decoration: BoxDecoration(
+        color: _composerBg,
+        border: Border(top: BorderSide(color: _muted45.withValues(alpha: 0.3))),
+      ),
+      child: ListView.builder(
+        shrinkWrap: true,
+        padding: EdgeInsets.zero,
+        // +1 pour l'entrée collective, quand elle est proposée.
+        itemCount: membres.length + (proposeTous ? 1 : 0),
+        itemBuilder: (_, i) {
+          if (proposeTous && i == 0) {
+            return ListTile(
+              dense: true,
+              leading: Icon(Icons.groups_outlined, color: _accent),
+              title: Text("@$_libelleTousLesMembres",
+                  style: TextStyle(
+                      color: _iconNeutral, fontWeight: FontWeight.w600)),
+              subtitle: Text(tr(context, 'notify_members', {'n': '${_membresProposes().length}'}),
+                  style: TextStyle(color: _muted45, fontSize: 11)),
+              onTap: _insereMentionTous,
+            );
+          }
+          final e = membres[proposeTous ? i - 1 : i];
+          return ListTile(
+            dense: true,
+            leading: AvatarCircle(name: e.value, avatarUrl: null, radius: 16),
+            title: Text(e.value, style: TextStyle(color: _iconNeutral)),
+            onTap: () => _insereMention(e.key, e.value),
+          );
+        },
+      ),
+    );
   }
 
   /// Insère un emoji à la position du curseur, ou à la fin si le champ n'a
@@ -410,6 +881,22 @@ class _ChatScreenState extends State<ChatScreen>
 
   @override
   void dispose() {
+    /*
+     * 🔴 LE BANDEAU « CLÉ CHANGÉE » PART AVEC LA CONVERSATION. Il est posé sur
+     * le messager de toute l'application : sans ceci, il restait sur l'accueil
+     * (capture du user, 29/09/2026), à propos d'une conversation qu'on ne
+     * regarde plus. Tant qu'on n'y a pas répondu, il revient à la prochaine
+     * ouverture du fil.
+     *
+     * ⚠️ APRÈS LA TRAME : pendant `dispose`, l'arbre est verrouillé et le
+     * messager ne peut pas se reconstruire.
+     */
+    final messager = _messagerBandeau;
+    if (messager != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (messager.mounted) messager.clearMaterialBanners();
+      });
+    }
     ChatScreen.activeConvId = null;
     WidgetsBinding.instance.removeObserver(this);
     _typingDebounce?.cancel();
@@ -424,12 +911,16 @@ class _ChatScreenState extends State<ChatScreen>
     // l'objet du magasin.
     EnvoiMediaStore.instance.removeListener(_surEnvois);
     _rtSub?.cancel();
+    _relevesSub?.cancel();
+    _restaurationsSub?.cancel();
     try {
       context.read<CallController>().removeListener(_onCallActivity);
     } catch (_) {}
     _lockPulse.dispose();
     _voiceRecorder.cancel();
-    _translateService.dispose();
+    // Libère les traducteurs ML Kit gardés en mémoire. Les modèles téléchargés
+    // sur l'appareil, eux, restent — c'est tout l'intérêt.
+    libererTraducteurs();
     InlineAudioPlayer.stop();
     _inputCtrl.removeListener(_onInputTextChanged);
     _inputCtrl.dispose();
@@ -477,14 +968,40 @@ class _ChatScreenState extends State<ChatScreen>
         Timer(const Duration(milliseconds: 350), () => _runSearch(query));
   }
 
+  /// Cherche dans la conversation : d'abord ICI, puis sur le serveur.
+  ///
+  /// 🐛 « LA RECHERCHE NE FONCTIONNE PAS » (user, 10/10/2026). Elle ne
+  /// demandait qu'au serveur — qui, dans un fil CHIFFRÉ, n'a jamais le texte :
+  /// zéro résultat, toujours. Le texte en clair n'existe que sur l'appareil
+  /// (messages affichés et cache local) : c'est là qu'il faut chercher d'abord.
+  ///
+  /// ⚠️ LE SERVEUR GARDE SON RÔLE pour l'historique en clair qui n'est pas
+  /// encore descendu sur l'appareil : ses résultats s'ajoutent après, sans
+  /// doublon. Son échec (hors ligne) n'efface pas ce qu'on a trouvé ici.
   Future<void> _runSearch(String query) async {
+    final ici = <String, Message>{for (final m in _messages) m.id: m};
+    try {
+      final cache = await MessageCache.getConv(widget.convId)
+          .timeout(const Duration(seconds: 3), onTimeout: () => const []);
+      for (final m in cache) {
+        ici.putIfAbsent(m.id, () => m);
+      }
+    } catch (_) {}
+    final trouves = ici.values
+        .where((m) => !m.isDeleted && contientRecherche(m.content ?? '', query))
+        .toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    final ids = [for (final m in trouves) m.id];
     try {
       final results = await context
           .read<ChatRepository>()
           .searchMessages(widget.convId, query);
+      for (final id in results.map((r) => r["id"] as String?).whereType<String>()) {
+        if (!ids.contains(id)) ids.add(id);
+      }
+    } catch (_) {}
+    try {
       if (!mounted) return;
-      final ids =
-          results.map((r) => r["id"] as String?).whereType<String>().toList();
       setState(() {
         _searchResultIds = ids;
         _searchIndex = 0;
@@ -508,12 +1025,58 @@ class _ChatScreenState extends State<ChatScreen>
   // ══════════════════════════════════════════════
   // REALTIME
   // ══════════════════════════════════════════════
+  /// Le serveur REFUSE une modification ou une suppression que l'écran a déjà
+  /// affichée. On remet le message d'avant et on le dit. Rend `false` quand la
+  /// trame ne concerne aucune action en attente : d'autres la traitent.
+  bool _surRefus(Map<String, dynamic> e) {
+    final code = e["code"] as String?;
+    final messageId = e["messageId"] as String?;
+    if (code == null || messageId == null) return false;
+    final avant = _modifsEnAttente.remove(messageId);
+    final supprime = _suppressionsEnAttente.remove(messageId);
+    final retour = avant ?? supprime;
+    if (retour == null) return false;
+    setState(() {
+      final idx = _messages.indexWhere((x) => x.id == messageId);
+      if (idx >= 0) {
+        _messages[idx] = retour;
+        _rebuildCombined();
+      }
+    });
+    _cacheMsg(retour);
+    _showError(tr(
+        context,
+        code == delaiSuppressionDepasse
+            ? 'msg_suppr_trop_tard'
+            : code == delaiModificationDepasse
+                ? 'msg_modif_trop_tard'
+                : 'send_failed'));
+    return true;
+  }
+
   void _onRealtimeEvent(Map<String, dynamic> e) {
     if (!mounted) return;
     final type = e["type"];
+    if (type == "error" && _surRefus(e)) return;
     if (type == "message") {
-      final data = e["message"] as Map<String, dynamic>?;
-      if (data == null || data["convId"] != widget.convId) return;
+      final recu = e["message"] as Map<String, dynamic>?;
+      if (recu == null || recu["convId"] != widget.convId) return;
+      /*
+       * 🔴 DANS UN FIL CHIFFRÉ, UN TEXTE ARRIVÉ EN CLAIR NE S'AFFICHE PAS.
+       *
+       * Le serveur refuse tout texte en clair dans un fil chiffré ; un texte
+       * qui arrive quand même ne peut venir que de lui — erreur ou
+       * interposition. On le traite comme un message sans contenu : la relève
+       * ira chercher son enveloppe, s'il en a une, et c'est elle qui fait foi.
+       * Même règle que le web (`chat.tsx`, `e2ee-etat-memorise.mjs` ④).
+       *
+       * ⚠️ LE TEXTE SEULEMENT : les avis système portent un contenu légitime.
+       */
+      final data = _filChiffre &&
+              recu["type"] == "TEXT" &&
+              ((recu["content"] as String?) ?? '').isNotEmpty
+          ? {...recu, "content": null}
+          : recu;
       final msg = Message.fromJson(data);
       _cacheMsg(msg);
       final tempId = e["tempId"] as String?;
@@ -521,7 +1084,9 @@ class _ChatScreenState extends State<ChatScreen>
         final idx =
             tempId != null ? _messages.indexWhere((m) => m.id == tempId) : -1;
         if (idx >= 0) {
-          _messages[idx] = msg;
+          // Un « lu » a pu se poser sur la bulle avant l'écho : il reste.
+          _messages[idx] =
+              msg.avecStatut(_statutAuRemplacement(_messages[idx], msg));
         } else if (!_messages.any((m) => m.id == msg.id)) {
           _messages = [..._messages, msg];
         }
@@ -536,17 +1101,129 @@ class _ChatScreenState extends State<ChatScreen>
         // le son est donc le seul signal d'arrivée. Respecte le réglage
         // « Notifications de messages ».
         if (NotificationSettings.instance.messagesOn) {
-          RingtoneService.instance.playMessageReceived();
+          _sonnerMessageRecu(msg.senderId);
         }
       }
       _scrollToBottom();
+      /*
+       * 🔴 UN MESSAGE CHIFFRÉ ARRIVE VIDE, ET IL FAUT ALLER CHERCHER SON TEXTE.
+       *
+       * 🐛 `_releverChiffres()` n'était appelé qu'à l'ouverture de l'écran. Une
+       * enveloppe déposée APRÈS n'était donc jamais relevée : la ligne du fil
+       * arrivait par le temps réel, sans texte — le serveur n'en a pas — et la
+       * bulle restait vide jusqu'à ce qu'on sorte et revienne.
+       *
+       * ⚠️ LE TEMPS RÉEL PORTE LA LIGNE, PAS LE CONTENU. C'est exactement ce
+       * que le chiffrement de bout en bout implique : le serveur relaie une
+       * enveloppe qu'il ne peut pas ouvrir. Tout écran qui affiche un message
+       * chiffré doit donc faire DEUX pas, et non un.
+       *
+       * ⚠️ SEULEMENT SI LE FIL EST CHIFFRÉ : une conversation ordinaire n'a
+       * aucune enveloppe à relever, et l'appel coûterait une requête par
+       * message reçu.
+       */
+      if (_filChiffre && (msg.content ?? '').isEmpty) {
+        /*
+         * ⚠️ UN REPLI, ET IL DOIT ATTENDRE. `e2ee_arrivee` ci-dessous fait le
+         * travail dans le cas normal ; celui-ci ne sert que si le pont temps
+         * réel n'a pas pu prévenir — `previensDesPersonnes` rend `false` sans
+         * lever quand il est absent.
+         *
+         * ⚠️ RELEVER TOUT DE SUITE NE SERVIRAIT À RIEN : les enveloppes sont
+         * déposées après la ligne du fil. C'était le défaut de ma première
+         * correction — le bon appel, au mauvais moment.
+         */
+        Future<void>.delayed(const Duration(seconds: 2), () {
+          if (!mounted) return;
+          final toujoursVide = _messages
+              .any((x) => x.id == msg.id && (x.content ?? '').isEmpty);
+          if (toujoursVide) unawaited(_releverChiffres());
+        });
+      }
+      // Le message vient d'arriver : on le traduit sans attendre la prochaine
+      // ouverture du fil. La passe ne reprend que ce qui n'est pas déjà traduit.
+      _traduitAutomatiquement();
+    } else if (type == "e2ee_arrivee") {
+      /*
+       * 🔴 LE SIGNAL QUI DIT QUE LES ENVELOPPES SONT LÀ — ET LE MOBILE NE
+       * L'ÉCOUTAIT PAS.
+       *
+       * 🐛 Un message chiffré part en DEUX temps : la ligne du fil d'abord,
+       * les enveloppes ensuite. L'événement `message` arrive donc AVANT que le
+       * texte n'existe côté serveur : relever à ce moment-là ne trouve rien,
+       * et la bulle reste vide jusqu'à ce qu'on rouvre la conversation.
+       *
+       * Le serveur émet `e2ee_arrivee` APRÈS le dépôt, exactement pour ça. Le
+       * web l'écoute depuis toujours — `websocket-service.ts:490` — et c'est
+       * pourquoi l'affichage y était immédiat.
+       *
+       * ⚠️ DEUX ÉVÉNEMENTS POUR UN MESSAGE, C'EST LE PRIX DU BOUT EN BOUT : le
+       * serveur ne peut pas annoncer un contenu qu'il ne sait pas lire.
+       */
+      if (e["convId"] != widget.convId) return;
+      /*
+       * 🔴 GROUPE (lot 3) : pas d'enveloppe à relever, le chiffré est AVEC la
+       * ligne. On relit la page récente et on l'ouvre.
+       */
+      if (e["groupe"] == true) {
+        unawaited(_rafraichirGroupe());
+        return;
+      }
+      unawaited(_releverChiffres());
+    } else if (type == "e2ee_trousseau") {
+      /*
+       * La clé de CE groupe vient d'arriver (lot 7) : on la relève, et les
+       * bulles « en attente de la clé » se rouvrent sans quitter le fil.
+       */
+      if (e["convId"] != widget.convId) return;
+      final pile = context.e2ee;
+      unawaited(() async {
+        try {
+          await pile?.releverEtRanger();
+        } catch (_) {}
+        if (mounted) await _rafraichirGroupe();
+      }());
     } else if (type == "read") {
       if (e["convId"] != widget.convId) return;
       setState(() {
+        /*
+         * Jusqu'où CE membre a lu — c'est ce qui alimente le compteur en
+         * groupe.
+         *
+         * ⚠️ LE CHAMP S'APPELLE `userId`, PAS `readBy`. La trame du serveur est
+         * `{type:"read", convId, userId, at}` (`ws-server.mjs`) ; le web le
+         * renomme dans sa couche WebSocket, ce qui rend son code trompeur si
+         * on le recopie. `readBy` est accepté en second, au cas où le serveur
+         * s'aligne un jour sur ce nom.
+         *
+         * `at` est une chaîne ISO (`new Date()` sérialisé). Un serveur plus
+         * ancien ne l'envoie pas : le compteur s'en tient alors à sa semence,
+         * sans jamais afficher de chiffre faux.
+         */
+        final lecteur = e["userId"] ?? e["readBy"];
+        final quand = e["at"];
+        if (lecteur is String) {
+          final ms = quand is num
+              ? quand.toInt()
+              : (quand is String
+                  ? DateTime.tryParse(quand)?.millisecondsSinceEpoch
+                  : null);
+          if (ms != null) _avanceLecture(lecteur, ms);
+        }
+        // ⚠️ « EN ATTENTE » EST MARQUÉ LU, ET C'EST VOULU : le destinataire
+        // peut lire avant que le serveur nous ait répondu (voir
+        // `statutFusionne`). Un message en ÉCHEC, lui, n'est jamais parti.
         _messages = _messages
-            .map((m) => m.senderId == _myId && m.status != "READ"
+            .map((m) => m.senderId == _myId &&
+                    m.status != "READ" &&
+                    m.status != "FAILED"
                 ? Message(
                     id: m.id,
+                    chiffre: m.chiffre,
+                    vueUnique: m.vueUnique,
+                    vueUniqueOuverte: m.vueUniqueOuverte,
+                    vueUniqueEffacee: m.vueUniqueEffacee,
+                    mediaChiffre: m.mediaChiffre,
                     convId: m.convId,
                     senderId: m.senderId,
                     content: m.content,
@@ -554,6 +1231,7 @@ class _ChatScreenState extends State<ChatScreen>
                     status: "READ",
                     replyToId: m.replyToId,
                     replyTo: m.replyTo,
+                    statutCite: m.statutCite,
                     deletedAt: m.deletedAt,
                     editedAt: m.editedAt,
                     media: m.media,
@@ -563,17 +1241,42 @@ class _ChatScreenState extends State<ChatScreen>
                     expiresAt: m.expiresAt)
                 : m)
             .toList();
+        // 🐛 SANS CETTE LIGNE, L ÉCRAN NE CHANGEAIT PAS : `_messages` était à
+        // jour, mais la liste AFFICHÉE (`_combined`) gardait les anciennes
+        // bulles jusqu au prochain redessin complet — envoyer un autre message,
+        // rouvrir le fil (user, 28/09/2026 : « le premier prend 2 coches quand
+        // j envoie le second »).
+        _rebuildCombined();
       });
-    } else if (type == "message_status") {
+    } else if (type == "message_status" || type == "e2ee_distribue") {
+      // `e2ee_distribue` : un message CHIFFRÉ vient d'être relevé par un
+      // appareil du destinataire (acquittement, serveur d443124). Même forme
+      // que `message_status` — le pont serveur n'accepte que les verbes `e2ee_*`.
       final messageId = e["messageId"] as String?;
       final newStatus = e["status"] as String?;
       if (messageId == null || newStatus == null) return;
+      /*
+       * ⚠️ UN ÉTAT PEUT PRÉCÉDER SON MESSAGE. Le destinataire relève avant que
+       * le serveur nous ait répondu (il attend Google pour la notification) :
+       * notre bulle porte encore son identifiant PROVISOIRE, et cet état ne
+       * trouverait personne. On le garde, et le remplacement l'appliquera.
+       */
+      if (!_messages.any((m) => m.id == messageId)) {
+        _statutsEnAvance[messageId] = statutFusionne(
+            affiche: _statutsEnAvance[messageId] ?? 'SENT', recu: newStatus);
+        return;
+      }
       setState(() {
         _messages = _messages
             .map((m) => m.id == messageId &&
                     _statusRank(newStatus) > _statusRank(m.status)
                 ? Message(
                     id: m.id,
+                    chiffre: m.chiffre,
+                    vueUnique: m.vueUnique,
+                    vueUniqueOuverte: m.vueUniqueOuverte,
+                    vueUniqueEffacee: m.vueUniqueEffacee,
+                    mediaChiffre: m.mediaChiffre,
                     convId: m.convId,
                     senderId: m.senderId,
                     content: m.content,
@@ -581,6 +1284,7 @@ class _ChatScreenState extends State<ChatScreen>
                     status: newStatus,
                     replyToId: m.replyToId,
                     replyTo: m.replyTo,
+                    statutCite: m.statutCite,
                     deletedAt: m.deletedAt,
                     editedAt: m.editedAt,
                     media: m.media,
@@ -590,11 +1294,51 @@ class _ChatScreenState extends State<ChatScreen>
                     expiresAt: m.expiresAt)
                 : m)
             .toList();
+        // 🐛 SANS CETTE LIGNE, L ÉCRAN NE CHANGEAIT PAS : `_messages` était à
+        // jour, mais la liste AFFICHÉE (`_combined`) gardait les anciennes
+        // bulles jusqu au prochain redessin complet — envoyer un autre message,
+        // rouvrir le fil (user, 28/09/2026 : « le premier prend 2 coches quand
+        // j envoie le second »).
+        _rebuildCombined();
       });
+    } else if (type == "vue_unique_ouverte" || type == "vue_unique_effacee") {
+      /*
+       * VUE UNIQUE : quelqu'un a ouvert, ou le fichier est effacé.
+       *
+       * « Ouverte » ne vaut que pour l'expéditeur (quelqu'un a vu) et pour MOI
+       * si c'est moi qui ai ouvert, depuis un autre appareil : la bulle de ce
+       * téléphone ne doit plus proposer d'ouvrir. L'ouverture d'un AUTRE
+       * membre du groupe ne change rien à la mienne.
+       */
+      final messageId = e["messageId"] as String?;
+      if (messageId == null || e["convId"] != widget.convId) return;
+      final efface = type == "vue_unique_effacee";
+      final parQui = e["userId"] as String?;
+      setState(() {
+        _messages = [
+          for (final m in _messages)
+            if (m.id != messageId)
+              m
+            else if (efface)
+              m.avecVueUnique(effacee: true)
+            else if (m.senderId == _myId || parQui == _myId)
+              m.avecVueUnique(ouverte: true)
+            else
+              m,
+        ];
+        _rebuildCombined();
+      });
+      for (final m in _messages) {
+        if (m.id == messageId) unawaited(MessageCache.upsert(m, widget.convId));
+      }
     } else if (type == "message_deleted") {
       final messageId = e["messageId"] as String?;
       final scope = e["scope"] as String? ?? "me";
       if (messageId == null || e["convId"] != widget.convId) return;
+      _suppressionsEnAttente.remove(messageId);
+      // L'accueil le fait aussi : c'est sans effet de le faire deux fois.
+      unawaited(MessageCache.appliquerSuppression(messageId, scope)
+          .catchError((_) {}));
       setState(() {
         if (scope == "me") {
           _messages = _messages.where((m) => m.id != messageId).toList();
@@ -603,6 +1347,11 @@ class _ChatScreenState extends State<ChatScreen>
               .map((m) => m.id == messageId
                   ? Message(
                       id: m.id,
+                      chiffre: m.chiffre,
+                      vueUnique: m.vueUnique,
+                      vueUniqueOuverte: m.vueUniqueOuverte,
+                      vueUniqueEffacee: m.vueUniqueEffacee,
+                      mediaChiffre: m.mediaChiffre,
                       convId: m.convId,
                       senderId: m.senderId,
                       content: null,
@@ -610,12 +1359,14 @@ class _ChatScreenState extends State<ChatScreen>
                       status: m.status,
                       replyToId: m.replyToId,
                       replyTo: m.replyTo,
+                      statutCite: m.statutCite,
                       deletedAt: DateTime.now(),
                       media: const [],
                       createdAt: m.createdAt)
                   : m)
               .toList();
         }
+        _rebuildCombined(); // même oubli que pour « lu » et les états
       });
     } else if (type == "typing") {
       if (e["convId"] != widget.convId) return;
@@ -646,6 +1397,7 @@ class _ChatScreenState extends State<ChatScreen>
       final messageId = e["messageId"] as String?;
       final content = e["content"] as String?;
       if (messageId == null || content == null) return;
+      _modifsEnAttente.remove(messageId);
       final editedAtStr = e["editedAt"] as String?;
       final editedAt =
           (editedAtStr != null ? DateTime.tryParse(editedAtStr) : null) ??
@@ -654,6 +1406,14 @@ class _ChatScreenState extends State<ChatScreen>
       if (idx < 0) return;
       setState(() {
         _messages[idx] = _withEdited(_messages[idx], content, editedAt);
+        // ⚠️ La liste RENDUE est `_combined`, pas `_messages` : sans cette
+        // reconstruction, elle continue de pointer l'ANCIEN objet et le texte
+        // ne bouge pas d'un pixel. Le gestionnaire de réactions, juste
+        // au-dessus, s'en passe pour une raison qui ne vaut que pour lui : il
+        // MUTE l'objet en place (`m.reactions = ...`), donc la même référence
+        // est déjà dans `_combined`. Ici on REMPLACE l'objet — il faut le
+        // reporter.
+        _rebuildCombined();
       });
     } else if (type == "message_pinned") {
       if (e["convId"] != widget.convId) return;
@@ -688,6 +1448,15 @@ class _ChatScreenState extends State<ChatScreen>
       // Reconnexion : ce qui s'est produit pendant la coupure n'a jamais été
       // reçu, et un événement WebSocket ne se rejoue pas. On rattrape.
       _rafraichitAppels();
+      /*
+       * 🐛 LES MESSAGES CHIFFRÉS N'ÉTAIENT PAS RATTRAPÉS. Leur sonnette
+       * (`e2ee_arrivee`) partie pendant la coupure ne sera jamais rejouée :
+       * sans cette relève, ils restaient « indisponibles » jusqu'à la
+       * réouverture du fil. Elle AJOUTE aussi les bulles absentes
+       * (`fusionnerReleve`, cas ②). Le web le faisait déjà
+       * (`subscribeToWsConnected` → `refreshMessages`).
+       */
+      unawaited(_releverChiffres());
     }
   }
 
@@ -721,6 +1490,32 @@ class _ChatScreenState extends State<ChatScreen>
     // du message, dans _onRealtimeEvent.
   }
 
+  /// Joue le son d'arrivée d'un message — celui de la LISTE DE CONTACTS de
+  /// l'expéditeur s'il en porte un, l'embarqué sinon.
+  ///
+  /// ⚠️ LE SERVICE EST LU AVANT LE MOINDRE `await` : on ne consulte pas
+  /// `context` après une coupure asynchrone, l'écran pouvant avoir été démonté
+  /// entre-temps.
+  ///
+  /// ⚠️ LE DÉLAI EST BORNÉ et l'échec vaut « pas de son personnalisé », comme à
+  /// l'arrivée d'un appel : un message ne doit pas attendre le réseau pour
+  /// s'annoncer. Le cache des listes est en mémoire, donc la réponse est
+  /// immédiate dans le cas normal ; la borne ne couvre que la lecture du jeton.
+  ///
+  /// L'anti-rafale vit dans `playMessageReceived`, pas ici.
+  Future<void> _sonnerMessageRecu(String expediteurId) async {
+    final sonneries = context.read<SonneriesDeListes>();
+    final son = await sonneries
+        .sonneriePourExpediteur(expediteurId: expediteurId)
+        .timeout(const Duration(milliseconds: 400), onTimeout: () => null)
+        .catchError((_) => null);
+    // Livré : se joue depuis le paquet, sans réseau ni jeton.
+    RingtoneService.instance.playMessageReceived(
+      asset: son != null && son.estLivree ? son.valeur : null,
+      url: son != null && !son.estLivree ? son.valeur : null,
+    );
+  }
+
   void _markReadRemote() {
     final rt = context.read<RealtimeClient>();
     if (rt.connected) {
@@ -730,12 +1525,196 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
+  /// Recolle le texte que NOUS connaissons sur les lignes que le serveur rend
+  /// vides.
+  ///
+  /// 🔴 SANS ÇA, NOS PROPRES MESSAGES CHIFFRÉS S'EFFAÇAIENT À CHAQUE
+  /// RECHARGEMENT.
+  ///
+  /// 🐛 Le chemin était : on envoie, on range le clair dans le cache local, et
+  /// au rechargement suivant `putConv` ÉCRASE tout le cache avec ce que rend le
+  /// serveur — c'est-à-dire des lignes SANS TEXTE, puisqu'il n'en a pas.
+  ///
+  /// ⚠️ ET `_releverChiffres()` NE PEUT PAS LE RATTRAPER : il remplit à partir
+  /// des enveloppes qui nous sont ADRESSÉES, et on ne s'en envoie pas à
+  /// soi-même. Le texte de nos propres messages n'existe donc nulle part
+  /// ailleurs que dans ce cache et dans l'archive.
+  ///
+  /// 🔴 ON NE REMPLACE JAMAIS UN TEXTE QUE LE SERVEUR DONNE. On ne comble que
+  /// le vide : une conversation ordinaire passe ici sans rien changer, et une
+  /// modification faite ailleurs n'est pas écrasée par notre copie périmée.
+  List<Message> _garderLeClairConnu(List<Message> duServeur, List<Message> connus) {
+    final textes = <String, String>{
+      for (final m in [...connus, ..._messages])
+        if ((m.content ?? '').isNotEmpty) m.id: m.content!,
+    };
+    // Le DESCRIPTEUR d'un média chiffré, clé comprise (chapitre 23) : le
+    // serveur rend ce message sans lui — il ne l'a jamais eu.
+    final descripteurs = <String, DescripteurMedia>{
+      for (final m in [...connus, ..._messages])
+        if (m.mediaChiffre != null) m.id: m.mediaChiffre!,
+    };
+    if (textes.isEmpty && descripteurs.isEmpty) return duServeur;
+
+    bool aCompleter(Message m) =>
+        m.deletedAt == null &&
+        (((m.content ?? '').isEmpty && textes[m.id] != null) ||
+            (m.mediaChiffre == null && descripteurs[m.id] != null));
+
+    return [
+      for (final m in duServeur)
+        if (!aCompleter(m))
+          m
+        else
+          Message(
+            id: m.id,
+            chiffre: m.chiffre,
+            vueUnique: m.vueUnique,
+            vueUniqueOuverte: m.vueUniqueOuverte,
+            vueUniqueEffacee: m.vueUniqueEffacee,
+            mediaChiffre: m.mediaChiffre ?? descripteurs[m.id],
+            convId: m.convId,
+            senderId: m.senderId,
+            content: (m.content ?? '').isEmpty ? (textes[m.id] ?? m.content) : m.content,
+            type: m.type,
+            status: m.status,
+            replyToId: m.replyToId,
+            media: m.media,
+            createdAt: m.createdAt,
+            deletedAt: m.deletedAt,
+            editedAt: m.editedAt,
+            expiresAt: m.expiresAt,
+            replyTo: m.replyTo,
+            reactions: m.reactions,
+            starred: m.starred,
+            mentions: m.mentions,
+            statutCite: m.statutCite,
+          ),
+    ];
+  }
+
+  /// Ouvre les messages de GROUPE chiffrés d'une page (lot 3, chapitre 34).
+  ///
+  /// 🔴 RIEN NE SE CONSOMME : le chiffré reste sur le serveur et se relit à
+  /// chaque chargement, avec le trousseau du coffre. Le cache sert l'affichage
+  /// immédiat et hors ligne, comme pour un message en clair.
+  ///
+  /// ⚠️ UN ÉCHEC LAISSE LA BULLE VIDE (clé pas encore reçue, signature
+  /// refusée) : « indisponible sur cet appareil ». Jamais de texte deviné.
+  /// Les messages de groupe dont la clé n'est pas encore sur ce téléphone
+  /// (lot 7) : leur bulle dit « en attente de la clé du groupe ».
+  final Set<String> _attenteCle = {};
+
+  Future<List<Message>> _ouvrirGroupe(List<Message> page) async {
+    final pile = context.e2ee;
+    if (pile == null || !page.any((m) => m.chiffreGroupe != null)) return page;
+    final sortie = <Message>[];
+    for (final m in page) {
+      final c = m.chiffreGroupe;
+      if (c == null || m.isDeleted) {
+        sortie.add(m);
+        continue;
+      }
+      final (clair, echec) = await pile.fil.groupe.lire(
+          convId: widget.convId, messageId: m.id, expediteurId: m.senderId, chiffre: c);
+      if (clair == null) {
+        if (echec == EchecGroupe.cleAbsente) _attenteCle.add(m.id);
+        sortie.add(m);
+        continue;
+      }
+      _attenteCle.remove(m.id);
+      sortie.add(m.avecDechiffre(texte: clair.texte, media: clair.media));
+      unawaited(MessageCache.rangeTexteDechiffre(
+        id: m.id,
+        convId: widget.convId,
+        expediteurId: m.senderId,
+        texte: clair.texte,
+        quand: m.createdAt,
+        media: clair.media,
+        genre: clair.genre,
+        replyToId: clair.reponseA,
+      ).then((_) {}, onError: (_) {}));
+    }
+    return sortie;
+  }
+
+  /// Un message de GROUPE chiffré vient d'arriver (`e2ee_arrivee`, `groupe`) :
+  /// on relit la page récente, on l'ouvre, et on la fusionne.
+  ///
+  /// ⚠️ L'HISTORIQUE DÉJÀ REMONTÉ ET LES ENVOIS EN COURS RESTENT : la page du
+  /// serveur ne porte que les plus récents, et pas nos bulles d'attente.
+  Future<void> _rafraichirGroupe() async {
+    if (!mounted) return;
+    try {
+      final repo = context.read<ChatRepository>();
+      final page = await repo.getMessages(widget.convId);
+      if (!mounted) return;
+      final ouverts = _garderLeClairConnu(
+          (await _ouvrirGroupe(page)).reversed.toList(), _messages);
+      if (!mounted || ouverts.isEmpty) return;
+      final ids = {for (final m in ouverts) m.id};
+      final plusAncien = ouverts.first.createdAt;
+      final avant = [
+        for (final m in _messages)
+          if (!ids.contains(m.id) && m.createdAt.isBefore(plusAncien)) m,
+      ];
+      final attente = [
+        for (final m in _messages)
+          if (!ids.contains(m.id) && m.id.startsWith('tmp-') && !_envoisChiffres.containsKey(m.id)) m,
+      ];
+      final nouveaux = ouverts
+          .where((m) => !_messages.any((x) => x.id == m.id) && m.senderId != _myId)
+          .toList();
+      setState(() {
+        _messages = [
+          ...avant,
+          ...garderEnvoisEnCours(ouverts, _messages, _envoisChiffres.keys.toSet()),
+          ...attente,
+        ];
+        _rebuildCombined();
+      });
+      for (final m in ouverts) {
+        _cacheMsg(m);
+      }
+      if (nouveaux.isNotEmpty) {
+        _markReadRemote();
+        if (NotificationSettings.instance.messagesOn) {
+          _sonnerMessageRecu(nouveaux.last.senderId);
+        }
+        _scrollToBottom();
+      }
+    } catch (_) {
+      // Le réseau a bronché : la prochaine ouverture relira tout.
+    }
+  }
+
   Future<void> _load() async {
     // _myId est désormais un getter (toujours à jour) — plus besoin de le figer ici.
     _baseUrl = context.read<ApiClient>().baseUrl;
     initMediaIntegration(_baseUrl);
-    _token = await context.read<TokenStorage>().accessToken;
-    final cached = await MessageCache.getConv(widget.convId);
+    /*
+     * 🔴 LE CACHE D'ABORD, LE JETON ENSUITE — et l'ordre n'est pas cosmétique.
+     *
+     * 🐛 `accessToken` LIT LE COFFRE SÉCURISÉ, qui passe par le canal de
+     * plateforme. Quand ce canal est occupé — et il l'était, par les cinquante
+     * écritures de pré-clés au démarrage — cette lecture ne revient pas, et
+     * l'écran reste en chargement INFINI alors que les messages sont là, dans le
+     * cache local, disponibles immédiatement.
+     *
+     * ⚠️ AUCUN AFFICHAGE NE DOIT DÉPENDRE D'UNE LECTURE DE COFFRE SÉCURISÉ. Le
+     * jeton ne sert qu'aux appels réseau qui suivent ; les messages déjà connus
+     * n'en ont pas besoin. Les faire attendre derrière lui, c'était accepter que
+     * n'importe quelle lenteur du coffre vide l'écran.
+     */
+    /*
+     * ⚠️ LE CACHE AUSSI PASSE PAR LE CANAL DE PLATEFORME. `sqflite` ouvre sa
+     * base a travers lui : la lecture qui doit NOUS SAUVER de l attente peut
+     * elle-meme attendre. Trois secondes, puis on continue sans elle — un
+     * ecran vide qui se remplit ensuite vaut mieux qu un ecran qui tourne.
+     */
+    final cached = await MessageCache.getConv(widget.convId)
+        .timeout(const Duration(seconds: 3), onTimeout: () => const [])
+        .catchError((_) => const <Message>[]);
     if (cached.isNotEmpty && mounted) {
       setState(() {
         _messages = cached;
@@ -747,11 +1726,30 @@ class _ChatScreenState extends State<ChatScreen>
       }
       _scrollToBottom(immediat: true);
     }
+
+    // Le jeton n'est nécessaire qu'à partir d'ici, pour le réseau.
+    if (!mounted) return;
+    /*
+     * ⚠️ LE COFFRE SÉCURISÉ A DROIT À CINQ SECONDES, PAS DAVANTAGE. Il passe
+     * par le canal de plateforme, qui est une file d'attente partagée : si
+     * quelque chose l'occupe, cette lecture ne revient pas, et rien ici ne la
+     * réveillerait. Cinq secondes sans réponse, c'est déjà une panne ; mieux
+     * vaut continuer sans jeton — les appels réseau échoueront proprement —
+     * que laisser l'écran tourner à vide.
+     */
+    _token = await context
+        .read<TokenStorage>()
+        .accessToken
+        .timeout(const Duration(seconds: 5), onTimeout: () => null);
+
     try {
       final repo = context.read<ChatRepository>();
-      final msgs = await repo.getMessages(widget.convId);
+      final page = await repo.getMessages(widget.convId);
       if (!mounted) return;
-      final reversed = msgs.reversed.toList();
+      // Groupe chiffré : chaque message porte son chiffré, relu ici (lot 3).
+      final msgs = await _ouvrirGroupe(page);
+      if (!mounted) return;
+      final reversed = _garderLeClairConnu(msgs.reversed.toList(), cached);
       await MessageCache.putConv(widget.convId, reversed);
       setState(() {
         _messages = reversed;
@@ -763,9 +1761,33 @@ class _ChatScreenState extends State<ChatScreen>
       }
       _markReadRemote();
       _scrollToBottom(immediat: true);
+      _traduitAutomatiquement();
     } catch (_) {
       if (mounted) setState(() => _loading = false);
+    } finally {
+      /*
+       * 🔴 LE FILET QUI REND LE CHARGEMENT INFINI IMPOSSIBLE.
+       *
+       * 🐛 Les deux corrections précédentes — le cache avant le jeton, les
+       * pré-clés groupées — traitaient DES CAUSES. Celle-ci traite le
+       * SYMPTÔME, et c'est volontaire : tant qu'un seul chemin peut sortir
+       * d'ici sans éteindre l'indicateur, l'écran peut encore rester bloqué,
+       * et la prochaine cause sera une nouvelle découverte en production.
+       *
+       * ⚠️ UN INDICATEUR DE CHARGEMENT S'ÉTEINT DANS UN `finally`, JAMAIS
+       * AILLEURS. Le mettre à faux à la fin du `try` laisse le cas d'erreur
+       * découvert ; le mettre dans le `catch` laisse le cas du `return`
+       * anticipé. Seul le `finally` couvre les trois sorties.
+       */
+      if (mounted && _loading) setState(() => _loading = false);
     }
+    // Les enveloppes chiffrées : leur texte n est pas dans `getMessages`.
+    // L'état du chiffrement : il commande la bannière.
+    unawaited(_lireEtatChiffrement());
+    unawaited(_verifierChangementDeCle());
+    unawaited(_releverChiffres());
+    unawaited(_completerParArchive());
+
     // Charge aussi les appels de cette conversation pour les afficher façon WhatsApp
     _loadCalls();
   }
@@ -790,14 +1812,24 @@ class _ChatScreenState extends State<ChatScreen>
     setState(() => _loadingOlder = true);
     final cursor = _messages.first.id;
     try {
-      final older = await context
-          .read<ChatRepository>()
-          .getMessages(widget.convId, cursor: cursor);
+      final repoAncien = context.read<ChatRepository>();
+      final older = await _ouvrirGroupe(
+          await repoAncien.getMessages(widget.convId, cursor: cursor));
       if (!mounted) return;
       if (older.isEmpty) {
         _hasMoreOlder = false;
       } else {
-        final newMsgs = older.reversed.toList();
+        /*
+         * ⚠️ UNE PAGE ANCIENNE D'UN FIL CHIFFRÉ ARRIVE SANS TEXTE : le serveur
+         * ne l'a pas. Le texte déchiffré est dans le cache local — on le
+         * recolle, comme au premier chargement. Sans cela, remonter
+         * l'historique montrait des bulles vides.
+         */
+        final connus = await MessageCache.getConv(widget.convId)
+            .timeout(const Duration(seconds: 3), onTimeout: () => const [])
+            .catchError((_) => const <Message>[]);
+        if (!mounted) return;
+        final newMsgs = _garderLeClairConnu(older.reversed.toList(), connus);
         final before =
             _scrollCtrl.hasClients ? _scrollCtrl.position.maxScrollExtent : 0.0;
         _loadedOlder = true;
@@ -829,8 +1861,26 @@ class _ChatScreenState extends State<ChatScreen>
     if (context.read<RealtimeClient>().connected) return;
     try {
       final repo = context.read<ChatRepository>();
-      final latest = (await repo.getMessages(widget.convId)).reversed.toList();
+      /*
+       * 🔴 LES TEXTES CONNUS SONT RECOLLÉS, comme à l'ouverture du fil.
+       *
+       * 🐛 CE RELAIS REMPLAÇAIT LES BULLES PAR LA PAGE DU SERVEUR, qui n'a
+       * jamais le texte d'un message chiffré. Il tourne quand la connexion
+       * temps réel est coupée — donc précisément au retour du réseau, avant
+       * qu'elle revienne : toute la conversation passait à « indisponible sur
+       * cet appareil », et la relève ne remplissait ensuite que les nouveaux
+       * messages (test T5 du user, 29/09/2026).
+       */
+      final page = await repo.getMessages(widget.convId);
       if (!mounted) return;
+      final duServeur = _garderLeClairConnu(
+          (await _ouvrirGroupe(page)).reversed.toList(), _messages);
+      if (!mounted) return;
+      // 🐛 La page du serveur n'a pas les bulles d'attente des médias
+      // chiffrés : sans cette garde, un PDF envoyé au retour du sélecteur de
+      // fichiers disparaissait (voir `envois_chiffres_fil.dart`).
+      final latest = garderEnvoisEnCours(
+          duServeur, _messages, _envoisChiffres.keys.toSet());
       if (_signature(latest) == _signature(_messages)) return;
       final hadMore = latest.length > _messages.length;
       final atBottom = !_scrollCtrl.hasClients ||
@@ -898,6 +1948,7 @@ class _ChatScreenState extends State<ChatScreen>
     all.sort((a, b) => _dateOfCombined(a).compareTo(_dateOfCombined(b)));
     final avant = _combined.length;
     _combined = _regroupeMedias(all);
+    _frontiere = indiceFrontiere(_combined);
     // 🔬 Trace temporaire : un changement du NOMBRE d'éléments déplace tout ce
     // qui suit dans une liste ancrée en haut. C'est l'un des deux suspects.
     if (avant != _combined.length) {
@@ -931,7 +1982,6 @@ class _ChatScreenState extends State<ChatScreen>
       if (x is! Message) return false;
       if (x.media.isEmpty) return false;
       if (x.isDeleted) return false;
-      if ((x.content ?? '').isNotEmpty) return false;
       if (x.replyToId != null) return false;
       if (x.reactions.isNotEmpty) return false;
       if (x.starred) return false;
@@ -965,10 +2015,15 @@ class _ChatScreenState extends State<ChatScreen>
         lot.add(msg);
         j++;
       }
-      if (lot.length > 1) {
+      // Au plus UNE légende par lot, comme le web (`groupMediaRuns`) : deux
+      // légendes ne tiennent pas sous une seule grille, et on préfère alors ne
+      // pas regrouper plutôt que d'en perdre une.
+      final legendes =
+          lot.where((m) => (m.content ?? '').trim().isNotEmpty).length;
+      if (lot.length > 1 && legendes <= 1) {
         sortie.add(GroupeMedias(lot));
       } else {
-        sortie.add(courant);
+        sortie.addAll(lot);
       }
       i = j;
     }
@@ -982,6 +2037,312 @@ class _ChatScreenState extends State<ChatScreen>
   /// vide, donc ne pouvait jamais découvrir un appel nouveau : un seul appel en
   /// cache suffisait à ce que tous les rechargements suivants relisent ce même
   /// cache. L'événement WebSocket arrivait bien, mais ne changeait rien.
+
+  /// Relève les enveloppes chiffrées et remplit le texte des messages vides.
+  ///
+  /// 🔴 SANS CET APPEL, LE MOBILE NE LIT RIEN. Un message chiffré arrive avec un
+  /// `content` VIDE — le serveur ne l'a jamais eu. Le texte est dans une
+  /// enveloppe qu'il faut relever et déchiffrer soi-même. Tant que personne ne
+  /// le faisait, le fil restait désespérément vide côté mobile.
+  ///
+  /// ⚠️ ON ACQUITTE APRÈS AVOIR DÉCHIFFRÉ, jamais avant — c'est `relever` qui
+  /// s'en charge. Une enveloppe acquittée est définitivement perdue : le ratchet
+  /// a avancé et la clé du message est détruite.
+  ///
+  /// ⚠️ NE LÈVE JAMAIS. Un échec de déchiffrement ne doit pas empêcher
+  /// l'affichage des messages en clair de la même conversation.
+  /// Le fil est-il chiffré ?
+  ///
+  /// ⚠️ ON DEMANDE AU SERVEUR plutôt que de le deviner du contenu des messages :
+  /// un seul message ancien, arrivé en clair avant l'activation, ferait conclure
+  /// que le fil ne l'est pas — et la bannière clignoterait au défilement.
+  bool _filChiffre = false;
+
+  /// Peut-on modifier ce message ?
+  ///
+  /// 🐛 « MODIFIER » ÉTAIT PROPOSÉ SUR UNE BULLE CHIFFRÉE, et le nouveau texte
+  /// partait EN CLAIR : écrit dans `message.content`, remonté dans l'aperçu de
+  /// la liste, diffusé aux participants. Le serveur le refuse désormais
+  /// (`CONVERSATION_CHIFFREE`) ; l'écran ne doit pas le proposer, d'autant qu'il
+  /// affiche la modification AVANT la réponse du serveur.
+  ///
+  /// ⚠️ RÉTABLI DANS UN FIL CHIFFRÉ (07/10/2026, « modifier le message ne
+  /// donne plus ») pour un message CHIFFRÉ déjà envoyé : le nouveau texte part
+  /// chiffré (`_modifierChiffre`). Un ancien message écrit en clair avant
+  /// l'activation reste non modifiable — le serveur le refuse.
+  bool _peutModifier(Message m) =>
+      m.senderId == _myId &&
+      m.type == 'TEXT' &&
+      // Deux heures pour modifier (décision du user, 07/10/2026).
+      peutEncoreModifier(m.createdAt) &&
+      (!_filChiffre ||
+          (m.chiffre && !m.id.startsWith('tmp-') && m.status != 'FAILED'));
+
+  /// Peut-on transférer ce message ?
+  ///
+  /// ⚠️ LE SERVEUR RECOPIE `content`, ET UN TEXTE CHIFFRÉ N'EN A PAS : il
+  /// produirait une bulle vide chez le destinataire. Les médias, eux, ne sont
+  /// pas chiffrés et restent transférables — même règle que
+  /// `backend-alanya/src/lib/e2ee-clair.mjs`.
+  ///
+  /// ⚠️ RÉTABLI POUR LES FILS CHIFFRÉS (07/10/2026) : le téléphone renvoie
+  /// lui-même le contenu en clair qu'il a (`transfert_appareil.dart`).
+  bool _peutTransferer(Message m) =>
+      // Une vue unique ne se transfère pas : le serveur le refuse aussi.
+      !m.vueUnique &&
+      !m.isDeleted &&
+      !m.id.startsWith('tmp-') &&
+      // Un message chiffré dont l'appareil n'a ni le texte ni le média.
+      ((m.content ?? '').trim().isNotEmpty ||
+          m.mediaChiffre != null ||
+          (m.media.isNotEmpty && !m.media.first.chiffre));
+
+  Future<void> _lireEtatChiffrement() async {
+    final pile = context.e2ee;
+    if (pile == null) return;
+    /*
+     * ⚠️ LA MÉMOIRE D'ABORD, LE SERVEUR ENSUITE. Un fil déjà vu chiffré
+     * s'affiche chiffré tout de suite, et le reste même si le serveur
+     * répond le contraire (voir `E2eeFil.noteEtat`).
+     */
+    await pile.fil.chargerMemoire();
+    if (mounted && pile.fil.estChiffree(widget.convId) && !_filChiffre) {
+      setState(() => _filChiffre = true);
+    }
+    try {
+      final r = await pile.fil.etat(widget.convId);
+      if (mounted && r != _filChiffre) setState(() => _filChiffre = r);
+    } catch (_) {
+      // Sans réponse, on n'affirme rien : pas de bannière plutôt qu'une fausse.
+    }
+  }
+
+  /// Avertit si la clé du correspondant a changé.
+  ///
+  /// 🔴 ON AVERTIT, ON NE BLOQUE JAMAIS. Un changement de clé est soit une
+  /// réinstallation, soit une interposition — et les deux sont INDISTINGUABLES.
+  /// Bloquer punirait la réinstallation, de loin le cas le plus fréquent.
+  ///
+  /// ⚠️ LA SEULE ACTION UTILE EST DE COMPARER LE CODE hors de ce canal : c'est
+  /// donc la seule que l'avertissement propose.
+  Future<void> _verifierChangementDeCle() async {
+    final pile = context.e2ee;
+    final pair = widget.otherUserId;
+    if (pile == null || pair == null) return;
+    /*
+     * 🔴 ON LIT, ON NE CONSOMME PLUS. L'ancien `Set.remove()` faisait les deux
+     * d'un coup : lire l'alerte SUFFISAIT à la faire disparaître, même si
+     * l'écran se refermait avant d'avoir rien affiché.
+     *
+     * ⚠️ L'ALERTE NE S'ÉTEINT QUE SUR UN GESTE : c'est ce que veut dire un
+     * accusé de LECTURE. Tant que personne n'a touché « Vérifier » ou
+     * « Ignorer », elle revient à la prochaine ouverture.
+     */
+    if (!await pile.coffre.cleAChange(pair)) return;
+    if (!mounted) return;
+
+    // ⚠️ Par `montrerAvertissementCle` : le messager y est pris une fois, et
+    // les bandeaux en file effacés — voir pourquoi dans `e2ee_widgets.dart`.
+    _messagerBandeau = montrerAvertissementCle(
+      context,
+        nomPair: widget.title,
+        onVerifier: () {
+          unawaited(pile.coffre.oublierAvertissement(pair));
+          // Ouvre l'écran de vérification lui-même : le bouton ne donnait
+          // qu'un conseil (« ouvrez les infos du contact… »), 02/10/2026.
+          if (!mounted) return;
+          unawaited(ouvrirVerificationCle(context,
+              pairId: pair, nomPair: widget.title));
+        },
+        /*
+         * ⚠️ « IGNORER » ÉTEINT L'ALERTE AUSSI, ET DÉFINITIVEMENT. C'est un
+         * accusé de lecture, pas un accord : rien ici ne dit que la nouvelle
+         * clé est la bonne. Mais la personne l'a VUE, et la lui resservir
+         * chaque jour lui apprendrait à la balayer sans la lire.
+         */
+        onIgnorer: () {
+          unawaited(pile.coffre.oublierAvertissement(pair));
+        },
+    );
+  }
+
+  /// Le messager qui porte le bandeau « clé changée » de CE fil, pour le
+  /// retirer en quittant l'écran — voir `dispose`.
+  ScaffoldMessengerState? _messagerBandeau;
+
+  /// Va chercher dans l'archive ce qui manque à CETTE conversation.
+  ///
+  /// 🔴 L'ARCHIVE ÉTAIT LÀ, ET IL FALLAIT ALLER LA CHERCHER À LA MAIN — dans
+  /// Paramètres, puis Sauvegarde chiffrée. Ça marchait, et c'est bien le
+  /// problème : la donnée existait, le chemin existait, et seul un geste manuel
+  /// les reliait.
+  ///
+  /// ⚠️ ON NE LE FAIT QUE S'IL MANQUE QUELQUE CHOSE. Une conversation dont
+  /// toutes les bulles ont leur texte n'a rien à restaurer, et déchiffrer
+  /// l'archive entière à chaque ouverture coûterait cher pour rien.
+  ///
+  /// ⚠️ `force: true` — le raccourci du démarrage compare le NOMBRE de blocs
+  /// de l'archive, ce qui ne dit rien de notre cache local. Ici on SAIT qu'il
+  /// manque quelque chose : c'est plus sûr que le raccourci.
+  ///
+  /// ⚠️ ET ON RELIT LE CACHE APRÈS. Restaurer sans relire ne changerait rien à
+  /// l'écran déjà affiché — c'est exactement ce qui obligeait à ressortir de la
+  /// conversation et à y revenir.
+  Future<void> _completerParArchive() async {
+    final pile = context.e2ee;
+    if (pile == null) return;
+
+    /*
+     * 🐛 CE RATTRAPAGE NE S'EXÉCUTAIT JAMAIS. Il testait `_filChiffre`, que
+     * `_lireEtatChiffrement` — lancé juste avant, SANS être attendu — n'avait
+     * pas encore reçu du serveur : il valait toujours `false`, et la fonction
+     * sortait à la première ligne. D'où « les messages chiffrés ne sortent
+     * en clair qu'à la deuxième ouverture » (user, 28/09/2026).
+     *
+     * ⚠️ LES MESSAGES LE DISENT EUX-MÊMES : le serveur marque `chiffre` chaque
+     * ligne qui a une enveloppe. Aucune attente, et seules les bulles
+     * réellement chiffrées déclenchent la reprise.
+     */
+    if (!_manqueUnTexteChiffre()) return;
+
+    try {
+      await pile.sauvegarde.reprendreAuDemarrage(pile.coffre, force: true);
+      // La relecture du cache se fait sur `restaurations` : voir `_surRestauration`.
+    } catch (_) {
+      // Archive fermée ou réseau coupé : l'écran dit déjà « indisponible ».
+    }
+  }
+
+  /// Un message en tête-à-tête chiffré auquel il manque son contenu : un texte
+  /// vide, ou un MÉDIA sans sa clé.
+  ///
+  /// 🐛 LES MÉDIAS N'Y ÉTAIENT PAS (cas Toti → steve, 10/10/2026). Une vidéo
+  /// reçue sans enveloppe pour cet appareil restait « Média chiffré —
+  /// indisponible » : seul un TEXTE manquant déclenchait la reprise de
+  /// l'archive, qui porte pourtant aussi le descripteur du fichier.
+  ///
+  /// ⚠️ PAS LES MESSAGES DE GROUPE : leur chiffré se relit sur le serveur.
+  bool _manqueUnTexteChiffre() => _messages.any((m) =>
+      m.chiffre &&
+      m.chiffreGroupe == null &&
+      !m.isDeleted &&
+      (m.type == 'TEXT'
+          ? (m.content ?? '').isEmpty
+          : const {'IMAGE', 'VIDEO', 'AUDIO', 'FILE'}.contains(m.type) && m.mediaChiffre == null));
+
+  /// L'archive vient de ranger des textes : si ce fil en fait partie, on relit
+  /// le cache pour remplir les bulles vides — sans attendre une réouverture.
+  Future<void> _surRestauration(Set<String> fils) async {
+    if (!fils.contains(widget.convId) || !mounted) return;
+    if (!_manqueUnTexteChiffre()) return;
+    try {
+      final cache = await MessageCache.getConv(widget.convId)
+          .timeout(const Duration(seconds: 3), onTimeout: () => const []);
+      if (cache.isEmpty || !mounted) return;
+      setState(() {
+        _messages = _garderLeClairConnu(_messages, cache);
+        _rebuildCombined();
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _releverChiffres() async {
+    final pile = context.e2ee;
+    if (pile == null) return;
+
+    try {
+      /*
+       * 🔴 `releverEtRanger`, JAMAIS `fil.relever()` NU. La relève ramène les
+       * enveloppes de TOUS les fils ; ce passage ne rangeait que celles du fil
+       * ouvert, et le texte des autres était acquitté puis perdu.
+       */
+      /*
+       * 🔴 AVEC REPRISES. Juste après une coupure réseau, le premier essai part
+       * souvent avant que le réseau soit vraiment revenu ; son échec était
+       * avalé, et tout ce qui était arrivé pendant la coupure restait
+       * « indisponible sur cet appareil » jusqu'à ce qu'on rouvre le fil
+       * (signalé le 29/09/2026). Voir `avecReprises`.
+       */
+      final r = await avecReprises(pile.releverEtRanger, continuer: () => mounted);
+      if (r == null) return;
+
+      /*
+       * 🔴 UN ÉCHEC DE DÉCHIFFREMENT SE DIT. IL ÉTAIT COMPTÉ ET JAMAIS MONTRÉ.
+       *
+       * `relever()` rend `illisibles` depuis le premier jour, et personne ne
+       * le regardait. Une enveloppe qu'on n'arrive pas à ouvrir produisait
+       * donc exactement le même écran qu'une enveloppe absente : une bulle
+       * vide. Deux situations opposées — « je ne l'ai pas reçue » et « je
+       * l'ai reçue et je n'ai pas pu la lire » — rendues indistinguables.
+       *
+       * ⚠️ C'EST CE SILENCE QUI A COÛTÉ LE PLUS DE TOURS cette semaine. On
+       * nomme, et on dit le geste qui répare : la session vient d'être jetée,
+       * le prochain message envoyé d'ici remettra les deux côtés d'accord.
+       */
+      if (r.illisibles > 0 && mounted) {
+        showAppSnackBar(
+          '${r.illisibles} message(s) chiffré(s) illisible(s) — la session a '
+          'été réinitialisée. Envoyez un message pour la rétablir.',
+        );
+      }
+
+      _appliquerReleve(r.messages);
+    } catch (_) {
+      // Silencieux : les messages en clair de la conversation restent affichés.
+    }
+  }
+
+  /// Ce qu’une relève apporte à CE fil : bulles remplies, bulles ajoutées.
+  ///
+  /// ⚠️ APPELÉE DEUX FOIS POUR UNE MÊME RELÈVE quand c’est cet écran qui l’a
+  /// lancée — par son retour ET par le flux `PileE2ee.releves`. C’est voulu et
+  /// sans effet : `fusionnerReleve` ignore un message déjà affiché, donc ni
+  /// double bulle ni double son.
+  void _appliquerReleve(List<MessageClair> messages) {
+    if (messages.isEmpty || !mounted) return;
+
+    /*
+     * 🔴 REMPLIR LES BULLES VIDES, ET AJOUTER CELLES QUI MANQUENT.
+     *
+     * 🐛 « LE MESSAGE N’APPARAÎT PAS TANT QU’ON NE ROUVRE PAS LA
+     * CONVERSATION » (user, 28/09/2026, mobile seulement). Un message chiffré
+     * est créé par la route REST, qui ne diffuse rien : on ne reçoit pas
+     * l’événement `message` qui ajoute la bulle, seulement `e2ee_arrivee`. Ce
+     * passage ne faisait que REMPLIR les bulles déjà affichées ; le nouveau
+     * message n’était ajouté nulle part. Voir `fusionnerReleve`, et
+     * `test/fusion_releve_test.dart`.
+     *
+     * ⚠️ LE WEB N’A PAS CE DÉFAUT : il recharge tout le fil sur
+     * `e2ee_arrivee`. Ici, pas de `_load()` — qui relance lui-même une relève.
+     *
+     * ⚠️ NI CACHE NI ARCHIVE ICI : `releverEtRanger` les a DÉJÀ écrits, fil
+     * par fil, avant l’acquittement. (Le `putConv` qui était ici vidait le
+     * fil entier avant d’écrire la liste affichée : il aurait effacé ce
+     * rangement.)
+     */
+    final fusion = fusionnerReleve(_messages, messages, widget.convId);
+    final nouveaux = fusion.ajoutes;
+
+    if (!mounted) return;
+    setState(() {
+      _messages = fusion.liste;
+      _rebuildCombined();
+    });
+
+    if (nouveaux.isNotEmpty) {
+      // Mêmes gestes qu'un message arrivé par le temps réel : on le lit, on
+      // sonne si le réglage le veut, on descend en bas du fil.
+      final dAutrui = nouveaux.where((m) => m.senderId != _myId).toList();
+      if (dAutrui.isNotEmpty) {
+        _markReadRemote();
+        if (NotificationSettings.instance.messagesOn) {
+          _sonnerMessageRecu(dAutrui.last.senderId);
+        }
+      }
+      _scrollToBottom();
+    }
+  }
+
   Future<void> _loadCalls() async {
     // Dépôt capturé AVANT tout await : le lire après reviendrait à toucher un
     // BuildContext qui peut avoir été démonté entre-temps.
@@ -1205,12 +2566,12 @@ class _ChatScreenState extends State<ChatScreen>
             const Divider(height: 1),
             ListTile(
               leading: Icon(Icons.call, color: _positive),
-              title: const Text("Appel audio"),
+              title: Text(tr(context, 'audio_call')),
               onTap: () => Navigator.pop(ctx, "AUDIO"),
             ),
             ListTile(
               leading: Icon(Icons.videocam, color: _positive),
-              title: const Text("Appel vidéo"),
+              title: Text(tr(context, 'video_call')),
               onTap: () => Navigator.pop(ctx, "VIDEO"),
             ),
             const SizedBox(height: 8),
@@ -1237,7 +2598,11 @@ class _ChatScreenState extends State<ChatScreen>
   // ══════════════════════════════════════════════
   Future<void> _send() async {
     final text = _inputCtrl.text.trim();
-    if (text.isEmpty || _sending) return;
+    if (text.isEmpty) return;
+    _proposerEnHaut();
+    // Les mentions encore présentes dans le texte — voir `_mentionsAEnvoyer`,
+    // qui écarte celles que l'utilisateur a effacées après les avoir choisies.
+    final mentions = _mentionsAEnvoyer(text);
     // Mode édition : on modifie le message au lieu d'en envoyer un nouveau.
     if (_editing != null) {
       _submitEdit(text);
@@ -1247,6 +2612,90 @@ class _ChatScreenState extends State<ChatScreen>
     _emitTyping(false); // on arrête l'indicateur dès l'envoi
     final rt = context.read<RealtimeClient>();
     final replyId = _replyTo?.id;
+
+    /*
+     * 🔴 LE CHEMIN CHIFFRÉ PASSE AVANT TOUT LE RESTE, ET IL MANQUAIT.
+     *
+     * 🐛 `E2eeFil.envoyer` était ÉCRIT MAIS APPELÉ PAR PERSONNE : `grep
+     * '.envoyer('` ne rendait rien. Dans une conversation chiffrée, le mobile
+     * empruntait donc le chemin ordinaire — celui d'en dessous.
+     *
+     * ⚠️ LE SERVEUR REFUSE, ET C'EST TANT MIEUX : `envoi.ts` rend
+     * `CONVERSATION_CHIFFREE` dès qu'un texte en clair vise une conversation
+     * marquée `e2eeActif`. Mais la branche WebSocket juste en dessous n'attend
+     * AUCUNE réponse : la bulle optimiste s'affichait avec sa coche, le serveur
+     * jetait le message, et il disparaissait au rechargement suivant.
+     *
+     * 🔴 ET LE TEXTE EN CLAIR PARTAIT QUAND MÊME SUR LE FIL. Le serveur ne
+     * l'écrit pas en base, mais il le reçoit — dans une conversation dont
+     * l'écran affiche « chiffré de bout en bout ». C'est la raison la plus
+     * forte de brancher ceci ici, avant la branche temps réel.
+     *
+     * ⚠️ ON NE RETOMBE JAMAIS EN CLAIR SI LE CHIFFREMENT ÉCHOUE : on le dit.
+     * Un repli silencieux est exactement ce qu'un attaquant cherche à
+     * provoquer.
+     */
+    /*
+     * 🔴 ÉTAT INCONNU → ON DEMANDE AVANT D'ENVOYER. Un fil dont ni le serveur
+     * ni la mémoire n'ont encore rien dit partait en clair par défaut ; le
+     * serveur le refusait s'il était chiffré… après l'avoir reçu.
+     */
+    final pileAvant = context.e2ee;
+    if (pileAvant != null && !_filChiffre && !pileAvant.fil.etatConnu(widget.convId)) {
+      await _lireEtatChiffrement();
+      if (!mounted) return;
+    }
+    final pile = context.e2ee;
+    final pair = widget.otherUserId;
+    if (_filChiffre && pile != null && _cheminChiffre) {
+      /*
+       * 🔴 LE CHAMP SE LIBÈRE TOUT DE SUITE, L’ENVOI SE FAIT EN FOND.
+       *
+       * 🐛 « QUAND ON CLIQUE SUR ENVOYER, ÇA PREND DU TEMPS ET ÇA BLOQUE LE
+       * CHAMP » (user, 28/09/2026). Le texte ne s’effaçait qu’APRÈS l’envoi
+       * chiffré complet — liste des appareils, ligne du fil, enveloppes : quatre
+       * à cinq allers-retours, soit deux secondes à 300 ms de latence — et
+       * `_sending` refusait tout autre envoi pendant ce temps.
+       *
+       * ⚠️ LA BULLE APPARAÎT « EN ATTENTE » (horloge) sous un identifiant
+       * provisoire, puis prend l’identifiant du serveur à la réussite, ou
+       * passe « échec » avec « Réessayer ». Le texte n’est jamais perdu.
+       */
+      final tempId = "tmp-${DateTime.now().microsecondsSinceEpoch}";
+      final quand = DateTime.now();
+      _inputCtrl.clear();
+      _mentionsEnCours.clear();
+      setState(() {
+        _messages = [
+          ..._messages,
+          Message(
+            id: tempId,
+            chiffre: true,
+            convId: widget.convId,
+            senderId: _myId ?? "",
+            content: text,
+            type: "TEXT",
+            status: "PENDING",
+            /*
+             * 🐛 C'ÉTAIT `null`, « la citation voyagerait en clair » (user,
+             * 06/10/2026 : « le reply ne marche pas »). Faux : seul
+             * l'IDENTIFIANT du message cité part — au serveur, et dans la
+             * charge chiffrée. Le texte cité est relu sur chaque appareil.
+             */
+            replyToId: replyId,
+            replyTo: _apercuReponse(_replyTo),
+            media: const [],
+            createdAt: quand,
+          ),
+        ];
+        _rebuildCombined();
+        _replyTo = null;
+      });
+      _scrollToBottom();
+      _envoyerChiffreEnFond(pile, pair, text, tempId, quand, replyToId: replyId);
+      return;
+    }
+
     if (rt.connected) {
       final tempId = "tmp-${DateTime.now().microsecondsSinceEpoch}";
       final replyMsg = _replyTo;
@@ -1275,56 +2724,259 @@ class _ChatScreenState extends State<ChatScreen>
         _replyTo = null;
       });
       _inputCtrl.clear();
-      rt.sendMessage(widget.convId, text, tempId, replyToId: replyId);
+      rt.sendMessage(widget.convId, text, tempId,
+          replyToId: replyId, mentions: mentions);
+      _mentionsEnCours.clear();
       _scrollToBottom();
       return;
     }
+    /*
+     * ⚠️ TEMPS RÉEL COUPÉ : REPLI REST — ET LUI AUSSI LIBÈRE LE CHAMP TOUT DE
+     * SUITE. Il attendait la réponse du serveur avant d’effacer le texte, avec
+     * `_sending` qui refusait tout autre envoi : le même blocage que le chemin
+     * chiffré. La bulle part « en attente » ; la réponse la remplace.
+     *
+     * ⚠️ PANNE RÉSEAU → BOÎTE D’ENVOI, comme avant : la bulle garde son
+     * horloge et l’`Outbox` la renverra. Refus du serveur → bulle en échec.
+     */
+    final tempId = "out-${DateTime.now().microsecondsSinceEpoch}";
+    final optimistic = Message(
+        id: tempId,
+        convId: widget.convId,
+        senderId: _myId ?? "",
+        content: text,
+        type: "TEXT",
+        status: "PENDING",
+        replyToId: replyId,
+        replyTo: null,
+        media: const [],
+        createdAt: DateTime.now());
+    _inputCtrl.clear();
+    _mentionsEnCours.clear();
     setState(() {
-      _sending = true;
+      _messages = [..._messages, optimistic];
+      _rebuildCombined();
+      _replyTo = null;
     });
+    _scrollToBottom();
+    final repo = context.read<ChatRepository>();
+    final outbox = context.read<Outbox>();
     try {
-      final msg = await context
-          .read<ChatRepository>()
-          .sendText(widget.convId, text, replyToId: replyId);
+      final msg = await repo.sendText(widget.convId, text,
+          replyToId: replyId, mentions: mentions);
       _cacheMsg(msg);
-      _inputCtrl.clear();
+      if (!mounted) return;
       setState(() {
-        _messages = [..._messages, msg];
+        final i = _messages.indexWhere((m) => m.id == tempId);
+        if (i >= 0) {
+          _messages[i] = msg.avecStatut(_statutAuRemplacement(_messages[i], msg));
+        } else if (!_messages.any((m) => m.id == msg.id)) {
+          _messages = [..._messages, msg];
+        }
         _rebuildCombined();
-        _replyTo = null;
       });
-      _scrollToBottom();
     } on ApiException catch (e) {
+      if (!mounted) return;
+      _marquerStatut(tempId, "FAILED");
       _showError(e.message);
     } catch (_) {
-      final tempId = "out-${DateTime.now().microsecondsSinceEpoch}";
-      final optimistic = Message(
-          id: tempId,
-          convId: widget.convId,
-          senderId: _myId ?? "",
-          content: text,
-          type: "TEXT",
-          status: "PENDING",
-          replyToId: replyId,
-          replyTo: null,
-          media: const [],
-          createdAt: DateTime.now());
       _cacheMsg(optimistic);
-      _inputCtrl.clear();
-      setState(() {
-        _messages = [..._messages, optimistic];
-        _rebuildCombined();
-        _replyTo = null;
-      });
-      _scrollToBottom();
-      await context.read<Outbox>().enqueue(
+      await outbox.enqueue(
           tempId: tempId,
           convId: widget.convId,
           content: text,
           replyToId: replyId);
-    } finally {
-      if (mounted) setState(() => _sending = false);
     }
+  }
+
+  /* ══════════════ L'ENVOI CHIFFRÉ, EN FOND ══════════════ */
+
+  /// Ce fil a-t-il un chemin chiffré ? Un tête-à-tête a un correspondant ; un
+  /// GROUPE n'en a pas — `pair` y vaut `null`, et `E2eeFil` prend alors le
+  /// chemin du groupe (lot 3, chapitre 34).
+  bool get _cheminChiffre => widget.isGroup || widget.otherUserId != null;
+
+  /// La file des envois chiffrés de cet écran : un à la fois, dans l'ordre.
+  ///
+  /// ⚠️ SANS ELLE, deux messages tapés vite partiraient en parallèle, et le
+  /// second pourrait créer sa ligne sur le serveur AVANT le premier — le fil
+  /// les afficherait dans le désordre chez le correspondant.
+  Future<void> _fileEnvoisChiffres = Future<void>.value();
+
+  /// [type] : `TEXT`, ou `CONTACT` / `LOCATION` quand [texte] est une fiche
+  /// JSON (06/10/2026).
+  void _envoyerChiffreEnFond(
+    PileE2ee pile,
+    String? pair,
+    String texte,
+    String tempId,
+    DateTime quand, {
+    String type = "TEXT",
+    String? replyToId,
+  }) {
+    _fileEnvoisChiffres = _fileEnvoisChiffres
+        .then((_) => _envoyerChiffreMaintenant(pile, pair, texte, tempId, quand,
+            type: type, replyToId: replyToId))
+        .catchError((_) {});
+  }
+
+  Future<void> _envoyerChiffreMaintenant(
+    PileE2ee pile,
+    String? pair,
+    String texte,
+    String tempId,
+    DateTime quand, {
+    String type = "TEXT",
+    String? replyToId,
+  }) async {
+    try {
+      final id = await pile.fil.envoyer(
+          convId: widget.convId,
+          pairId: pair,
+          texte: texte,
+          type: type,
+          replyToId: replyToId);
+      final envoye = Message(
+        id: id,
+        chiffre: true,
+        convId: widget.convId,
+        senderId: _myId ?? "",
+        content: texte,
+        type: type,
+        status: "SENT",
+        replyToId: replyToId,
+        media: const [],
+        createdAt: quand,
+      );
+      /*
+       * ⚠️ LE CLAIR VA DANS LE CACHE LOCAL, comme sur le web — décision du
+       * 21/09. Sans lui, NOTRE PROPRE message redeviendrait vide au
+       * rechargement : aucune enveloppe ne nous est adressée, et le serveur ne
+       * garde que la ligne sans texte.
+       *
+       * 🐛 `_cacheMsg` N'ÉCRIT RIEN SUR LE DISQUE : son nom trompe, il ne
+       * remplit que la table des aperçus de réponse. D'où `MessageCache.upsert`
+       * en plus.
+       *
+       * ⚠️ AVANT le test `mounted` : si l'utilisateur a quitté l'écran pendant
+       * l'envoi, le message est parti — il doit être rangé quand même.
+       */
+      _cacheMsg(envoye);
+      unawaited(MessageCache.upsert(envoye, widget.convId));
+      /*
+       * 🔴 ET DANS L'ARCHIVE, SANS QUOI IL NE SURVIT PAS À CET APPAREIL. Le
+       * mobile archivait ce qu'il REÇOIT et jamais ce qu'il ENVOIE. Sans
+       * attendre : échouer l'archive ne doit pas faire paraître le message
+       * échoué.
+       *
+       * ⚠️ `quand` EN MILLISECONDES, comme le web et la relève : deux formats
+       * pour le même champ empileraient la moitié des messages à la date du
+       * jour à la restauration.
+       */
+      unawaited(pile.sauvegarde.deposer([
+        {
+          'id': id,
+          'convId': widget.convId,
+          'expediteurId': _myId ?? '',
+          'texte': texte,
+          'quand': quand.millisecondsSinceEpoch,
+          if (replyToId != null) 'reponseA': replyToId,
+          if (type != "TEXT") 'genre': type,
+        },
+      ]));
+      if (!mounted) return;
+      setState(() {
+        final i = _messages.indexWhere((m) => m.id == tempId);
+        if (i >= 0) {
+          /*
+           * 🔴 LA RÉPONSE NE DOIT PAS EFFACER UN « LU » DÉJÀ REÇU.
+           *
+           * 🐛 Le serveur prévient le destinataire AVANT d'attendre Google
+           * pour la notification push, et ne nous répond qu'APRÈS. Un
+           * destinataire qui a la conversation ouverte a le temps de lire :
+           * la bulle passait « lu », puis cette ligne la remettait « envoyé »
+           * — pour toujours. Voir `statutFusionne`.
+           */
+          _messages[i] =
+              envoye.avecStatut(_statutAuRemplacement(_messages[i], envoye));
+        } else if (!_messages.any((m) => m.id == id)) {
+          _messages = [..._messages, envoye];
+        }
+        _rebuildCombined();
+      });
+    } catch (e) {
+      /*
+       * ⚠️ ON NE RETOMBE JAMAIS EN CLAIR SI LE CHIFFREMENT ÉCHOUE : on le dit,
+       * et la bulle reste là, marquée en échec, avec son texte — « Réessayer »
+       * dans son menu. Un repli silencieux est exactement ce qu'un attaquant
+       * chercherait à provoquer.
+       */
+      if (!mounted) return;
+      _marquerStatut(tempId, "FAILED");
+      _showError(messageDErreur(context, e));
+    }
+  }
+
+  /// Les états reçus pour un message que l'écran ne connaît pas encore sous
+  /// son vrai identifiant. Voir le traitement de `message_status`.
+  final Map<String, String> _statutsEnAvance = {};
+
+  /// L'état d'une bulle provisoire remplacée par [recu], la version du
+  /// serveur : le plus avancé entre l'affiché, le reçu, et ce qui est arrivé
+  /// en avance pour ce message. Voir `statutFusionne`.
+  String _statutAuRemplacement(Message provisoire, Message recu) {
+    final enAvance = _statutsEnAvance.remove(recu.id);
+    final s = statutFusionne(affiche: provisoire.status, recu: recu.status);
+    return enAvance == null ? s : statutFusionne(affiche: s, recu: enAvance);
+  }
+
+  /// Change le statut d'une bulle, sans rien d'autre.
+  void _marquerStatut(String id, String statut) {
+    setState(() {
+      _messages = [
+        for (final m in _messages)
+          if (m.id != id)
+            m
+          else
+            Message(
+              id: m.id,
+              chiffre: m.chiffre,
+              vueUnique: m.vueUnique,
+              vueUniqueOuverte: m.vueUniqueOuverte,
+              vueUniqueEffacee: m.vueUniqueEffacee,
+              mediaChiffre: m.mediaChiffre,
+              convId: m.convId,
+              senderId: m.senderId,
+              content: m.content,
+              type: m.type,
+              status: statut,
+              replyToId: m.replyToId,
+              replyTo: m.replyTo,
+              media: m.media,
+              createdAt: m.createdAt,
+            ),
+      ];
+      _rebuildCombined();
+    });
+  }
+
+  /// « Réessayer » sur une bulle chiffrée en échec : même texte, même bulle.
+  ///
+  /// ⚠️ FIL CHIFFRÉ SEULEMENT. En fil ordinaire, une panne réseau passe par
+  /// la boîte d’envoi, qui réessaie seule ; il ne reste en échec que ce que le
+  /// serveur a REFUSÉ, et le renvoyer échouerait pareil. Remettre le texte dans
+  /// le champ écraserait, en plus, ce que l’utilisateur est en train de taper.
+  bool _peutReessayer(Message m) =>
+      m.status == "FAILED" && _filChiffre && (m.content ?? '').isNotEmpty;
+
+  void _reessayerTexteChiffre(Message m) {
+    final pile = context.e2ee;
+    final pair = widget.otherUserId;
+    final texte = m.content;
+    if (!_peutReessayer(m) || pile == null || !_cheminChiffre || texte == null) return;
+    _marquerStatut(m.id, "PENDING");
+    _envoyerChiffreEnFond(pile, pair, texte, m.id, m.createdAt,
+        type: m.type, replyToId: m.replyToId);
   }
 
   void _setReplyTo(Message m) {
@@ -1335,6 +2987,11 @@ class _ChatScreenState extends State<ChatScreen>
   // ── Édition d'un message ──
   Message _withEdited(Message m, String content, DateTime editedAt) => Message(
       id: m.id,
+      chiffre: m.chiffre,
+      vueUnique: m.vueUnique,
+      vueUniqueOuverte: m.vueUniqueOuverte,
+      vueUniqueEffacee: m.vueUniqueEffacee,
+      mediaChiffre: m.mediaChiffre,
       convId: m.convId,
       senderId: m.senderId,
       content: content,
@@ -1342,6 +2999,7 @@ class _ChatScreenState extends State<ChatScreen>
       status: m.status,
       replyToId: m.replyToId,
       replyTo: m.replyTo,
+      statutCite: m.statutCite,
       deletedAt: m.deletedAt,
       editedAt: editedAt,
       media: m.media,
@@ -1372,8 +3030,30 @@ class _ChatScreenState extends State<ChatScreen>
   void _submitEdit(String text) {
     final m = _editing;
     if (m == null) return;
+    // Le délai a pu passer pendant la saisie : on ne l'apprend pas du serveur.
+    if (!peutEncoreModifier(m.createdAt)) {
+      _cancelEdit();
+      _showError(tr(context, 'msg_modif_trop_tard'));
+      return;
+    }
+    final pile = context.e2ee;
+    final pair = widget.otherUserId;
+    if (_filChiffre && m.chiffre && pile != null && _cheminChiffre) {
+      setState(() {
+        final idx = _messages.indexWhere((x) => x.id == m.id);
+        if (idx >= 0) {
+          _messages[idx] = _withEdited(_messages[idx], text, DateTime.now());
+          _rebuildCombined();
+        }
+        _editing = null;
+      });
+      _inputCtrl.clear();
+      unawaited(_modifierChiffre(pile, pair, m, text));
+      return;
+    }
     final rt = context.read<RealtimeClient>();
     if (rt.connected) {
+      _modifsEnAttente[m.id] = m;
       rt.editMessage(m.id, text);
     } else {
       context
@@ -1383,11 +3063,60 @@ class _ChatScreenState extends State<ChatScreen>
     }
     setState(() {
       final idx = _messages.indexWhere((x) => x.id == m.id);
-      if (idx >= 0)
+      if (idx >= 0) {
         _messages[idx] = _withEdited(_messages[idx], text, DateTime.now());
+        // Même raison qu'à la réception de `message_edited` : la liste rendue
+        // est `_combined`. Sans ce report, l'auteur de la modification était le
+        // SEUL à ne jamais la voir — son écran gardait l'ancien texte jusqu'à
+        // ce qu'il rouvre la conversation.
+        _rebuildCombined();
+      }
       _editing = null;
     });
     _inputCtrl.clear();
+  }
+
+  /// Fait partir la modification d'un message CHIFFRÉ (voir
+  /// `E2eeFil.modifier`), puis la range : cache local et archive, sans quoi
+  /// l'ancien texte reviendrait au rechargement. En cas d'échec, l'ancien
+  /// texte revient à l'écran et on le dit.
+  Future<void> _modifierChiffre(
+      PileE2ee pile, String? pair, Message avant, String texte) async {
+    try {
+      final le = await pile.fil.modifier(
+        convId: widget.convId,
+        pairId: pair,
+        messageId: avant.id,
+        texte: texte,
+      );
+      final apres = _withEdited(avant, texte, le ?? DateTime.now());
+      _cacheMsg(apres);
+      unawaited(MessageCache.upsert(apres, widget.convId));
+      unawaited(pile.sauvegarde.deposer([
+        {
+          'id': avant.id,
+          'convId': widget.convId,
+          'expediteurId': avant.senderId,
+          'texte': texte,
+          'quand': avant.createdAt.millisecondsSinceEpoch,
+          if (avant.replyToId != null) 'reponseA': avant.replyToId,
+        },
+      ]));
+      if (!mounted) return;
+      setState(() {
+        final idx = _messages.indexWhere((x) => x.id == avant.id);
+        if (idx >= 0) _messages[idx] = _withEdited(_messages[idx], texte, apres.editedAt!);
+        _rebuildCombined();
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        final idx = _messages.indexWhere((x) => x.id == avant.id);
+        if (idx >= 0) _messages[idx] = avant;
+        _rebuildCombined();
+      });
+      _showError(e is ApiException ? e.message : tr(context, 'send_failed'));
+    }
   }
 
   // ══════════════════════════════════════════════
@@ -1396,6 +3125,9 @@ class _ChatScreenState extends State<ChatScreen>
   Widget _statusTicks(String status, Color baseColor) {
     if (status == "PENDING")
       return Icon(Icons.access_time, size: 13, color: baseColor);
+    // Envoi refusé ou chiffrement impossible : « Réessayer » dans le menu.
+    if (status == "FAILED")
+      return const Icon(Icons.error_outline, size: 15, color: Colors.redAccent);
     if (status == "READ")
       return const Icon(Icons.done_all, size: 15, color: AlanyaColors.tickRead);
     if (status == "DELIVERED")
@@ -1425,12 +3157,33 @@ class _ChatScreenState extends State<ChatScreen>
         const SizedBox(width: 4),
       ],
       if (m.editedAt != null) ...[
-        Text("modifié",
+        Text(tr(context, 'edited'),
             style: TextStyle(
                 fontSize: 10, fontStyle: FontStyle.italic, color: color)),
         const SizedBox(width: 4),
       ],
       Text(_time(m.createdAt), style: TextStyle(fontSize: 10, color: color)),
+      /*
+       * LE COMPTEUR DE LECTURES, EN GROUPE SEULEMENT.
+       *
+       * Deux coches ne disent rien d'utile à douze : « lu » par qui ? Le nombre
+       * répond, et il ne se laisse pas bloquer par un membre qui a coupé ses
+       * accusés — celui-là n'est simplement pas compté.
+       *
+       * ⚠️ MASQUÉ À ZÉRO : « 0 lu » sous chaque message fraîchement envoyé
+       * serait un reproche permanent.
+       */
+      if (mine && widget.isGroup) ...[
+        Builder(builder: (_) {
+          final n = _nbLectures(m);
+          if (n <= 0) return const SizedBox.shrink();
+          return Padding(
+            padding: const EdgeInsets.only(left: 4),
+            child: Text(tr(context, 'n_read', {'n': '$n'}),
+                style: TextStyle(fontSize: 10, color: color)),
+          );
+        }),
+      ],
       if (mine) ...[const SizedBox(width: 4), _statusTicks(m.status, color)],
     ]);
   }
@@ -1454,16 +3207,25 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   ReplyPreview? _resolveReply(Message m) {
-    if (m.replyTo != null) return m.replyTo;
-    if (m.replyToId == null) return null;
-    final cached = _replySnapshots[m.replyToId];
-    if (cached != null) return cached;
-    final live = _findMessage(m.replyToId);
+    /*
+     * 🔴 L'APERÇU DU SERVEUR D'UN MESSAGE CHIFFRÉ EST VIDE (06/10/2026) : il
+     * n'a pas son texte. On ne le garde que s'il dit quelque chose ; sinon,
+     * le texte cité est relu ici, parmi les messages déjà déchiffrés.
+     */
+    final serveur = m.replyTo;
+    if (serveur != null && ((serveur.content ?? '').isNotEmpty || serveur.isDeleted)) {
+      return serveur;
+    }
+    final id = m.replyToId ?? serveur?.id;
+    if (id == null) return serveur;
+    final cached = _replySnapshots[id];
+    if (cached != null && (cached.content ?? '').isNotEmpty) return cached;
+    final live = _findMessage(id);
     if (live != null) {
       _cacheMsg(live);
       return _replySnapshots[live.id];
     }
-    return null;
+    return cached ?? serveur;
   }
 
   Future<void> _scrollToMessage(String id) async {
@@ -1475,9 +3237,9 @@ class _ChatScreenState extends State<ChatScreen>
         try {
           final cursor = _messages.isNotEmpty ? _messages.first.id : null;
           if (cursor == null) break;
-          final older = await context
-              .read<ChatRepository>()
-              .getMessages(widget.convId, cursor: cursor);
+          final repoSaut = context.read<ChatRepository>();
+          final older = await _ouvrirGroupe(
+              await repoSaut.getMessages(widget.convId, cursor: cursor));
           if (older.isEmpty) break;
           final newMsgs = older.reversed.toList();
           setState(() => _messages = [...newMsgs, ..._messages]);
@@ -1493,9 +3255,9 @@ class _ChatScreenState extends State<ChatScreen>
     }
     if (foundIdx < 0) {
       if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text("Message introuvable"),
-            duration: Duration(seconds: 2)));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(tr(context, 'message_not_found')),
+            duration: const Duration(seconds: 2)));
       return;
     }
     if (!_scrollCtrl.hasClients) return;
@@ -1585,45 +3347,76 @@ class _ChatScreenState extends State<ChatScreen>
   /// ligne et n'applique pas les styles, or y laisser `*coucou*` afficherait la
   /// mécanique au lieu du message. WhatsApp procède de même.
   String _replyPreviewText(Message? original, ReplyPreview? snapshot) {
+    if (snapshot?.isDeleted == true) return tr(context, 'message_deleted');
+    /*
+     * 🐛 « LE REPLY DES FICHIERS AFFICHE chiffre.bin » (user, 07/10/2026). Un
+     * média chiffré n'a, pour le serveur, qu'un nom neutre ; son VRAI nom est
+     * dans le descripteur, sur l'appareil. Quand on a le message cité, on le
+     * lit donc lui, avant l'aperçu du serveur — comme WhatsApp : « 📄 nom.pdf »,
+     * « 📷 Photo ».
+     */
+    if (original != null && !original.isDeleted && original.mediaChiffre != null) {
+      return apercuMessage(
+        original.type,
+        original.content,
+        nomFichier: _nomFichierCite(original),
+        nettoyerTexte: sansMarqueursWhatsApp,
+      );
+    }
     if (snapshot != null) {
       if (snapshot.isDeleted) return tr(context, 'message_deleted');
       // ⚠️ Le libellé AVANT le contenu : un CONTACT ou une LOCATION porte du
-      // JSON dans `content`, et cette citation tient sur une ligne.
-      final structure = apercuStructure(snapshot.type, snapshot.content);
-      if (structure != null) return structure;
-      if (snapshot.content != null)
-        return sansMarqueursWhatsApp(snapshot.content!);
-      return _typeLabel(snapshot.type);
+      // JSON dans `content`, et cette citation tient sur une ligne. C'est
+      // `apercuMessage` qui en décide, pour les QUATRE endroits qui affichent
+      // un aperçu — ils en avaient chacun leur version, et elles divergeaient.
+      return apercuMessage(snapshot.type, snapshot.content,
+          nettoyerTexte: sansMarqueursWhatsApp);
     }
     if (original == null) return '...';
     if (original.isDeleted) return tr(context, 'message_deleted');
-    final structure = apercuStructure(original.type, original.content);
-    if (structure != null) return structure;
-    if (original.content != null)
-      return sansMarqueursWhatsApp(original.content!);
-    if (original.media.isNotEmpty)
-      return original.media.first.filename ?? 'Fichier';
-    return _typeLabel(original.type);
+    return apercuMessage(
+      original.type,
+      original.content,
+      // Le nom du fichier vient du média, que la charge utile ne porte pas.
+      nomFichier: _nomFichierCite(original),
+      nettoyerTexte: sansMarqueursWhatsApp,
+    );
   }
 
-  String _typeLabel(String type) {
-    switch (type) {
-      case 'IMAGE':
-        return 'Photo';
-      case 'AUDIO':
-        return 'Message vocal';
-      case 'VIDEO':
-        return 'Vidéo';
-      case 'FILE':
-        return 'Fichier';
-      case 'CONTACT':
-        return 'Contact';
-      case 'LOCATION':
-        return 'Position';
-      default:
-        return '[$type]';
+  /// Le nom du fichier d'un message cité : le VRAI nom d'un média chiffré
+  /// (descripteur), jamais le « chiffre.bin » que le serveur connaît.
+  String? _nomFichierCite(Message m) {
+    final d = m.mediaChiffre;
+    if (d != null) return d.nom;
+    if (m.media.isEmpty || m.media.first.chiffre) return null;
+    return m.media.first.filename;
+  }
+
+  /// La vignette d'un média CHIFFRÉ cité, tirée de son aperçu (descripteur) :
+  /// photo, première image d'une vidéo, première page d'un PDF. `null` s'il
+  /// n'en a pas, ou pour une vue unique — la citer n'en montre rien.
+  Widget? _vignetteChiffreeCitee(Message? m) {
+    final a = m?.mediaChiffre?.apercu;
+    if (m == null || a == null || m.isDeleted || m.vueUnique) return null;
+    try {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: Image.memory(base64Decode(a),
+            width: 38, height: 38, fit: BoxFit.cover, gaplessPlayback: true),
+      );
+    } catch (_) {
+      return null;
     }
   }
+
+  /// Une citation texte, avec la vignette du média chiffré cité à droite.
+  Widget _avecVignette(Widget citation, Widget? vignette) => vignette == null
+      ? citation
+      : Row(mainAxisSize: MainAxisSize.min, children: [
+          Flexible(child: citation),
+          const SizedBox(width: 6),
+          vignette,
+        ]);
 
   String _replySenderName(Message? original, ReplyPreview? snapshot) {
     final senderId = snapshot?.senderId ?? original?.senderId;
@@ -1641,7 +3434,13 @@ class _ChatScreenState extends State<ChatScreen>
     if (snapshot == null && original == null) return const SizedBox.shrink();
     final senderName = _replySenderName(original, snapshot);
     final hasMedia =
-        original != null && original.media.isNotEmpty && !original.isDeleted;
+        original != null &&
+        original.media.isNotEmpty &&
+        !original.isDeleted &&
+        // Citer une vue unique n'en montre pas la vignette.
+        !original.vueUnique &&
+        // Ni un fichier chiffré, illisible sans déchiffrement.
+        !original.media.first.chiffre;
     return GestureDetector(
       onTap: original != null ? () => _scrollToMessage(m.replyToId!) : null,
       child: Container(
@@ -1661,11 +3460,136 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
+  /// La barre de réponse au-dessus du champ de saisie.
+  ///
+  /// 🔴 **MÊME VISUEL QUE LA RÉPONSE UNE FOIS ENVOYÉE** (demande du user,
+  /// 18/08/2026). Elle avait sa propre mise en page et surtout sa propre règle
+  /// d'aperçu, qui lisait `content` EN PREMIER : un contact ou une position y
+  /// apparaissait donc en JSON brut, et un fichier sans légende en ligne vide.
+  ///
+  /// Elle réemprunte désormais les deux rendus de la citation d'une bulle :
+  /// [ReplyMediaPreview] quand le message cité porte un média — c'est lui qui
+  /// donne la vignette du document ou de la photo — et le rendu texte sinon.
+  /// Le choix entre les deux se fait sur le MÊME critère qu'en bulle
+  /// (`media.isNotEmpty && !isDeleted`), sans quoi les deux se répondraient
+  /// différemment pour un même message.
+  ///
+  /// ⚠️ `isMe: false` en dur, et ce n'est pas un oubli : le paramètre sert à
+  /// accorder la citation à la couleur de SA BULLE. Ici il n'y a pas de bulle,
+  /// la barre est posée sur le fond du composer — la variante « reçu » est
+  /// celle qui s'y lit, quel que soit l'auteur du message cité.
+  Widget _barreReponse() {
+    final original = _replyTo!;
+    final auteur = original.senderId == _myId
+        ? tr(context, 'you')
+        : (widget.memberNames[original.senderId] ?? tr(context, 'reply_to'));
+    final avecMedia =
+        original.media.isNotEmpty &&
+        !original.isDeleted &&
+        !original.vueUnique &&
+        !original.media.first.chiffre;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      color: _composerBg,
+      child: Row(children: [
+        Expanded(
+          child: avecMedia
+              ? ReplyMediaPreview(
+                  replyToContent: original.content,
+                  replyToMediaUrl:
+                      '$_baseUrl${original.media.first.url}?token=$_token',
+                  replyToMimeType: original.media.first.mimeType,
+                  replyToFileName: original.media.first.filename,
+                  replyToSenderName: auteur,
+                  isMe: false,
+                )
+              : _avecVignette(
+                  _citationTexte(
+                    auteur,
+                    _replyPreviewText(original, null),
+                    false,
+                    largeurMax: double.infinity,
+                  ),
+                  _vignetteChiffreeCitee(original),
+                ),
+        ),
+        const SizedBox(width: 8),
+        GestureDetector(
+            onTap: () => setState(() => _replyTo = null),
+            child: Icon(Icons.close, size: 20, color: _muted)),
+      ]),
+    );
+  }
+
+  /// L'aperçu du STATUT auquel ce message répond.
+  ///
+  /// 🔴 IL RÉEMPRUNTE `_citationTexte`, le rendu de la citation d'un message.
+  /// Répondre à un statut et répondre à un message sont le même geste pour qui
+  /// lit la conversation : deux visuels différents auraient fait croire à deux
+  /// choses différentes.
+  ///
+  /// Ce qui le distingue tient en deux détails : l'auteur est remplacé par
+  /// « Statut », et une vignette du média accompagne l'aperçu quand il y en a
+  /// un — c'est elle qui dit DE QUEL statut on parle quand la personne en a
+  /// publié plusieurs dans la journée.
+  ///
+  /// ⚠️ AUCUN LIEN VERS LE STATUT : il a pu expirer depuis, et le texte affiché
+  /// est l'instantané recopié à l'envoi, pas le statut vivant.
+  Widget _citationStatut(StatutCite s, bool mine) {
+    final citation = _citationTexte("Statut", s.apercu, mine);
+    if (s.mediaUrl == null) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: citation,
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Flexible(child: citation),
+        const SizedBox(width: 6),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: SizedBox(
+            width: 38,
+            height: 38,
+            child: s.type == "VIDEO"
+                // Une vidéo n'a pas de vignette prête côté serveur : l'icône
+                // dit au moins de quelle nature était le statut.
+                ? Container(
+                    color: Colors.black26,
+                    child: const Icon(Icons.videocam,
+                        size: 18, color: Colors.white70),
+                  )
+                : AuthNetworkImage(
+                    url: '$_baseUrl${s.mediaUrl}?token=$_token',
+                    token: _token,
+                    width: 38,
+                    height: 38,
+                  ),
+          ),
+        ),
+      ]),
+    );
+  }
+
   Widget _replyPreviewTextOnly(Message m, bool mine, dynamic snapshot,
-      Message? original, String senderName) {
+          Message? original, String senderName) =>
+      _avecVignette(
+          _citationTexte(senderName, _replyPreviewText(original, snapshot), mine),
+          _vignetteChiffreeCitee(original));
+
+  /// Le rendu TEXTE d'une citation, partagé par la bulle et par la barre du
+  /// composer — c'est ce partage qui tient la promesse « même visuel ».
+  ///
+  /// [largeurMax] est le seul paramètre qui les sépare : en bulle la citation
+  /// ne doit pas pousser la largeur du message, au-dessus du composer elle
+  /// occupe toute la ligne disponible.
+  Widget _citationTexte(String auteur, String apercu, bool mine,
+      {double largeurMax = 220}) {
     final onColor = _bubbleTextColor(mine);
     final barColor = mine ? Colors.white70 : _accentSoft;
-    final previewText = _replyPreviewText(original, snapshot);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
@@ -1673,13 +3597,13 @@ class _ChatScreenState extends State<ChatScreen>
         borderRadius: BorderRadius.circular(8),
         border: Border(left: BorderSide(color: barColor, width: 3)),
       ),
-      constraints: const BoxConstraints(maxWidth: 220),
+      constraints: BoxConstraints(maxWidth: largeurMax),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(senderName,
+        Text(auteur,
             style: TextStyle(
                 fontSize: 11, fontWeight: FontWeight.bold, color: barColor)),
         const SizedBox(height: 2),
-        Text(previewText,
+        Text(apercu,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(fontSize: 12, color: onColor.withOpacity(0.8))),
@@ -1724,17 +3648,35 @@ class _ChatScreenState extends State<ChatScreen>
       return;
     }
 
-    // Médias sélectionnés
+    /*
+     * Médias sélectionnés.
+     *
+     * ⚠️ TOUTES LES SOURCES PASSENT PAR L'ÉCRAN DE LÉGENDE, y compris le « OK »
+     * du sélecteur plein écran : c'est LUI l'écran que le user a demandé —
+     * les médias en grand, la barre de légende en bas, le bouton d'envoi. Le
+     * « Prévisualiser » du sélecteur, lui, ne sort jamais du sélecteur et
+     * n'arrive donc pas ici.
+     */
     final files = result as List<MediaPickResult>;
     if (files.isEmpty) return;
 
     // Aperçu : balayage entre les médias, retrait de l'un d'eux, légende.
     // ⚠️ On envoie la liste RENDUE par l'aperçu, pas celle de la sélection : un
     // média retiré doit disparaître de l'envoi.
-    final apercu = await MediaCaptionScreen.open(context, files);
+    // Les membres ne partent QUE pour un groupe : hors groupe, le `@` de la
+    // legende ne propose rien, comme dans le champ de discussion.
+    final apercu = await MediaCaptionScreen.open(
+      context,
+      files,
+      membres: widget.isGroup
+          ? {...widget.memberNames, ..._membresCharges}
+          : const {},
+      monId: _myId,
+    );
     if (apercu == null || apercu.fichiers.isEmpty) return; // annulé
 
-    await _lanceEnvoiMedias(apercu.fichiers, apercu.legende);
+    await _lanceEnvoiMedias(
+        apercu.fichiers, apercu.legende, apercu.mentions, apercu.vueUnique);
   }
 
   // ══════════════════════════════════════════════
@@ -1749,10 +3691,51 @@ class _ChatScreenState extends State<ChatScreen>
   /// message par un 422, et les quinze médias restaient orphelins en base. On
   /// découpe donc en plusieurs messages ; le regroupement à la lecture les
   /// réunira visuellement.
-  Future<void> _lanceEnvoiMedias(
-      List<MediaPickResult> fichiers, String? legende) async {
+  Future<void> _lanceEnvoiMedias(List<MediaPickResult> fichiers, String? legende,
+      [List<Map<String, String>> mentions = const [],
+      bool vueUnique = false]) async {
+    _proposerEnHaut();
     final replyId = _replyTo?.id;
     if (_replyTo != null) setState(() => _replyTo = null);
+
+    /*
+     * 🔴 FIL CHIFFRÉ : CHAQUE MÉDIA PART CHIFFRÉ DE BOUT EN BOUT (chapitre 25).
+     *
+     * Un message par fichier (décision du user) : la charge ne porte qu'un
+     * descripteur. Rien ne passe par le magasin d'envois — sa file hors ligne
+     * renverrait le fichier EN CLAIR au retour du réseau.
+     *
+     * 🔴 ÉTAT INCONNU → ON DEMANDE AVANT DE TÉLÉVERSER (lot D, chapitre 26).
+     * Le serveur refuse désormais un fichier en clair dans un fil chiffré,
+     * mais au moment du MESSAGE, après le téléversement : le fichier en clair
+     * serait déjà sur le stockage. Seul l'expéditeur peut l'éviter. Même
+     * garde que pour le texte.
+     */
+    final pileAvant = context.e2ee;
+    if (pileAvant != null && !_filChiffre && !pileAvant.fil.etatConnu(widget.convId)) {
+      await _lireEtatChiffrement();
+      if (!mounted) return;
+    }
+    final pile = context.e2ee;
+    final pair = widget.otherUserId;
+    final moi = _myId;
+    if (_filChiffre && pile != null && _cheminChiffre && moi != null) {
+      final medias = context.read<MediaRepository>();
+      for (var i = 0; i < fichiers.length; i++) {
+        await _envoyerMediaChiffre(
+          pile: pile,
+          medias: medias,
+          pair: pair,
+          moi: moi,
+          fichier: fichiers[i],
+          // La légende accompagne le PREMIER fichier seulement.
+          legende: i == 0 ? (legende ?? '') : '',
+          replyToId: i == 0 ? replyId : null,
+          vueUnique: vueUnique && fichiers.length == 1,
+        );
+      }
+      return;
+    }
 
     for (var debut = 0; debut < fichiers.length; debut += 10) {
       final lot = fichiers.sublist(
@@ -1774,7 +3757,12 @@ class _ChatScreenState extends State<ChatScreen>
         // La légende accompagne le PREMIER paquet seulement : répétée sur
         // chacun, elle apparaîtrait plusieurs fois dans le fil.
         legende: debut == 0 ? legende : null,
+        // Comme la legende : sur le PREMIER paquet seulement, puisque ce sont
+        // ses mentions. Repetees, elles notifieraient a chaque paquet.
+        mentions: debut == 0 ? mentions : null,
         replyToId: debut == 0 ? replyId : null,
+        // Une vue unique n'a qu'un fichier : le paquet est forcément le seul.
+        vueUnique: vueUnique && lot.length == 1,
       );
 
       // Bulle immédiate, avec la vignette locale : plus d'attente devant un
@@ -1790,6 +3778,7 @@ class _ChatScreenState extends State<ChatScreen>
         replyTo: null,
         media: const [],
         createdAt: DateTime.now(),
+        vueUnique: envoi.vueUnique,
       );
       setState(() {
         _messages = [..._messages, optimiste];
@@ -1812,6 +3801,10 @@ class _ChatScreenState extends State<ChatScreen>
     final media = context.read<MediaRepository>();
     final chat = context.read<ChatRepository>();
     final rt = context.read<RealtimeClient>();
+    // Lu ICI comme les trois autres, et pour la même raison : le magasin ne
+    // touche jamais un `BuildContext`. C'est lui qui, ensuite, écoute le retour
+    // du réseau et relance ce qui attendait — même si cet écran a disparu.
+    final conn = context.read<ConnectivityService>();
     final erreur = tr(context, 'send_failed');
     return EnvoiMediaStore.instance.lancer(
       envoi,
@@ -1819,10 +3812,286 @@ class _ChatScreenState extends State<ChatScreen>
       chat: chat,
       rt: rt,
       messageErreurGenerique: () => erreur,
+      conn: conn,
     );
   }
 
   void _reessayerEnvoi(EnvoiMedia envoi) => _lanceDansLeMagasin(envoi);
+
+  /// La bulle d'un MÉDIA CHIFFRÉ de bout en bout (cours, chapitre 23) : son
+  /// aperçu et sa clé viennent de l'enveloppe. Sans eux — enveloppe jamais
+  /// reçue sur ce téléphone — on le DIT, comme pour un texte.
+  Widget _bulleMediaChiffre(Message m, bool mine) {
+    final d = m.mediaChiffre;
+    final legende = (m.content ?? '').trim();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (d == null && m.status == "PENDING")
+          EnvoiChiffreEnCours(
+            octets: _envoisChiffres[m.id]?.fichier.bytes,
+            mime: _envoisChiffres[m.id]?.fichier.mimeType ?? '',
+            progression: _envoisChiffres[m.id]?.progression ??
+                ValueNotifier<double>(0),
+          )
+        else if (d != null)
+          BulleMediaChiffre(
+            descripteur: d,
+            isMe: mine,
+            baseUrl: _baseUrl,
+            token: _token,
+            couleurDiscrete: _muted,
+            onLongPress: () => _openMessageActions(m),
+            onOuvrir: () => _openGallery(d.id),
+          )
+        else
+          MediaChiffreIndisponible(couleur: _muted),
+        if (legende.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 6, 4, 0),
+            child: Text.rich(TextSpan(children: spansWhatsApp(legende)),
+                style: TextStyle(color: _bubbleTextColor(mine))),
+          ),
+        Align(
+          alignment: Alignment.centerRight,
+          child: Padding(
+            padding: const EdgeInsets.only(top: 3, right: 2),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Text(_time(m.createdAt),
+                  style: TextStyle(fontSize: 11, color: _muted)),
+              if (mine) ...[
+                const SizedBox(width: 4),
+                _statusTicks(m.status, _muted),
+              ],
+            ]),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Envoie UN média chiffré, avec sa bulle d'attente. Voir
+  /// `EnvoiMediaChiffre`.
+  Future<void> _envoyerMediaChiffre({
+    required PileE2ee pile,
+    required MediaRepository medias,
+    /// `null` pour un GROUPE chiffré (lot 3).
+    required String? pair,
+    required String moi,
+    required MediaPickResult fichier,
+    required String legende,
+    String? replyToId,
+    bool vueUnique = false,
+  }) async {
+    final tempId = "tmp-${DateTime.now().microsecondsSinceEpoch}";
+    final erreur = tr(context, 'send_failed');
+    final suivi = (fichier: fichier, progression: ValueNotifier<double>(0));
+    _envoisChiffres[tempId] = suivi;
+    setState(() {
+      _messages = [
+        ..._messages,
+        Message(
+          id: tempId,
+          chiffre: true,
+          convId: widget.convId,
+          senderId: moi,
+          content: legende,
+          type: typeMessagePour(DescripteurMedia(
+              id: tempId, cle: '', empreinte: '', taille: 0, mime: fichier.mimeType)),
+          status: "PENDING",
+          replyToId: replyToId,
+          // Une ligne de média chiffré SANS descripteur : la bulle d'attente.
+          media: [
+            MessageMedia(
+                id: tempId, url: '', mimeType: 'application/octet-stream', chiffre: true)
+          ],
+          createdAt: DateTime.now(),
+          vueUnique: vueUnique,
+        ),
+      ];
+      _rebuildCombined();
+    });
+    _scrollToBottom();
+    /*
+     * 🔴 EN MORCEAUX D'ABORD (cours, chapitre 44) : le fichier part par
+     * tranches confiées à Android, qui continue application fermée, et le
+     * serveur publie le message au dernier morceau.
+     *
+     * ⚠️ ON N'ATTEND QUE LA PRÉPARATION. Elle fait avancer le chiffrement et
+     * doit garder l'ordre des fichiers ; l'envoi des octets, lui, se suit à
+     * côté (`_suivreEnvoiMorceaux`) — sans quoi le deuxième fichier
+     * attendrait que le premier soit entièrement arrivé.
+     */
+    var confie = false;
+    try {
+      EnvoiMorceauxSuivi? enMorceaux;
+      if (SuiviEnvoisMorceaux.instance.pret) {
+        try {
+          enMorceaux = await SuiviEnvoisMorceaux.instance.lancer(
+            fil: pile.fil,
+            convId: widget.convId,
+            pairId: pair,
+            fichier: fichier,
+            legende: legende,
+            replyToId: replyToId,
+            vueUnique: vueUnique,
+            rangerMaCopie: (id, d) => EnvoiMediaChiffre.rangerMaCopie(
+              pile: pile,
+              convId: widget.convId,
+              moi: moi,
+              id: id,
+              d: d,
+              legende: legende,
+              replyToId: replyToId,
+              vueUnique: vueUnique,
+              octets: fichier.bytes,
+            ),
+          );
+        } on ApiException catch (e) {
+          // Un serveur qui ne connaît pas encore l'envoi en morceaux : on
+          // retombe sur l'envoi d'un seul bloc, qui marchait avant.
+          if (e.statusCode != 404) rethrow;
+        }
+      }
+      if (enMorceaux != null) {
+        confie = true;
+        unawaited(_suivreEnvoiMorceaux(
+          enMorceaux,
+          tempId,
+          suivi.progression,
+          pile: pile,
+          pair: pair,
+          moi: moi,
+          legende: legende,
+          replyToId: replyToId,
+          vueUnique: vueUnique,
+          erreur: erreur,
+        ));
+        return;
+      }
+      final envoye = await EnvoiMediaChiffre.envoyer(
+        pile: pile,
+        medias: medias,
+        convId: widget.convId,
+        pairId: pair,
+        moi: moi,
+        fichier: fichier,
+        legende: legende,
+        replyToId: replyToId,
+        vueUnique: vueUnique,
+        onProgression: (r) => suivi.progression.value = r,
+      );
+      if (!mounted) return;
+      setState(() {
+        // Ajouté même si la bulle d'attente a disparu, et à la place de la
+        // version du serveur arrivée d'abord : voir `envois_chiffres_fil.dart`.
+        _messages = remplacerEnvoiChiffre(_messages, tempId, envoye);
+        _rebuildCombined();
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _messages = _messages.where((m) => m.id != tempId).toList();
+        _rebuildCombined();
+      });
+      showAppSnackBar("$erreur : $e");
+    } finally {
+      // Confié en morceaux : c'est le suivi qui libérera la bulle.
+      if (!confie) _envoisChiffres.remove(tempId)?.progression.dispose();
+    }
+  }
+
+  /// Suit un envoi en morceaux jusqu'à sa publication, et remplace la bulle
+  /// d'attente par le message.
+  ///
+  /// ⚠️ L'ÉCRAN PEUT ÊTRE FERMÉ ENTRE-TEMPS : rien ne s'arrête pour autant
+  /// (Android envoie, le serveur publie) ; on cesse seulement d'afficher.
+  Future<void> _suivreEnvoiMorceaux(
+    EnvoiMorceauxSuivi envoi,
+    String tempId,
+    ValueNotifier<double> progression, {
+    required PileE2ee pile,
+    required String? pair,
+    required String moi,
+    required String legende,
+    String? replyToId,
+    required bool vueUnique,
+    required String erreur,
+  }) async {
+    void relayer() => progression.value = envoi.progression.value;
+    envoi.progression.addListener(relayer);
+    try {
+      final etat = await envoi.fin;
+      var envoye = envoi.message!;
+      if (!etat.publie) {
+        /*
+         * La publication différée a été REFUSÉE (clé de groupe changée pendant
+         * l'envoi, par exemple) : le fichier, lui, est arrivé. On renvoie le
+         * message par le chemin ordinaire, avec le MÊME média — rien à
+         * retéléverser. Un blocage, lui, sera refusé là aussi, et dit.
+         */
+        final d = envoye.mediaChiffre!;
+        final id = await pile.fil.envoyerMedia(
+          convId: widget.convId,
+          pairId: pair,
+          media: d,
+          legende: legende,
+          replyToId: replyToId,
+          vueUnique: vueUnique,
+        );
+        envoye = await EnvoiMediaChiffre.rangerMaCopie(
+          pile: pile,
+          convId: widget.convId,
+          moi: moi,
+          id: id,
+          d: d,
+          legende: legende,
+          replyToId: replyToId,
+          vueUnique: vueUnique,
+        );
+      }
+      if (!mounted) return;
+      setState(() {
+        _messages = remplacerEnvoiChiffre(_messages, tempId, envoye);
+        _rebuildCombined();
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _messages = _messages.where((m) => m.id != tempId).toList();
+        _rebuildCombined();
+      });
+      showAppSnackBar("$erreur : $e");
+    } finally {
+      envoi.progression.removeListener(relayer);
+      _envoisChiffres.remove(tempId)?.progression.dispose();
+    }
+  }
+
+  /// Ouvre un message à vue unique dans le visionneur protégé.
+  ///
+  /// La bulle passe à « Ouverte » DÈS que le serveur a accepté — et non à la
+  /// fermeture : si l'application est tuée pendant l'affichage, la vue est
+  /// consommée quand même, et la bulle ne doit pas proposer de rouvrir.
+  Future<void> _ouvrirVueUnique(Message m) => VisionneurVueUnique.ouvrir(
+        context,
+        message: m,
+        chat: context.read<ChatRepository>(),
+        baseUrl: _baseUrl,
+        token: _token,
+        onOuvert: () {
+          if (!mounted) return;
+          final ouverte = m.avecVueUnique(ouverte: true);
+          setState(() {
+            _messages = [
+              for (final x in _messages) x.id == m.id ? ouverte : x,
+            ];
+            _rebuildCombined();
+          });
+          unawaited(MessageCache.upsert(ouverte, widget.convId));
+        },
+      );
 
   /// Abandonne un envoi échoué : la bulle disparaît du fil. Les médias déjà
   /// téléversés deviennent orphelins côté serveur — mais c'est un choix
@@ -1835,54 +4104,27 @@ class _ChatScreenState extends State<ChatScreen>
     });
   }
 
-  Future<void> _uploadAndSend(
-      List<int> bytes, String filename, String mime, String msgType,
-      {int? durationMs}) async {
-    setState(() => _uploading = true);
-    final replyId = _replyTo?.id;
-    final replyMsg = _replyTo;
-    final replySnapshot = replyMsg != null
-        ? ReplyPreview(
-            id: replyMsg.id,
-            senderId: replyMsg.senderId,
-            type: replyMsg.type,
-            content: replyMsg.isDeleted ? null : replyMsg.content,
-            isDeleted: replyMsg.isDeleted)
-        : null;
-    if (mounted) setState(() => _replyTo = null);
-    final media = context.read<MediaRepository>();
-    final rt = context.read<RealtimeClient>();
-    try {
-      final uploaded = await media.upload(
-          Uint8List.fromList(bytes), filename, mime,
-          durationMs: durationMs);
-      if (rt.connected) {
-        rt.sendMedia(widget.convId, uploaded.id, msgType,
-            "tmp-${DateTime.now().microsecondsSinceEpoch}",
-            replyToId: replyId);
-      } else {
-        final msg = await context
-            .read<ChatRepository>()
-            .sendMedia(widget.convId, uploaded.id, msgType, replyToId: replyId);
-        if (mounted) setState(() => _messages = [..._messages, msg]);
-      }
-      _scrollToBottom();
-    } on ApiException catch (e) {
-      _showError(e.message);
-    } catch (_) {
-      _showError(tr(context, 'send_failed'));
-    } finally {
-      if (mounted) setState(() => _uploading = false);
-    }
-  }
-
   /// Prise de vue, depuis l'écran de discussion et non depuis la feuille : la
   /// caméra est une application externe, et la feuille aurait été détruite
   /// pendant son affichage.
   Future<List<MediaPickResult>?> _prendrePhoto() async {
     try {
-      final photo = await ImagePicker()
-          .pickImage(source: ImageSource.camera, imageQuality: 85);
+      /*
+       * ⚠️ MÊMES BORNES QUE LA GALERIE (`core/compression_image.dart`) : bord
+       * long à 1600 px, qualité 82. La prise de vue ne bornait que la qualité,
+       * et sortait donc des images en pleine définition du capteur — 12 Mpx sur
+       * un téléphone courant, soit plusieurs mégaoctets pour une bulle de
+       * 280 px de large.
+       *
+       * `image_picker` sait le faire lui-même à la capture : c'est plus sobre
+       * que de recompresser après coup, et le fichier n'existe jamais en grand.
+       */
+      final photo = await ImagePicker().pickImage(
+        source: ImageSource.camera,
+        maxWidth: imageBordMax.toDouble(),
+        maxHeight: imageBordMax.toDouble(),
+        imageQuality: imageQualite,
+      );
       if (photo == null) return null;
       final octets = await photo.readAsBytes();
       return [
@@ -1926,6 +4168,11 @@ class _ChatScreenState extends State<ChatScreen>
     });
 
     final charge = encodeContacts(resultat.contacts);
+    if (await _envoyerStructureChiffree("CONTACT", charge, replyId, replySnapshot)) {
+      if (mounted) setState(() => _uploading = false);
+      return;
+    }
+    if (!mounted) return;
     final rt = context.read<RealtimeClient>();
     try {
       if (rt.connected) {
@@ -1972,6 +4219,139 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
+  /// 🔴 UN CONTACT OU UNE POSITION DANS UN FIL CHIFFRÉ (06/10/2026).
+  ///
+  /// 🐛 Ils partaient par le temps réel, EN CLAIR : le serveur les refuse
+  /// dans un fil chiffré (`CONVERSATION_CHIFFREE`), et l'envoi échouait. La
+  /// fiche part maintenant comme un texte chiffré, son type dans la charge.
+  ///
+  /// Rend `true` si le message a pris le chemin chiffré — l'appelant s'arrête
+  /// alors. Même garde que le texte : un fil dont l'état est inconnu est lu
+  /// d'abord.
+  Future<bool> _envoyerStructureChiffree(
+    String type,
+    String charge,
+    String? replyId,
+    ReplyPreview? replySnapshot,
+  ) async {
+    final pileAvant = context.e2ee;
+    if (pileAvant != null && !_filChiffre && !pileAvant.fil.etatConnu(widget.convId)) {
+      await _lireEtatChiffrement();
+      if (!mounted) return true;
+    }
+    final pile = context.e2ee;
+    final pair = widget.otherUserId;
+    if (!_filChiffre || pile == null || !_cheminChiffre) return false;
+    final tempId = "tmp-${DateTime.now().microsecondsSinceEpoch}";
+    final quand = DateTime.now();
+    setState(() {
+      _messages = [
+        ..._messages,
+        Message(
+          id: tempId,
+          chiffre: true,
+          convId: widget.convId,
+          senderId: _myId ?? "",
+          content: charge,
+          type: type,
+          status: "PENDING",
+          replyToId: replyId,
+          replyTo: replySnapshot,
+          media: const [],
+          createdAt: quand,
+        ),
+      ];
+      _rebuildCombined();
+    });
+    _scrollToBottom();
+    _envoyerChiffreEnFond(pile, pair, charge, tempId, quand,
+        type: type, replyToId: replyId);
+    return true;
+  }
+
+  /// L'aperçu d'un message cité, tel que la bulle d'attente l'affiche.
+  ReplyPreview? _apercuReponse(Message? m) => m == null
+      ? null
+      : ReplyPreview(
+          id: m.id,
+          senderId: m.senderId,
+          type: m.type,
+          content: m.isDeleted ? null : m.content,
+          isDeleted: m.isDeleted);
+
+  bool _enHautPropose = false;
+
+  /// Cette conversation remonte EN HAUT de la feuille de partage d'Android
+  /// (07/10/2026) : on vient d'y écrire. Une fois par ouverture suffit.
+  void _proposerEnHaut() {
+    if (_enHautPropose) return;
+    _enHautPropose = true;
+    unawaited(PartageEntrant.instance.proposerEnHaut(widget.convId, widget.title));
+  }
+
+  /// Envoie ce qu'une autre application a partagé vers cette conversation.
+  ///
+  /// Un fichier suit le chemin d'un fichier choisi ici : plafond, compression,
+  /// écran d'aperçu et de légende, puis `_lanceEnvoiMedias` — chiffré si le
+  /// fil l'est. Un texte seul est posé dans le champ : on le relit avant de
+  /// l'envoyer, comme sur WhatsApp.
+  Future<void> _traiterPartage() async {
+    final partage = widget.partage;
+    if (partage == null || !mounted) return;
+    final texte = (partage.texte ?? '').trim();
+    if (partage.fichiers.isEmpty) {
+      if (texte.isNotEmpty) {
+        _inputCtrl.text = texte;
+        _inputFocus.requestFocus();
+      }
+      return;
+    }
+    final fichiers = <MediaPickResult>[];
+    final tropGros = <String>[];
+    for (final chemin in partage.fichiers) {
+      final nom = chemin.split(RegExp(r'[\\/]')).last;
+      try {
+        final f = File(chemin);
+        if (depassePlafondMedia(await f.length())) {
+          tropGros.add(nom);
+          continue;
+        }
+        final octets = await f.readAsBytes();
+        final pret = await compresserPourEnvoi(
+          octets: octets,
+          nomFichier: nom,
+          mimeType: mimeFichierRecu(nom),
+          chemin: chemin,
+        );
+        fichiers.add(MediaPickResult(
+          bytes: pret.octets,
+          fileName: pret.nomFichier,
+          mimeType: pret.mimeType,
+          path: chemin,
+        ));
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    final avis = messageMediasEcartes(tropGros, context: context);
+    if (avis != null) showAppSnackBar(avis);
+    if (fichiers.isEmpty) return;
+    final apercu = await MediaCaptionScreen.open(
+      context,
+      fichiers,
+      membres: widget.isGroup
+          ? {...widget.memberNames, ..._membresCharges}
+          : const {},
+      monId: _myId,
+    );
+    if (apercu == null || apercu.fichiers.isEmpty || !mounted) return;
+    await _lanceEnvoiMedias(
+      apercu.fichiers,
+      apercu.legende ?? (texte.isEmpty ? null : texte),
+      apercu.mentions,
+      apercu.vueUnique,
+    );
+  }
+
   /// Contacts portés par un message, ou liste vide si la charge est illisible.
   List<SharedContact> _contactsDe(Message m) =>
       contactsDepuisContenu(m.content) ?? const [];
@@ -2002,6 +4382,11 @@ class _ChatScreenState extends State<ChatScreen>
     });
 
     final charge = encodeLocation(position);
+    if (await _envoyerStructureChiffree("LOCATION", charge, replyId, replySnapshot)) {
+      if (mounted) setState(() => _uploading = false);
+      return;
+    }
+    if (!mounted) return;
     final rt = context.read<RealtimeClient>();
     try {
       if (rt.connected) {
@@ -2080,19 +4465,17 @@ class _ChatScreenState extends State<ChatScreen>
       final convId = await context.read<ChatRepository>().createDirect(id);
       if (!mounted) return;
       await cc.startOutgoing(convId, "AUDIO", contact.displayName);
-      if (!mounted) return;
       // Sans cette ouverture, l'appel démarre sans que rien ne s'affiche —
       // seul le bandeau global le signale (même enchaînement que la fiche
       // contact et le clavier d'appel).
-      await Navigator.of(context).push(MaterialPageRoute(
-        fullscreenDialog: true,
-        builder: (_) => const ActiveCallScreen(),
-      ));
+      //
+      // ⚠️ PAS DE `if (!mounted) return;` : l'appel est déjà parti.
+      await ouvrirEcranAppelLance(cc);
     } catch (e) {
       // `messageErreurAppel` traite déjà l'ApiException : le message du serveur
       // passe tel quel (« Le correspondant est déjà en appel »), et c'est le
       // point unique des trois écrans qui lancent un appel.
-      _showError(messageErreurAppel(e));
+      _showError(messageErreurAppel(e, context: context));
     }
   }
 
@@ -2110,10 +4493,10 @@ class _ChatScreenState extends State<ChatScreen>
     try {
       await context.read<ContactsRepository>().add(id, alias: contact.name);
       if (!mounted) return;
-      showAppSnackBar("${contact.displayName} ajouté à tes contacts");
+      showAppSnackBar(tr(context, 'contact_added_toast', {'nom': contact.displayName}));
     } on ApiException catch (e) {
       if (e.code == "ALREADY_CONTACT") {
-        showAppSnackBar("${contact.displayName} est déjà dans tes contacts");
+        showAppSnackBar(tr(context, 'add_already_contact', {'nom': contact.displayName}));
         return;
       }
       _showError(e.message);
@@ -2167,6 +4550,7 @@ class _ChatScreenState extends State<ChatScreen>
     setState(() {
       _recording = true;
       _recordLocked = false;
+      _vocalVueUnique = false;
       _recordStarted = DateTime.now();
     });
     _startRecordTimer();
@@ -2197,9 +4581,25 @@ class _ChatScreenState extends State<ChatScreen>
     if (result == null || result.bytes.isEmpty) return;
     final ext = kIsWeb ? "webm" : "m4a";
     final mime = kIsWeb ? "audio/webm" : "audio/mp4";
-    await _uploadAndSend(result.bytes,
-        "vocal-${DateTime.now().millisecondsSinceEpoch}.$ext", mime, "AUDIO",
-        durationMs: result.durationMs);
+    /*
+     * 🔴 LE VOCAL PASSE PAR LE MEME CHEMIN QUE LES AUTRES MEDIAS.
+     *
+     * Il court-circuitait le magasin d'envois : ni bulle provisoire, ni
+     * progression, ni reessai — et, sans reseau, une simple alerte rouge et un
+     * enregistrement PERDU. Or c'est le media qu'on ne peut justement pas
+     * refaire : une photo se reprend, un message vocal se re-dit.
+     *
+     * Par cette voie il gagne tout d'un coup : la bulle qui attend, le depart
+     * automatique au retour du reseau, et le reessai en cas de vrai refus.
+     */
+    await _lanceEnvoiMedias([
+      MediaPickResult(
+        bytes: Uint8List.fromList(result.bytes),
+        fileName: "vocal-${DateTime.now().millisecondsSinceEpoch}.$ext",
+        mimeType: mime,
+        durationMs: result.durationMs,
+      ),
+    ], null, const [], _vocalVueUnique);
   }
 
   String _ext(String name) {
@@ -2267,12 +4667,13 @@ class _ChatScreenState extends State<ChatScreen>
     final token = await _freshToken();
     final url = "$_baseUrl${m.url}?download=1&token=$token";
     final name = m.filename ?? "fichier-${m.id}";
-    final path = await downloadUrl(url, name);
+    final path = await telechargerEnSuivant(url, name,
+        idTransfert: "dl-${m.id}", ouvrirEnsuite: true);
     if (!mounted) return;
     if (path != null) {
-      showAppSnackBar("Enregistré dans Alanya/ : $name");
+      showAppSnackBar(tr(context, 'saved_to_alanya', {'nom': name}));
     } else {
-      showAppSnackBar("Échec du téléchargement");
+      showAppSnackBar(tr(context, 'download_failed'));
     }
   }
 
@@ -2282,36 +4683,23 @@ class _ChatScreenState extends State<ChatScreen>
     final token = await _freshToken();
     final url = "$_baseUrl${m.url}?download=1&token=$token";
     final name = m.filename ?? "fichier-${m.id}";
-    showAppSnackBar("Ouverture…");
+    showAppSnackBar(tr(context, 'opening'));
     final path = await downloadToCache(url, name);
     if (!mounted) return;
     if (path != null) {
       await openLocalFile(path);
     } else {
-      showAppSnackBar("Impossible d'ouvrir le fichier");
+      showAppSnackBar(tr(context, 'open_file_failed'));
     }
   }
 
   // Collecte tous les médias image/vidéo de la conversation (ordre du fil) pour
   // la galerie navigable (swipe entre médias).
+  /// Les médias du fil pour la galerie — en clair ET chiffrés, pour qu'on
+  /// puisse glisser de l'un à l'autre (voir `mediasGalerie`).
   Future<List<ConvMediaItem>> _galleryItems() async {
     final token = await _freshToken();
-    final items = <ConvMediaItem>[];
-    for (final msg in _messages) {
-      for (final media in msg.media) {
-        final t = MediaHelper.detectType(media.mimeType, media.filename);
-        if (t == AlanyaMediaType.image || t == AlanyaMediaType.video) {
-          items.add(ConvMediaItem(
-            id: media.id,
-            url: "$_baseUrl${media.url}?token=$token",
-            downloadUrl: "$_baseUrl${media.url}?download=1&token=$token",
-            filename: media.filename ?? "",
-            isVideo: t == AlanyaMediaType.video,
-          ));
-        }
-      }
-    }
-    return items;
+    return mediasGalerie(_messages, baseUrl: _baseUrl, token: token);
   }
 
   // Ouvre la visionneuse navigable positionnée sur le média [mediaId].
@@ -2389,12 +4777,17 @@ class _ChatScreenState extends State<ChatScreen>
   // DELETE / FORWARD / OPTIONS
   // ══════════════════════════════════════════════
   Future<void> _deleteMessage(Message m) async {
-    final canDeleteForAll = m.senderId == _myId && !m.isDeleted;
+    // Vingt-quatre heures pour supprimer pour tous (décision du user,
+    // 07/10/2026) ; « pour moi » reste possible sans délai.
+    final canDeleteForAll = m.senderId == _myId &&
+        !m.isDeleted &&
+        peutEncoreSupprimerPourTous(m.createdAt);
     final scope = await _showDeleteDialog(canDeleteForAll);
     if (scope == null || !mounted) return;
     final rt = context.read<RealtimeClient>();
     try {
       if (rt.connected) {
+        if (scope == "everyone") _suppressionsEnAttente[m.id] = m;
         rt.deleteMessage(m.id, scope: scope);
       } else {
         await context
@@ -2410,6 +4803,11 @@ class _ChatScreenState extends State<ChatScreen>
               .map((msg) => msg.id == m.id
                   ? Message(
                       id: m.id,
+                      chiffre: m.chiffre,
+                      vueUnique: m.vueUnique,
+                      vueUniqueOuverte: m.vueUniqueOuverte,
+                      vueUniqueEffacee: m.vueUniqueEffacee,
+                      mediaChiffre: m.mediaChiffre,
                       convId: m.convId,
                       senderId: m.senderId,
                       content: null,
@@ -2417,6 +4815,7 @@ class _ChatScreenState extends State<ChatScreen>
                       status: m.status,
                       replyToId: m.replyToId,
                       replyTo: m.replyTo,
+                      statutCite: m.statutCite,
                       deletedAt: DateTime.now(),
                       media: const [],
                       createdAt: m.createdAt)
@@ -2457,27 +4856,162 @@ class _ChatScreenState extends State<ChatScreen>
         context: context,
         isScrollControlled: true,
         builder: (ctx) => _ForwardPicker(
+            /*
+             * ⚠️ UN TEXTE N'ENTRE PAS EN CLAIR DANS UN FIL CHIFFRÉ : le serveur
+             * le refuse (`CONVERSATION_CHIFFREE`), et cet écran annoncerait
+             * pourtant « transféré ». On écarte donc ces fils d'avance. Un
+             * média sans légende, lui, peut y aller — il n'est pas chiffré.
+             */
+            // Tous les fils, chiffrés compris : ce qui ne peut pas passer par
+            // le serveur passe par l'appareil (`transfert_appareil.dart`).
             conversations:
                 conversations.where((c) => c.id != widget.convId).toList(),
             title: tr(context, 'forward_to'))).then((result) {
       if (result != null) picked.addAll(result);
     });
     if (picked.isEmpty || !mounted) return;
+    final cibles = [for (final c in conversations) if (picked.contains(c.id)) c];
+    final parLeServeur = [
+      for (final c in cibles)
+        if (!transfertParLAppareil(m,
+            sourceChiffree: _filChiffre, cibleChiffree: c.e2eeActif))
+          c.id,
+    ];
+    final parLAppareil = [
+      for (final c in cibles)
+        if (!parLeServeur.contains(c.id)) c,
+    ];
     final rt = context.read<RealtimeClient>();
+    final chat = context.read<ChatRepository>();
+    final medias = context.read<MediaRepository>();
+    final pile = context.e2ee;
+    final moi = _myId ?? '';
+    final erreurGenerique = tr(context, 'send_failed');
+    final reussi = tr(context, 'forwarded_success');
+    var echecs = 0;
     try {
-      if (rt.connected) {
-        rt.forwardMessage(m.id, picked.toList());
-      } else {
-        await context
-            .read<ChatRepository>()
-            .forwardMessage(widget.convId, m.id, picked.toList());
+      if (parLeServeur.isNotEmpty) {
+        if (rt.connected) {
+          rt.forwardMessage(m.id, parLeServeur);
+        } else {
+          await chat.forwardMessage(widget.convId, m.id, parLeServeur);
+        }
       }
-      if (mounted) showAppSnackBar(tr(context, 'forwarded_success'));
     } on ApiException catch (e) {
       _showError(e.message);
+      return;
     } catch (_) {
-      _showError(tr(context, 'send_failed'));
+      _showError(erreurGenerique);
+      return;
     }
+    // Le fichier n'est lu (déchiffré ou téléchargé) qu'une fois, quel que
+    // soit le nombre de fils chiffrés visés.
+    ({Uint8List octets, String nom, String mime, int? dureeMs})? fichier;
+    for (final c in parLAppareil) {
+      try {
+        await transfererDepuisLAppareil(
+          m: m,
+          cible: c,
+          moi: moi,
+          pile: pile,
+          chat: chat,
+          medias: medias,
+          octetsDuMedia: () async => fichier ??= await _fichierEnClair(m),
+        );
+      } catch (_) {
+        echecs++;
+      }
+    }
+    if (!mounted) return;
+    if (echecs == 0) {
+      showAppSnackBar(reussi);
+    } else {
+      _showError('$erreurGenerique ($echecs/${cibles.length})');
+    }
+  }
+
+  /// PARTAGER UN MESSAGE VERS UNE AUTRE APPLICATION (07/10/2026, demande du
+  /// user) : la feuille de partage d'Android — WhatsApp, Gmail… et, en haut,
+  /// les conversations Alanya récentes.
+  ///
+  /// ⚠️ C'EST LE CLAIR QUI SORT : le texte déchiffré, le fichier déchiffré.
+  /// C'est le geste demandé — l'utilisateur choisit de faire sortir ce message
+  /// du chiffrement de bout en bout, comme une capture d'écran.
+  Future<void> _partagerMessage(Message m) async {
+    final erreur = tr(context, 'send_failed');
+    try {
+      final aUnMedia = m.mediaChiffre != null || m.media.isNotEmpty;
+      if (!aUnMedia) {
+        await SharePlus.instance.share(ShareParams(text: _texteAPartager(m)));
+        return;
+      }
+      final f = await _fichierEnClair(m);
+      final dossier = await getTemporaryDirectory();
+      final chemin =
+          '${dossier.path}/partage_${DateTime.now().millisecondsSinceEpoch}_${f.nom}';
+      await File(chemin).writeAsBytes(f.octets, flush: true);
+      final legende = (m.content ?? '').trim();
+      await SharePlus.instance.share(ShareParams(
+        files: [XFile(chemin, mimeType: f.mime)],
+        text: legende.isEmpty ? null : legende,
+      ));
+    } catch (_) {
+      if (mounted) _showError(erreur);
+    }
+  }
+
+  /// Ce qu'un message dit, en texte lisible hors d'Alanya : un contact devient
+  /// son nom et ses numéros, une position un lien de carte.
+  String _texteAPartager(Message m) {
+    final contenu = m.content ?? '';
+    if (m.type == 'CONTACT') {
+      final contacts = contactsDepuisContenu(contenu) ?? const <SharedContact>[];
+      return contacts
+          .map((c) => [c.name ?? '', ...c.phones].where((x) => x.isNotEmpty).join('\n'))
+          .join('\n\n');
+    }
+    if (m.type == 'LOCATION') {
+      final p = positionDepuisContenu(contenu);
+      if (p != null) {
+        final nom = (p.label ?? '').trim();
+        return '${nom.isEmpty ? '' : '$nom\n'}https://maps.google.com/?q=${p.lat},${p.lng}';
+      }
+    }
+    return sansMarqueursWhatsApp(contenu);
+  }
+
+  /// Le fichier EN CLAIR d'un message, pour le renvoyer d'ici : déchiffré
+  /// (média chiffré, clair en cache ou téléchargé), ou téléchargé.
+  Future<({Uint8List octets, String nom, String mime, int? dureeMs})>
+      _fichierEnClair(Message m) async {
+    final d = m.mediaChiffre;
+    if (d != null) {
+      final f = await OuvertureMediaChiffre.ouvrir(
+        d,
+        baseUrl: _baseUrl,
+        token: _token,
+        jeton: fournisseurJeton(context),
+      );
+      return (
+        octets: await f.readAsBytes(),
+        nom: nomPourEnregistrer(d),
+        mime: d.mime,
+        dureeMs: d.dureeMs,
+      );
+    }
+    final media = m.media.first;
+    final nom = (media.filename ?? '').isNotEmpty
+        ? media.filename!
+        : 'Alanya_${DateTime.now().millisecondsSinceEpoch}';
+    final chemin = await downloadToCache(
+        '$_baseUrl${media.url}?token=$_token', 'fwd_${media.id}_$nom');
+    if (chemin == null) throw StateError('Téléchargement impossible');
+    return (
+      octets: await File(chemin).readAsBytes(),
+      nom: nom,
+      mime: media.mimeType,
+      dureeMs: media.durationMs,
+    );
   }
 
   static const List<String> _reactionEmojis = [
@@ -2564,8 +5098,8 @@ class _ChatScreenState extends State<ChatScreen>
                 height: 160, child: Center(child: CircularProgressIndicator()));
           }
           if (snap.hasError || snap.data == null) {
-            return const SizedBox(
-                height: 120, child: Center(child: Text("Infos indisponibles")));
+            return SizedBox(
+                height: 120, child: Center(child: Text(tr(fctx, 'infos_unavailable'))));
           }
           final members = ((snap.data!["members"] as List?) ?? [])
               .map((e) => Map<String, dynamic>.from(e as Map))
@@ -2574,20 +5108,20 @@ class _ChatScreenState extends State<ChatScreen>
           final pending = members.where((x) => x["read"] != true).toList();
           return SafeArea(
             child: Column(mainAxisSize: MainAxisSize.min, children: [
-              const Padding(
-                padding: EdgeInsets.all(14),
-                child: Text("Infos du message",
-                    style:
-                        TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              Padding(
+                padding: const EdgeInsets.all(14),
+                child: Text(tr(fctx, 'message_infos'),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 16)),
               ),
               const Divider(height: 1),
               _infoSection(
-                  Icons.done_all, AlanyaColors.tickRead, "Lu", readList),
-              _infoSection(Icons.done, _mutedIcon, "En attente", pending),
+                  Icons.done_all, AlanyaColors.tickRead, tr(fctx, 'read_label'), readList),
+              _infoSection(Icons.done, _mutedIcon, tr(fctx, 'pending_label'), pending),
               if (readList.isEmpty && pending.isEmpty)
-                const Padding(
-                    padding: EdgeInsets.all(20),
-                    child: Text("Aucun destinataire.")),
+                Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Text(tr(fctx, 'no_recipient'))),
               const SizedBox(height: 8),
             ]),
           );
@@ -2605,7 +5139,7 @@ class _ChatScreenState extends State<ChatScreen>
         child: Row(children: [
           Icon(icon, size: 18, color: color),
           const SizedBox(width: 8),
-          Text("$title (${list.length})",
+          Text(tr(context, 'selection_title', {'titre': title, 'n': '${list.length}'}),
               style: TextStyle(fontWeight: FontWeight.w600, color: color)),
         ]),
       ),
@@ -2638,14 +5172,15 @@ class _ChatScreenState extends State<ChatScreen>
     } catch (_) {}
   }
 
-  static const Map<int, String> _disappearingOptions = {
-    0: "Désactivé",
-    86400: "24 heures",
-    604800: "7 jours",
-    7776000: "90 jours",
+  Map<int, String> get _disappearingOptions => {
+    0: tr(context, 'disappearing_off'),
+    86400: tr(context, 'duration_24h'),
+    604800: tr(context, 'duration_7d'),
+    7776000: tr(context, 'duration_90d'),
   };
 
-  String _disappearingLabel(int s) => _disappearingOptions[s] ?? "Personnalisé";
+  String _disappearingLabel(int s) =>
+      _disappearingOptions[s] ?? tr(context, 'custom_word');
 
   void _setDisappearing(int seconds) {
     setState(() => _disappearingSeconds = seconds);
@@ -2665,22 +5200,22 @@ class _ChatScreenState extends State<ChatScreen>
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Padding(
-            padding: EdgeInsets.all(16),
+          Padding(
+            padding: const EdgeInsets.all(16),
             child: Row(children: [
-              Icon(Icons.timer_outlined, size: 20),
-              SizedBox(width: 10),
+              const Icon(Icons.timer_outlined, size: 20),
+              const SizedBox(width: 10),
               Expanded(
-                child: Text("Messages éphémères",
-                    style:
-                        TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                child: Text(tr(context, 'ephemeral_title'),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 16)),
               ),
             ]),
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: Text(
-              "Les nouveaux messages disparaîtront après la durée choisie, pour tout le monde.",
+              tr(context, 'ephemeral_body'),
               style: TextStyle(fontSize: 13, color: _muted),
             ),
           ),
@@ -2727,23 +5262,15 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   String _pinnedPreviewText(Message m) {
-    if (m.isDeleted) return "Message supprimé";
+    if (m.isDeleted) return tr(context, 'ai_message_deleted');
     // Même raison que pour la citation d'une réponse : le bandeau ne montre
     // qu'une ligne, et la charge d'un message structuré est du JSON.
-    final structure = apercuStructure(m.type, m.content);
-    if (structure != null) return structure;
-    switch (m.type) {
-      case "IMAGE":
-        return "Photo";
-      case "VIDEO":
-        return "Vidéo";
-      case "AUDIO":
-        return "Message vocal";
-      case "FILE":
-        return "Fichier";
-      default:
-        return m.content ?? "";
-    }
+    return apercuMessage(
+      m.type,
+      m.content,
+      nomFichier: m.media.isNotEmpty ? m.media.first.filename : null,
+      nettoyerTexte: sansMarqueursWhatsApp,
+    );
   }
 
   Widget _pinnedBanner() {
@@ -2773,7 +5300,7 @@ class _ChatScreenState extends State<ChatScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text("Message épinglé",
+                  Text(tr(context, 'pinned_message'),
                       style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
@@ -2786,7 +5313,7 @@ class _ChatScreenState extends State<ChatScreen>
               ),
             ),
             IconButton(
-              tooltip: "Détacher",
+              tooltip: tr(context, 'unpin_action'),
               icon: Icon(Icons.close, size: 20, color: _muted45),
               onPressed: () {
                 setState(() => _pinnedMessageId = null);
@@ -2861,6 +5388,14 @@ class _ChatScreenState extends State<ChatScreen>
               if (!m.isDeleted) _reactionPickerRow(m, ctx),
               if (!m.isDeleted) const Divider(height: 1),
               if (!m.isDeleted) ...[
+                if (_peutReessayer(m))
+                  ListTile(
+                      leading: const Icon(Icons.refresh, color: Colors.redAccent),
+                      title: Text(tr(context, 'retry')),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _reessayerTexteChiffre(m);
+                      }),
                 ListTile(
                     leading: Icon(Icons.reply, color: _accent),
                     title: Text(tr(context, 'reply')),
@@ -2868,21 +5403,30 @@ class _ChatScreenState extends State<ChatScreen>
                       Navigator.pop(ctx);
                       _setReplyTo(m);
                     }),
-                if (m.senderId == _myId && m.type == 'TEXT')
+                if (_peutModifier(m))
                   ListTile(
                       leading: Icon(Icons.edit_outlined, color: _positive),
-                      title: const Text("Modifier"),
+                      title: Text(tr(context, 'edit')),
                       onTap: () {
                         Navigator.pop(ctx);
                         _startEdit(m);
                       }),
-                ListTile(
-                    leading: Icon(Icons.forward, color: _positive),
-                    title: Text(tr(context, 'forward')),
-                    onTap: () {
-                      Navigator.pop(ctx);
-                      _forwardMessage(m);
-                    }),
+                if (_peutTransferer(m))
+                  ListTile(
+                      leading: Icon(Icons.forward, color: _positive),
+                      title: Text(tr(context, 'forward')),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _forwardMessage(m);
+                      }),
+                if (_peutTransferer(m))
+                  ListTile(
+                      leading: Icon(Icons.share_outlined, color: _positive),
+                      title: Text(tr(context, 'share')),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _partagerMessage(m);
+                      }),
                 ListTile(
                     leading: Icon(Icons.copy, color: _iconNeutral),
                     title: Text(tr(context, 'copy')),
@@ -2894,10 +5438,14 @@ class _ChatScreenState extends State<ChatScreen>
                       }
                     }),
               ],
-              if (!m.isDeleted && m.media.isNotEmpty)
+              if (!m.isDeleted &&
+                  m.media.isNotEmpty &&
+                  !m.vueUnique &&
+                  // Enregistrer un fichier chiffré donnerait des octets illisibles.
+                  !m.media.first.chiffre)
                 ListTile(
                     leading: Icon(Icons.download_outlined, color: _iconNeutral),
-                    title: const Text("Enregistrer"),
+                    title: Text(tr(context, 'save')),
                     onTap: () {
                       Navigator.pop(ctx);
                       _download(m.media.first);
@@ -2918,21 +5466,37 @@ class _ChatScreenState extends State<ChatScreen>
     final cc = context.read<CallController>();
     try {
       await cc.startOutgoing(widget.convId, type, widget.title);
-      if (!mounted) return;
-      await Navigator.of(context).push(MaterialPageRoute(
-          fullscreenDialog: true, builder: (_) => const ActiveCallScreen()));
+      // ⚠️ PAS DE `if (!mounted) return;` : l'appel est déjà parti.
+      await ouvrirEcranAppelLance(cc);
     } catch (e) {
       // Le message vient de `messageErreurAppel`, partagé avec le clavier et la
       // fiche de contact. Ici manquait la clause `on ApiException` : appeler
       // quelqu'un déjà en ligne affichait « vérifie ta connexion » au lieu du
       // « Le correspondant est déjà en appel » que le serveur renvoyait.
-      _showError(messageErreurAppel(e));
+      _showError(messageErreurAppel(e, context: context));
     }
+  }
+
+  /// Réglages ▸ Traduction, ouvert depuis la conversation.
+  ///
+  /// Au retour, la passe automatique reprend : une langue qu'on vient
+  /// d'installer, ou la traduction automatique qu'on vient d'activer, doit se
+  /// voir tout de suite sur les messages déjà affichés — sans attendre le
+  /// prochain message reçu. La passe ne télécharge rien et saute ce qui est
+  /// déjà traduit.
+  Future<void> _openTranslation() async {
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const TranslationScreen()));
+    if (!mounted) return;
+    _traduitAutomatiquement();
   }
 
   // ══════════════════════════════════════════════
   // APPBAR
   // ══════════════════════════════════════════════
+
+
   PreferredSizeWidget _whatsappAppBar() {
     return AppBar(
       backgroundColor: _appBarBg,
@@ -2961,7 +5525,7 @@ class _ChatScreenState extends State<ChatScreen>
                     style: const TextStyle(
                         fontSize: 16, fontWeight: FontWeight.w600)),
                 if (widget.isGroup)
-                  Text("${widget.memberNames.length} membres",
+                  Text(trN(context, 'grp_members', widget.memberNames.length),
                       style: TextStyle(fontSize: 11, color: _onAppBarSub))
                 else
                   // Présence LIVE : lit le PresenceStore (mis à jour par les events WS
@@ -2996,27 +5560,56 @@ class _ChatScreenState extends State<ChatScreen>
         ]),
       ),
       actions: [
-        IconButton(
-            tooltip: "Rechercher",
-            icon: const Icon(Icons.search),
-            onPressed: _openSearch),
-        if (!widget.isGroup) ...[
+        /*
+         * ⚠️ PAS DE BOUCLIER DANS LA BARRE — décision du user, 26/09/2026.
+         *
+         * La barre est déjà pleine, et le chiffrement n est pas un GESTE qu on
+         * refait : c est un état qu on CONSULTE. Sa place est dans les infos du
+         * contact, avec le code de sécurité — là où l on va déjà chercher ce
+         * qui concerne la personne.
+         */
+        // Avec une personne, la place de la loupe revient à la traduction :
+        // la recherche descend dans le menu ⋮ plus bas, elle n'est pas perdue.
+        // Un groupe garde sa loupe — il n'a pas les deux boutons d'appel, la
+        // barre y a de la place.
+        if (widget.isGroup)
           IconButton(
-              tooltip: "Appel vidéo",
+              tooltip: tr(context, 'search'),
+              icon: const Icon(Icons.search),
+              onPressed: _openSearch)
+        else ...[
+          IconButton(
+              tooltip: tr(context, 'translated'),
+              icon: const Icon(Icons.translate),
+              onPressed: _openTranslation),
+          IconButton(
+              tooltip: tr(context, 'video_call'),
               icon: const Icon(Icons.videocam),
               onPressed: () => _startCall("VIDEO")),
           IconButton(
-              tooltip: "Appel audio",
+              tooltip: tr(context, 'audio_call'),
               icon: const Icon(Icons.call),
               onPressed: () => _startCall("AUDIO")),
         ],
         PopupMenuButton<String>(
-          tooltip: "Plus",
+          tooltip: tr(context, 'more'),
           icon: const Icon(Icons.more_vert),
           onSelected: (v) {
+            if (v == 'search') _openSearch();
             if (v == 'disappearing') _showDisappearingDialog();
           },
           itemBuilder: (_) => [
+            if (!widget.isGroup)
+              PopupMenuItem(
+                value: 'search',
+                child: Row(
+                  children: [
+                    Icon(Icons.search, size: 20, color: _accent),
+                    const SizedBox(width: 12),
+                    Expanded(child: Text(tr(context, 'search'))),
+                  ],
+                ),
+              ),
             PopupMenuItem(
               value: 'disappearing',
               child: Row(children: [
@@ -3029,8 +5622,8 @@ class _ChatScreenState extends State<ChatScreen>
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(_disappearingSeconds > 0
-                      ? "Éphémères · ${_disappearingLabel(_disappearingSeconds)}"
-                      : "Messages éphémères"),
+                      ? tr(context, 'ephemeral_active', {'duree': _disappearingLabel(_disappearingSeconds)})
+                      : tr(context, 'ephemeral_title')),
                 ),
               ]),
             ),
@@ -3058,10 +5651,16 @@ class _ChatScreenState extends State<ChatScreen>
         cursorColor: _onAppBar,
         textInputAction: TextInputAction.search,
         onChanged: _onSearchChanged,
+        // Le thème remplit tous les champs en blanc : ici, sur la barre, le
+        // texte est clair — sans fond ni bordure, sinon blanc sur blanc.
         decoration: InputDecoration(
-          hintText: "Rechercher…",
+          hintText: tr(context, 'search_hint_dots'),
           hintStyle: TextStyle(color: _onAppBarSub),
+          filled: false,
           border: InputBorder.none,
+          enabledBorder: InputBorder.none,
+          focusedBorder: InputBorder.none,
+          contentPadding: EdgeInsets.zero,
         ),
       ),
       actions: [
@@ -3084,11 +5683,11 @@ class _ChatScreenState extends State<ChatScreen>
                 style: TextStyle(color: _onAppBar, fontSize: 13)),
           ),
           IconButton(
-              tooltip: "Plus ancien",
+              tooltip: tr(context, 'older'),
               icon: const Icon(Icons.keyboard_arrow_up),
               onPressed: total == 0 ? null : () => _searchNav(1)),
           IconButton(
-              tooltip: "Plus récent",
+              tooltip: tr(context, 'newer'),
               icon: const Icon(Icons.keyboard_arrow_down),
               onPressed: total == 0 ? null : () => _searchNav(-1)),
         ],
@@ -3106,41 +5705,42 @@ class _ChatScreenState extends State<ChatScreen>
       backgroundColor: _appBarBg,
       foregroundColor: _onAppBar,
       leading: IconButton(
-          tooltip: "Annuler",
+          tooltip: tr(context, 'cancel'),
           icon: const Icon(Icons.close),
           onPressed: _clearSelection),
       title: const SizedBox.shrink(),
       actions: [
         IconButton(
-            tooltip: "Répondre",
+            tooltip: tr(context, 'reply'),
             icon: const Icon(Icons.reply),
             onPressed: () {
               _clearSelection();
               _setReplyTo(m);
             }),
         IconButton(
-            tooltip: m.starred ? "Retirer des favoris" : "Ajouter aux favoris",
+            tooltip: m.starred ? tr(context, 'star_remove') : tr(context, 'star_add'),
             icon: Icon(m.starred ? Icons.star : Icons.star_border),
             onPressed: () {
               _clearSelection();
               _toggleStar(m);
             }),
+        if (_peutTransferer(m))
+          IconButton(
+              tooltip: tr(context, 'forward'),
+              icon: const Icon(Icons.forward),
+              onPressed: () {
+                _clearSelection();
+                _forwardMessage(m);
+              }),
         IconButton(
-            tooltip: "Transférer",
-            icon: const Icon(Icons.forward),
-            onPressed: () {
-              _clearSelection();
-              _forwardMessage(m);
-            }),
-        IconButton(
-            tooltip: "Supprimer",
+            tooltip: tr(context, 'delete'),
             icon: const Icon(Icons.delete_outline),
             onPressed: () {
               _clearSelection();
               _deleteMessage(m);
             }),
         PopupMenuButton<String>(
-          tooltip: "Plus",
+          tooltip: tr(context, 'more'),
           icon: const Icon(Icons.more_vert),
           // Retire la bulle de réactions (et sa barrière) dès l'ouverture du menu,
           // sinon la barrière intercepte le tap sur les items → « rien ne se passe ».
@@ -3153,6 +5753,8 @@ class _ChatScreenState extends State<ChatScreen>
             if (v == 'copy' && m.content != null) {
               Clipboard.setData(ClipboardData(text: m.content!));
               showAppSnackBar(tr(context, 'copied'));
+            } else if (v == 'share') {
+              _partagerMessage(m);
             } else if (v == 'edit') {
               _startEdit(m);
             } else if (v == 'pin') {
@@ -3170,7 +5772,7 @@ class _ChatScreenState extends State<ChatScreen>
                   child: Row(children: [
                     Icon(Icons.info_outline, size: 20, color: _iconNeutral),
                     const SizedBox(width: 12),
-                    const Text("Infos"),
+                    Text(tr(context, 'infos')),
                   ])),
             // Enregistrer dans le stockage public du téléphone.
             //
@@ -3185,7 +5787,7 @@ class _ChatScreenState extends State<ChatScreen>
                     Icon(Icons.download_outlined,
                         size: 20, color: _iconNeutral),
                     const SizedBox(width: 12),
-                    const Text("Enregistrer"),
+                    Text(tr(context, 'save')),
                   ])),
             if (hasText)
               PopupMenuItem(
@@ -3193,7 +5795,15 @@ class _ChatScreenState extends State<ChatScreen>
                   child: Row(children: [
                     Icon(Icons.copy, size: 20, color: _iconNeutral),
                     const SizedBox(width: 12),
-                    const Text("Copier"),
+                    Text(tr(context, 'copy')),
+                  ])),
+            if (_peutTransferer(m))
+              PopupMenuItem(
+                  value: 'share',
+                  child: Row(children: [
+                    Icon(Icons.share_outlined, size: 20, color: _iconNeutral),
+                    const SizedBox(width: 12),
+                    Text(tr(context, 'share')),
                   ])),
             PopupMenuItem(
                 value: 'pin',
@@ -3205,15 +5815,15 @@ class _ChatScreenState extends State<ChatScreen>
                       size: 20,
                       color: _accent),
                   const SizedBox(width: 12),
-                  Text(_pinnedMessageId == m.id ? "Détacher" : "Épingler"),
+                  Text(_pinnedMessageId == m.id ? tr(context, 'unpin_action') : tr(context, 'pin')),
                 ])),
-            if (mine && m.type == 'TEXT')
+            if (_peutModifier(m))
               PopupMenuItem(
                   value: 'edit',
                   child: Row(children: [
                     Icon(Icons.edit_outlined, size: 20, color: _positive),
                     const SizedBox(width: 12),
-                    const Text("Modifier"),
+                    Text(tr(context, 'edit')),
                   ])),
           ],
         ),
@@ -3287,6 +5897,7 @@ class _ChatScreenState extends State<ChatScreen>
         overlayOpacity: 0.85,
         child: Column(children: [
           _pinnedBanner(),
+          _bandeauLangueManquante(),
           Expanded(
               child: _loading
                   ? Center(child: CircularProgressIndicator(color: _accent))
@@ -3314,6 +5925,20 @@ class _ChatScreenState extends State<ChatScreen>
                           controller: _scrollCtrl,
                           reverse: true,
                           padding: const EdgeInsets.all(12),
+                          /*
+                           * 🔴 LA BANDE « À PARTIR D’ICI, CHIFFRÉ » SE PLACE JUSTE
+                           * AVANT LE PREMIER MESSAGE CHIFFRÉ — plus en tête du fil.
+                           *
+                           * 🐛 ELLE ÉTAIT UN ÉLÉMENT DE PLUS (`+1`) au dernier indice
+                           * de la liste inversée, donc TOUT EN HAUT, au-dessus de
+                           * messages en clair (signalé par le user le 28/09/2026). Or
+                           * elle dit « à partir d’ici » : son « ici » est le premier
+                           * message chiffré. Même règle que le web ; pas de bande
+                           * s’il n’y en a encore aucun. Voir `indiceFrontiere`.
+                           *
+                           * ⚠️ Elle dit toujours la même vérité : les messages
+                           * ANTÉRIEURS restent lisibles par le serveur.
+                           */
                           itemCount: _combined.length,
                           itemBuilder: (_, iAffichage) {
                             // L'ordre des données reste chronologique : seule la
@@ -3326,6 +5951,11 @@ class _ChatScreenState extends State<ChatScreen>
                             if (_needsDateSeparatorCombined(i)) {
                               widgets.add(
                                   _dateChip(_dateLabel(_dateOfCombined(item))));
+                            }
+                            // Après la date du jour, avant la bulle : la bande
+                            // introduit le premier message chiffré.
+                            if (_filChiffre && i == _frontiere) {
+                              widgets.add(const BanniereChiffrement());
                             }
                             if (item is Message) {
                               widgets.add(_bubble(item, item.senderId == myId));
@@ -3340,6 +5970,9 @@ class _ChatScreenState extends State<ChatScreen>
           if (!widget.isGroup)
             ActivityIndicatorBar(
                 typing: _peerTyping, recording: _peerRecording),
+          // Juste au-dessus du champ : la liste sort du `@` qu'on vient de
+          // taper, et doit rester sous les yeux, au-dessus du clavier.
+          _panneauMentions(),
           _composer(),
         ]),
       ),
@@ -3352,6 +5985,18 @@ class _ChatScreenState extends State<ChatScreen>
   Widget _bubble(Message m, bool mine) {
     // Message système (ex. « Messages éphémères activés ») : pastille centrée.
     if (m.type == "SYSTEM") {
+      /*
+       * 🔴 LA CHARGE EST DU JSON, ET ELLE S'AFFICHAIT TELLE QUELLE (signalé sur
+       * device le 30/08/2026). Le serveur enregistre `{"code":…}` parce que la
+       * phrase dépend de la LANGUE du lecteur, et parfois de son identité — un
+       * avis de blocage ne dit pas la même chose des deux côtés. C'est donc au
+       * client de composer, ce que le web faisait déjà et le mobile non.
+       */
+      final texteSysteme =
+          composerMessageSysteme(context, m.content, _myId);
+      // Code inconnu (client plus ancien que le serveur) : la pastille dispa-
+      // raît plutôt que d'afficher une accolade. Voir `core/messages_systeme.dart`.
+      if (texteSysteme.isEmpty) return const SizedBox.shrink();
       return Center(
         child: Container(
           margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 36),
@@ -3366,7 +6011,7 @@ class _ChatScreenState extends State<ChatScreen>
             Icon(Icons.timer_outlined, size: 15, color: _iconNeutral),
             const SizedBox(width: 6),
             Flexible(
-              child: Text(m.content ?? '',
+              child: Text(texteSysteme,
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 12.5, color: _iconNeutral)),
             ),
@@ -3405,9 +6050,7 @@ class _ChatScreenState extends State<ChatScreen>
     // une carte vide au milieu de l'océan.
     final positionPartagee =
         effectif == "LOCATION" ? positionDepuisContenu(m.content) : null;
-    final senderLabel = widget.isGroup && !mine
-        ? (widget.memberNames[m.senderId] ?? "Membre")
-        : null;
+    final senderLabel = widget.isGroup && !mine ? _nomExpediteur(m.senderId) : null;
     final isHighlighted =
         _highlightedMessageId == m.id || _selectedMessageId == m.id;
     final isGrid = isMultiMedia; // 2+ médias → grille
@@ -3462,6 +6105,8 @@ class _ChatScreenState extends State<ChatScreen>
                       children: [
                         if (m.replyToId != null && !m.isDeleted)
                           _replyPreviewHeader(m, mine),
+                        if (m.statutCite != null && !m.isDeleted)
+                          _citationStatut(m.statutCite!, mine),
                         m.isDeleted
                             ? _deletedBubble(m, mine)
                             // Envoi en cours ou échoué : la bulle montre la vignette
@@ -3478,6 +6123,27 @@ class _ChatScreenState extends State<ChatScreen>
                                     onAbandonner: () =>
                                         _abandonneEnvoi(envoiEnCours),
                                   )
+                                : m.vueUnique
+                                    ? BulleVueUnique(
+                                        message: m,
+                                        isMe: mine,
+                                        couleurAccent: _accent,
+                                        couleurDiscrete: _muted,
+                                        timestamp: _time(m.createdAt),
+                                        statusWidget: mine
+                                            ? _statusTicks(m.status, _muted)
+                                            : null,
+                                        onOuvrir: BulleVueUnique.ouvrable(m,
+                                                isMe: mine)
+                                            ? () => _ouvrirVueUnique(m)
+                                            : null,
+                                        onLongPress: () =>
+                                            _openMessageActions(m),
+                                      )
+                                : m.mediaChiffre != null ||
+                                        (m.media.isNotEmpty &&
+                                            m.media.first.chiffre)
+                                    ? _bulleMediaChiffre(m, mine)
                                 : isContact
                                     ? ContactBubble(
                                         contacts: contactsPartages,
@@ -3717,7 +6383,7 @@ class _ChatScreenState extends State<ChatScreen>
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 3),
         child: Text.rich(
-          TextSpan(children: spansWhatsApp(legende!)),
+          TextSpan(children: spansWhatsApp(legende!, tailleBase: 14.5)),
           style: TextStyle(color: onText, fontSize: 14.5),
         ),
       ),
@@ -3739,9 +6405,8 @@ class _ChatScreenState extends State<ChatScreen>
   /// « répondre » ou « supprimer » n'a de sens que pour un message.
   Widget _groupBubble(GroupeMedias groupe, bool mine) {
     final medias = groupe.medias;
-    final senderLabel = widget.isGroup && !mine
-        ? (widget.memberNames[groupe.senderId] ?? "Membre")
-        : null;
+    final senderLabel =
+        widget.isGroup && !mine ? _nomExpediteur(groupe.senderId) : null;
     // Une grille regroupe PLUSIEURS messages : elle s'illumine dès que l'un
     // d'eux est la cible. Sans cela, sauter vers une photo citée amenait au bon
     // endroit sans que rien ne s'allume — la grille ignorait la surbrillance,
@@ -3798,11 +6463,17 @@ class _ChatScreenState extends State<ChatScreen>
                   : Border.all(
                       color: enSurbrillance ? AlanyaColors.gold : _hairline),
             ),
-            child: _grilleAvecLegende(
+            // Une grille de médias CHIFFRÉS se dessine avec des tuiles qui
+            // déchiffrent : la grille ordinaire lirait le fichier du serveur,
+            // illisible (chapitre 25).
+            child: groupe.messages.any((m) =>
+                    m.mediaChiffre != null ||
+                    (m.media.isNotEmpty && m.media.first.chiffre))
+                ? _grilleChiffree(groupe, mine)
+                : _grilleAvecLegende(
               medias: medias,
-              // Un message porteur d'une légende n'est jamais regroupé : il n'y
-              // a donc pas de légende à afficher ici, par construction.
-              legende: null,
+              // La légende du lot, sous la grille, comme sur le web.
+              legende: groupe.legende,
               horodatage: _time(groupe.date),
               statut: mine ? _statusTicks(groupe.statut, Colors.white) : null,
               mine: mine,
@@ -3816,6 +6487,175 @@ class _ChatScreenState extends State<ChatScreen>
         ],
       ),
     );
+  }
+
+  /// La grille d'un lot de médias CHIFFRÉS : une tuile par message, qui
+  /// déchiffre la sienne (chapitre 25).
+  ///
+  /// Même disposition que `MediaGrid`, pour qu'un lot chiffré ne se distingue
+  /// pas d'un lot en clair : deux côte à côte, trois en « une grande + deux »,
+  /// quatre et plus en carré, « +N » sur la quatrième tuile — la règle du web
+  /// (`ALBUM_VISIBLE_TILES = 4`). « +N » ouvre la galerie sur la 4ᵉ tuile.
+  ///
+  /// La légende du lot, s'il en a une, se place SOUS la grille, comme sur le
+  /// web ; l'heure passe alors sous la légende.
+  Widget _grilleChiffree(GroupeMedias groupe, bool mine) {
+    final msgs = groupe.messages;
+    final legende = groupe.legende;
+    final aLegende = legende != null;
+    const ecart = 2.0;
+
+    Widget tuile(Message m) => m.mediaChiffre != null
+        ? TuileMediaChiffre(
+            descripteur: m.mediaChiffre!,
+            baseUrl: _baseUrl,
+            token: _token,
+            onLongPress: () => _openMessageActions(m),
+            onOuvrir: () => _openGallery(m.mediaChiffre!.id),
+          )
+        : GestureDetector(
+            onLongPress: () => _openMessageActions(m),
+            child: Container(
+              color: Colors.black12,
+              alignment: Alignment.center,
+              child: Icon(Icons.lock_outline, color: _muted),
+            ),
+          );
+
+    Widget plus(int reste) => GestureDetector(
+          // La galerie, sur le 4ᵉ média : on y feuillette tout le lot, et
+          // le reste de la conversation.
+          onTap: () {
+            final d = msgs[3].mediaChiffre;
+            if (d != null) _openGallery(d.id);
+          },
+          onLongPress: () => _openMessageActions(msgs[3]),
+          child: Stack(fit: StackFit.expand, children: [
+            tuile(msgs[3]),
+            Container(
+              color: Colors.black.withValues(alpha: 0.5),
+              alignment: Alignment.center,
+              child: Text('+$reste',
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w700)),
+            ),
+          ]),
+        );
+
+    final heure = Row(mainAxisSize: MainAxisSize.min, children: [
+      Text(_time(groupe.date),
+          style: TextStyle(
+              fontSize: 11,
+              color: aLegende
+                  ? (mine ? Colors.white70 : _muted45)
+                  : Colors.white)),
+      if (mine) ...[
+        const SizedBox(width: 3),
+        _statusTicks(groupe.statut,
+            aLegende ? Colors.white70 : Colors.white),
+      ],
+    ]);
+
+    final grille = LayoutBuilder(builder: (context, contraintes) {
+      final w = contraintes.maxWidth.isFinite ? contraintes.maxWidth : 260.0;
+      final n = msgs.length;
+      Widget g;
+      if (n == 2) {
+        g = SizedBox(
+          width: w,
+          height: (w - ecart) / 2,
+          child: Row(children: [
+            Expanded(child: tuile(msgs[0])),
+            const SizedBox(width: ecart),
+            Expanded(child: tuile(msgs[1])),
+          ]),
+        );
+      } else if (n == 3) {
+        g = SizedBox(
+          width: w,
+          height: w,
+          child: Row(children: [
+            Expanded(child: tuile(msgs[0])),
+            const SizedBox(width: ecart),
+            Expanded(
+              child: Column(children: [
+                Expanded(child: tuile(msgs[1])),
+                const SizedBox(height: ecart),
+                Expanded(child: tuile(msgs[2])),
+              ]),
+            ),
+          ]),
+        );
+      } else {
+        g = SizedBox(
+          width: w,
+          height: w,
+          child: Column(children: [
+            Expanded(
+              child: Row(children: [
+                Expanded(child: tuile(msgs[0])),
+                const SizedBox(width: ecart),
+                Expanded(child: tuile(msgs[1])),
+              ]),
+            ),
+            const SizedBox(height: ecart),
+            Expanded(
+              child: Row(children: [
+                Expanded(child: tuile(msgs[2])),
+                const SizedBox(width: ecart),
+                Expanded(child: n > 4 ? plus(n - 4) : tuile(msgs[3])),
+              ]),
+            ),
+          ]),
+        );
+      }
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Stack(children: [
+          g,
+          if (!aLegende)
+            Positioned(
+              right: 6,
+              bottom: 6,
+              child: IgnorePointer(
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.45),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: heure,
+                ),
+              ),
+            ),
+        ]),
+      );
+    });
+
+    if (!aLegende) return grille;
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      grille,
+      const SizedBox(height: 5),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 3),
+        child: Text.rich(
+          TextSpan(children: spansWhatsApp(legende, tailleBase: 14.5)),
+          style: TextStyle(color: _bubbleTextColor(mine), fontSize: 14.5),
+        ),
+      ),
+      const SizedBox(height: 2),
+      Align(
+        alignment: Alignment.centerRight,
+        child: Padding(
+          padding: const EdgeInsets.only(right: 3),
+          child: heure,
+        ),
+      ),
+    ]);
   }
 
   /// Pastilles de réactions sous la bulle : agrège par emoji (emoji + compteur),
@@ -3910,6 +6750,106 @@ class _ChatScreenState extends State<ChatScreen>
     return m.type == 'TEXT' ? 'FILE' : m.type;
   }
 
+  /// Ouvre la fiche d'une personne mentionnée.
+  ///
+  /// ⚠️ ON N'A QUE SON IDENTIFIANT ET SON LIBELLÉ. Le numéro public et l'avatar
+  /// viennent des membres relus (`_membresCharges` ne porte que les noms) : la
+  /// fiche s'ouvre donc avec ce qu'on sait, et se complète elle-même — c'est
+  /// déjà ce qu'elle fait quand on l'ouvre depuis la liste des contacts.
+  ///
+  /// Se mentionner soi-même n'arrive pas (le serveur l'écarte), mais un ancien
+  /// message pourrait en porter : on n'ouvre alors rien plutôt que d'afficher
+  /// sa propre fiche comme celle d'un correspondant.
+  Future<void> _ouvreFicheMentionne(MentionMessage mention) async {
+    if (mention.userId == _myId) return;
+    final nom = _membresCharges[mention.userId] ??
+        widget.memberNames[mention.userId] ??
+        mention.libelle;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ContactInfoScreen(
+          userId: mention.userId,
+          name: nom,
+          // Le numéro n'est pas connu ici : la fiche l'affiche vide plutôt que
+          // d'inventer, et les actions qui en dépendent le disent.
+          publicNumber: "",
+        ),
+      ),
+    );
+  }
+
+  /// Le texte d'un message, avec ses `@mentions` mises en évidence.
+  ///
+  /// 🔴 ON DÉCOUPE SUR LES LIBELLÉS PORTÉS PAR LE MESSAGE, jamais sur une
+  /// expression régulière du genre `@\w+`. Deux raisons :
+  ///   - un `@` écrit à la main, qui ne désigne personne, ne doit pas se
+  ///     colorer comme une vraie mention ;
+  ///   - un libellé peut contenir une espace (« @Jean Dupont ») : aucune
+  ///     expression sur les mots ne le retrouverait en entier.
+  ///
+  /// ⚠️ LA MISE EN FORME WHATSAPP EST CONSERVÉE HORS MENTIONS : les segments
+  /// entre deux mentions repassent par `spansWhatsApp`, sans quoi le gras et
+  /// l'italique disparaîtraient de tout message contenant un `@`.
+  ///
+  /// ⚠️ Les mentions les plus LONGUES sont cherchées d'abord : avec « @Jean »
+  /// et « @Jean Dupont » dans le même groupe, commencer par la courte couperait
+  /// la longue en deux.
+  List<InlineSpan> _spansAvecMentions(String texte, Message m, Color couleur) {
+    final libelles = m.mentions.map((x) => x.libelle).toSet().toList()
+      ..sort((a, b) => b.length.compareTo(a.length));
+    final spans = <InlineSpan>[];
+    var reste = texte;
+
+    while (reste.isNotEmpty) {
+      var meilleurIndex = -1;
+      var meilleurLibelle = "";
+      for (final l in libelles) {
+        if (l.isEmpty) continue;
+        final i = reste.indexOf("@$l");
+        if (i < 0) continue;
+        // Le plus TÔT dans le texte ; à égalité, le plus long — la liste étant
+        // déjà triée par longueur, le premier trouvé à cet index l'emporte.
+        if (meilleurIndex < 0 || i < meilleurIndex) {
+          meilleurIndex = i;
+          meilleurLibelle = l;
+        }
+      }
+      if (meilleurIndex < 0) {
+        spans.addAll(spansWhatsApp(reste));
+        break;
+      }
+      if (meilleurIndex > 0) {
+        spans.addAll(spansWhatsApp(reste.substring(0, meilleurIndex)));
+      }
+      /*
+       * APPUYER SUR UNE MENTION OUVRE LA FICHE DE LA PERSONNE (comme WhatsApp).
+       *
+       * ⚠️ ON RETROUVE LE COMPTE PAR SON LIBELLÉ, dans les mentions du message.
+       * Deux membres peuvent partager un libellé : on prend le premier, faute
+       * de mieux — c'est le prix de ne pas stocker les positions, et cela reste
+       * incomparablement plus juste que de chercher un pseudo dans une phrase.
+       *
+       * ⚠️ Le `recognizer` est créé À CHAQUE CONSTRUCTION et jamais libéré.
+       * C'est acceptable ici — quelques mentions par écran — mais ce serait
+       * une fuite dans une liste qui en porterait des centaines.
+       */
+      final vise = m.mentions.firstWhere(
+        (x) => x.libelle == meilleurLibelle,
+        orElse: () => const MentionMessage(userId: "", libelle: ""),
+      );
+      spans.add(TextSpan(
+        text: "@$meilleurLibelle",
+        style: TextStyle(color: couleur, fontWeight: FontWeight.w700),
+        recognizer: vise.userId.isEmpty
+            ? null
+            : (TapGestureRecognizer()
+              ..onTap = () => _ouvreFicheMentionne(vise)),
+      ));
+      reste = reste.substring(meilleurIndex + meilleurLibelle.length + 1);
+    }
+    return spans;
+  }
+
   Widget _textBubble(Message m, bool mine) {
     final translated = _translations[m.id];
     final isTranslating = _translating.contains(m.id);
@@ -3951,13 +6891,54 @@ class _ChatScreenState extends State<ChatScreen>
             displayText =
                 displayText.replaceAll(RegExp(r'\[([^\]]+)\]'), '').trim();
           }
-          return displayText.isNotEmpty
-              ? Text.rich(
-                  TextSpan(children: spansWhatsApp(displayText)),
-                  style: TextStyle(color: onTextColor),
-                )
-              : const SizedBox.shrink();
+          if (displayText.isEmpty) return const SizedBox.shrink();
+          /*
+           * 🔴 QUAND IL Y A UNE TRADUCTION, C'EST ELLE LE TEXTE PRINCIPAL
+           * (demande du user, 31/08/2026, capture de référence à l'appui).
+           *
+           * L'ordre était inverse : l'original en grand, la traduction dans un
+           * encadré en dessous. Or on traduit précisément parce qu'on ne lit
+           * PAS la langue d'origine — mettre en avant ce qu'on ne comprend pas
+           * et reléguer ce qu'on comprend prenait le lecteur à contre-emploi.
+           *
+           * L'original reste juste en dessous, en plus petit : il n'est pas
+           * caché, il passe au second plan. C'est ce que fait la maquette.
+           */
+          final aTraduction = translated != null;
+          final texteAffiche = aTraduction ? translated : displayText;
+          return Text.rich(
+            TextSpan(
+              children: m.mentions.isEmpty
+                  ? spansWhatsApp(texteAffiche)
+                  : _spansAvecMentions(texteAffiche, m, onTextColor),
+            ),
+            style: TextStyle(color: onTextColor),
+          );
         })(),
+        // L'ORIGINAL, sous la traduction — et la langue dont il vient.
+        if (translated != null && (m.content ?? '').trim().isNotEmpty) ...[
+          const SizedBox(height: 3),
+          Text(
+            (m.content ?? '').trim(),
+            style: TextStyle(fontSize: 12.5, color: onSubColor),
+          ),
+          const SizedBox(height: 2),
+          Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.translate, size: 11, color: onSubColor),
+            const SizedBox(width: 4),
+            Text(
+              // « traduit de l'anglais » quand la langue est connue ; le
+              // libellé nu sinon — une traduction dont on ignore la source
+              // reste une traduction, et le taire vaut mieux que d'inventer.
+              _sourceTraduction[m.id] != null
+                  ? tr(context, 'translated_from').replaceFirst(
+                      '{langue}', nomAutonyme(_sourceTraduction[m.id]!))
+                  : tr(context, 'translated'),
+              style: TextStyle(
+                  fontSize: 10, fontStyle: FontStyle.italic, color: onSubColor),
+            ),
+          ]),
+        ],
         if ((m.content ?? '').isNotEmpty) ...[
           buildLinkPreview(m.content!, mine),
           (() {
@@ -4011,34 +6992,9 @@ class _ChatScreenState extends State<ChatScreen>
             );
           })(),
         ],
-        if (translated != null) ...[
-          const SizedBox(height: 6),
-          Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                  color:
-                      mine ? Colors.white.withOpacity(0.15) : _quoteBgRecv(0.7),
-                  borderRadius: BorderRadius.circular(8)),
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(Icons.translate, size: 12, color: onSubColor),
-                      const SizedBox(width: 4),
-                      Text(tr(context, 'translated'),
-                          style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
-                              color: onSubColor))
-                    ]),
-                    const SizedBox(height: 2),
-                    Text(translated,
-                        style: TextStyle(
-                            fontSize: 13,
-                            color: onTextColor,
-                            fontStyle: FontStyle.italic)),
-                  ])),
-        ],
+        // L'ancien encadré « Traduction » sous le message a disparu : la
+        // traduction est passée EN HAUT, à la place du texte principal, et
+        // l'original juste sous elle. Voir le bloc de texte ci-dessus.
         if (isTranslating) ...[
           const SizedBox(height: 4),
           Row(mainAxisSize: MainAxisSize.min, children: [
@@ -4052,7 +7008,39 @@ class _ChatScreenState extends State<ChatScreen>
                 style: TextStyle(fontSize: 10, color: onSubColor))
           ]),
         ],
-        if (!isTranslating && translated == null && m.type == 'TEXT')
+        /*
+         * 🔴 UNE BULLE SANS TEXTE DOIT DIRE POURQUOI.
+         *
+         * 🐛 Elle n'affichait RIEN — et comme le pense-bête « Traduire » se
+         * pose sous tout message TEXT, c'est LUI qu'on lisait à la place du
+         * message. Sur un second appareil, une conversation entière se lisait
+         * « Traduire, Traduire, Traduire ».
+         *
+         * ⚠️ C'EST UN ÉTAT LÉGITIME, PAS UNE PANNE : le texte d'un message
+         * chiffré ne vit que chez les appareils à qui une enveloppe était
+         * adressée, plus l'archive. Un téléphone ajouté après coup n'a ni
+         * l'une ni l'autre pour les messages d'avant.
+         *
+         * ⚠️ ET ON RETIRE « TRADUIRE » : proposer de traduire le vide est une
+         * promesse qu'on ne peut pas tenir.
+         */
+        if (m.type == 'TEXT' && (m.content ?? '').isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              // Groupe : la clé arrive (lot 7) — ce n'est pas une perte.
+              tr(context, _attenteCle.contains(m.id) ? 'e2ee_attente_cle_groupe' : 'e2ee_texte_indisponible'),
+              style: TextStyle(
+                fontSize: 11,
+                color: onSubColor.withOpacity(0.85),
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ),
+        if (!isTranslating &&
+            translated == null &&
+            m.type == 'TEXT' &&
+            (m.content ?? '').isNotEmpty)
           Padding(
               padding: const EdgeInsets.only(top: 2),
               child: Text(tr(context, 'translate'),
@@ -4066,29 +7054,427 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
+  /// Vrai pendant une passe de traduction automatique — une seule à la fois.
+  bool _autoEnCours = false;
+
+  /// La langue qu'il faudrait installer pour que l'automatique fasse son
+  /// travail dans cette conversation.
+  ///
+  /// 🔴 SANS CE BANDEAU, LA FONCTION EST SILENCIEUSEMENT INERTE — c'est le
+  /// défaut signalé par le user le 31/08/2026 : « j'ai activé la traduction
+  /// automatique, il faut encore appuyer sur Traduire ». La passe automatique
+  /// s'arrête sur chaque message dont le modèle de langue n'est pas installé,
+  /// et elle ne télécharge jamais rien d'elle-même — à raison, mais rien ne le
+  /// disait. L'utilisateur voyait donc un interrupteur allumé qui ne faisait
+  /// rien.
+  String? _langueManquante;
+
+  /// La langue de l'interlocuteur était-elle DÉJÀ fixée quand la passe a buté ?
+  ///
+  /// Ce qui manque n'est alors plus la langue, mais le paquet : proposer de
+  /// « fixer la langue » à quelqu'un qui vient de le faire serait une boucle.
+  /// Le bandeau repasse dans ce cas à sa proposition d'installation.
+  bool _langueManquanteFixee = false;
+
+  /// Le bandeau affiché quand la traduction automatique ne peut pas travailler.
+  ///
+  /// 🔴 IL INVITE À FIXER LA LANGUE, PAS À TÉLÉCHARGER — demande du user du
+  /// 11/09/2026. La langue devinée sur quelques mots est souvent fausse, et
+  /// installer le mauvais paquet coûte des dizaines de mégaoctets pour rien.
+  /// Dire de qui l'on parle règle les deux : le paquet juste s'installe dans la
+  /// foulée, par le même chemin que la fiche du contact.
+  ///
+  /// Un geste, pas une notification : le téléchargement reste déclenché par
+  /// l'utilisateur, avec la confirmation habituelle qui annonce le poids.
+  Widget _bandeauLangueManquante() {
+    final langue = _langueManquante;
+    if (langue == null || !TraductionAuto.instance.activee) {
+      return const SizedBox.shrink();
+    }
+    // Un groupe n'a pas UN interlocuteur : plusieurs personnes y écrivent, et
+    // `_langueManquante` est une langue, pas quelqu'un. L'ancienne proposition
+    // d'installation y reste donc la bonne.
+    final uid = widget.otherUserId;
+    if (!widget.isGroup && uid != null && !_langueManquanteFixee) {
+      return Material(
+        color: AlanyaColors.gold.withValues(alpha: 0.18),
+        child: InkWell(
+          onTap: _fixeLangueInterlocuteur,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+            child: Row(children: [
+              Icon(Icons.translate, size: 16, color: _iconNeutral),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  tr(context, 'chat_fix_language', {'nom': widget.title}),
+                  style: TextStyle(fontSize: 12.5, color: _iconNeutral),
+                ),
+              ),
+              Icon(Icons.chevron_right, size: 18, color: _iconNeutral),
+            ]),
+          ),
+        ),
+      );
+    }
+    return Material(
+      color: AlanyaColors.gold.withValues(alpha: 0.18),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
+        child: Row(children: [
+          Icon(Icons.translate, size: 16, color: _iconNeutral),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              tr(context, 'auto_translation_install', {'langue': nomAutonyme(langue)}),
+              style: TextStyle(fontSize: 12.5, color: _iconNeutral),
+            ),
+          ),
+          TextButton(
+            onPressed: () => _installeLangueManquante(langue),
+            child: Text(tr(context, 'install_action')),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  /// Ouvre la liste des langues pour l'interlocuteur, depuis le bandeau.
+  ///
+  /// Même chemin que « Langue de {nom} » dans la fiche du contact, y compris
+  /// l'installation du paquet dans la foulée.
+  Future<void> _fixeLangueInterlocuteur() async {
+    final uid = widget.otherUserId;
+    if (uid == null) return;
+    final choix = await choisirLangueInterlocuteur(
+      context,
+      userId: uid,
+      nom: widget.title,
+    );
+    if (choix == null || !mounted) return;
+    if (choix.langue != null) {
+      await installerCoupleSiNecessaire(context, choix.langue!);
+      if (!mounted) return;
+    }
+    // Le bandeau repart de zéro : la passe le repose aussitôt s'il manque
+    // encore quelque chose, avec cette fois la langue que l'on vient de fixer.
+    setState(() {
+      _langueManquante = null;
+      _langueManquanteFixee = false;
+    });
+    _traduitAutomatiquement();
+  }
+
+  Future<void> _installeLangueManquante(String source) async {
+    final cible = context.read<LocaleController>().languageCode;
+    final manquantes = await nomsLanguesManquantes(source, cible);
+    if (!mounted) return;
+    final libelle =
+        manquantes.isEmpty ? nomAutonyme(source) : manquantes.join(" + ");
+    if (!await confirmerInstallationLangues(context, libelle)) return;
+    if (!mounted) return;
+    var installe = await telechargerCouple(source, cible);
+    if (!installe &&
+        wifiExige &&
+        mounted &&
+        await proposerDonneesMobiles(context)) {
+      installe = await telechargerCouple(source, cible, wifiSeulement: false);
+    }
+    if (!mounted) return;
+    if (!installe) {
+      _messageTraduction('translation_download_failed');
+      return;
+    }
+    setState(() {
+      _langueManquante = null;
+      _langueManquanteFixee = false;
+    });
+    // La passe reprend aussitôt : les messages qui l'attendaient sont
+    // maintenant traduisibles, et l'utilisateur vient de le demander.
+    _traduitAutomatiquement();
+  }
+
+  /// Combien de messages récents la passe automatique examine.
+  ///
+  /// ⚠️ PAS TOUT L'HISTORIQUE. Ouvrir une conversation de deux mille messages
+  /// ne doit pas lancer deux mille détections de langue : on traduit ce qui est
+  /// sous les yeux, et la remontée du fil s'occupera du reste au fur et à
+  /// mesure. Les traductions étant conservées, le travail ne se refait pas.
+  static const int _fenetreAuto = 30;
+
+  /// Sous cette longueur, il n'y a rien à traduire du tout.
+  ///
+  /// 🔴 ABAISSÉ DE 15 À 1 LE 31/08/2026, et c'était LA cause du défaut signalé
+  /// par le user : « j'envoie plein de hello, ils ne sont pas traduits
+  /// automatiquement, et pourtant quand je clique sur traduire ça passe ».
+  /// « hello » fait cinq caractères — la passe automatique le sautait, message
+  /// après message, pendant que le bouton, lui, n'a jamais eu de plancher.
+  ///
+  /// Le plancher de 15 venait de la crainte des mauvaises détections sur un
+  /// texte court. Cette crainte est fondée, mais elle ne justifiait pas de
+  /// rendre la fonction inerte sur les messages les plus fréquents d'une
+  /// conversation : **l'automatique doit faire ce que fait le bouton**, sans
+  /// quoi il ne mérite pas son nom.
+  ///
+  /// ⚠️ CE QUE ÇA COÛTE, ASSUMÉ : sur un « hello » d'un correspondant inconnu,
+  /// la langue devinée peut être fausse, et la traduction affichée sera fausse
+  /// aussi — exactement ce que le bouton produisait déjà dans ce cas. Trois
+  /// garde-fous limitent la casse : une langue FIXÉE court-circuite la
+  /// devinette, la langue APPRISE du correspondant passe avant elle, et
+  /// l'original reste affiché sous la traduction — une bêtise se voit.
+  ///
+  /// ⚠️ MIS À 1 SUR DEMANDE EXPLICITE DU USER (« arrête cette limite de
+  /// caractère, mets-le à 1 »). Le plancher ne sert donc plus qu'à écarter la
+  /// chaîne VIDE : tout message qui porte au moins un caractère est candidat.
+  static const int _minCaracteresAuto = 1;
+
+  /// Types dont le `content` est de la PROSE.
+  ///
+  /// 🔴 LISTE BLANCHE, ET C'EST LE GARDE-FOU DU LOT. `CONTACT` et `LOCATION`
+  /// stockent du JSON dans `content` : le passer à un traducteur détruirait le
+  /// rendu de la bulle. Une liste noire laisserait un futur type filer au
+  /// traducteur par défaut ; ici, il reste exclu tant que personne ne l'a
+  /// explicitement autorisé.
+  static const Set<String> _typesTraduisibles = {
+    "TEXT",
+    // Médias : seule leur légende est concernée, et elle vit dans `content`.
+    "IMAGE",
+    "VIDEO",
+    "FILE",
+  };
+
+  /// TRADUIT AUTOMATIQUEMENT les messages reçus.
+  ///
+  /// 🔴 NE TÉLÉCHARGE JAMAIS RIEN. Si le couple de langues n'est pas installé,
+  /// le message reste dans sa langue et le bouton « Traduire » fera la demande.
+  /// Quelques dizaines de mégaoctets ne partent que d'un geste — la règle vaut
+  /// d'autant plus ici que personne n'a rien demandé pour ce message-là.
+  ///
+  /// Les échecs sont silencieux : une passe automatique qui afficherait des
+  /// erreurs harcèlerait l'utilisateur pour un service qu'il n'a pas sollicité
+  /// message par message.
+  Future<void> _traduitAutomatiquement() async {
+    if (!TraductionAuto.instance.activee || !moteurAppareilPresent) return;
+    if (_autoEnCours || !mounted) return;
+    _autoEnCours = true;
+    try {
+      final cible = context.read<LocaleController>().languageCode;
+      // Les plus récents d'abord : ce sont ceux qu'on regarde.
+      final candidats = _messages.reversed.take(_fenetreAuto).toList();
+      for (final m in candidats) {
+        if (!mounted) return;
+        if (!TraductionAuto.instance.activee) return;
+        final texte = (m.content ?? '').trim();
+        if (m.senderId == _myId) continue; // les messages REÇUS
+        if (m.deletedAt != null) continue;
+        if (!_typesTraduisibles.contains(m.type)) continue;
+        if (_translations.containsKey(m.id)) continue;
+
+        // La langue FIXÉE prime sur tout : passée à part, elle court-circuite
+        // la détection au lieu de lui servir de repli.
+        final fixee = await MemoireLangues.langueFixee(m.senderId);
+        if (!mounted) return;
+        // Un caractère : le plancher n'écarte plus que le message vide. Voir
+        // `_minCaracteresAuto`, qui porte l'histoire de cette limite.
+        if (texte.length < _minCaracteresAuto) continue;
+
+        final connue = await MemoireLangues.langueDe(m.senderId);
+        if (!mounted) return;
+        final detection = await detecterSource(texte, cible,
+            langueConnue: connue, langueImposee: fixee);
+        if (!mounted) return;
+        final source = detection.source;
+        if (source != null && detection.fiable) {
+          await MemoireLangues.retiens(m.senderId, source);
+        }
+        if (source == null) {
+          // Rien à traduire : on le RETIENT quand même, sinon le détecteur
+          // repasserait sur ce message à chaque ouverture du fil.
+          await MessageCache.putTraduction(
+            messageId: m.id,
+            convId: widget.convId,
+            texte: texte,
+            langueSource: null,
+            langueCible: cible,
+          );
+          continue;
+        }
+        // Le modèle manque : on s'arrête là pour ce message, sans rien
+        // télécharger et sans rien retenir — il redeviendra candidat le jour où
+        // la langue sera installée. Le bandeau le DIT, sans quoi l'interrupteur
+        // resterait allumé sans effet visible.
+        if (await etatCouple(source, cible) != EtatCouple.pret) {
+          if (!mounted) return;
+          // `fixee` dit lequel des deux bandeaux est juste : fixer la langue,
+          // ou installer le paquet de celle qui est déjà fixée.
+          if (_langueManquante != source ||
+              _langueManquanteFixee != (fixee != null)) {
+            setState(() {
+              _langueManquante = source;
+              _langueManquanteFixee = fixee != null;
+            });
+          }
+          continue;
+        }
+        if (!mounted) return;
+
+        try {
+          final traduit = await traduireUnTexte(source, cible, texte);
+          if (!mounted) return;
+          setState(() {
+            _translations[m.id] = traduit;
+            _sourceTraduction[m.id] = source;
+          });
+          await MessageCache.putTraduction(
+            messageId: m.id,
+            convId: widget.convId,
+            texte: traduit,
+            langueSource: source,
+            langueCible: cible,
+          );
+        } catch (_) {
+          // Un échec ponctuel n'arrête pas la passe : les autres messages
+          // n'ont pas à en souffrir.
+        }
+      }
+    } finally {
+      _autoEnCours = false;
+    }
+  }
+
+  /// Traduit un message SUR L'APPAREIL, ou retire la traduction affichée.
+  ///
+  /// Le service en ligne a disparu : le texte du message ne quitte plus le
+  /// téléphone. Contrepartie assumée — la première traduction vers une langue
+  /// demande d'installer ses modèles, ce qui ne peut pas se faire en douce.
   Future<void> _translateMessage(Message m) async {
     final text = (m.content ?? '').trim();
     if (text.isEmpty) return;
-    final locale = context.read<LocaleController>().languageCode;
+    final cible = context.read<LocaleController>().languageCode;
     if (_translations.containsKey(m.id)) {
-      setState(() => _translations.remove(m.id));
+      setState(() {
+        _translations.remove(m.id);
+        _sourceTraduction.remove(m.id);
+      });
+      // Oubliée aussi en base : sans cela, elle reviendrait à la réouverture et
+      // le geste de retrait passerait pour ignoré.
+      await MessageCache.supprimeTraduction(m.id);
       return;
     }
     if (_translating.contains(m.id)) return;
+    if (!moteurAppareilPresent) {
+      _messageTraduction('translation_unsupported');
+      return;
+    }
     setState(() => _translating.add(m.id));
     try {
-      final translated = await _translateService.translate(
-          text: text, target: locale, source: 'auto');
+      // ⚠️ AUCUN REFUS ICI NON PLUS (règle du user) : `detecterSource` finit
+      // toujours par proposer une source, et son `null` ne veut pas dire « je
+      // ne sais pas » mais « rien à traduire » — traité juste en dessous en
+      // affichant le texte tel quel.
+      /*
+       * 🔴 LA LANGUE DU CORRESPONDANT SERT D'INDICE (31/08/2026).
+       *
+       * Le user constatait que la détection « pointe très souvent sur la
+       * mauvaise langue ». Un message de trois mots est indécidable — « merci »
+       * est français, portugais et proche de l'italien — mais son AUTEUR écrit
+       * presque toujours dans la même langue. On lui passe donc ce qu'on a
+       * observé chez lui, et `detecterSource` ne s'en sert que si sa propre
+       * détection n'ose pas se prononcer.
+       */
+      // Meme regle que la passe automatique : une langue fixee ne se discute pas.
+      final fixee = await MemoireLangues.langueFixee(m.senderId);
+      final connue = await MemoireLangues.langueDe(m.senderId);
       if (!mounted) return;
-      setState(() => _translations[m.id] = translated);
+      final detection = await detecterSource(text, cible,
+          langueConnue: connue, langueImposee: fixee);
+      if (!mounted) return;
+      final source = detection.source;
+      // On n'apprend QUE des détections sûres : retenir une erreur la ferait
+      // resservir à tous les messages suivants de cette personne.
+      if (source != null && detection.fiable) {
+        await MemoireLangues.retiens(m.senderId, source);
+        if (!mounted) return;
+      }
+      if (source == null) {
+        // Rien à traduire : le message est DÉJÀ dans la langue des réglages, ou
+        // ne porte aucune langue (chiffres, émojis). Traduire un texte vers sa
+        // propre langue, c'est ce texte — on le montre, plutôt que d'opposer un
+        // message d'erreur à quelqu'un qui a simplement appuyé sur « Traduire ».
+        setState(() => _translations[m.id] = text);
+        // Retenue comme les autres : « rien à traduire » est une réponse, et la
+        // recalculer à chaque ouverture ferait retourner le détecteur sur un
+        // message dont on sait déjà qu'il n'y a rien à en tirer.
+        await MessageCache.putTraduction(
+          messageId: m.id,
+          convId: widget.convId,
+          texte: text,
+          langueSource: null,
+          langueCible: cible,
+        );
+        return;
+      }
+      final etat = await etatCouple(source, cible);
+      if (!mounted) return;
+      if (etat == EtatCouple.indisponible) {
+        _messageTraduction('translation_unsupported');
+        return;
+      }
+      if (etat == EtatCouple.aTelecharger) {
+        // Le téléchargement DOIT partir d'un geste : quelques dizaines de Mo
+        // ne s'imposent pas à quelqu'un qui a seulement appuyé sur « Traduire ».
+        // Ne citer QUE ce qui manque : nommer une langue déjà installée faisait
+        // croire que le téléchargement recommençait à chaque fois.
+        final manquantes = await nomsLanguesManquantes(source, cible);
+        if (!mounted) return;
+        final libelle =
+            manquantes.isEmpty ? nomAutonyme(source) : manquantes.join(" + ");
+        final accepte = await confirmerInstallationLangues(context, libelle);
+        if (!mounted || !accepte) return;
+        var installe = await telechargerCouple(source, cible);
+        // Le téléchargement n'accepte que le Wi-Fi par défaut. Sans cette
+        // seconde question, un utilisateur en données mobiles restait devant un
+        // « impossible » sans savoir pourquoi ni quoi faire.
+        // Le repli n'est proposé que si le Wi-Fi était bien la contrainte.
+        if (!installe &&
+            wifiExige &&
+            mounted &&
+            await proposerDonneesMobiles(context)) {
+          installe =
+              await telechargerCouple(source, cible, wifiSeulement: false);
+        }
+        if (!mounted) return;
+        if (!installe) {
+          _messageTraduction('translation_download_failed');
+          return;
+        }
+      }
+      final traduit = await traduireUnTexte(source, cible, text);
+      if (!mounted) return;
+      setState(() {
+        _translations[m.id] = traduit;
+        _sourceTraduction[m.id] = source;
+      });
+      await MessageCache.putTraduction(
+        messageId: m.id,
+        convId: widget.convId,
+        texte: traduit,
+        langueSource: source,
+        langueCible: cible,
+      );
     } catch (_) {
-      if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(tr(context, 'translation_failed'))));
+      _messageTraduction('translation_failed');
     } finally {
       if (mounted) setState(() => _translating.remove(m.id));
     }
   }
+
+  void _messageTraduction(String cle) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(tr(context, cle))));
+  }
+
 
   // ══ TIME / DATE ══
   String _time(DateTime d) {
@@ -4098,10 +7484,10 @@ class _ChatScreenState extends State<ChatScreen>
 
   String _lastSeenLabel(DateTime d) {
     final diff = DateTime.now().difference(d);
-    if (diff.inMinutes < 1) return "vu à l'instant";
-    if (diff.inMinutes < 60) return "vu il y a ${diff.inMinutes} min";
-    if (diff.inHours < 24) return "vu il y a ${diff.inHours}h";
-    return "vu il y a ${diff.inDays}j";
+    if (diff.inMinutes < 1) return tr(context, 'presence_just_now');
+    if (diff.inMinutes < 60) return tr(context, 'presence_min', {'n': '${diff.inMinutes}'});
+    if (diff.inHours < 24) return tr(context, 'presence_hour', {'n': '${diff.inHours}'});
+    return tr(context, 'presence_day', {'n': '${diff.inDays}'});
   }
 
   Widget _dateChip(String label) {
@@ -4213,7 +7599,26 @@ class _ChatScreenState extends State<ChatScreen>
                           Text(tr(context, 'recording_locked'),
                               style: TextStyle(fontSize: 13, color: _muted)),
                         ]))),
-                const SizedBox(width: 8),
+                // Le « 1 » de WhatsApp : ce vocal partira à vue unique.
+                IconButton(
+                  tooltip: tr(context, 'vu_activer'),
+                  onPressed: () {
+                    setState(() => _vocalVueUnique = !_vocalVueUnique);
+                    if (_vocalVueUnique) {
+                      showAppSnackBar(tr(context, 'vu_active_info'));
+                    }
+                  },
+                  icon: Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: _vocalVueUnique ? _accent : Colors.transparent,
+                    ),
+                    child: PastilleVueUnique(
+                        taille: 24,
+                        couleur: _vocalVueUnique ? Colors.white : _muted),
+                  ),
+                ),
                 GestureDetector(
                     onTap: _uploading ? null : () => _stopVoiceRecord(),
                     child: CircleAvatar(
@@ -4236,7 +7641,7 @@ class _ChatScreenState extends State<ChatScreen>
                       child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                        Text("Modifier le message",
+                        Text(tr(context, 'edit_message'),
                             style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.bold,
@@ -4250,52 +7655,13 @@ class _ChatScreenState extends State<ChatScreen>
                       onTap: _cancelEdit,
                       child: Icon(Icons.close, size: 20, color: _muted)),
                 ])),
-          if (_replyTo != null && _editing == null)
-            Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                color: _composerBg,
-                child: Row(children: [
-                  Container(
-                      width: 3,
-                      height: 32,
-                      decoration: BoxDecoration(
-                          color: _accentSoft,
-                          borderRadius: BorderRadius.circular(2))),
-                  const SizedBox(width: 8),
-                  Expanded(
-                      child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                        Text(
-                            _replyTo!.senderId == _myId
-                                ? tr(context, 'you')
-                                : (widget.memberNames[_replyTo!.senderId] ??
-                                    tr(context, 'reply_to')),
-                            style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                                color: _accent)),
-                        Text(
-                            _replyTo!.isDeleted
-                                ? tr(context, 'message_deleted')
-                                : (_replyTo!.content ??
-                                    (_replyTo!.media.isNotEmpty
-                                        ? '📎 ${_replyTo!.media.first.filename ?? tr(context, 'file')}'
-                                        : '...')),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(fontSize: 12, color: _muted)),
-                      ])),
-                  GestureDetector(
-                      onTap: () => setState(() => _replyTo = null),
-                      child: Icon(Icons.close, size: 20, color: _muted)),
-                ])),
+          if (_replyTo != null && _editing == null) _barreReponse(),
           Container(
               padding: const EdgeInsets.all(8),
               color: _composerBg,
               child: Column(mainAxisSize: MainAxisSize.min, children: [
                 _formatBar(),
+                _compteurLongueur(),
                 Row(children: [
                   // Ordre repris de la maquette : TOUT est dans le champ — smiley contre
                   // le bord gauche, « A » et trombone contre le bord droit. Seul le
@@ -4312,6 +7678,24 @@ class _ChatScreenState extends State<ChatScreen>
                               textInputAction: TextInputAction.send,
                               onChanged: _onInputChanged,
                               onSubmitted: (_) => _send(),
+                              // La colonne `message.content` est un VARCHAR(500) :
+                              // au-delà, le serveur COUPE. Borner la saisie évite
+                              // d'écrire un texte qui arriverait amputé sans
+                              // avertissement.
+                              //
+                              // `inputFormatters` et NON `maxLength` : ce dernier
+                              // impose son propre compteur sous le champ, qui
+                              // pousserait le composeur vers le haut EN
+                              // PERMANENCE. Le compteur ci-dessous ne se montre
+                              // qu'à l'approche de la limite.
+                              //
+                              // Le formateur borne aussi le COLLER, pas seulement
+                              // la frappe — c'est le cas qui compte, personne ne
+                              // tape 500 caractères à la main.
+                              inputFormatters: [
+                                LengthLimitingTextInputFormatter(
+                                    longueurMaxContenu),
+                              ],
                               // Second chemin, celui de WhatsApp : sélectionner du texte, puis
                               // choisir la mise en forme dans le menu contextuel, à la suite de
                               // Couper / Copier / Coller. On repart des entrées natives plutôt que
@@ -4342,7 +7726,7 @@ class _ChatScreenState extends State<ChatScreen>
                                     horizontal: 8, vertical: 10),
                                 // Smiley À L'INTÉRIEUR du champ, contre le bord gauche.
                                 prefixIcon: IconButton(
-                                  tooltip: "Emojis",
+                                  tooltip: tr(context, 'emojis'),
                                   icon: Icon(
                                       _emojiPanelOpen
                                           ? Icons.keyboard
@@ -4379,7 +7763,7 @@ class _ChatScreenState extends State<ChatScreen>
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
                                       IconButton(
-                                        tooltip: "Mise en forme",
+                                        tooltip: tr(context, 'formatting'),
                                         icon: _iconeFormatA(_formatBarOpen
                                             ? _accent
                                             : _iconNeutral),
@@ -4425,7 +7809,7 @@ class _ChatScreenState extends State<ChatScreen>
                           child: IconButton(
                               tooltip: tr(context, 'send'),
                               icon: const Icon(Icons.send, color: Colors.white),
-                              onPressed: _sending ? null : _send))
+                              onPressed: _send))
                       : _micButton(),
                 ]),
                 if (_emojiPanelOpen && !_recording) _emojiPanel(),
@@ -4459,54 +7843,16 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
-  /// Emojis les plus courants, insérés dans le champ au clic.
+  /// Le sélecteur complet — même catalogue que le web, avec les récents et
+  /// une recherche. Il remplace une grille figée de 24 emojis (02/10/2026).
   ///
-  /// Volontairement une grille figée et non un vrai clavier emoji : rien dans
-  /// le projet n'en fournissait, et une liste courte couvre l'essentiel sans
-  /// ajouter de dépendance. Les emojis sont du TEXTE — ils partent dans un
-  /// message normal, sans rien changer au protocole.
-  static const List<String> _emojisCourants = [
-    "😀",
-    "😂",
-    "🙂",
-    "😍",
-    "😘",
-    "😎",
-    "🤔",
-    "😴",
-    "😢",
-    "😭",
-    "😡",
-    "🥳",
-    "👍",
-    "👎",
-    "👏",
-    "🙏",
-    "❤️",
-    "🔥",
-    "✨",
-    "🎉",
-    "💯",
-    "✅",
-    "❌",
-    "📞",
-  ];
-
+  /// Les emojis restent du TEXTE : ils partent dans un message normal, sans
+  /// rien changer au protocole.
   Widget _emojiPanel() {
     return Container(
-      height: 180,
+      height: 300,
       margin: const EdgeInsets.only(top: 6),
-      child: GridView.count(
-        crossAxisCount: 8,
-        children: [
-          for (final e in _emojisCourants)
-            InkWell(
-              onTap: () => _insereEmoji(e),
-              child:
-                  Center(child: Text(e, style: const TextStyle(fontSize: 24))),
-            ),
-        ],
-      ),
+      child: SelecteurEmojis(onChoisir: _insereEmoji),
     );
   }
 
@@ -4641,6 +7987,46 @@ class _ChatScreenState extends State<ChatScreen>
   ///
   /// `AnimatedSize` plutôt qu'un `if` sec : la barre pousse le champ de saisie
   /// vers le bas, et un saut brutal juste au-dessus du clavier se voit.
+  /// Compteur « reste N caractères », visible seulement à l'approche du plafond.
+  ///
+  /// Il ne s'affiche qu'à partir de 50 caractères de la fin : un compteur
+  /// toujours présent occuperait une ligne du composeur pour une limite que la
+  /// quasi-totalité des messages n'atteint jamais — le message médian fait
+  /// quelques dizaines de caractères.
+  ///
+  /// ⚠️ `ValueListenableBuilder` et NON un `setState` dans `_onInputChanged` :
+  /// cet écran fait plus de 5 000 lignes, et le reconstruire à CHAQUE frappe
+  /// pour rafraîchir un compteur coûterait bien plus que ce qu'il affiche. Ici
+  /// seul le compteur se reconstruit.
+  Widget _compteurLongueur() {
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: _inputCtrl,
+      builder: (context, valeur, _) {
+        final restant = longueurMaxContenu - valeur.text.length;
+        if (restant > 50) return const SizedBox.shrink();
+        // À zéro, la saisie est bloquée par le formateur : le compteur devient
+        // rouge pour expliquer pourquoi le clavier « ne répond plus ».
+        final limiteAtteinte = restant <= 0;
+        return Padding(
+          padding: const EdgeInsets.only(right: 12, bottom: 2),
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: Text(
+              "$restant",
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: limiteAtteinte ? FontWeight.w600 : FontWeight.w400,
+                color: limiteAtteinte
+                    ? Theme.of(context).colorScheme.error
+                    : _iconNeutral,
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _formatBar() {
     return AnimatedSize(
       duration: const Duration(milliseconds: 180),
@@ -4806,8 +8192,8 @@ class _ForwardPickerState extends State<_ForwardPicker> {
                               : themed(context,
                                   light: AlanyaColors.chocolate,
                                   dark: AlanyaColors.craie2))),
-                  title: Text(conv.title ?? 'Conversation'),
-                  subtitle: conv.isGroup ? const Text('Groupe') : null,
+                  title: Text(conv.title ?? tr(context, 'conversation')),
+                  subtitle: conv.isGroup ? Text(tr(context, 'group_label')) : null,
                   onTap: () {
                     setState(() {
                       if (isSelected) {

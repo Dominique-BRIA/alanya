@@ -5,7 +5,7 @@ import 'package:flutter/services.dart';
 /// Les longueurs supportées et leurs formats visuels :
 /// - 3 chiffres  : xxx
 /// - 4 chiffres  : xx xx
-/// - 6 chiffres  : xxx xxx
+/// - 6 chiffres  : xx xx xx
 /// - 8 chiffres  : xx xx xx xx
 /// - 10 chiffres : x xxx xxx xxx
 ///
@@ -31,7 +31,12 @@ String formatAlanyaId(String rawId) {
     case 4:
       return '${digits.substring(0, 2)} ${digits.substring(2)}'; // xx xx
     case 6:
-      return '${digits.substring(0, 3)} ${digits.substring(3)}'; // xxx xxx
+      // xx xx xx — demandé par le user le 18/08/2026, en remplacement de
+      // « xxx xxx ». Aligné sur les longueurs 4 et 8, qui se lisent déjà deux
+      // par deux : un même identifiant ne change donc plus de rythme de lecture
+      // selon sa longueur.
+      return '${digits.substring(0, 2)} ${digits.substring(2, 4)} '
+          '${digits.substring(4)}';
     case 8:
       return '${digits.substring(0, 2)} ${digits.substring(2, 4)} ' +
           '${digits.substring(4, 6)} ${digits.substring(6)}'; // xx xx xx xx
