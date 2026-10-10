@@ -211,6 +211,9 @@ class PileE2ee {
          * c'est là que la reprise sert le plus.
          */
         await sauvegarde.reprendreAuDemarrage(coffre);
+        // Les clés de mes groupes chiffrés, par mes copies (lot 6) : c'est
+        // le cas du téléphone neuf, celui où elles servent le plus.
+        unawaited(fil.groupe.restaurerTous());
         return;
       }
 
@@ -243,6 +246,7 @@ class PileE2ee {
        * le coffre sécurisé. C'est ce qui rend ce rattrapage silencieux.
        */
       await sauvegarde.reprendreAuDemarrage(coffre);
+      unawaited(fil.groupe.restaurerTous());
     } catch (e) {
       /*
        * ⚠️ ON NE LÈVE TOUJOURS PAS — l'application doit s'ouvrir. Mais on

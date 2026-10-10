@@ -17,6 +17,7 @@
 /// changée ».
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
@@ -28,6 +29,7 @@ import '../../core/api_client.dart' show ApiException;
 import 'e2ee_groupe.dart' as g;
 import 'e2ee_media.dart';
 import 'e2ee_service.dart';
+import 'e2ee_trousseau_perso.dart';
 
 /// Le message n'est pas parti : la clé du groupe manque ou a changé.
 class CleGroupeAbsente implements Exception {
@@ -75,8 +77,15 @@ bool estAdministrateur(List<Map<String, dynamic>> membres, String userId) {
   return tries.isNotEmpty && tries.first['id'] == userId;
 }
 
+/// Le bilan d'une distribution de trousseau.
+typedef BilanDistribution = ({int appareils, List<String> sansAppareil, List<String> echecs});
+
 class GroupeChiffre {
-  GroupeChiffre(this._service, this._api, this._monDeviceId, this._monCompte);
+  GroupeChiffre(this._service, this._api, this._monDeviceId, this._monCompte)
+      : copies = CopiesTrousseau(_service.coffre, _api, _monCompte);
+
+  /// Ma copie personnelle de chaque trousseau (lot 6).
+  final CopiesTrousseau copies;
 
   final E2eeService _service;
   final Future<Map<String, dynamic>> Function(
@@ -105,12 +114,60 @@ class GroupeChiffre {
   /// Ajoute des versions. ⚠️ `fusionnerTrousseau` REFUSE de remplacer une clé
   /// connue : un faux trousseau ne peut ni rendre illisible ce qu'on lit, ni
   /// faire accepter une clé détenue par un autre sous un numéro existant.
-  Future<List<g.VersionCle>> ranger(String convId, List<g.VersionCle> recues) async {
-    final fusion = g.fusionnerTrousseau(await trousseau(convId), recues);
+  ///
+  /// 🔴 LA COPIE PERSONNELLE SUIT CHAQUE CHANGEMENT (lot 6, chapitre 35) : une
+  /// version reçue et pas recopiée serait perdue au changement de téléphone.
+  Future<List<g.VersionCle>> ranger(
+    String convId,
+    List<g.VersionCle> recues, {
+    bool deposerCopie = true,
+  }) async {
+    final connues = await trousseau(convId);
+    final fusion = g.fusionnerTrousseau(connues, recues);
+    if (fusion.length == connues.length) return fusion;
     await _service.coffre.rangerTrousseauGroupe(convId, [
       for (final v in fusion) {'n': v.n, 'cle': base64.encode(v.cle), 'creeLe': v.creeLe},
     ]);
+    if (deposerCopie) unawaited(copies.deposer(convId, fusion));
     return fusion;
+  }
+
+  /// Dernière tentative de restauration, par groupe — pour ne pas boucler.
+  final _restaurations = <String, DateTime>{};
+
+  /// Le trousseau local, COMPLÉTÉ PAR MA COPIE quand il manque quelque chose
+  /// (lot 6) : rien du tout (nouveau téléphone), ou la version [voulue].
+  ///
+  /// ⚠️ UNE TENTATIVE PAR GROUPE ET PAR DEMI-MINUTE. Jumeau du web.
+  Future<List<g.VersionCle>> trousseauAvecRepli(String convId, [int? voulue]) async {
+    final local = await trousseau(convId);
+    final manque = local.isEmpty || (voulue != null && !local.any((v) => v.n == voulue));
+    if (!manque) return local;
+    final derniere = _restaurations[convId];
+    if (derniere != null && DateTime.now().difference(derniere).inSeconds < 30) return local;
+    _restaurations[convId] = DateTime.now();
+    try {
+      final copie = await copies.lire(convId);
+      if (copie == null) return local;
+      return await ranger(convId, copie, deposerCopie: false);
+    } catch (_) {
+      return local;
+    }
+  }
+
+  /// Nouveau téléphone : reprend TOUTES mes copies (archive ouverte). Rend le
+  /// nombre de groupes repris. Ne lève jamais.
+  Future<int> restaurerTous() async {
+    var n = 0;
+    try {
+      for (final e in (await copies.lireToutes()).entries) {
+        try {
+          await ranger(e.key, e.value, deposerCopie: false);
+          n++;
+        } catch (_) {}
+      }
+    } catch (_) {}
+    return n;
   }
 
   /// Parti ou exclu : on oublie la clé. Les messages déjà lus restent dans le
@@ -144,7 +201,7 @@ class GroupeChiffre {
     DescripteurMedia? media,
     bool vueUnique = false,
   }) async {
-    final versions = await trousseau(convId);
+    final versions = await trousseauAvecRepli(convId);
     if (versions.isEmpty) throw const CleGroupeAbsente();
     final courante = versions.last;
     final moi = _monCompte;
@@ -184,7 +241,7 @@ class GroupeChiffre {
     required String messageId,
     required String texte,
   }) async {
-    final versions = await trousseau(convId);
+    final versions = await trousseauAvecRepli(convId);
     if (versions.isEmpty) throw const CleGroupeAbsente();
     final courante = versions.last;
     final moi = _monCompte;
@@ -254,7 +311,7 @@ class GroupeChiffre {
   }) async {
     final version = chiffre['version'] as int;
     final appareil = chiffre['expediteurAppareil'] as int;
-    final versions = await trousseau(convId);
+    final versions = await trousseauAvecRepli(convId, version);
     final cle = versions.where((v) => v.n == version).firstOrNull;
     if (cle == null) return (null, EchecGroupe.cleAbsente);
     final signataire = await _cleSignataire(expediteurId, appareil);
@@ -307,5 +364,112 @@ class GroupeChiffre {
       }
     }
     return ranger(t.convId, t.versions);
+  }
+
+  /* ══════════════ LES GESTES D'ADMINISTRATEUR (lot 5) ══════════════ */
+
+  /// Envoie un trousseau, hors fil, à chaque appareil de [destinataires] —
+  /// moi compris (mes AUTRES appareils ; celui-ci est exclu).
+  ///
+  /// ⚠️ UN MEMBRE INJOIGNABLE N'ARRÊTE PAS LES AUTRES : il est compté.
+  Future<BilanDistribution> distribuer(
+    String convId,
+    String motif,
+    List<g.VersionCle> versions,
+    Iterable<String> destinataires,
+  ) async {
+    final moi = _monCompte;
+    final monAppareil = await _monDeviceId();
+    final charge = g.ecrireChargeTrousseau(g.Trousseau(convId: convId, motif: motif, versions: versions));
+    final enveloppes = <Map<String, dynamic>>[];
+    final sansAppareil = <String>[];
+    final echecs = <String>[];
+    for (final uid in destinataires.toSet()) {
+      try {
+        final appareils =
+            await _service.ouvrirSessions(uid, exclure: uid == moi ? monAppareil : null);
+        if (appareils.isEmpty) {
+          if (uid != moi) sansAppareil.add(uid);
+          continue;
+        }
+        for (final d in appareils) {
+          final e = await _service.chiffrer(uid, d, charge);
+          enveloppes.add(
+              {'destinataireId': uid, 'destinataireDevice': d, 'type': e.type, 'corps': e.corps});
+        }
+      } catch (_) {
+        echecs.add(uid);
+      }
+    }
+    // Plafond d'un dépôt côté serveur : 1 000.
+    for (var i = 0; i < enveloppes.length; i += 1000) {
+      await _api('POST', '/api/e2ee/enveloppes', {
+        'convId': convId,
+        'deviceId': monAppareil,
+        'enveloppes': enveloppes.sublist(i, min(i + 1000, enveloppes.length)),
+      });
+    }
+    return (appareils: enveloppes.length, sansAppareil: sansAppareil, echecs: echecs);
+  }
+
+  Future<List<Map<String, dynamic>>> _membres(String convId) async {
+    final r = await _api('GET', '/api/conversations/$convId/members', null);
+    return ((r['members'] as List?) ?? const []).cast<Map<String, dynamic>>();
+  }
+
+  /// ACTIVE le chiffrement d'un groupe (administrateur : le serveur vérifie).
+  ///
+  /// 🔴 LA CLÉ N'EST TIRÉE QU'APRÈS LA RÉSERVATION DU SERVEUR. Tirée avant puis
+  /// refusée, elle resterait ici sous un numéro qui désigne, chez les autres,
+  /// une AUTRE clé : la vraie serait refusée à sa réception. Jumeau du web.
+  ///
+  /// `deja` : quelqu'un l'avait déjà activé ; sa clé arrivera par la relève.
+  Future<({bool deja, BilanDistribution? bilan})> activer(String convId) async {
+    final r = await _api('POST', '/api/conversations/$convId/e2ee', {'appareil': await _monDeviceId()});
+    if (r['deja'] == true) return (deja: true, bilan: null);
+    final v1 = g.VersionCle(n: 1, cle: g.genererCleGroupe(), creeLe: DateTime.now().millisecondsSinceEpoch);
+    final versions = await ranger(convId, [v1]);
+    final bilan = await distribuer(
+        convId, 'ACTIVATION', versions, (await _membres(convId)).map((m) => m['id'] as String));
+    return (deja: false, bilan: bilan);
+  }
+
+  /// Le nouveau membre reçoit TOUT le trousseau : il lira l'historique
+  /// (décision du user).
+  Future<BilanDistribution> partagerAvecNouveaux(String convId, Iterable<String> userIds) async {
+    final versions = await trousseauAvecRepli(convId);
+    if (versions.isEmpty) throw const CleGroupeAbsente();
+    return distribuer(convId, 'AJOUT', versions, userIds);
+  }
+
+  /// Après un ajout par numéro : retrouve les comptes ajoutés, et partage.
+  Future<BilanDistribution> partagerApresAjout(String convId, List<String> numeros) async {
+    final voulus = numeros.toSet();
+    final ajoutes = (await _membres(convId))
+        .where((m) => voulus.contains(m['publicNumber']))
+        .map((m) => m['id'] as String);
+    return partagerAvecNouveaux(convId, ajoutes);
+  }
+
+  /// Nouvelle version : après une EXCLUSION, ou sur demande (MANUEL).
+  ///
+  /// `null` si un autre administrateur l'a changée au même moment : sa clé
+  /// arrive par la relève.
+  Future<({int version, BilanDistribution bilan})?> changerCle(String convId, String motif) async {
+    final etat = await _api('GET', '/api/conversations/$convId/e2ee', null);
+    final attendue = ((etat['cleVersion'] as int?) ?? 0) + 1;
+    try {
+      await _api('POST', '/api/conversations/$convId/e2ee/versions',
+          {'attendue': attendue, 'appareil': await _monDeviceId(), 'motif': motif});
+    } on ApiException catch (e) {
+      if (e.code == 'VERSION_CONFLIT') return null;
+      rethrow;
+    }
+    final neuve =
+        g.VersionCle(n: attendue, cle: g.genererCleGroupe(), creeLe: DateTime.now().millisecondsSinceEpoch);
+    final versions = await ranger(convId, [...await trousseauAvecRepli(convId), neuve]);
+    final bilan = await distribuer(
+        convId, motif, versions, (await _membres(convId)).map((m) => m['id'] as String));
+    return (version: attendue, bilan: bilan);
   }
 }

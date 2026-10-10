@@ -13,6 +13,7 @@ import '../../chat/chat_repository.dart';
 import '../../../widgets/contact_picker_sheet.dart';
 import '../../chat/screens/chat_screen.dart';
 import '../../../l10n/app_localizations.dart';
+import '../../../services/e2ee/e2ee_fournisseur.dart';
 
 /// Écran d'infos d'un groupe — style WhatsApp.
 ///
@@ -47,6 +48,94 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     _title = widget.title;
     _avatarUrl = widget.avatarUrl;
     _refreshMembers();
+    _lireEtatChiffrement();
+  }
+
+  /* ══════════════ LE CHIFFREMENT DU GROUPE (lot 5, chapitre 35) ══════════════ */
+
+  /// Ce groupe est-il chiffré ? `null` tant qu'on ne sait pas.
+  bool? _chiffre;
+  bool _chiffrementEnCours = false;
+
+  Future<void> _lireEtatChiffrement() async {
+    final pile = context.e2ee;
+    if (pile == null) return;
+    try {
+      final actif = await pile.fil.etat(widget.convId);
+      if (mounted) setState(() => _chiffre = actif);
+    } catch (_) {}
+  }
+
+  void _dire(String texte) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(texte)));
+  }
+
+  /// ACTIVER : le serveur réserve la version 1, CE téléphone tire la clé et la
+  /// distribue à chaque appareil de chaque membre.
+  Future<void> _activerChiffrement() async {
+    final pile = context.e2ee;
+    if (pile == null || _chiffrementEnCours) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Chiffrer ce groupe ?'),
+        content: const Text(
+            "Les messages suivants seront chiffrés de bout en bout pour tous les membres. "
+            "Le chiffrement ne se retire pas."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr(context, 'cancel'))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Chiffrer')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => _chiffrementEnCours = true);
+    try {
+      final r = await pile.fil.groupe.activer(widget.convId);
+      pile.fil.noteEtat(widget.convId, true);
+      if (mounted) setState(() => _chiffre = true);
+      final sans = r.bilan?.sansAppareil.length ?? 0;
+      _dire(sans == 0
+          ? 'Groupe chiffré de bout en bout.'
+          : 'Groupe chiffré. $sans membre(s) sans appareil à jour ne lisent pas encore.');
+    } on ApiException catch (e) {
+      _dire(e.message);
+    } catch (_) {
+      _dire("Le chiffrement n'a pas pu être activé.");
+    } finally {
+      if (mounted) setState(() => _chiffrementEnCours = false);
+    }
+  }
+
+  /// CHANGER LA CLÉ : une nouvelle version, envoyée aux membres actuels — pour
+  /// une clé qu'on soupçonne volée, ou une distribution manquée.
+  Future<void> _changerCle() async {
+    final pile = context.e2ee;
+    if (pile == null || _chiffrementEnCours) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Changer la clé du groupe'),
+        content: const Text(
+            'Une nouvelle clé est créée et envoyée aux membres actuels. '
+            'Les anciens messages restent lisibles.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr(context, 'cancel'))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Changer')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => _chiffrementEnCours = true);
+    try {
+      await pile.fil.groupe.changerCle(widget.convId, 'MANUEL');
+      _dire('Clé du groupe changée.');
+    } catch (_) {
+      _dire("La clé n'a pas pu être changée.");
+    } finally {
+      if (mounted) setState(() => _chiffrementEnCours = false);
+    }
   }
 
   String get _myId => context.read<AuthController>().user?.id ?? '';
@@ -214,7 +303,20 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     );
     if (result != null && result.isNotEmpty) {
       try {
+        final pile = context.e2ee;
         await context.read<ChatRepository>().addMembersToGroup(widget.convId, result);
+        /*
+         * 🔴 GROUPE CHIFFRÉ : sans le trousseau, le nouveau membre verrait un
+         * groupe muet. L'ajout est fait quoi qu'il arrive ensuite ; un échec du
+         * partage est dit, et « Clé » le rattrape.
+         */
+        if (_chiffre == true && pile != null) {
+          try {
+            await pile.fil.groupe.partagerApresAjout(widget.convId, result);
+          } catch (_) {
+            _dire("Membre ajouté, mais la clé du groupe n'a pas pu lui être envoyée.");
+          }
+        }
         await _refreshMembers();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -249,10 +351,23 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     );
     if (ok == true) {
       try {
+        final pile = context.e2ee;
         await context.read<ChatRepository>().removeMemberFromGroup(
               widget.convId,
               member['id'] as String,
             );
+        /*
+         * 🔴 EXCLUSION D'UN GROUPE CHIFFRÉ (décision du user) : l'exclu connaît
+         * la clé actuelle. Une nouvelle version, envoyée aux membres restants,
+         * rend illisible ce qui s'écrira ensuite.
+         */
+        if (_chiffre == true && pile != null) {
+          try {
+            await pile.fil.groupe.changerCle(widget.convId, 'EXCLUSION');
+          } catch (_) {
+            _dire("Membre retiré, mais la clé n'a pas pu être changée : utilisez « Clé ».");
+          }
+        }
         await _refreshMembers();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -434,6 +549,11 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
                 _actionButton(Icons.person_add, "Ajouter", _addMembers),
+                // Administrateur seulement : chiffrer, puis changer la clé.
+                if (_amAdmin && _chiffre == false)
+                  _actionButton(Icons.shield_outlined, "Chiffrer", _activerChiffrement),
+                if (_amAdmin && _chiffre == true)
+                  _actionButton(Icons.key, "Clé", _changerCle),
                 _actionButton(Icons.exit_to_app, "Quitter", _leaveGroup,
                     color: dangerOf(context)),
               ],

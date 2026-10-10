@@ -523,6 +523,9 @@ class E2eeFil {
           try {
             await groupe.recevoirTrousseau(
                 e['convId'] as String, e['expediteurId'] as String, texte);
+            // Recevoir la clé d'un groupe, c'est savoir qu'il est chiffré —
+            // même défaut trouvé par le banc web du lot 5 (membre ajouté).
+            noteEtat(e['convId'] as String, true);
           } catch (_) {}
           aAcquitter.add(e['id'] as String);
           continue;
