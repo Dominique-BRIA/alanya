@@ -11,7 +11,9 @@
 //   ④ la modification remplace le chiffré ;
 //   ⑤ les refus : trousseau d'un non-administrateur, clé connue remplacée,
 //     chiffré altéré, version périmée (rien ne part) ;
-//   ⑥ l'oubli au départ.
+//   ⑥ l'oubli au départ ;
+//   ⑦ un FICHIER : sa clé voyage dans le chiffré de groupe, chaque membre
+//     l'ouvre, le serveur ne la voit jamais, un fichier altéré est refusé.
 
 import 'dart:convert';
 import 'dart:typed_data';
@@ -19,6 +21,7 @@ import 'dart:typed_data';
 import 'package:alanya/core/api_client.dart' show ApiException;
 import 'package:alanya/services/e2ee/e2ee_groupe.dart' as g;
 import 'package:alanya/services/e2ee/e2ee_groupe_fil.dart';
+import 'package:alanya/services/e2ee/e2ee_media.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -81,6 +84,8 @@ class FauxServeurGroupe extends FauxServeur {
         messages[id] = {
           'id': id,
           'senderId': moi,
+          // Tout ce que le serveur a reçu, pour prouver ce qu'il n'a PAS vu.
+          'recu': jsonEncode(corps),
           'groupe': {
             'version': gr['version'],
             'expediteurAppareil': gr['appareil'],
@@ -256,6 +261,72 @@ void main() {
     final (clair, echec) = await lirePar(carole, id);
     expect(clair, isNull);
     expect(echec, EchecGroupe.cleAbsente);
+  });
+
+  group('⑦ un fichier dans le groupe', () {
+    // Une « photo » de 200 Ko : plusieurs blocs de chiffrement.
+    final photo = Uint8List.fromList(List<int>.generate(200 * 1024, (i) => (i * 31 + 7) % 256));
+
+    Future<(String, FichierChiffre)> envoyerPhoto() async {
+      final f = chiffrerFichier(photo);
+      final d = DescripteurMedia(
+        id: 'media-1',
+        cle: f.cle,
+        empreinte: f.empreinte,
+        taille: photo.length,
+        mime: 'image/jpeg',
+        nom: 'plage.jpg',
+        largeur: 800,
+        hauteur: 600,
+      );
+      final id = await alice.fil.envoyerMedia(
+          convId: 'g1', pairId: null, media: d, legende: 'La plage');
+      return (id, f);
+    }
+
+    test('chaque membre reçoit la clé dans le chiffré, et ouvre le fichier', () async {
+      final (id, f) = await envoyerPhoto();
+      for (final qui in [bob, carole, alice]) {
+        final (clair, echec) = await lirePar(qui, id);
+        expect(echec, isNull, reason: qui.compte);
+        expect(clair!.texte, 'La plage');
+        final d = clair.media!;
+        expect((d.id, d.mime, d.nom, d.largeur, d.hauteur),
+            ('media-1', 'image/jpeg', 'plage.jpg', 800, 600));
+        final ouvert =
+            dechiffrerFichier(f.chiffre, cle: d.cle, empreinte: d.empreinte, taille: d.taille);
+        expect(ouvert, photo, reason: '${qui.compte} retrouve le fichier, octet pour octet');
+      }
+    });
+
+    test('le serveur ne reçoit ni la clé, ni l’empreinte, ni le nom du fichier', () async {
+      final (id, f) = await envoyerPhoto();
+      final recu = serveur.messages[id]!['recu'] as String;
+      expect(recu.contains(f.cle), isFalse, reason: 'la clé du fichier');
+      expect(recu.contains(f.empreinte), isFalse, reason: 'l’empreinte');
+      expect(recu.contains('plage.jpg'), isFalse, reason: 'le nom');
+      expect(recu.contains('La plage'), isFalse, reason: 'la légende');
+      final corps = jsonDecode(recu) as Map<String, dynamic>;
+      expect(corps['mediaIds'], ['media-1'], reason: 'seul l’identifiant du fichier est en clair');
+      expect(corps['type'], 'IMAGE');
+    });
+
+    test('un fichier remplacé ou abîmé sur le serveur est refusé', () async {
+      final (id, f) = await envoyerPhoto();
+      final (clair, _) = await lirePar(bob, id);
+      final d = clair!.media!;
+      final abime = Uint8List.fromList(f.chiffre)..[1000] ^= 0x01;
+      expect(() => dechiffrerFichier(abime, cle: d.cle, empreinte: d.empreinte, taille: d.taille),
+          throwsA(isA<FichierInvalide>()));
+    });
+
+    test('un ancien membre, sans la clé du groupe, n’obtient pas celle du fichier', () async {
+      await carole.fil.groupe.oublier('g1');
+      final (id, _) = await envoyerPhoto();
+      final (clair, echec) = await lirePar(carole, id);
+      expect(clair, isNull);
+      expect(echec, EchecGroupe.cleAbsente);
+    });
   });
 
   test('administrateur : même règle que le serveur, repli « premier arrivé »', () {

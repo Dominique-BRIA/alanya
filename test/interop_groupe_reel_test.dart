@@ -18,12 +18,15 @@
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:alanya/services/e2ee/e2ee_coffre.dart';
 import 'package:alanya/services/e2ee/e2ee_fil.dart';
+import 'package:alanya/services/e2ee/e2ee_media.dart';
 import 'package:alanya/services/e2ee/e2ee_service.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
 
 void main() {
   final env = Platform.environment;
@@ -71,9 +74,38 @@ void main() {
     final t1 = await fil.envoyer(convId: conv, pairId: null, texte: env['E2EE_T1']!);
     banc('ENVOYE_T1 $t1');
 
-    // 3. Attendre la réponse du navigateur, et la lire.
+    // 2bis. Un FICHIER chiffré dans le groupe : téléversé chiffré, sa clé
+    // voyage dans le chiffré de groupe (comme `MediaRepository.upload`).
+    final contenu = utf8.encode(env['E2EE_FICHIER']!);
+    final f = chiffrerFichier(Uint8List.fromList(contenu));
+    final envoi = http.MultipartRequest('POST', Uri.parse('$api/api/media'))
+      ..headers['Authorization'] = 'Bearer $jeton'
+      ..fields['chiffre'] = '1'
+      ..files.add(http.MultipartFile.fromBytes('file', f.chiffre, filename: 'chiffre.bin'));
+    final repMedia = await http.Response.fromStream(await envoi.send());
+    expect(repMedia.statusCode, lessThan(300), reason: repMedia.body);
+    final mediaId = (jsonDecode(repMedia.body) as Map)['id'] as String;
+    final idFichier = await fil.envoyerMedia(
+      convId: conv,
+      pairId: null,
+      media: DescripteurMedia(
+        id: mediaId,
+        cle: f.cle,
+        empreinte: f.empreinte,
+        taille: contenu.length,
+        mime: 'text/plain',
+        nom: 'du-telephone.txt',
+      ),
+      legende: 'fichier du téléphone',
+    );
+    banc('ENVOYE_FICHIER $idFichier');
+
+    // 3. Attendre la réponse du navigateur — un texte, puis un fichier — et
+    // les lire. Le fichier est TÉLÉCHARGÉ chiffré, puis ouvert avec la clé
+    // reçue dans le chiffré de groupe.
     String? lu;
-    for (var i = 0; i < 90 && lu == null; i++) {
+    String? fichierLu;
+    for (var i = 0; i < 90 && (lu == null || fichierLu == null); i++) {
       final page = await appel('GET', '/api/conversations/$conv/messages?limit=20', null);
       for (final m in ((page['messages'] as List?) ?? const []).cast<Map<String, dynamic>>()) {
         if (m['senderId'] != web || m['groupe'] == null) continue;
@@ -83,13 +115,27 @@ void main() {
           expediteurId: web,
           chiffre: m['groupe'] as Map<String, dynamic>,
         );
-        if (clair != null) lu = clair.texte;
         if (echec != null) banc('ECHEC_LECTURE $echec');
+        if (clair == null) continue;
+        final d = clair.media;
+        if (d == null) {
+          lu = clair.texte;
+          continue;
+        }
+        final req = await client.getUrl(Uri.parse('$api/api/media/${d.id}'));
+        req.headers.set('Authorization', 'Bearer $jeton');
+        final rep = await req.close();
+        final octets = await rep.fold<List<int>>(<int>[], (a, b) => a..addAll(b));
+        final ouvert = dechiffrerFichier(Uint8List.fromList(octets),
+            cle: d.cle, empreinte: d.empreinte, taille: d.taille);
+        fichierLu = '${d.nom}|${utf8.decode(ouvert)}';
       }
-      if (lu == null) await Future<void>.delayed(const Duration(seconds: 1));
+      if (lu == null || fichierLu == null) await Future<void>.delayed(const Duration(seconds: 1));
     }
     banc('LU ${lu ?? "(rien)"}');
+    banc('FICHIER_LU ${fichierLu ?? "(rien)"}');
     expect(lu, isNotNull, reason: 'le message du navigateur n\'a pas été lu');
+    expect(fichierLu, isNotNull, reason: 'le fichier du navigateur n\'a pas été ouvert');
 
     // 4. Changer la clé, puis écrire T2 en version 2.
     final change = await fil.groupe.changerCle(conv, 'MANUEL');
