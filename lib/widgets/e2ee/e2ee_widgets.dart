@@ -119,37 +119,13 @@ class BanniereChiffrement extends StatelessWidget {
         ],
           ),
           /*
-           * 🔴 LES PIÈCES JOINTES NE SONT PAS CHIFFRÉES, ET IL FAUT LE DIRE ICI.
-           *
-           * 🐛 Le web l'annonçait, le mobile non — il n'avait même pas la
-           * phrase. Un fil marqué « chiffré de bout en bout » y transportait des
-           * fichiers qui ne l'étaient pas, sans que rien ne le signale.
-           *
-           * ⚠️ C'EST PIRE QU'UN MANQUE, C'EST UNE PROMESSE FAUSSE. Quelqu'un qui
-           * lit la première ligne envoie sa photo en croyant qu'elle est
-           * protégée comme son texte. Le chiffrement des médias est remis —
-           * décision du 21/09 — mais le silence, lui, ne se décide pas : il
-           * trompe.
-           *
-           * ⚠️ JUSTE EN DESSOUS, PAS AILLEURS. Dans un écran de réglages,
-           * personne ne la lirait au moment qui compte : celui où l'on joint un
-           * fichier.
+           * 🐛 CETTE BANNIÈRE DISAIT « LES FICHIERS JOINTS NE SONT PAS ENCORE
+           * CHIFFRÉS » — vrai le 21/09, FAUX depuis le 03/10 (médias chiffrés,
+           * lots A à D), en tête-à-tête comme en groupe. Le web l'avait retirée
+           * à ce moment-là (8fa17e1) ; le mobile l'avait gardée, et faisait
+           * croire au user, le 10/10, que les fichiers des groupes n'étaient
+           * pas chiffrés. Retirée, avec la phrase des deux dictionnaires.
            */
-          const SizedBox(height: 4),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.info_outline, size: 13, color: Color(0xFF9A6B4E)),
-              const SizedBox(width: 7),
-              Flexible(
-                child: Text(
-                  tr(context, 'e2ee_medias_clairs'),
-                  style: const TextStyle(
-                      fontSize: 11.5, color: Color(0xFF9A6B4E)),
-                ),
-              ),
-            ],
-          ),
         ],
       ),
     );
