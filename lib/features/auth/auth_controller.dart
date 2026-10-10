@@ -8,6 +8,7 @@ import '../../core/cache_ecrans.dart';
 import '../../core/call_cache.dart';
 import '../../core/call_ui_native.dart';
 import '../../core/contact_cache.dart';
+import '../../core/verdicts_session.dart';
 import '../../core/verrou_rafraichissement.dart';
 import '../../core/memoire_langues.dart';
 import '../../core/conversation_cache.dart';
@@ -31,7 +32,7 @@ enum AuthStatus { unknown, unauthenticated, authenticated }
 /// simple réessai. L'utilisateur se retrouvait devant l'écran de connexion
 /// alors que RIEN n'avait expiré.
 ///
-/// Chacun de ces trois codes est une décision que le serveur a prise SUR CETTE
+/// Chacun de ces codes est une décision que le serveur a prise SUR CETTE
 /// SESSION, et qu'il nomme :
 const codesSessionFermee = {
   /// Le compte a été ouvert sur un autre appareil de la même famille.
@@ -50,7 +51,40 @@ const codesSessionFermee = {
   /// revers de la nouvelle règle — ne plus se fier au statut HTTP oblige le
   /// serveur à nommer AUSSI les fins normales, pas seulement les incidents.
   "SESSION_EXPIREE",
+
+  /// La réponse de la dernière rotation s'est perdue pour de bon : l'appli a
+  /// été tuée (installation d'une mise à jour, le plus souvent) entre la
+  /// rotation côté serveur et l'écriture du nouveau jeton, et rouverte bien
+  /// après la fenêtre de grâce de 30 s.
+  ///
+  /// 🐛 AVANT CE CODE (10/10/2026), le serveur répondait `BAD_REFRESH` — un
+  /// doute, donc on gardait la session et on réessayait… sans fin : ~1 200
+  /// requêtes en dix minutes, toutes en 401. Le serveur SAIT que ce jeton ne
+  /// reviendra pas ; il le nomme désormais.
+  "JETON_DEJA_TOURNE",
 };
+
+/// Ce qu'on explique à l'utilisateur ramené à l'écran de connexion, selon le
+/// verdict du serveur. `null` : rien à expliquer (il a fermé la session
+/// lui-même, ou elle a simplement expiré au bout de sept jours).
+String? messageFermeture(String? code) {
+  switch (code) {
+    // L'appareil ÉTEINT au moment de l'éviction ne l'apprend qu'ici, en
+    // tentant de se rafraîchir : sans ce message, il retomberait sur l'écran
+    // de connexion sans la moindre explication.
+    case "SESSION_EVINCEE":
+      return "Votre compte a été ouvert sur un autre appareil.";
+    // Un jeton copié a circulé. On ne dit PAS « ouvert sur un autre appareil » :
+    // laisser croire à une simple seconde connexion masquerait un incident de
+    // sécurité.
+    case "JETON_REJOUE":
+      return "Session fermée par sécurité. Reconnecte-toi.";
+    // Ni une intrusion, ni un incident : seulement une réponse perdue.
+    case "JETON_DEJA_TOURNE":
+      return "Ta session doit être rouverte. Reconnecte-toi.";
+  }
+  return null;
+}
 
 /// Ce rafraîchissement raté doit-il DÉTRUIRE la session ?
 ///
@@ -82,7 +116,9 @@ bool sessionMorteApresEchec(Object erreur) {
 
 class AuthController extends ChangeNotifier {
   AuthController(this._repo, this._storage, {RealtimeClient? realtime})
-      : _realtime = realtime;
+      : _realtime = realtime {
+    _verdictsSub = VerdictsSession.flux.listen(_surVerdict);
+  }
 
   final AuthRepository _repo;
   final TokenStorage _storage;
@@ -116,6 +152,29 @@ class AuthController extends ChangeNotifier {
   static const raisonDissociation = "dissociation";
 
   StreamSubscription<Map<String, dynamic>>? _revocationSub;
+
+  StreamSubscription<ApiException>? _verdictsSub;
+  bool _fermetureEnCours = false;
+
+  /// Un renouvellement a été refusé EN COURS D'UTILISATION (`AuthedApi`).
+  ///
+  /// 🔴 SANS CETTE ÉCOUTE, SEUL LE DÉMARRAGE LISAIT LE VERDICT : une session
+  /// condamnée pendant qu'on se servait de l'application ne revenait jamais à
+  /// l'écran de connexion. Voir `VerdictsSession`.
+  ///
+  /// ⚠️ UNE SEULE FERMETURE : `logout` fait lui-même des requêtes, qui peuvent
+  /// reprendre un 401 et relancer ce verdict pendant qu'il s'exécute.
+  Future<void> _surVerdict(ApiException e) async {
+    if (status != AuthStatus.authenticated || _fermetureEnCours) return;
+    if (!sessionMorteApresEchec(e)) return;
+    _fermetureEnCours = true;
+    try {
+      messageDeconnexion = messageFermeture(e.code);
+      await logout();
+    } finally {
+      _fermetureEnCours = false;
+    }
+  }
 
   /// Déconnexion à distance : une autre session du compte a révoqué un
   /// appareil. Chaque client compare l'identifiant reçu au sien ; seul celui
@@ -153,6 +212,7 @@ class AuthController extends ChangeNotifier {
   @override
   void dispose() {
     _revocationSub?.cancel();
+    _verdictsSub?.cancel();
     super.dispose();
   }
 
@@ -253,21 +313,10 @@ class AuthController extends ChangeNotifier {
           _set(AuthStatus.authenticated, u);
           return;
         } on ApiException catch (e) {
-          // ⚠️ LE SEUL CHEMIN qui couvre l'appareil ÉTEINT au moment de
-          // l'éviction : il n'a pas reçu l'événement temps réel, et ne
-          // l'apprend qu'en tentant de se rafraîchir à son réveil. Sans ce cas,
-          // il retomberait sur l'écran de connexion sans la moindre explication.
-          if (e.code == "SESSION_EVINCEE") {
-            messageDeconnexion =
-                "Votre compte a été ouvert sur un autre appareil.";
-          }
-          // Un jeton copié a circulé. On ne dit PAS « ouvert sur un autre
-          // appareil » : ce n'est pas ce qui s'est passé, et laisser croire à
-          // une simple seconde connexion masquerait un incident de sécurité.
-          if (e.code == "JETON_REJOUE") {
-            messageDeconnexion =
-                "Session fermée par sécurité. Reconnecte-toi.";
-          }
+          // L'explication à montrer sur l'écran de connexion : une seule
+          // table pour le démarrage et pour l'usage (`messageFermeture`).
+          final explication = messageFermeture(e.code);
+          if (explication != null) messageDeconnexion = explication;
 
           // Le serveur en panne n'est pas un refus — voir
           // [sessionMorteApresEchec], qui porte la règle et ses raisons.

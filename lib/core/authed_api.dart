@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'api_client.dart';
 import 'token_storage.dart';
+import 'verdicts_session.dart';
 import 'verrou_rafraichissement.dart';
 
 /// Enveloppe l'ApiClient pour injecter automatiquement l'access token et
@@ -19,6 +20,11 @@ class AuthedApi {
 
   final ApiClient _api;
   final TokenStorage _storage;
+
+  /// Renouvellements ratés d'affilée sans que la session soit condamnée, et
+  /// l'heure avant laquelle on ne retente pas. Voir [delaiAvantNouvelEssai].
+  int _echecsRenouvellement = 0;
+  DateTime? _pasAvant;
 
   Future<Map<String, dynamic>> get(String path) =>
       _withAuth((token) => _api.get(path, bearer: token));
@@ -105,13 +111,37 @@ class AuthedApi {
   /// les deux partaient ensemble avec le MÊME jeton, et la rotation serveur en
   /// condamnait un — la session tombait alors que rien n'avait expiré.
   Future<String?> _refreshLocked() async {
+    // Un renouvellement vient d'échouer : on ne le relance pas à chaque 401.
+    final pasAvant = _pasAvant;
+    if (pasAvant != null && DateTime.now().isBefore(pasAvant)) return null;
     try {
-      return await VerrouRafraichissement.partage(_doRefresh);
+      return await VerrouRafraichissement.partage(_doRefreshSuivi);
     } catch (_) {
       // Ici, on ne juge pas : `_withAuth` relaie l'erreur d'origine et c'est
       // `AuthController` qui lit le code du serveur pour décider du sort de la
       // session. Voir `sessionMorteApresEchec`.
       return null;
+    }
+  }
+
+  /// [_doRefresh], compté UNE fois par tentative.
+  ///
+  /// ⚠️ ICI ET PAS DANS [_refreshLocked] : dix requêtes en 401 attendent le même
+  /// renouvellement, et chacune reçoit son échec. Compter dans leur `catch`
+  /// sauterait d'un coup au délai maximal, et signalerait dix fois le verdict.
+  Future<String?> _doRefreshSuivi() async {
+    try {
+      final access = await _doRefresh();
+      _echecsRenouvellement = 0;
+      _pasAvant = null;
+      return access;
+    } catch (e) {
+      _echecsRenouvellement++;
+      _pasAvant = DateTime.now().add(delaiAvantNouvelEssai(_echecsRenouvellement));
+      // `AuthController` juge : une session condamnée revient à l'écran de
+      // connexion, au lieu de laisser chaque écran prendre des 401 en boucle.
+      if (e is ApiException) VerdictsSession.signaler(e);
+      rethrow;
     }
   }
 

@@ -137,18 +137,23 @@ void main() {
     // le plus banal (401 `BAD_REFRESH`) du côté des condamnations.
     //
     // Le statut ne décide plus de rien. Seul le CODE nommé par le serveur
-    // décide, et il n'y en a que quatre.
+    // décide, et il n'y en a que cinq.
     for (final statut in [399, 400, 401, 403, 409, 499, 500, 502, 0]) {
       test("$statut sans code nommé ne ferme rien", () {
         expect(sessionMorteApresEchec(ApiException(statut, "?")), isFalse);
       });
     }
 
-    test("la liste des verdicts fait exactement quatre entrées", () {
+    test("la liste des verdicts fait exactement cinq entrées", () {
       // ⚠️ GARDE-FOU : élargir cette liste, c'est réintroduire des
       // déconnexions. Toute entrée nouvelle doit être une décision que le
       // serveur prend et NOMME — jamais une commodité.
-      expect(codesSessionFermee, hasLength(4));
+      //
+      // Cinquième entrée, le 10/10/2026 : `JETON_DEJA_TOURNE`, que le serveur
+      // ne renvoie QUE pour un jeton tourné hors de la fenêtre de grâce dont le
+      // successeur n'a jamais servi — une réponse perdue pour de bon. Il
+      // remplaçait un `BAD_REFRESH` qui faisait tourner l'appli en rond.
+      expect(codesSessionFermee, hasLength(5));
     });
   });
 }
