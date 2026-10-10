@@ -10,7 +10,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:alanya/core/api_client.dart' show ApiException;
-import 'package:alanya/services/e2ee/e2ee_groupe.dart' show ecrireDemandeTrousseau;
+import 'package:alanya/services/e2ee/e2ee_groupe.dart' show VersionCle, ecrireDemandeTrousseau;
 import 'package:alanya/services/e2ee/e2ee_trousseau_perso.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -274,6 +274,31 @@ void main() {
       await bob.fil.relever();
       expect(serveur.enveloppes.where((e) => e['expediteurId'] == 'bob').length, avant,
           reason: 'Bob ne doit rien envoyer à un autre compte');
+    });
+
+    test('pas de limite de clés : 1 000 versions arrivent, en enveloppes de moins de 64 Ko', () async {
+      await alice.fil.groupe.activer('g1');
+      await bob.fil.relever();
+      // 999 versions de plus, comme après des années d'exclusions.
+      await alice.fil.groupe.ranger('g1', [
+        for (var n = 2; n <= 1000; n++)
+          VersionCle(n: n, cle: Uint8List.fromList(List.generate(32, (i) => (i + n) % 256)), creeLe: n),
+      ]);
+      final avant = serveur.enveloppes.length;
+      final bilan = await alice.fil.groupe.distribuer(
+          'g1', 'MANUEL', await alice.fil.groupe.trousseau('g1'), ['bob']);
+      final nouvelles = serveur.enveloppes.sublist(avant);
+      expect(nouvelles.length, 3, reason: '1 000 versions = 3 morceaux de 400 au plus, un appareil');
+      expect(bilan.appareils, 3);
+      for (final e in nouvelles) {
+        expect((e['corps'] as String).length, lessThanOrEqualTo(64 * 1024),
+            reason: 'plafond d’une enveloppe côté serveur');
+      }
+      await bob.fil.relever();
+      final recues = await bob.fil.groupe.trousseau('g1');
+      expect(recues.length, 1000);
+      expect(recues.first.n, 1);
+      expect(recues.last.n, 1000);
     });
 
     test('une autre archive (mauvaise clé maîtresse) n’ouvre pas la copie', () async {

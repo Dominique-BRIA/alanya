@@ -77,6 +77,24 @@ bool estAdministrateur(List<Map<String, dynamic>> membres, String userId) {
   return tries.isNotEmpty && tries.first['id'] == userId;
 }
 
+/// Versions par charge « trousseau » (chapitre 38) — jumeau du web.
+///
+/// 🔴 PAS DE LIMITE AU NOMBRE DE CLÉS (décision du user, 10/10/2026) : une
+/// enveloppe ne dépasse pas 64 Ko, un trousseau entier y tenait jusqu'à ~560
+/// versions. On le DÉCOUPE ; chaque morceau est un trousseau valide, fusionné
+/// à la réception.
+const versionsParCharge = 400;
+
+/// Découpe les versions en morceaux de [taille], dans l'ordre.
+List<List<g.VersionCle>> decouperVersions(List<g.VersionCle> versions,
+    [int taille = versionsParCharge]) {
+  final tries = [...versions]..sort((a, b) => a.n.compareTo(b.n));
+  return [
+    for (var i = 0; i < tries.length; i += taille)
+      tries.sublist(i, min(i + taille, tries.length)),
+  ];
+}
+
 /// Le bilan d'une distribution de trousseau.
 typedef BilanDistribution = ({int appareils, List<String> sansAppareil, List<String> echecs});
 
@@ -438,7 +456,10 @@ class GroupeChiffre {
   ) async {
     final moi = _monCompte;
     final monAppareil = await _monDeviceId();
-    final charge = g.ecrireChargeTrousseau(g.Trousseau(convId: convId, motif: motif, versions: versions));
+    final charges = [
+      for (final morceau in decouperVersions(versions))
+        g.ecrireChargeTrousseau(g.Trousseau(convId: convId, motif: motif, versions: morceau)),
+    ];
     final enveloppes = <Map<String, dynamic>>[];
     final sansAppareil = <String>[];
     final echecs = <String>[];
@@ -450,10 +471,12 @@ class GroupeChiffre {
           if (uid != moi) sansAppareil.add(uid);
           continue;
         }
-        for (final d in appareils) {
-          final e = await _service.chiffrer(uid, d, charge);
-          enveloppes.add(
-              {'destinataireId': uid, 'destinataireDevice': d, 'type': e.type, 'corps': e.corps});
+        for (final charge in charges) {
+          for (final d in appareils) {
+            final e = await _service.chiffrer(uid, d, charge);
+            enveloppes.add(
+                {'destinataireId': uid, 'destinataireDevice': d, 'type': e.type, 'corps': e.corps});
+          }
         }
       } catch (_) {
         echecs.add(uid);
