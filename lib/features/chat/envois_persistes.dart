@@ -8,6 +8,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../../widgets/media/media_picker_sheet.dart';
 import 'envoi_media.dart';
+import 'envoi_morceaux/envoi_morceaux_api.dart';
 
 /// LES ENVOIS DE MÉDIAS QUI ATTENDENT LE RÉSEAU, GARDÉS SUR DISQUE.
 ///
@@ -56,10 +57,21 @@ class EnvoisPersistes {
   static Future<Directory> _racine() async {
     if (_dossier != null) return _dossier!;
     final docs = await getApplicationDocumentsDirectory();
-    final d = Directory(p.join(docs.path, 'envois_en_attente'));
+    final d = Directory(p.join(docs.path, dossierRelatif));
     if (!await d.exists()) await d.create(recursive: true);
     _dossier = d;
     return d;
+  }
+
+  /// Le dossier des envois en attente, relatif aux documents de l'application.
+  static const dossierRelatif = 'envois_en_attente';
+
+  /// Où [enregistrer] range le fichier n° [i] de [envoi], RELATIF aux
+  /// documents : c'est de là qu'Android l'envoie en morceaux (cours,
+  /// chapitre 45). Même règle de nom que [enregistrer].
+  static String cheminRelatif(EnvoiMedia envoi, int i) {
+    final sur = envoi.fichiers[i].fileName.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+    return '$dossierRelatif/${envoi.tempId}/${i}_$sur';
   }
 
   /// Range un envoi sur disque. Sans effet s'il y est déjà à l'identique.
@@ -107,6 +119,9 @@ class EnvoisPersistes {
             'vueUnique': envoi.vueUnique,
             'creeA': envoi.creeA.toIso8601String(),
             'mediaIdsObtenus': envoi.mediaIdsObtenus,
+            'reservations': {
+              for (final e in envoi.reservations.entries) '${e.key}': e.value.toJson(),
+            },
             'fichiers': fichiers,
           }),
         },
@@ -192,6 +207,15 @@ class EnvoisPersistes {
           // en base, référencés par aucun message.
           envoi.mediaIdsObtenus
               .addAll((meta['mediaIdsObtenus'] as List).cast<String>());
+          final reservations = meta['reservations'];
+          if (reservations is Map) {
+            for (final e in reservations.entries) {
+              final i = int.tryParse('${e.key}');
+              if (i == null || e.value is! Map) continue;
+              envoi.reservations[i] =
+                  ReservationEnvoi.depuisJson(Map<String, dynamic>.from(e.value as Map));
+            }
+          }
           envoi.enAttenteReseau = true;
           restaures.add(envoi);
         } catch (e) {

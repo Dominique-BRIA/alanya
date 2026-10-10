@@ -1,4 +1,5 @@
 import '../../widgets/media/media_picker_sheet.dart';
+import 'envoi_morceaux/envoi_morceaux_api.dart';
 
 /// État d'un envoi de médias en cours, ou échoué.
 ///
@@ -68,6 +69,14 @@ class EnvoiMedia {
 
   /// Médias déjà téléversés, dans l'ordre des [fichiers].
   final List<String> mediaIdsObtenus = [];
+
+  /// L'envoi EN MORCEAUX de chaque fichier, par son rang (cours, chapitre 45).
+  ///
+  /// 🔴 GARDÉE SUR LE DISQUE avec l'envoi : après un redémarrage, le fichier à
+  /// moitié parti REPREND là où Android en était, au lieu de repartir de zéro
+  /// sous une nouvelle réservation — l'ancienne serait restée sept jours sur le
+  /// serveur pour rien.
+  final Map<int, ReservationEnvoi> reservations = {};
 
   /// Photo, vidéo ou vocal À VUE UNIQUE : le destinataire l'ouvre une fois,
   /// puis le serveur efface le fichier. Un seul média, sans légende — le

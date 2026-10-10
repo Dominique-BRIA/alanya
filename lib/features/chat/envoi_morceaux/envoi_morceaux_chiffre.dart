@@ -36,20 +36,32 @@ import 'transport_morceaux.dart';
 /// le faire application fermée, et le SERVEUR publie le message quand le
 /// dernier morceau arrive. Personne n'a besoin du code Dart à la fin.
 ///
-/// ⚠️ GROUPES ET TÊTE-À-TÊTE, FILS CHIFFRÉS SEULEMENT. Le chemin en clair
-/// garde son file d'envoi actuelle (lot 4).
+/// ⚠️ LE CHEMIN EN CLAIR (lot 4) passe par [SuiviEnvoisMorceaux.lancerFichier] :
+/// mêmes morceaux, même reprise, mais pas de publication différée — le
+/// serveur ne sait pas annoncer en temps réel un message en clair qu'il
+/// créerait lui-même. C'est la file d'envoi (`EnvoiMediaStore`) qui poste le
+/// message une fois le fichier arrivé.
 class EnvoiMorceauxSuivi {
   EnvoiMorceauxSuivi({
     required this.reservation,
     required this.convId,
-    required this.messageId,
+    required this.cheminRelatif,
+    this.messageId,
     required List<Morceau> morceaux,
     this.message,
   }) : _progression = ProgressionEnvoi(morceaux);
 
   final ReservationEnvoi reservation;
+
+  /// Conversation de l'envoi, quand on la connaît (vide pour un fichier en
+  /// clair : c'est la file d'envoi qui la porte).
   final String convId;
-  final String messageId;
+
+  /// Le fichier envoyé, relatif aux documents de l'application.
+  final String cheminRelatif;
+
+  /// Le message publié par le serveur (chemin chiffré). Nul en clair.
+  final String? messageId;
 
   /// Le message tel que le fil l'affichera une fois publié (ma copie). Nul
   /// pour un envoi REPRIS au démarrage : le fil le relira du serveur.
@@ -199,13 +211,15 @@ class SuiviEnvoisMorceaux {
       final suivi = EnvoiMorceauxSuivi(
         reservation: r,
         convId: convId,
+        cheminRelatif: '$dossier/chiffre.bin',
         messageId: messageId,
         morceaux: morceaux,
         message: message,
       );
-      await _ecrireRegistre(r, convId: convId, messageId: messageId);
+      await _ecrireRegistre(r,
+          convId: convId, messageId: messageId, fichier: suivi.cheminRelatif);
       _actifs[r.id] = suivi;
-      await transport.confier(r, '$dossier/chiffre.bin', morceaux, titre: _titre(mime));
+      await transport.confier(r, suivi.cheminRelatif, morceaux, titre: _titre(mime));
       return suivi;
     } catch (_) {
       // Rien ne doit rester derrière un envoi qui n'a pas pu partir : ni le
@@ -217,6 +231,87 @@ class SuiviEnvoisMorceaux {
         _actifs.remove(r.id);
       }
       rethrow;
+    }
+  }
+
+  // ═══════════════════════ EN CLAIR (lot 4) ═══════════════════════
+
+  /// Envoie EN MORCEAUX un fichier en clair déjà rangé sous les documents de
+  /// l'application, à [cheminRelatif] — la file d'envoi le range dans
+  /// `envois_en_attente/`, d'où Android l'enverra sans nouvelle copie.
+  ///
+  /// Rend le suivi dès que les morceaux sont confiés ; `fin` se termine quand
+  /// le serveur a fait du fichier un média, dont l'identifiant est
+  /// `reservation.mediaId`. Le MESSAGE reste à poster par l'appelant.
+  Future<EnvoiMorceauxSuivi> lancerFichier({
+    required String cheminRelatif,
+    required String nom,
+    required String mime,
+    int? dureeMs,
+  }) async {
+    final api = _api!, transport = _transport!, racine = _racine!;
+    final taille = await File('$racine/$cheminRelatif').length();
+    final r = await api.reserver(
+      taille: taille,
+      chiffre: false,
+      nom: nom,
+      mime: mime,
+      durationMs: dureeMs,
+    );
+    try {
+      final morceaux = morceauxDe(taille, r.tailleMorceau);
+      final suivi = EnvoiMorceauxSuivi(
+        reservation: r,
+        convId: '',
+        cheminRelatif: cheminRelatif,
+        morceaux: morceaux,
+      );
+      await Directory('$racine/$dossierEnvoisMorceaux/${r.id}').create(recursive: true);
+      await _ecrireRegistre(r, convId: '', fichier: cheminRelatif);
+      _actifs[r.id] = suivi;
+      await transport.confier(r, cheminRelatif, morceaux, titre: _titre(mime));
+      return suivi;
+    } catch (_) {
+      _actifs.remove(r.id);
+      await _effacerDossier('$racine/$dossierEnvoisMorceaux/${r.id}');
+      unawaited(api.abandonner(r.id, r.jeton).catchError((_) {}));
+      rethrow;
+    }
+  }
+
+  /// Le suivi d'un envoi CONNU par sa réservation — celle que la file d'envoi
+  /// a gardée sur le disque. Après un redémarrage, c'est ainsi qu'elle
+  /// retrouve un fichier à moitié parti au lieu de le renvoyer en entier.
+  ///
+  /// ⚠️ LE SERVEUR FAIT FOI : l'envoi est relu chez lui ; terminé, `fin` se
+  /// termine aussitôt ; en cours, Android reçoit les morceaux qui manquent.
+  EnvoiMorceauxSuivi suivre(ReservationEnvoi r, String cheminRelatif) {
+    final deja = _actifs[r.id];
+    if (deja != null) return deja;
+    final s = EnvoiMorceauxSuivi(
+      reservation: r,
+      convId: '',
+      cheminRelatif: cheminRelatif,
+      morceaux: morceauxDe(_tailleDe(cheminRelatif), r.tailleMorceau),
+    );
+    _actifs[r.id] = s;
+    unawaited(() async {
+      await Directory('$_racine/$dossierEnvoisMorceaux/${r.id}').create(recursive: true);
+      await _ecrireRegistre(r, convId: '', fichier: cheminRelatif);
+      await _verifier(s, relire: true);
+    }());
+    return s;
+  }
+
+  /// L'utilisateur renonce : Android cesse d'envoyer, le serveur efface le
+  /// fichier partiel.
+  Future<void> abandonner(ReservationEnvoi r) async {
+    final s = _actifs.remove(r.id);
+    await _transport?.annuler(r.id);
+    await _api?.abandonner(r.id, r.jeton).catchError((_) {});
+    await _effacerDossier('$_racine/$dossierEnvoisMorceaux/${r.id}');
+    if (s != null && !s._fin.isCompleted) {
+      s._fin.completeError(StateError('envoi abandonné'));
     }
   }
 
@@ -270,11 +365,16 @@ class SuiviEnvoisMorceaux {
     }
   }
 
-  Future<void> _verifier(EnvoiMorceauxSuivi s) async {
+  Future<void> _verifier(EnvoiMorceauxSuivi s, {bool relire = false}) async {
     final api = _api;
     if (api == null) return;
     try {
       final etat = await api.etat(s.reservation.id, s.reservation.jeton);
+      if (relire) {
+        s._progression.dejaRecus(List<int>.generate(s.reservation.nbMorceaux, (i) => i)
+            .where((i) => !etat.manquants.contains(i)));
+        s._rafraichir();
+      }
       if (etat.termine) return _finir(s, etat);
       // Tout est là mais l'assemblage n'a pas eu lieu : le filet.
       if (etat.manquants.isEmpty) {
@@ -285,10 +385,10 @@ class SuiviEnvoisMorceaux {
       final enVol = await _transport!.enVol(s.reservation.id);
       final aRedonner = etat.manquants.where((i) => !enVol.contains(i)).toSet();
       if (aRedonner.isNotEmpty) {
-        final tous = morceauxDe(_tailleChiffre(s), s.reservation.tailleMorceau);
+        final tous = morceauxDe(_tailleDe(s.cheminRelatif), s.reservation.tailleMorceau);
         await _transport!.confier(
           s.reservation,
-          '$dossierEnvoisMorceaux/${s.reservation.id}/chiffre.bin',
+          s.cheminRelatif,
           tous.where((m) => aRedonner.contains(m.indice)).toList(),
           titre: 'Envoi d’un fichier',
         );
@@ -306,12 +406,11 @@ class SuiviEnvoisMorceaux {
     }
   }
 
-  int _tailleChiffre(EnvoiMorceauxSuivi s) {
+  int _tailleDe(String cheminRelatif) {
     try {
-      return File('$_racine/$dossierEnvoisMorceaux/${s.reservation.id}/chiffre.bin')
-          .lengthSync();
+      return File('$_racine/$cheminRelatif').lengthSync();
     } catch (_) {
-      return 0;
+      return 1;
     }
   }
 
@@ -354,30 +453,23 @@ class SuiviEnvoisMorceaux {
         continue;
       }
       final r = ReservationEnvoi.depuisJson(registre['reservation'] as Map<String, dynamic>);
-      final morceaux = morceauxDe(_tailleSurDisque(entree.path), r.tailleMorceau);
+      final chemin =
+          registre['fichier'] as String? ?? '$dossierEnvoisMorceaux/$nom/chiffre.bin';
+      // Le fichier n'est plus là (la file d'envoi en clair l'a déjà oublié) :
+      // rien à pousser. Si l'envoi vit encore, c'est elle qui le reprendra.
+      if (!File('$racine/$chemin').existsSync()) {
+        await _effacerDossier(entree.path);
+        continue;
+      }
       final s = EnvoiMorceauxSuivi(
         reservation: r,
-        convId: registre['convId'] as String,
-        messageId: registre['messageId'] as String,
-        morceaux: morceaux,
+        convId: registre['convId'] as String? ?? '',
+        cheminRelatif: chemin,
+        messageId: registre['messageId'] as String?,
+        morceaux: morceauxDe(_tailleDe(chemin), r.tailleMorceau),
       );
       _actifs[r.id] = s;
-      try {
-        final etat = await api.etat(r.id, r.jeton);
-        s._progression.dejaRecus(morceaux
-            .map((m) => m.indice)
-            .where((i) => !etat.manquants.contains(i)));
-        s._rafraichir();
-      } catch (_) {}
-      await _verifier(s);
-    }
-  }
-
-  int _tailleSurDisque(String dossier) {
-    try {
-      return File('$dossier/chiffre.bin').lengthSync();
-    } catch (_) {
-      return 1;
+      await _verifier(s, relire: true);
     }
   }
 
@@ -390,13 +482,15 @@ class SuiviEnvoisMorceaux {
   Future<void> _ecrireRegistre(
     ReservationEnvoi r, {
     required String convId,
-    required String messageId,
+    String? messageId,
+    required String fichier,
   }) async {
     final f = File('$_racine/$dossierEnvoisMorceaux/${r.id}/envoi.json');
     await f.writeAsString(jsonEncode({
       'reservation': r.toJson(),
       'convId': convId,
-      'messageId': messageId,
+      if (messageId != null) 'messageId': messageId,
+      'fichier': fichier,
       'creeA': DateTime.now().toIso8601String(),
     }));
   }

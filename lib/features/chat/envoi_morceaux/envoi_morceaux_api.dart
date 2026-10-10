@@ -92,19 +92,25 @@ class EnvoiMorceauxApi {
 
   String get base => _base;
 
-  /// Réserve l'envoi d'un fichier CHIFFRÉ de [taille] octets.
+  /// Réserve l'envoi d'un fichier de [taille] octets.
+  ///
+  /// Par défaut un fichier CHIFFRÉ, sous un nom et un type neutres — les
+  /// vrais vivent dans l'enveloppe. En clair ([chiffre] faux), le serveur
+  /// range le fichier sous son vrai [nom] et son vrai [mime].
   Future<ReservationEnvoi> reserver({
     required int taille,
-    required String empreinteHex,
+    String? empreinteHex,
     int? durationMs,
+    bool chiffre = true,
+    String? nom,
+    String? mime,
   }) async {
     final r = await _authed.post('/api/media/envois', {
       'taille': taille,
-      // Nom et type neutres : les vrais vivent dans l'enveloppe chiffrée.
-      'nom': 'chiffre.bin',
-      'mime': 'application/octet-stream',
-      'chiffre': true,
-      'empreinte': empreinteHex,
+      'nom': chiffre ? 'chiffre.bin' : (nom ?? 'fichier'),
+      'mime': chiffre ? 'application/octet-stream' : (mime ?? 'application/octet-stream'),
+      'chiffre': chiffre,
+      if (empreinteHex != null) 'empreinte': empreinteHex,
       if (durationMs != null) 'durationMs': durationMs,
     });
     return ReservationEnvoi.depuisJson(r);

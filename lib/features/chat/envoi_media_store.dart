@@ -13,6 +13,7 @@ import '../media/media_repository.dart';
 import 'chat_repository.dart';
 import 'envoi_media.dart';
 import 'envois_persistes.dart';
+import 'envoi_morceaux/envoi_morceaux_chiffre.dart';
 
 /// File des envois de médias, **hors de l'écran de discussion**.
 ///
@@ -132,7 +133,66 @@ class EnvoiMediaStore extends ChangeNotifier {
   ///
   /// Les médias déjà téléversés deviennent alors orphelins côté serveur — mais
   /// c'est un choix EXPLICITE de l'utilisateur, pas une perte silencieuse.
-  void abandonner(String tempId) => terminer(tempId);
+  /// L'utilisateur renonce. Les morceaux encore confiés à Android sont
+  /// annulés, et le serveur efface le fichier partiel — sans quoi Android
+  /// finirait d'envoyer un fichier dont plus personne ne veut.
+  void abandonner(String tempId) {
+    final envoi = _envois[tempId];
+    if (envoi != null) {
+      for (final r in envoi.reservations.values) {
+        unawaited(SuiviEnvoisMorceaux.instance.abandonner(r));
+      }
+    }
+    terminer(tempId);
+  }
+
+  /// Envoie le fichier n° [i] de [envoi] en morceaux et rend l'identifiant du
+  /// média une fois le fichier arrivé.
+  ///
+  /// ⚠️ LE FICHIER DOIT ÊTRE SOUS LES DOCUMENTS : Android l'enverra de là,
+  /// application fermée. [EnvoisPersistes.enregistrer] l'y range — une seule
+  /// fois, il ne réécrit pas ce qui y est déjà.
+  ///
+  /// ⚠️ UNE SEULE NOTIFICATION : celle d'Android, qui survit à l'application.
+  /// La nôtre resterait figée dès que l'application est fermée.
+  Future<String> _envoyerEnMorceaux(EnvoiMedia envoi, int i) async {
+    final f = envoi.fichiers[i];
+    await EnvoisPersistes.enregistrer(envoi);
+    final chemin = EnvoisPersistes.cheminRelatif(envoi, i);
+    final moteur = SuiviEnvoisMorceaux.instance;
+    final connue = envoi.reservations[i];
+    final suivi = connue != null
+        ? moteur.suivre(connue, chemin)
+        : await moteur.lancerFichier(
+            cheminRelatif: chemin,
+            nom: f.fileName,
+            mime: f.mimeType,
+            dureeMs: f.durationMs,
+          );
+    if (connue == null) {
+      envoi.reservations[i] = suivi.reservation;
+      await EnvoisPersistes.enregistrer(envoi);
+    }
+    CentreTransferts.instance.reussir(envoi.tempId);
+
+    void relayer() {
+      envoi.progressionFichier = suivi.progression.value;
+      notifyListeners();
+    }
+
+    suivi.progression.addListener(relayer);
+    try {
+      await suivi.fin;
+    } on ApiException {
+      // L'envoi n'existe plus chez le serveur (expiré, abandonné) : on oublie
+      // la réservation ; le prochain essai repartira d'un envoi neuf.
+      envoi.reservations.remove(i);
+      rethrow;
+    } finally {
+      suivi.progression.removeListener(relayer);
+    }
+    return suivi.reservation.mediaId;
+  }
 
   /// Lance (ou relance) un envoi. Reprend là où un échec précédent s'est arrêté.
   ///
@@ -182,6 +242,20 @@ class EnvoiMediaStore extends ChangeNotifier {
         envoi.indexCourant = i;
         envoi.progressionFichier = 0;
         notifyListeners();
+
+        /*
+         * 🔴 EN MORCEAUX quand le moteur est branché (cours, chapitre 45) :
+         * Android envoie le fichier par tranches, le reprend après une coupure
+         * et continue application fermée. Le message, lui, part d'ici une fois
+         * tous les fichiers arrivés — le serveur ne sait pas annoncer en temps
+         * réel un message en clair qu'il créerait lui-même.
+         */
+        if (SuiviEnvoisMorceaux.instance.pret) {
+          envoi.mediaIdsObtenus.add(await _envoyerEnMorceaux(envoi, i));
+          CentreTransferts.instance.avancer(envoi.tempId, envoi.progression);
+          notifyListeners();
+          continue;
+        }
 
         final envoye = await media.upload(
           Uint8List.fromList(f.bytes),
