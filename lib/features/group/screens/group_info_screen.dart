@@ -70,6 +70,18 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
 
   Future<void> _chargerMedias() async {
     _baseUrl = context.read<ApiClient>().baseUrl;
+    // Le cache local d'abord : la carte se remplit sans attendre le réseau.
+    try {
+      final local = await filPourMediasEnCache(context, widget.convId);
+      if (mounted && _medias == null) {
+        setState(() {
+          _token = local.token;
+          _medias = mediasGalerie(local.messages,
+              baseUrl: _baseUrl, token: local.token, chiffreDe: local.chiffreDe);
+        });
+      }
+    } catch (_) {}
+    if (!mounted) return;
     try {
       final fil = await chargerFilPourMedias(context, widget.convId);
       if (!mounted) return;
@@ -79,7 +91,8 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
             baseUrl: _baseUrl, token: fil.token, chiffreDe: fil.chiffreDe);
       });
     } catch (_) {
-      if (mounted) setState(() => _medias = const []);
+      // Hors ligne : on garde ce que le cache a donné.
+      if (mounted && _medias == null) setState(() => _medias = const []);
     }
   }
 

@@ -90,10 +90,31 @@ class _SharedContentScreenState extends State<SharedContentScreen>
 
   Future<void> _load() async {
     final baseUrl = context.read<ApiClient>().baseUrl;
+    // Le cache local d'abord : l'écran se remplit sans attendre le réseau.
+    try {
+      final local = await filPourMediasEnCache(context, widget.convId);
+      _remplir(local, baseUrl);
+      if (mounted && (_media.isNotEmpty || _docs.isNotEmpty || _links.isNotEmpty)) {
+        setState(() => _loading = false);
+      }
+    } catch (_) {}
+    if (!mounted) return;
     try {
       // Toutes les pages, le jeton lu APRÈS, les clés des médias chiffrés :
       // le chargement commun à la fiche contact et à cet écran.
       final fil = await chargerFilPourMedias(context, widget.convId);
+      _remplir(fil, baseUrl);
+    } catch (_) {}
+    if (mounted) setState(() => _loading = false);
+  }
+
+  /// Remplit les trois onglets depuis [fil] — en REMPLAÇANT ce qui y était :
+  /// le réseau passe après le cache, sans doublon.
+  void _remplir(FilPourMedias fil, String baseUrl) {
+    _media.clear();
+    _links.clear();
+    _docs.clear();
+    {
       final msgs = fil.messages;
       final token = fil.token;
       _baseUrl = baseUrl;
@@ -139,8 +160,7 @@ class _SharedContentScreenState extends State<SharedContentScreen>
           }
         }
       }
-    } catch (_) {}
-    if (mounted) setState(() => _loading = false);
+    }
   }
 
   @override

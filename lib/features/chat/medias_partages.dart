@@ -77,6 +77,23 @@ Future<FilPourMedias> chargerFilPourMedias(
   return FilPourMedias(messages, descripteurs, token);
 }
 
+/// Les médias que le téléphone connaît DÉJÀ : les messages de son cache
+/// local, sans un seul appel réseau.
+///
+/// 🐛 « LES MÉDIAS SONT CHARGÉS INDÉFINIMENT » (user, 10/10/2026).
+/// [chargerFilPourMedias] lit jusqu'à 30 pages de 100 messages avant de rien
+/// rendre ; les écrans attendaient tout. Ils affichent maintenant ceci
+/// d'abord, puis le complètent avec le réseau.
+Future<FilPourMedias> filPourMediasEnCache(
+  BuildContext context,
+  String convId,
+) async {
+  final storage = context.read<TokenStorage>();
+  final messages = [...await MessageCache.getConv(convId)]
+    ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  return FilPourMedias(messages, const {}, await storage.accessToken);
+}
+
 /// Les photos et vidéos de [messages], prêtes pour la galerie — en clair ou
 /// chiffrées. Une vue unique n'y figure jamais : elle ne s'ouvre qu'une fois,
 /// dans son visionneur protégé. Un média chiffré dont ce téléphone n'a pas la

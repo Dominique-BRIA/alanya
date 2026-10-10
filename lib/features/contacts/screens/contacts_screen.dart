@@ -12,7 +12,6 @@ import '../../../models/contact.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
 import '../../../widgets/back_app_bar.dart';
-import '../../../widgets/motif_background.dart';
 import '../../auth/auth_controller.dart';
 import '../../chat/chat_repository.dart';
 import '../../chat/screens/chat_screen.dart';
@@ -53,12 +52,19 @@ class _ContactsScreenState extends State<ContactsScreen> {
   /// quelqu'un qu'on n'a pas encore nommé.
   List<Contact> get _contactsAffiches {
     final tous = _contacts ?? const <Contact>[];
+    /*
+     * 🐛 « ZZZZZZ » RENDAIT LES 16 CONTACTS (user, 10/10/2026). Le numéro se
+     * compare aux seuls CHIFFRES tapés ; une recherche sans chiffre en donnait
+     * zéro — une chaîne vide, que tout numéro « contient ». Le numéro ne
+     * compte donc que si l'on a tapé au moins un chiffre.
+     */
+    final chiffres = stripAlanyaId(_recherche);
     final filtres = _recherche.trim().isEmpty
         ? List<Contact>.from(tous)
         : tous
             .where((c) =>
                 contientRecherche(c.displayName, _recherche) ||
-                c.publicNumber.contains(stripAlanyaId(_recherche)))
+                (chiffres.isNotEmpty && c.publicNumber.contains(chiffres)))
             .toList();
     filtres.sort((a, b) => comparePourTri(a.displayName, b.displayName));
     return filtres;
@@ -219,10 +225,9 @@ class _ContactsScreenState extends State<ContactsScreen> {
           ),
         ],
       ),
-      body: MotifBackground(
-        overlayOpacity: 0.92,
-        child: RefreshIndicator(onRefresh: _load, child: _body()),
-      ),
+      // Le fond uni du thème, comme Réunions (user, 10/10/2026) : le motif
+      // rendait la liste et les cartes difficiles à lire.
+      body: RefreshIndicator(onRefresh: _load, child: _body()),
     );
   }
 
@@ -400,8 +405,14 @@ class _ContactsScreenState extends State<ContactsScreen> {
     required VoidCallback onTap,
   }) {
     final teinte = accentOf(context);
+    /*
+     * ⚠️ OPAQUE (user, 10/10/2026) : une teinte transparente laissait voir ce
+     * qu'il y a dessous. La couleur d'accent est MÉLANGÉE à la surface au lieu
+     * d'être posée par transparence.
+     */
     return Material(
-      color: teinte.withValues(alpha: 0.10),
+      color: Color.alphaBlend(teinte.withValues(alpha: 0.10), Theme.of(context).colorScheme.surface),
+      elevation: 0.5,
       borderRadius: BorderRadius.circular(18),
       child: InkWell(
         borderRadius: BorderRadius.circular(18),

@@ -160,6 +160,22 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
     if (convId == null) return;
     setState(() => _loadingMedia = true);
     _baseUrl = context.read<ApiClient>().baseUrl;
+    // Le cache local d'abord : les aperçus s'affichent sans attendre le réseau.
+    try {
+      final local = await filPourMediasEnCache(context, convId);
+      if (mounted) {
+        final medias = mediasGalerie(local.messages,
+            baseUrl: _baseUrl, token: local.token, chiffreDe: local.chiffreDe);
+        if (medias.isNotEmpty) {
+          setState(() {
+            _token = local.token;
+            _sharedMedia = medias;
+            _loadingMedia = false;
+          });
+        }
+      }
+    } catch (_) {}
+    if (!mounted) return;
     try {
       /*
        * 🐛 LES APERÇUS NE S'AFFICHAIENT PAS ICI, mais bien dans « Médias

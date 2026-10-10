@@ -1,4 +1,5 @@
 import '../../core/authed_api.dart';
+import '../../core/cache_ecrans.dart';
 import '../../models/meeting.dart';
 
 /// Repository pour les réunions planifiées (table « meeting » / « participant » du PDF).
@@ -10,10 +11,22 @@ class MeetingsRepository {
   /// Récupère toutes les réunions de l'utilisateur (organisées ou participées).
   Future<List<Meeting>> fetchMeetings() async {
     final res = await _api.get("/api/meetings");
-    final list = (res["meetings"] as List)
-        .map((j) => Meeting.fromJson(j as Map<String, dynamic>))
-        .toList();
+    final brut = res["meetings"] as List;
+    final list = brut.map((j) => Meeting.fromJson(j as Map<String, dynamic>)).toList();
+    // Gardée pour la prochaine ouverture : l'écran l'affiche avant le réseau.
+    await CacheEcrans.ecrire('reunions', brut);
     return list;
+  }
+
+  /// La dernière liste reçue, sans réseau — `null` si aucune.
+  Future<List<Meeting>?> meetingsEnCache() async {
+    final brut = await CacheEcrans.lire('reunions');
+    if (brut is! List) return null;
+    try {
+      return brut.map((j) => Meeting.fromJson(j as Map<String, dynamic>)).toList();
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Récupère le détail d'une réunion par son ID.

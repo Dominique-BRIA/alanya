@@ -84,8 +84,16 @@ class _MeetingsScreenState extends State<MeetingsScreen>
   }
 
   Future<void> _load() async {
+    final repo = context.read<MeetingsRepository>();
+    // Première ouverture : la dernière liste connue, tout de suite.
+    if (_meetings == null) {
+      final enCache = await repo.meetingsEnCache();
+      if (enCache != null && mounted && _meetings == null) {
+        setState(() => _meetings = enCache);
+      }
+    }
     try {
-      final list = await context.read<MeetingsRepository>().fetchMeetings();
+      final list = await repo.fetchMeetings();
       if (!mounted) return;
       setState(() {
         _meetings = list;

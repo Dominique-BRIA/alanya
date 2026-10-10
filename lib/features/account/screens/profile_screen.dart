@@ -14,12 +14,15 @@
 /// terre cuite en clair, indigo en Nuit. La mise en page, elle, est reprise.
 library;
 
+import 'dart:async';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/alanya_id_formatter.dart';
+import '../../../core/contact_cache.dart';
 import '../../../core/api_client.dart';
 import '../../../core/lien_alanya.dart';
 import '../../../core/pays_repository.dart';
@@ -31,7 +34,6 @@ import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
 import '../../../widgets/avatar_source.dart';
 import '../../../widgets/back_app_bar.dart';
-import '../../../widgets/motif_background.dart';
 import '../../../widgets/qr_alanya.dart';
 import '../../auth/auth_controller.dart';
 import '../../contacts/contacts_repository.dart';
@@ -81,13 +83,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _chargerContacts() async {
+    final repo = context.read<ContactsRepository>();
+    // Le carnet déjà sur le téléphone, tout de suite ; le réseau ensuite.
     try {
-      final liste = await context.read<ContactsRepository>().list();
+      final enCache = await ContactCache.getAll();
+      if (enCache.isNotEmpty && mounted && _contacts == null) {
+        setState(() => _contacts = enCache.where((c) => !c.isBlocked).toList());
+      }
+    } catch (_) {}
+    try {
+      final liste = await repo.list();
+      unawaited(ContactCache.putAll(liste));
       if (!mounted) return;
       // Un contact bloqué n'a pas sa place parmi les « préférés ».
       setState(() => _contacts = liste.where((c) => !c.isBlocked).toList());
     } catch (_) {
-      if (mounted) setState(() => _contactsEnErreur = true);
+      // Hors ligne avec un carnet en cache : pas d'erreur à montrer.
+      if (mounted && _contacts == null) setState(() => _contactsEnErreur = true);
     }
   }
 
@@ -376,77 +388,74 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final user = context.watch<AuthController>().user;
     return Scaffold(
       appBar: backAppBar(context, tr(context, 'my_profile')),
-      body: MotifBackground(
-        overlayOpacity: 0.92,
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-          children: [
-            _enTete(user),
-            _titreSection('Contacts préférés'),
-            _contactsPreferes(),
-            const SizedBox(height: 20),
-            // Les préférences, la sauvegarde chiffrée, puis « Paramètres » en
-            // dernier (demande du user). Même bloc que les réglages.
-            _carte(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const PreferencesSection(
-                    margeHorizontale: 0,
-                    avecSeparateurs: true,
-                  ),
-                  separateurReglage(context),
-                  TuileReglage(
-                    icone: Icons.backup_outlined,
-                    couleur: themed(
-                      context,
-                      light: AlanyaColors.forest,
-                      dark: AlanyaColors.indigoLight,
-                    ),
-                    titre: 'Sauvegarde chiffrée',
-                    sousTitre:
-                        'Retrouver vos messages chiffrés sur un autre appareil',
-                    fin: chevronReglage(context),
-                    margeHorizontale: 0,
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const SauvegardeChiffreeScreen(),
-                      ),
-                    ),
-                  ),
-                  separateurReglage(context),
-                  TuileReglage(
-                    icone: Icons.settings_outlined,
-                    couleur: _accent,
-                    titre: tr(context, 'settings'),
-                    fin: chevronReglage(context),
-                    margeHorizontale: 0,
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const SettingsScreen()),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
-            // Même confirmation que depuis les réglages — avec l'avertissement
-            // sur les messages chiffrés sans sauvegarde.
-            _carte(
-              child: TuileReglage(
-                icone: Icons.logout,
-                couleur: themed(
-                  context,
-                  light: Colors.red,
-                  dark: AlanyaColors.erreurNuit,
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+        children: [
+          _enTete(user),
+          _titreSection('Contacts préférés'),
+          _contactsPreferes(),
+          const SizedBox(height: 20),
+          // Les préférences, la sauvegarde chiffrée, puis « Paramètres » en
+          // dernier (demande du user). Même bloc que les réglages.
+          _carte(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const PreferencesSection(
+                  margeHorizontale: 0,
+                  avecSeparateurs: true,
                 ),
-                titre: tr(context, 'logout'),
-                fin: chevronReglage(context),
-                margeHorizontale: 0,
-                onTap: () => confirmerDeconnexion(context),
-              ),
+                separateurReglage(context),
+                TuileReglage(
+                  icone: Icons.backup_outlined,
+                  couleur: themed(
+                    context,
+                    light: AlanyaColors.forest,
+                    dark: AlanyaColors.indigoLight,
+                  ),
+                  titre: 'Sauvegarde chiffrée',
+                  sousTitre:
+                      'Retrouver vos messages chiffrés sur un autre appareil',
+                  fin: chevronReglage(context),
+                  margeHorizontale: 0,
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const SauvegardeChiffreeScreen(),
+                    ),
+                  ),
+                ),
+                separateurReglage(context),
+                TuileReglage(
+                  icone: Icons.settings_outlined,
+                  couleur: _accent,
+                  titre: tr(context, 'settings'),
+                  fin: chevronReglage(context),
+                  margeHorizontale: 0,
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+          const SizedBox(height: 20),
+          // Même confirmation que depuis les réglages — avec l'avertissement
+          // sur les messages chiffrés sans sauvegarde.
+          _carte(
+            child: TuileReglage(
+              icone: Icons.logout,
+              couleur: themed(
+                context,
+                light: Colors.red,
+                dark: AlanyaColors.erreurNuit,
+              ),
+              titre: tr(context, 'logout'),
+              fin: chevronReglage(context),
+              margeHorizontale: 0,
+              onTap: () => confirmerDeconnexion(context),
+            ),
+          ),
+        ],
       ),
     );
   }

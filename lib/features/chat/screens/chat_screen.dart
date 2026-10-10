@@ -22,6 +22,7 @@ import '../../../core/connectivity_service.dart';
 import '../../../core/delais_message.dart';
 import '../../../core/memoire_langues.dart';
 import '../../../core/message_cache.dart';
+import '../../../core/texte_recherche.dart';
 import '../../../core/messages_systeme.dart';
 import '../../../core/whatsapp_text.dart';
 import '../../../core/whatsapp_format_input.dart';
@@ -966,14 +967,40 @@ class _ChatScreenState extends State<ChatScreen>
         Timer(const Duration(milliseconds: 350), () => _runSearch(query));
   }
 
+  /// Cherche dans la conversation : d'abord ICI, puis sur le serveur.
+  ///
+  /// 🐛 « LA RECHERCHE NE FONCTIONNE PAS » (user, 10/10/2026). Elle ne
+  /// demandait qu'au serveur — qui, dans un fil CHIFFRÉ, n'a jamais le texte :
+  /// zéro résultat, toujours. Le texte en clair n'existe que sur l'appareil
+  /// (messages affichés et cache local) : c'est là qu'il faut chercher d'abord.
+  ///
+  /// ⚠️ LE SERVEUR GARDE SON RÔLE pour l'historique en clair qui n'est pas
+  /// encore descendu sur l'appareil : ses résultats s'ajoutent après, sans
+  /// doublon. Son échec (hors ligne) n'efface pas ce qu'on a trouvé ici.
   Future<void> _runSearch(String query) async {
+    final ici = <String, Message>{for (final m in _messages) m.id: m};
+    try {
+      final cache = await MessageCache.getConv(widget.convId)
+          .timeout(const Duration(seconds: 3), onTimeout: () => const []);
+      for (final m in cache) {
+        ici.putIfAbsent(m.id, () => m);
+      }
+    } catch (_) {}
+    final trouves = ici.values
+        .where((m) => !m.isDeleted && contientRecherche(m.content ?? '', query))
+        .toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    final ids = [for (final m in trouves) m.id];
     try {
       final results = await context
           .read<ChatRepository>()
           .searchMessages(widget.convId, query);
+      for (final id in results.map((r) => r["id"] as String?).whereType<String>()) {
+        if (!ids.contains(id)) ids.add(id);
+      }
+    } catch (_) {}
+    try {
       if (!mounted) return;
-      final ids =
-          results.map((r) => r["id"] as String?).whereType<String>().toList();
       setState(() {
         _searchResultIds = ids;
         _searchIndex = 0;
