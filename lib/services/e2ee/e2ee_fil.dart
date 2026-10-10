@@ -17,7 +17,7 @@ import 'package:flutter/services.dart' show PlatformException;
 import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart'
     show DuplicateMessageException;
 
-import 'e2ee_groupe.dart' show estChargeTrousseau;
+import 'e2ee_groupe.dart' show estChargeTrousseau, estDemandeTrousseau;
 import 'e2ee_groupe_fil.dart';
 import 'e2ee_media.dart';
 import 'e2ee_service.dart';
@@ -519,6 +519,15 @@ class E2eeFil {
          * déjà connue autrement), il lève : acquitté, ignoré — sans toucher à
          * la session, qui a bien déchiffré.
          */
+        // Un autre de MES appareils demande une clé (repli APPAREIL, ch. 37).
+        if (e['messageId'] == null && estDemandeTrousseau(texte)) {
+          try {
+            await groupe.repondreADemande(
+                e['convId'] as String, e['expediteurId'] as String, texte);
+          } catch (_) {}
+          aAcquitter.add(e['id'] as String);
+          continue;
+        }
         if (e['messageId'] == null && estChargeTrousseau(texte)) {
           try {
             await groupe.recevoirTrousseau(

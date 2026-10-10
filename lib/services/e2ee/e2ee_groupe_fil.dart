@@ -148,11 +148,69 @@ class GroupeChiffre {
     _restaurations[convId] = DateTime.now();
     try {
       final copie = await copies.lire(convId);
-      if (copie == null) return local;
-      return await ranger(convId, copie, deposerCopie: false);
+      final repris = copie == null ? local : await ranger(convId, copie, deposerCopie: false);
+      final encoreManquant =
+          repris.isEmpty || (voulue != null && !repris.any((v) => v.n == voulue));
+      // 🔴 LE REPLI « APPAREIL » (chapitre 37) : pas de copie, ou une copie en
+      // retard. On demande à MES AUTRES appareils. Jumeau du web.
+      if (encoreManquant) unawaited(demanderAMesAppareils(convId));
+      return repris;
     } catch (_) {
+      unawaited(demanderAMesAppareils(convId));
       return local;
     }
+  }
+
+  /* ══════════════ LE REPLI « APPAREIL » ══════════════ */
+
+  final _demandes = <String, DateTime>{};
+  final _reponses = <String, DateTime>{};
+
+  /// Demande le trousseau de ce groupe à MES AUTRES appareils (hors fil).
+  ///
+  /// ⚠️ UNE DEMANDE PAR GROUPE ET PAR MINUTE. `false` sans rien faire si je
+  /// n'ai aucun autre appareil. Ne lève jamais.
+  Future<bool> demanderAMesAppareils(String convId) async {
+    final moi = _monCompte;
+    if (moi == null) return false;
+    final derniere = _demandes[convId];
+    if (derniere != null && DateTime.now().difference(derniere).inSeconds < 60) return false;
+    _demandes[convId] = DateTime.now();
+    try {
+      final monAppareil = await _monDeviceId();
+      final miens = await _service.ouvrirSessions(moi, exclure: monAppareil);
+      if (miens.isEmpty) return false;
+      final demande = g.ecrireDemandeTrousseau(convId);
+      final enveloppes = <Map<String, dynamic>>[];
+      for (final d in miens) {
+        final e = await _service.chiffrer(moi, d, demande);
+        enveloppes.add({'destinataireId': moi, 'destinataireDevice': d, 'type': e.type, 'corps': e.corps});
+      }
+      await _api('POST', '/api/e2ee/enveloppes',
+          {'convId': convId, 'deviceId': monAppareil, 'enveloppes': enveloppes});
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Un de MES appareils me demande le trousseau d'un groupe : je le lui
+  /// envoie (motif APPAREIL), s'il est bien de mon compte et si je l'ai.
+  ///
+  /// 🔴 SEUL MON COMPTE PEUT DEMANDER — l'expéditeur est sûr, c'est sa session
+  /// Signal qui a déchiffré. ⚠️ Une réponse par groupe et par demi-minute.
+  Future<bool> repondreADemande(String convIdEnveloppe, String expediteurId, String clair) async {
+    if (expediteurId != _monCompte) {
+      throw const g.GroupeInvalide("demande de trousseau venue d'un autre compte");
+    }
+    final convId = g.lireDemandeTrousseau(clair, convIdEnveloppe);
+    final versions = await trousseau(convId);
+    if (versions.isEmpty) return false;
+    final derniere = _reponses[convId];
+    if (derniere != null && DateTime.now().difference(derniere).inSeconds < 30) return false;
+    _reponses[convId] = DateTime.now();
+    await distribuer(convId, 'APPAREIL', versions, [expediteurId]);
+    return true;
   }
 
   /// Nouveau téléphone : reprend TOUTES mes copies (archive ouverte). Rend le

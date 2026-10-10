@@ -229,6 +229,35 @@ String ecrireChargeTrousseau(Trousseau t) {
 /// Ce clair est-il un trousseau ? (Avant d'essayer de le lire.)
 bool estChargeTrousseau(String clair) => clair.startsWith(prefixeTrousseau);
 
+/* ══════════════════ LA DEMANDE DE TROUSSEAU (repli APPAREIL) ══════════════════ */
+
+/// Préfixe d'une DEMANDE de trousseau, envoyée par un appareil à SES AUTRES
+/// appareils quand une clé lui manque (cours, chapitre 37). Jumeau du web.
+const prefixeDemande = '\u0000GD';
+
+String ecrireDemandeTrousseau(String convId) =>
+    prefixeDemande + jsonEncode({'v': 1, 'type': 'demande-trousseau', 'convId': convId});
+
+bool estDemandeTrousseau(String clair) => clair.startsWith(prefixeDemande);
+
+/// Lit une demande et rend le groupe visé — celui de l'enveloppe.
+String lireDemandeTrousseau(String clair, String convIdEnveloppe) {
+  if (!estDemandeTrousseau(clair)) throw const GroupeInvalide('pas une demande de trousseau');
+  Object? brut;
+  try {
+    brut = jsonDecode(clair.substring(prefixeDemande.length));
+  } catch (_) {
+    throw const GroupeInvalide('demande illisible');
+  }
+  if (brut is! Map || brut['v'] != 1 || brut['type'] != 'demande-trousseau') {
+    throw const GroupeInvalide('demande mal formée');
+  }
+  if (brut['convId'] != convIdEnveloppe) {
+    throw const GroupeInvalide('demande rattachée à un autre groupe que le sien');
+  }
+  return convIdEnveloppe;
+}
+
 /// Lit et VÉRIFIE une charge trousseau. Voir le jumeau web.
 Trousseau lireChargeTrousseau(String clair, String convIdEnveloppe) {
   if (!estChargeTrousseau(clair)) throw const GroupeInvalide('pas une charge trousseau');

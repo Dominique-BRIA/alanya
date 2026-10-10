@@ -10,6 +10,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:alanya/core/api_client.dart' show ApiException;
+import 'package:alanya/services/e2ee/e2ee_groupe.dart' show ecrireDemandeTrousseau;
 import 'package:alanya/services/e2ee/e2ee_trousseau_perso.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -226,6 +227,53 @@ void main() {
       final (clair, _) = await bob2.fil.groupe.lire(
           convId: 'g1', messageId: id, expediteurId: 'alice', chiffre: m['groupe'] as Map<String, dynamic>);
       expect(clair?.texte, 'à la demande');
+    });
+
+    test('repli APPAREIL : sans copie, un autre de mes appareils renvoie la clé', () async {
+      await alice.fil.groupe.activer('g1');
+      await bob.fil.relever();
+      final id = await alice.fil.envoyer(convId: 'g1', pairId: null, texte: 'par un autre appareil');
+      // Un second téléphone de Bob, SANS archive : aucune copie ne l'aidera.
+      final bob2 = Client('bob', serveur, stockage: 'bob-sans-archive');
+      await bob2.demarrer();
+      final m = serveur.messages[id]!;
+      Future<String?> lire() async => (await bob2.fil.groupe.lire(
+              convId: 'g1', messageId: id, expediteurId: 'alice', chiffre: m['groupe'] as Map<String, dynamic>))
+          .$1
+          ?.texte;
+      expect(await lire(), isNull, reason: 'pas encore de clé : la demande part');
+      // La demande part en tâche de fond : on attend son dépôt (hors fil).
+      await attendre(() => serveur.enveloppes
+          .any((e) => e['expediteurId'] == 'bob' && e['destinataireId'] == 'bob' && e['messageId'] == null));
+      await bob.fil.relever(); // le premier téléphone reçoit la demande, et répond
+      await bob2.fil.relever(); // le second reçoit le trousseau
+      expect((await bob2.fil.groupe.trousseau('g1')).map((v) => v.n), [1]);
+      expect(await lire(), 'par un autre appareil');
+    });
+
+    test('une demande venue d’un AUTRE compte est refusée', () async {
+      await alice.fil.groupe.activer('g1');
+      await bob.fil.relever();
+      await carole.fil.relever();
+      // Carole adresse une demande… au téléphone de Bob.
+      final api = serveur.pour('carole');
+      final appareils = await carole.service.ouvrirSessions('bob');
+      final enveloppes = [
+        for (final d in appareils)
+          () async {
+            final e = await carole.service.chiffrer('bob', d, ecrireDemandeTrousseau('g1'));
+            return {'destinataireId': 'bob', 'destinataireDevice': d, 'type': e.type, 'corps': e.corps};
+          }(),
+      ];
+      await api('POST', '/api/e2ee/enveloppes', {
+        'convId': 'g1',
+        'deviceId': await carole.coffre.deviceId(),
+        'enveloppes': await Future.wait(enveloppes),
+      });
+      final avant = serveur.enveloppes.where((e) => e['expediteurId'] == 'bob').length;
+      await bob.fil.relever();
+      expect(serveur.enveloppes.where((e) => e['expediteurId'] == 'bob').length, avant,
+          reason: 'Bob ne doit rien envoyer à un autre compte');
     });
 
     test('une autre archive (mauvaise clé maîtresse) n’ouvre pas la copie', () async {
