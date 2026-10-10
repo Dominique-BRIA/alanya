@@ -29,9 +29,45 @@ class TraductionLocale {
   final String? source;
 }
 
+/// Ce texte est-il une charge TECHNIQUE du chiffrement de groupe — un
+/// trousseau (`\u0000G1`) ou une demande de trousseau (`\u0000GD`) — et non un
+/// message ?
+///
+/// 🐛 L'ANCIENNE APPLICATION LES RANGEAIT COMME DES MESSAGES (constaté par le
+/// user le 10/10/2026) : elle ne connaissait pas les enveloppes hors fil, et
+/// rangeait leur clair sous l'identifiant de l'enveloppe. La liste affichait
+/// alors `G1{"v":1,"type":"trousseau",…}` en aperçu du groupe.
+bool estChargeTechnique(String? contenu) =>
+    contenu != null && (contenu.startsWith('\u0000G1') || contenu.startsWith('\u0000GD'));
+
 class MessageCache {
   MessageCache._();
   static Database? _db;
+
+  /// Le nettoyage des charges techniques n'a lieu qu'une fois par lancement.
+  static bool _chargesPurgees = false;
+
+  /// Retire du cache les charges techniques rangées à tort (voir
+  /// [estChargeTechnique]). ⚠️ Le filtre SQL ne fait que dégrossir — le
+  /// caractère nul ne se cherche pas bien en SQL ; c'est [estChargeTechnique]
+  /// qui décide.
+  static Future<void> _purgerChargesTechniques(Database db, {bool forcer = false}) async {
+    if (_chargesPurgees && !forcer) return;
+    _chargesPurgees = true;
+    final lignes = await db.query(
+      'messages',
+      columns: ['id', 'content'],
+      where: 'content LIKE ? OR content LIKE ?',
+      whereArgs: ['%"type":"trousseau"%', '%"type":"demande-trousseau"%'],
+    );
+    final ids = [
+      for (final l in lignes)
+        if (estChargeTechnique(l['content'] as String?)) l['id'] as String,
+    ];
+    if (ids.isEmpty) return;
+    await db.delete('messages',
+        where: 'id IN (${List.filled(ids.length, '?').join(',')})', whereArgs: ids);
+  }
 
   /// Ouvre (ou crée) la base de données locale.
   static Future<Database> _database() async {
@@ -416,6 +452,7 @@ class MessageCache {
     if (ids.isEmpty) return {};
     final db = await _database();
     await _purgerExpires(db);
+    await _purgerChargesTechniques(db);
     final lignes = await db.rawQuery(
       'SELECT id, conv_id, sender_id, content, type, MAX(created_at) AS created_at '
       'FROM messages '
@@ -488,6 +525,8 @@ class MessageCache {
     /// Le message cité, lu dans la charge (06/10/2026).
     String? replyToId,
   }) async {
+    // Jamais une charge technique comme message (voir `estChargeTechnique`).
+    if (estChargeTechnique(texte)) return false;
     final mediaJson = media == null ? null : jsonEncode(media.toJson());
     final db = await _database();
     /*
@@ -570,6 +609,9 @@ class MessageCache {
     String? genre,
     String? replyToId,
   }) async {
+    // Une charge technique archivée par l'ancienne application n'est pas un
+    // message : on ne la restaure pas (voir `estChargeTechnique`).
+    if (estChargeTechnique(texte)) return;
     final db = await _database();
     final efface = (await db.query('effaces',
             where: 'message_id = ?', whereArgs: [id], limit: 1))
@@ -685,6 +727,7 @@ class MessageCache {
   static Future<List<Message>> getConv(String convId) async {
     final db = await _database();
     await _purgerExpires(db);
+    await _purgerChargesTechniques(db);
     final rows = await db.query(
       'messages',
       where: 'conv_id = ?',

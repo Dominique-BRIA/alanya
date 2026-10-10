@@ -8,6 +8,7 @@
 import 'dart:convert';
 
 import 'package:alanya/core/locale_controller.dart';
+import 'package:alanya/core/message_cache.dart' show estChargeTechnique;
 import 'package:alanya/core/messages_systeme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -43,5 +44,15 @@ void main() {
 
   testWidgets('un code inconnu : rien, jamais le JSON brut', (tester) async {
     expect(await composer(tester, {'code': 'code_du_futur', 'actor': 'Alice'}), '');
+  });
+
+  // Le cache ne range ni ne montre un trousseau comme un message (défaut de
+  // l'ancienne application, constaté le 10/10/2026 : aperçu « G1{…} »).
+  test("un trousseau ou une demande n'est jamais un message", () {
+    expect(estChargeTechnique('\u0000G1{"v":1,"type":"trousseau"}'), isTrue);
+    expect(estChargeTechnique('\u0000GD{"v":1,"type":"demande-trousseau"}'), isTrue);
+    expect(estChargeTechnique('\u0000A2{"v":2,"id":"x","texte":"bonjour"}'), isFalse);
+    expect(estChargeTechnique('G1 est un modèle de voiture'), isFalse);
+    expect(estChargeTechnique(null), isFalse);
   });
 }

@@ -184,10 +184,16 @@ class GroupeChiffre {
   final _demandes = <String, DateTime>{};
   final _reponses = <String, DateTime>{};
 
-  /// Demande le trousseau de ce groupe à MES AUTRES appareils (hors fil).
+  /// Demande le trousseau de ce groupe à MES AUTRES appareils ET AUX
+  /// ADMINISTRATEURS du groupe (hors fil). Jumeau du web.
   ///
-  /// ⚠️ UNE DEMANDE PAR GROUPE ET PAR MINUTE. `false` sans rien faire si je
-  /// n'ai aucun autre appareil. Ne lève jamais.
+  /// 🐛 POURQUOI AUSSI LES ADMINISTRATEURS (10/10/2026, constaté par le user) :
+  /// un téléphone resté sur l'ancienne application à l'activation avait rangé
+  /// la clé comme un message — perdue. Ses autres appareils, anciens, ne
+  /// répondaient pas. Les administrateurs ont la clé, et peuvent la renvoyer
+  /// à un membre qui l'a perdue.
+  ///
+  /// ⚠️ UNE DEMANDE PAR GROUPE ET PAR MINUTE. Ne lève jamais.
   Future<bool> demanderAMesAppareils(String convId) async {
     final moi = _monCompte;
     if (moi == null) return false;
@@ -196,14 +202,27 @@ class GroupeChiffre {
     _demandes[convId] = DateTime.now();
     try {
       final monAppareil = await _monDeviceId();
-      final miens = await _service.ouvrirSessions(moi, exclure: monAppareil);
-      if (miens.isEmpty) return false;
       final demande = g.ecrireDemandeTrousseau(convId);
       final enveloppes = <Map<String, dynamic>>[];
-      for (final d in miens) {
-        final e = await _service.chiffrer(moi, d, demande);
-        enveloppes.add({'destinataireId': moi, 'destinataireDevice': d, 'type': e.type, 'corps': e.corps});
+      Future<void> pour(String uid, List<int> appareils) async {
+        for (final d in appareils) {
+          final e = await _service.chiffrer(uid, d, demande);
+          enveloppes.add({'destinataireId': uid, 'destinataireDevice': d, 'type': e.type, 'corps': e.corps});
+        }
       }
+
+      await pour(moi, await _service.ouvrirSessions(moi, exclure: monAppareil));
+      final membres = await _membres(convId);
+      for (final m in membres) {
+        final uid = m['id'] as String;
+        if (uid == moi || !estAdministrateur(membres, uid)) continue;
+        try {
+          await pour(uid, await _service.ouvrirSessions(uid));
+        } catch (_) {
+          // Un administrateur injoignable n'empêche pas de demander aux autres.
+        }
+      }
+      if (enveloppes.isEmpty) return false;
       await _api('POST', '/api/e2ee/enveloppes',
           {'convId': convId, 'deviceId': monAppareil, 'enveloppes': enveloppes});
       return true;
@@ -212,22 +231,33 @@ class GroupeChiffre {
     }
   }
 
-  /// Un de MES appareils me demande le trousseau d'un groupe : je le lui
-  /// envoie (motif APPAREIL), s'il est bien de mon compte et si je l'ai.
+  /// Quelqu'un me demande le trousseau d'un groupe. Je le lui envoie si c'est
+  /// un de MES appareils (motif APPAREIL), ou si je suis ADMINISTRATEUR et lui
+  /// MEMBRE ACTIF (motif AJOUT — ce que j'aurais fait en l'ajoutant).
   ///
-  /// 🔴 SEUL MON COMPTE PEUT DEMANDER — l'expéditeur est sûr, c'est sa session
-  /// Signal qui a déchiffré. ⚠️ Une réponse par groupe et par demi-minute.
+  /// 🔴 L'expéditeur est sûr — c'est sa session Signal qui a déchiffré. Un
+  /// simple membre ne répond qu'à ses propres appareils ; un ancien membre
+  /// n'obtient rien. ⚠️ Une réponse par demandeur, groupe et demi-minute.
   Future<bool> repondreADemande(String convIdEnveloppe, String expediteurId, String clair) async {
-    if (expediteurId != _monCompte) {
-      throw const g.GroupeInvalide("demande de trousseau venue d'un autre compte");
-    }
+    final moi = _monCompte;
     final convId = g.lireDemandeTrousseau(clair, convIdEnveloppe);
+    if (expediteurId != moi) {
+      final membres = await _membres(convId);
+      if (moi == null || !estAdministrateur(membres, moi)) {
+        throw const g.GroupeInvalide(
+            "demande de trousseau d'un autre compte, et je n'administre pas le groupe");
+      }
+      if (!membres.any((m) => m['id'] == expediteurId)) {
+        throw const g.GroupeInvalide("demande de trousseau d'un compte qui n'est pas membre");
+      }
+    }
     final versions = await trousseau(convId);
     if (versions.isEmpty) return false;
-    final derniere = _reponses[convId];
+    final cle = '$convId:$expediteurId';
+    final derniere = _reponses[cle];
     if (derniere != null && DateTime.now().difference(derniere).inSeconds < 30) return false;
-    _reponses[convId] = DateTime.now();
-    await distribuer(convId, 'APPAREIL', versions, [expediteurId]);
+    _reponses[cle] = DateTime.now();
+    await distribuer(convId, expediteurId == moi ? 'APPAREIL' : 'AJOUT', versions, [expediteurId]);
     return true;
   }
 

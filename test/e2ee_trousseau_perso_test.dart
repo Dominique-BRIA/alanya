@@ -301,6 +301,39 @@ void main() {
       expect(recues.last.n, 1000);
     });
 
+    test('clé perdue (ancienne application) : redemandée, l’administratrice la renvoie', () async {
+      await alice.fil.groupe.activer('g1');
+      final id = await alice.fil.envoyer(convId: 'g1', pairId: null, texte: 'avant la perte');
+      // Carole a « reçu » le trousseau… et l'a perdu, comme l'ancienne
+      // application qui le rangeait en message : l'enveloppe est acquittée.
+      for (final e in serveur.enveloppes) {
+        if (e['destinataireId'] == 'carole') e['remis'] = true;
+      }
+      final m = serveur.messages[id]!;
+      Future<String?> lire() async => (await carole.fil.groupe.lire(
+              convId: 'g1', messageId: id, expediteurId: 'alice', chiffre: m['groupe'] as Map<String, dynamic>))
+          .$1
+          ?.texte;
+      expect(await lire(), isNull, reason: 'clé perdue : la demande part');
+      await attendre(() => serveur.enveloppes
+          .any((e) => e['expediteurId'] == 'carole' && e['destinataireId'] == 'alice' && e['messageId'] == null));
+      await alice.fil.relever(); // l'administratrice reçoit la demande, et renvoie
+      await carole.fil.relever();
+      expect((await carole.fil.groupe.trousseau('g1')).map((v) => v.n), [1]);
+      expect(await lire(), 'avant la perte');
+    });
+
+    test('un ANCIEN membre qui redemande la clé n’obtient rien', () async {
+      await alice.fil.groupe.activer('g1');
+      await carole.fil.relever();
+      serveur.membres.remove('carole'); // exclue
+      await carole.fil.groupe.demanderAMesAppareils('g1');
+      final avant = serveur.enveloppes.where((e) => e['expediteurId'] == 'alice').length;
+      await alice.fil.relever();
+      expect(serveur.enveloppes.where((e) => e['expediteurId'] == 'alice').length, avant,
+          reason: 'aucun trousseau ne part vers une ancienne membre');
+    });
+
     test('une autre archive (mauvaise clé maîtresse) n’ouvre pas la copie', () async {
       await alice.fil.groupe.activer('g1');
       await bob.fil.relever();
