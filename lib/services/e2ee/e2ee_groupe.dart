@@ -319,3 +319,110 @@ List<VersionCle> fusionnerTrousseau(List<VersionCle> connu, List<VersionCle> rec
   }
   return parN.values.toList()..sort((a, b) => a.n.compareTo(b.n));
 }
+
+/* ══════════════════ LA BOÎTE PERMANENTE (chapitre 39) ══════════════════ */
+
+/// La BOÎTE : le trousseau d'un groupe, scellé pour UN appareil et gardé par le
+/// serveur ; l'appareil la relit quand il veut, sans administrateur en ligne
+/// (décision du user, 10/10/2026). Jumeau de `scellerBoite` / `ouvrirBoite`
+/// côté web — même forme, mêmes données associées (vecteurs croisés).
+///
+///   corps = base64( 0x01 | éphémère 33 | nonce 12 | AES-256-GCM | signature 64 )
+///   clé   = HKDF-SHA256( X25519(éphémère, identité du destinataire),
+///                        sel = 32 zéros, info = « alanya-boite-v1 » )
+const formatBoite = 0x01;
+const _infoBoite = 'alanya-boite-v1';
+const _taillePublique = 33;
+
+class ContexteBoite {
+  const ContexteBoite({
+    required this.convId,
+    required this.destinataireId,
+    required this.destinataireDevice,
+    required this.expediteurId,
+    required this.expediteurDevice,
+  });
+  final String convId;
+  final String destinataireId;
+  final int destinataireDevice;
+  final String expediteurId;
+  final int expediteurDevice;
+}
+
+Uint8List donneesBoite(ContexteBoite c) {
+  for (final v in [c.convId, c.destinataireId, c.expediteurId]) {
+    if (v.isEmpty || v.contains('\n')) throw const GroupeInvalide('contexte de boîte mal formé');
+  }
+  if (c.destinataireDevice < 0 || c.expediteurDevice < 0) {
+    throw const GroupeInvalide('appareil invalide');
+  }
+  return Uint8List.fromList(utf8.encode('$_infoBoite\n${c.convId}\n${c.destinataireId}\n'
+      '${c.destinataireDevice}\n${c.expediteurId}\n${c.expediteurDevice}'));
+}
+
+Uint8List _cleDeBoite(Uint8List partage) {
+  final hkdf = HKDFKeyDerivator(SHA256Digest())
+    ..init(HkdfParameters(partage, 32, Uint8List(32), Uint8List.fromList(utf8.encode(_infoBoite))));
+  final sortie = Uint8List(32);
+  hkdf.deriveKey(null, 0, sortie, 0);
+  return sortie;
+}
+
+/// Scelle [clair] pour l'appareil dont la clé publique d'identité est
+/// [clePubliqueDestinataire] (33 octets), et signe avec [clePriveeExpediteur].
+/// [ephemere] et [nonceImpose] : pour les vecteurs seulement.
+String scellerBoite(
+  String clair,
+  Uint8List clePubliqueDestinataire,
+  ContexteBoite contexte,
+  Uint8List clePriveeExpediteur, {
+  ({Uint8List pub, Uint8List priv})? ephemere,
+  Uint8List? nonceImpose,
+}) {
+  final eph = ephemere ??
+      (() {
+        final k = Curve.generateKeyPair();
+        return (pub: Uint8List.fromList(k.publicKey.serialize()), priv: Uint8List.fromList(k.privateKey.serialize()));
+      })();
+  final partage = Curve.calculateAgreement(
+      Curve.decodePoint(clePubliqueDestinataire, 0), Curve.decodePrivatePoint(eph.priv));
+  final nonce = nonceImpose ?? _aleatoire(_tailleNonce);
+  final aad = donneesBoite(contexte);
+  final chiffre = _gcm(true, _cleDeBoite(partage), nonce, aad, Uint8List.fromList(utf8.encode(clair)));
+  final signature = signer(clePriveeExpediteur, _concat([aad, eph.pub, nonce, chiffre]));
+  return base64.encode(_concat([Uint8List.fromList([formatBoite]), eph.pub, nonce, chiffre, signature]));
+}
+
+/// Ouvre une boîte : signature d'abord (identité DÉJÀ connue de l'expéditeur),
+/// déchiffrement ensuite. Lève [GroupeInvalide].
+String ouvrirBoite(
+  String corps,
+  Uint8List clePriveeDestinataire,
+  ContexteBoite contexte,
+  Uint8List clePubliqueExpediteur,
+) {
+  final Uint8List brut;
+  try {
+    brut = base64.decode(corps);
+  } catch (_) {
+    throw const GroupeInvalide('boîte illisible');
+  }
+  const min = 1 + _taillePublique + _tailleNonce + _tailleEtiquette + _tailleSignature;
+  if (brut.length < min || brut[0] != formatBoite) throw const GroupeInvalide('boîte mal formée');
+  final eph = Uint8List.sublistView(brut, 1, 1 + _taillePublique);
+  final nonce = Uint8List.sublistView(brut, 1 + _taillePublique, 1 + _taillePublique + _tailleNonce);
+  final chiffre =
+      Uint8List.sublistView(brut, 1 + _taillePublique + _tailleNonce, brut.length - _tailleSignature);
+  final signature = Uint8List.sublistView(brut, brut.length - _tailleSignature);
+  final aad = donneesBoite(contexte);
+  if (!signatureValide(clePubliqueExpediteur, _concat([aad, eph, nonce, chiffre]), signature)) {
+    throw const GroupeInvalide('boîte : signature invalide');
+  }
+  try {
+    final partage = Curve.calculateAgreement(
+        Curve.decodePoint(eph, 0), Curve.decodePrivatePoint(clePriveeDestinataire));
+    return utf8.decode(_gcm(false, _cleDeBoite(partage), nonce, aad, chiffre));
+  } catch (_) {
+    throw const GroupeInvalide('boîte : déchiffrement refusé');
+  }
+}

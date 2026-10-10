@@ -10,6 +10,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:alanya/core/api_client.dart' show ApiException;
+import 'package:alanya/services/e2ee/e2ee_groupe.dart' as g;
 import 'package:alanya/services/e2ee/e2ee_groupe.dart' show VersionCle, ecrireDemandeTrousseau;
 import 'package:alanya/services/e2ee/e2ee_trousseau_perso.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -28,6 +29,9 @@ class FauxServeurAdmin extends FauxServeurGroupe {
 
   /// compte → copie chiffrée.
   final copies = <String, String>{};
+
+  /// « compte|appareil » → boîte permanente du groupe g1 (chapitre 39).
+  final boites = <String, Map<String, dynamic>>{};
 
   @override
   Future<Map<String, dynamic>> Function(String, String, Map<String, dynamic>?) pour(
@@ -69,6 +73,31 @@ class FauxServeurAdmin extends FauxServeurGroupe {
         final c = copies[moi];
         if (c == null) throw ApiException(404, 'aucune copie', 'AUCUNE_COPIE');
         return {'convId': 'g1', 'corps': c};
+      }
+      // Les boîtes permanentes — mêmes règles que la route réelle.
+      if (p == '/api/e2ee/boites' && methode == 'PUT') {
+        for (final b in (corps!['boites'] as List).cast<Map<String, dynamic>>()) {
+          final dest = b['destinataireId'] as String;
+          if (!membres.containsKey(dest)) throw ApiException(403, 'hors du groupe', 'FORBIDDEN');
+          if (membres[moi] != 'ADMIN' && dest != moi) {
+            throw ApiException(403, 'admin requis', 'ADMIN_REQUIS');
+          }
+          boites['$dest|${b['destinataireDevice']}'] = {
+            'convId': 'g1',
+            'expediteurId': moi,
+            'expediteurDevice': corps['deviceId'],
+            'corps': b['corps'],
+          };
+        }
+        return {'deposees': (corps['boites'] as List).length};
+      }
+      if (p == '/api/e2ee/boites' && methode == 'GET') {
+        final device = Uri.parse(chemin).queryParameters['deviceId'];
+        return {
+          'boites': [
+            if (membres.containsKey(moi) && boites['$moi|$device'] != null) boites['$moi|$device'],
+          ],
+        };
       }
       if (p == '/api/e2ee/trousseaux' && methode == 'GET') {
         return {
@@ -309,6 +338,9 @@ void main() {
       for (final e in serveur.enveloppes) {
         if (e['destinataireId'] == 'carole') e['remis'] = true;
       }
+      // … et sans boîte permanente (un appareil apparu APRÈS la distribution) :
+      // c'est le chemin de la demande à l'administratrice qu'on éprouve ici.
+      serveur.boites.removeWhere((cle, _) => cle.startsWith('carole|'));
       final m = serveur.messages[id]!;
       Future<String?> lire() async => (await carole.fil.groupe.lire(
               convId: 'g1', messageId: id, expediteurId: 'alice', chiffre: m['groupe'] as Map<String, dynamic>))
@@ -332,6 +364,48 @@ void main() {
       await alice.fil.relever();
       expect(serveur.enveloppes.where((e) => e['expediteurId'] == 'alice').length, avant,
           reason: 'aucun trousseau ne part vers une ancienne membre');
+    });
+
+    test('BOÎTE PERMANENTE : clé perdue, AUCUN administrateur en ligne, elle revient', () async {
+      final r = await alice.fil.groupe.activer('g1');
+      expect(r.bilan!.boites, 2, reason: 'une boîte par appareil de Bob et de Carole');
+      final id = await alice.fil.envoyer(convId: 'g1', pairId: null, texte: 'sans admin en ligne');
+      // Carole perd l'enveloppe (ancienne application) ; Alice ne relève plus
+      // rien : elle est hors ligne pour tout le reste du test.
+      for (final e in serveur.enveloppes) {
+        if (e['destinataireId'] == 'carole') e['remis'] = true;
+      }
+      final m = serveur.messages[id]!;
+      final (clair, echec) = await carole.fil.groupe.lire(
+          convId: 'g1', messageId: id, expediteurId: 'alice', chiffre: m['groupe'] as Map<String, dynamic>);
+      expect(echec, isNull, reason: 'la boîte rend la clé, sans attendre personne');
+      expect(clair?.texte, 'sans admin en ligne');
+    });
+
+    test('une boîte déposée par un simple membre pour un autre est refusée', () async {
+      await alice.fil.groupe.activer('g1');
+      await bob.fil.relever();
+      // Le serveur la refuserait ; on la glisse quand même, comme un serveur
+      // malveillant : Carole doit l'écarter (Bob n'administre pas le groupe).
+      final faux = g.scellerBoite(
+        g.ecrireChargeTrousseau(g.Trousseau(convId: 'g1', motif: 'AJOUT', versions: [VersionCle(n: 9, cle: Uint8List.fromList(List.filled(32, 9)), creeLe: 9)])),
+        Uint8List.fromList((await carole.coffre.identiteLocale()).getPublicKey().publicKey.serialize()),
+        g.ContexteBoite(
+            convId: 'g1',
+            destinataireId: 'carole',
+            destinataireDevice: await carole.coffre.deviceId(),
+            expediteurId: 'bob',
+            expediteurDevice: await bob.coffre.deviceId()),
+        Uint8List.fromList((await bob.coffre.identiteLocale()).getPrivateKey().serialize()),
+      );
+      serveur.boites['carole|${await carole.coffre.deviceId()}'] = {
+        'convId': 'g1',
+        'expediteurId': 'bob',
+        'expediteurDevice': await bob.coffre.deviceId(),
+        'corps': faux,
+      };
+      await carole.fil.groupe.releverBoites('g1');
+      expect((await carole.fil.groupe.trousseau('g1')).any((v) => v.n == 9), isFalse);
     });
 
     test('une autre archive (mauvaise clé maîtresse) n’ouvre pas la copie', () async {

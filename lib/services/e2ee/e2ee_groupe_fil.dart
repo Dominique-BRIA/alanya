@@ -96,7 +96,7 @@ List<List<g.VersionCle>> decouperVersions(List<g.VersionCle> versions,
 }
 
 /// Le bilan d'une distribution de trousseau.
-typedef BilanDistribution = ({int appareils, List<String> sansAppareil, List<String> echecs});
+typedef BilanDistribution = ({int appareils, int boites, List<String> sansAppareil, List<String> echecs});
 
 class GroupeChiffre {
   GroupeChiffre(this._service, this._api, this._monDeviceId, this._monCompte)
@@ -164,6 +164,13 @@ class GroupeChiffre {
     final derniere = _restaurations[convId];
     if (derniere != null && DateTime.now().difference(derniere).inSeconds < 30) return local;
     _restaurations[convId] = DateTime.now();
+    // 🔴 D'ABORD MA BOÎTE PERMANENTE (chapitre 39) : elle se relit sans
+    // personne en ligne.
+    try {
+      await releverBoites(convId);
+      final apres = await trousseau(convId);
+      if (apres.isNotEmpty && (voulue == null || apres.any((v) => v.n == voulue))) return apres;
+    } catch (_) {}
     try {
       final copie = await copies.lire(convId);
       final repris = copie == null ? local : await ranger(convId, copie, deposerCopie: false);
@@ -261,9 +268,53 @@ class GroupeChiffre {
     return true;
   }
 
-  /// Nouveau téléphone : reprend TOUTES mes copies (archive ouverte). Rend le
-  /// nombre de groupes repris. Ne lève jamais.
+  /// Relit MES boîtes permanentes (toutes, ou celles d'un groupe) et range les
+  /// trousseaux qu'elles portent. Rend le nombre de boîtes acceptées.
+  ///
+  /// 🔴 MÊMES CONTRÔLES QU'UNE ENVELOPPE : signature avec l'identité DÉJÀ
+  /// connue du déposant (session ouverte d'abord s'il est inconnu), groupe du
+  /// clair = groupe de la boîte, déposant ADMINISTRATEUR ou moi. Jumeau du web.
+  Future<int> releverBoites([String? convId]) async {
+    final moi = _monCompte;
+    if (moi == null) return 0;
+    final appareil = await _monDeviceId();
+    final r = await _api(
+        'GET', '/api/e2ee/boites?deviceId=$appareil${convId == null ? '' : '&convId=$convId'}', null);
+    final maCle = (await _maPaire()).priv;
+    var n = 0;
+    for (final b in ((r['boites'] as List?) ?? const []).cast<Map<String, dynamic>>()) {
+      try {
+        final conv = b['convId'] as String;
+        final expediteur = b['expediteurId'] as String;
+        final expediteurDevice = b['expediteurDevice'] as int;
+        final signataire = await _cleSignataire(expediteur, expediteurDevice);
+        if (signataire == null) continue;
+        final clair = g.ouvrirBoite(
+          b['corps'] as String,
+          maCle,
+          g.ContexteBoite(
+              convId: conv,
+              destinataireId: moi,
+              destinataireDevice: appareil,
+              expediteurId: expediteur,
+              expediteurDevice: expediteurDevice),
+          signataire,
+        );
+        await recevoirTrousseau(conv, expediteur, clair);
+        n++;
+      } catch (_) {
+        // Une boîte refusée est ignorée ; les autres sont lues.
+      }
+    }
+    return n;
+  }
+
+  /// Nouveau téléphone : reprend TOUTES mes boîtes, puis toutes mes copies
+  /// (archive ouverte). Rend le nombre de groupes repris. Ne lève jamais.
   Future<int> restaurerTous() async {
+    try {
+      await releverBoites();
+    } catch (_) {}
     var n = 0;
     try {
       for (final e in (await copies.lireToutes()).entries) {
@@ -493,6 +544,16 @@ class GroupeChiffre {
     final enveloppes = <Map<String, dynamic>>[];
     final sansAppareil = <String>[];
     final echecs = <String>[];
+    /*
+     * 🔴 ET UNE BOÎTE PERMANENTE PAR APPAREIL (chapitre 39) — jumeau du web :
+     * l'enveloppe est à usage unique, la boîte reste et se relit sans personne
+     * en ligne. Trousseau ENTIER, scellé pour l'identité de l'appareil, signé
+     * par la mienne ; elle remplace la précédente.
+     */
+    final chargeEntiere =
+        g.ecrireChargeTrousseau(g.Trousseau(convId: convId, motif: motif, versions: versions));
+    final maCle = (await _maPaire()).priv;
+    final boites = <Map<String, dynamic>>[];
     for (final uid in destinataires.toSet()) {
       try {
         final appareils =
@@ -508,6 +569,25 @@ class GroupeChiffre {
                 {'destinataireId': uid, 'destinataireDevice': d, 'type': e.type, 'corps': e.corps});
           }
         }
+        for (final d in appareils) {
+          final id = await _service.coffre.getIdentity(SignalProtocolAddress(uid, d));
+          if (id == null || moi == null) continue;
+          boites.add({
+            'destinataireId': uid,
+            'destinataireDevice': d,
+            'corps': g.scellerBoite(
+              chargeEntiere,
+              Uint8List.fromList(id.publicKey.serialize()),
+              g.ContexteBoite(
+                  convId: convId,
+                  destinataireId: uid,
+                  destinataireDevice: d,
+                  expediteurId: moi,
+                  expediteurDevice: monAppareil),
+              maCle,
+            ),
+          });
+        }
       } catch (_) {
         echecs.add(uid);
       }
@@ -520,7 +600,26 @@ class GroupeChiffre {
         'enveloppes': enveloppes.sublist(i, min(i + 1000, enveloppes.length)),
       });
     }
-    return (appareils: enveloppes.length, sansAppareil: sansAppareil, echecs: echecs);
+    // Les boîtes, par lots d'environ 4 Mo (chacune porte le trousseau entier).
+    var deposees = 0;
+    var lot = <Map<String, dynamic>>[];
+    var taille = 0;
+    Future<void> envoyerLot() async {
+      if (lot.isEmpty) return;
+      await _api('PUT', '/api/e2ee/boites', {'convId': convId, 'deviceId': monAppareil, 'boites': lot});
+      deposees += lot.length;
+      lot = [];
+      taille = 0;
+    }
+
+    for (final b in boites) {
+      final t = (b['corps'] as String).length;
+      if (lot.length >= 1000 || taille + t > 4000000) await envoyerLot();
+      lot.add(b);
+      taille += t;
+    }
+    await envoyerLot();
+    return (appareils: enveloppes.length, boites: deposees, sansAppareil: sansAppareil, echecs: echecs);
   }
 
   Future<List<Map<String, dynamic>>> _membres(String convId) async {
