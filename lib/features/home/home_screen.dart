@@ -710,6 +710,15 @@ class _ConversationsTabState extends State<_ConversationsTab>
           } catch (_) {}
           if (mounted) await _poll();
         }());
+      } else if (t == "e2ee_trousseau") {
+        // Une clé de groupe m'attend (lot 7) : relevée tout de suite, fil
+        // ouvert ou non. Pas de notification : ce n'est pas un message.
+        final pile = context.e2ee;
+        unawaited(() async {
+          try {
+            await pile?.releverEtRanger();
+          } catch (_) {}
+        }());
       } else if (t == "e2ee_membre_parti") {
         /*
          * Parti ou exclu d'un groupe chiffré (lot 3, chapitre 34) : ce

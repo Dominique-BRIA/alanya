@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
 import '../../../services/e2ee/e2ee_fil.dart' show MessageClair;
 import '../../../services/e2ee/e2ee_fournisseur.dart';
+import '../../../services/e2ee/e2ee_groupe_fil.dart' show EchecGroupe;
 import '../../../services/e2ee/e2ee_media.dart';
 import '../../../services/e2ee/e2ee_media_envoi.dart';
 import '../../../widgets/e2ee/e2ee_widgets.dart';
@@ -1141,6 +1142,19 @@ class _ChatScreenState extends State<ChatScreen>
         return;
       }
       unawaited(_releverChiffres());
+    } else if (type == "e2ee_trousseau") {
+      /*
+       * La clé de CE groupe vient d'arriver (lot 7) : on la relève, et les
+       * bulles « en attente de la clé » se rouvrent sans quitter le fil.
+       */
+      if (e["convId"] != widget.convId) return;
+      final pile = context.e2ee;
+      unawaited(() async {
+        try {
+          await pile?.releverEtRanger();
+        } catch (_) {}
+        if (mounted) await _rafraichirGroupe();
+      }());
     } else if (type == "read") {
       if (e["convId"] != widget.convId) return;
       setState(() {
@@ -1559,6 +1573,10 @@ class _ChatScreenState extends State<ChatScreen>
   ///
   /// ⚠️ UN ÉCHEC LAISSE LA BULLE VIDE (clé pas encore reçue, signature
   /// refusée) : « indisponible sur cet appareil ». Jamais de texte deviné.
+  /// Les messages de groupe dont la clé n'est pas encore sur ce téléphone
+  /// (lot 7) : leur bulle dit « en attente de la clé du groupe ».
+  final Set<String> _attenteCle = {};
+
   Future<List<Message>> _ouvrirGroupe(List<Message> page) async {
     final pile = context.e2ee;
     if (pile == null || !page.any((m) => m.chiffreGroupe != null)) return page;
@@ -1569,12 +1587,14 @@ class _ChatScreenState extends State<ChatScreen>
         sortie.add(m);
         continue;
       }
-      final (clair, _) = await pile.fil.groupe.lire(
+      final (clair, echec) = await pile.fil.groupe.lire(
           convId: widget.convId, messageId: m.id, expediteurId: m.senderId, chiffre: c);
       if (clair == null) {
+        if (echec == EchecGroupe.cleAbsente) _attenteCle.add(m.id);
         sortie.add(m);
         continue;
       }
+      _attenteCle.remove(m.id);
       sortie.add(m.avecDechiffre(texte: clair.texte, media: clair.media));
       unawaited(MessageCache.rangeTexteDechiffre(
         id: m.id,
@@ -6836,7 +6856,8 @@ class _ChatScreenState extends State<ChatScreen>
           Padding(
             padding: const EdgeInsets.only(top: 2),
             child: Text(
-              tr(context, 'e2ee_texte_indisponible'),
+              // Groupe : la clé arrive (lot 7) — ce n'est pas une perte.
+              tr(context, _attenteCle.contains(m.id) ? 'e2ee_attente_cle_groupe' : 'e2ee_texte_indisponible'),
               style: TextStyle(
                 fontSize: 11,
                 color: onSubColor.withOpacity(0.85),

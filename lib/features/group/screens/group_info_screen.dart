@@ -14,6 +14,7 @@ import '../../../widgets/contact_picker_sheet.dart';
 import '../../chat/screens/chat_screen.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../services/e2ee/e2ee_fournisseur.dart';
+import '../../contacts/verification_cle.dart';
 
 /// Écran d'infos d'un groupe — style WhatsApp.
 ///
@@ -680,6 +681,21 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                   _sendMessageTo(member);
                 },
               ),
+              /*
+               * VÉRIFIER UN MEMBRE D'UN GROUPE CHIFFRÉ (lot 7) : le même écran
+               * qu'en tête-à-tête. C'est la parade contre un appareil glissé
+               * par le serveur dans le compte d'un membre (chapitre 31).
+               */
+              if (_chiffre == true)
+                ListTile(
+                  leading: Icon(Icons.verified_user_outlined, color: positiveOf(context)),
+                  title: Text(tr(context, 'e2ee_verifier_membre')),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    ouvrirVerificationCle(context,
+                        pairId: member['id'] as String, nomPair: '$name');
+                  },
+                ),
               if (_amAdmin) ...[
                 if ((member['role'] as String?) == 'ADMIN')
                   ListTile(

@@ -106,6 +106,15 @@ String composerMessageSysteme(
       return tr(context, 'system_member_left')
           .replaceFirst("{target}", _texte(charge["target"]));
 
+    // Groupes chiffrés (lot 7, chapitre 36).
+    case "e2ee_active":
+      return tr(context, 'system_e2ee_active')
+          .replaceFirst("{actor}", _texte(charge["actor"]));
+
+    case "e2ee_cle_changee":
+      return tr(context, 'system_e2ee_cle_changee')
+          .replaceFirst("{actor}", _texte(charge["actor"]));
+
     default:
       return "";
   }
