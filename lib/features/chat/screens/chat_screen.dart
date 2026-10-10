@@ -2185,8 +2185,22 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
-  bool _manqueUnTexteChiffre() => _messages.any(
-      (m) => m.chiffre && m.type == 'TEXT' && !m.isDeleted && (m.content ?? '').isEmpty);
+  /// Un message en tête-à-tête chiffré auquel il manque son contenu : un texte
+  /// vide, ou un MÉDIA sans sa clé.
+  ///
+  /// 🐛 LES MÉDIAS N'Y ÉTAIENT PAS (cas Toti → steve, 10/10/2026). Une vidéo
+  /// reçue sans enveloppe pour cet appareil restait « Média chiffré —
+  /// indisponible » : seul un TEXTE manquant déclenchait la reprise de
+  /// l'archive, qui porte pourtant aussi le descripteur du fichier.
+  ///
+  /// ⚠️ PAS LES MESSAGES DE GROUPE : leur chiffré se relit sur le serveur.
+  bool _manqueUnTexteChiffre() => _messages.any((m) =>
+      m.chiffre &&
+      m.chiffreGroupe == null &&
+      !m.isDeleted &&
+      (m.type == 'TEXT'
+          ? (m.content ?? '').isEmpty
+          : const {'IMAGE', 'VIDEO', 'AUDIO', 'FILE'}.contains(m.type) && m.mediaChiffre == null));
 
   /// L'archive vient de ranger des textes : si ce fil en fait partie, on relit
   /// le cache pour remplir les bulles vides — sans attendre une réouverture.
