@@ -278,6 +278,15 @@ Uint8List _sha256(Uint8List o) => SHA256Digest().process(o);
 /// SHA-256 de [o] — l'empreinte d'un fichier chiffré.
 Uint8List empreinteDe(Uint8List o) => _sha256(o);
 
+/// Chiffre le bloc n° [index] d'un fichier AGB1 — [dernier] pour le dernier.
+///
+/// Le seul morceau du format exposé hors de ce fichier : `e2ee_media_fichier.dart`
+/// chiffre de fichier à fichier, bloc par bloc, et doit produire EXACTEMENT les
+/// octets de [chiffrerFichier]. Il passe donc par le même nonce et le même GCM,
+/// pas par une copie.
+Uint8List chiffrerBlocAgb1(Uint8List cle, int index, bool dernier, Uint8List bloc) =>
+    _gcm(true, cle, _nonce(index, dernier), bloc);
+
 Uint8List? _b64(String s) {
   try {
     return base64Decode(s);
