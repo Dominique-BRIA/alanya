@@ -8,6 +8,7 @@ import '../../../core/plafond_media.dart';
 import '../../../core/galerie.dart';
 import '../../../theme/alanya_theme.dart';
 import 'apercu_selection_screen.dart';
+import '../../../widgets/media/avancement_compression.dart';
 import '../../../widgets/media/media_picker_sheet.dart';
 import '../../../l10n/app_localizations.dart';
 
@@ -79,6 +80,10 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
   bool _chargementPage = false;
   bool _permissionRefusee = false;
   bool _preparation = false;
+  /// Avancement de la vidéo en cours de compression (0 à 1), `null` sinon.
+  double? _avancement;
+  int _videoRang = 0;
+  int _videosTotal = 0;
 
   /// L'accès est PARTIEL (Android 14+, « Sélectionner des photos »).
   ///
@@ -235,7 +240,11 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
   /// rend la main à la discussion — qui enchaîne sur l'écran de légende.
   Future<void> _valide() async {
     if (_choisis.isEmpty || _preparation) return;
-    setState(() => _preparation = true);
+    setState(() {
+      _preparation = true;
+      _videosTotal = _choisis.where((a) => a.type == AssetType.video).length;
+      _videoRang = 0;
+    });
     final resultats = <MediaPickResult>[];
     final tropGros = <String>[];
     for (final asset in _choisis) {
@@ -255,13 +264,24 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
          * moindre incertitude. Les vidéos passent par `compression_video.dart`
          * depuis le 06/10/2026 — elles partaient entières.
          */
+        final video = asset.type == AssetType.video;
+        if (video && mounted) {
+          setState(() {
+            _videoRang++;
+            _avancement = 0;
+          });
+        }
         final compresse = await compresserPourEnvoi(
           asset: asset,
           octets: octets,
           nomFichier: asset.title ?? 'media_${asset.id}',
           mimeType: _mime(asset),
           chemin: fichier?.path,
+          onProgression: (p) {
+            if (mounted) setState(() => _avancement = p);
+          },
         );
+        if (video && mounted) setState(() => _avancement = null);
         /*
          * ⚠️ LE PLAFOND SE MESURE APRÈS COMPRESSION, jamais avant.
          *
@@ -768,7 +788,13 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12)),
             ),
-            child: _preparation
+            child: _preparation && _avancement != null
+                ? AvancementCompression(
+                    avancement: _avancement!,
+                    rang: _videoRang,
+                    total: _videosTotal,
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700))
+                : _preparation
                 ? const SizedBox(
                     width: 16,
                     height: 16,

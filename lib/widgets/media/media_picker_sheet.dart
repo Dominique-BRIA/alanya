@@ -4,6 +4,7 @@ import 'package:photo_manager/photo_manager.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../core/compression_envoi.dart';
+import 'avancement_compression.dart';
 import '../../core/compression_image.dart';
 import '../../core/galerie.dart';
 import '../../core/plafond_media.dart';
@@ -120,6 +121,10 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
   bool _loadingGallery = true;
   bool _permissionDenied = false;
   bool _preparation = false;
+  /// Avancement de la vidéo en cours de compression (0 à 1), `null` sinon.
+  double? _avancement;
+  int _videoRang = 0;
+  int _videosTotal = 0;
   final Set<String> _selectedIds = {};
 
   @override
@@ -193,6 +198,10 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
   Future<void> _prepareSelection() async {
     final results = <MediaPickResult>[];
     final tropGros = <String>[];
+    _videosTotal = _recentMedia
+        .where((a) => _selectedIds.contains(a.id) && a.type == AssetType.video)
+        .length;
+    _videoRang = 0;
     for (final asset in _recentMedia) {
       if (!_selectedIds.contains(asset.id)) continue;
       final bytes = await asset.originBytes;
@@ -202,13 +211,24 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
       final chemin = (await asset.file)?.path;
 
       // Photo comme vidéo — voir `core/compression_envoi.dart`.
+      final video = asset.type == AssetType.video;
+      if (video && mounted) {
+        setState(() {
+          _videoRang++;
+          _avancement = 0;
+        });
+      }
       final compresse = await compresserPourEnvoi(
         asset: asset,
         octets: bytes,
         nomFichier: name,
         mimeType: mime,
         chemin: chemin,
+        onProgression: (p) {
+          if (mounted) setState(() => _avancement = p);
+        },
       );
+      if (video && mounted) setState(() => _avancement = null);
 
       /* ⚠️ LE PLAFOND SE MESURE APRÈS COMPRESSION, jamais avant : une photo de
        * 12 Mo sortie du capteur en fait 400 Ko une fois réduite, et la refuser
@@ -526,7 +546,18 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
                         color: AlanyaColors.terracotta,
                         borderRadius: BorderRadius.circular(16),
                       ),
-                      child: _preparation
+                      child: _preparation && _avancement != null
+                          ? AvancementCompression(
+                              avancement: _avancement!,
+                              rang: _videoRang,
+                              total: _videosTotal,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            )
+                          : _preparation
                           ? const SizedBox(
                               width: 14,
                               height: 14,

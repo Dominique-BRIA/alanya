@@ -15,6 +15,7 @@ library;
 import 'dart:typed_data';
 
 import 'package:photo_manager/photo_manager.dart';
+import 'package:video_compress/video_compress.dart';
 
 import 'compression_image.dart';
 import 'compression_video.dart';
@@ -24,6 +25,10 @@ import 'compression_video.dart';
 /// [chemin] est indispensable à une vidéo : le transcodage lit un fichier,
 /// jamais des octets en mémoire. Sans lui, elle part intacte.
 ///
+/// [onProgression] reçoit l'avancement d'une compression VIDÉO, de 0 à 1 —
+/// pour l'afficher (« Compression… 42 % »), comme le web. Une photo se
+/// compresse en un instant et n'en donne pas.
+///
 /// Ne lève jamais : un envoi ne doit pas échouer parce qu'une optimisation a
 /// échoué.
 Future<ResultatCompression> compresserPourEnvoi({
@@ -32,6 +37,7 @@ Future<ResultatCompression> compresserPourEnvoi({
   required String nomFichier,
   required String mimeType,
   String? chemin,
+  void Function(double avancement)? onProgression,
 }) async {
   final intact = ResultatCompression(
     octets: octets,
@@ -43,12 +49,24 @@ Future<ResultatCompression> compresserPourEnvoi({
   );
   try {
     if (mimeType.toLowerCase().startsWith("video/")) {
-      final v = await compresserVideo(
-        octets,
-        chemin: chemin,
-        nomFichier: nomFichier,
-        mimeType: mimeType,
-      );
+      // Le module natif annonce son avancement de 0 à 100 ; les statuts s'en
+      // servent déjà pour leur barre (`publication_statuts.dart`).
+      final abonnement = onProgression == null
+          ? null
+          : VideoCompress.compressProgress$.subscribe((p) {
+              onProgression((p / 100).clamp(0.0, 1.0).toDouble());
+            });
+      final ResultatCompressionVideo v;
+      try {
+        v = await compresserVideo(
+          octets,
+          chemin: chemin,
+          nomFichier: nomFichier,
+          mimeType: mimeType,
+        );
+      } finally {
+        abonnement?.unsubscribe();
+      }
       return ResultatCompression(
         octets: v.octets,
         nomFichier: v.nomFichier,
