@@ -95,8 +95,42 @@ class EnvoiMediaChiffre {
       vueUnique: vueUnique,
     );
 
-    // 5. Ma copie. On ne s'envoie pas d'enveloppe à soi-même : ce cache et
-    // l'archive sont les seuls endroits où MA copie de la clé existe.
+    // 5. Ma copie.
+    return rangerMaCopie(
+      pile: pile,
+      convId: convId,
+      moi: moi,
+      id: id,
+      d: d,
+      legende: legende,
+      replyToId: replyToId,
+      vueUnique: vueUnique,
+      octets: octets,
+    );
+  }
+
+  /// MA COPIE d'un média chiffré que je viens d'envoyer : cache local,
+  /// archive, clair du fichier — sauf pour une vue unique, qui ne doit rien
+  /// laisser derrière elle. Rend le message tel que le fil l'affiche.
+  ///
+  /// Partagée par l'envoi d'un seul bloc ([envoyer]) et l'envoi en morceaux
+  /// (`envoi_morceaux_chiffre.dart`) : on ne s'envoie pas d'enveloppe à
+  /// soi-même, ce cache et l'archive sont les seuls endroits où MA copie de la
+  /// clé existe — les deux chemins doivent la ranger à l'identique.
+  static Future<Message> rangerMaCopie({
+    required PileE2ee pile,
+    required String convId,
+    required String moi,
+    required String id,
+    required DescripteurMedia d,
+    required String legende,
+    String? replyToId,
+    bool vueUnique = false,
+    /// Le clair, pour le garder en cache. Nul quand il y est déjà : renvoi par
+    /// le chemin ordinaire d'un média dont la publication différée a été
+    /// refusée — même descripteur, même clé de cache.
+    Uint8List? octets,
+  }) async {
     final quand = DateTime.now();
     await MessageCache.rangeTexteDechiffre(
       id: id,
@@ -118,7 +152,9 @@ class EnvoiMediaChiffre {
         if (replyToId != null) 'reponseA': replyToId,
       },
     ]);
-    if (!vueUnique) await OuvertureMediaChiffre.garderClair(d, octets);
+    if (!vueUnique && octets != null) {
+      await OuvertureMediaChiffre.garderClair(d, octets);
+    }
 
     return Message(
       id: id,

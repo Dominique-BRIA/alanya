@@ -9,6 +9,7 @@ import '../../../services/e2ee/e2ee_media_envoi.dart';
 import '../../../widgets/e2ee/e2ee_widgets.dart';
 import '../frontiere_chiffrement.dart';
 import '../envois_chiffres_fil.dart';
+import '../envoi_morceaux/envoi_morceaux_chiffre.dart';
 import '../fusion_releve.dart';
 import '../statut_envoi.dart';
 import 'dart:convert' show base64Decode;
@@ -3912,7 +3913,63 @@ class _ChatScreenState extends State<ChatScreen>
       _rebuildCombined();
     });
     _scrollToBottom();
+    /*
+     * 🔴 EN MORCEAUX D'ABORD (cours, chapitre 44) : le fichier part par
+     * tranches confiées à Android, qui continue application fermée, et le
+     * serveur publie le message au dernier morceau.
+     *
+     * ⚠️ ON N'ATTEND QUE LA PRÉPARATION. Elle fait avancer le chiffrement et
+     * doit garder l'ordre des fichiers ; l'envoi des octets, lui, se suit à
+     * côté (`_suivreEnvoiMorceaux`) — sans quoi le deuxième fichier
+     * attendrait que le premier soit entièrement arrivé.
+     */
+    var confie = false;
     try {
+      EnvoiMorceauxSuivi? enMorceaux;
+      if (SuiviEnvoisMorceaux.instance.pret) {
+        try {
+          enMorceaux = await SuiviEnvoisMorceaux.instance.lancer(
+            fil: pile.fil,
+            convId: widget.convId,
+            pairId: pair,
+            fichier: fichier,
+            legende: legende,
+            replyToId: replyToId,
+            vueUnique: vueUnique,
+            rangerMaCopie: (id, d) => EnvoiMediaChiffre.rangerMaCopie(
+              pile: pile,
+              convId: widget.convId,
+              moi: moi,
+              id: id,
+              d: d,
+              legende: legende,
+              replyToId: replyToId,
+              vueUnique: vueUnique,
+              octets: fichier.bytes,
+            ),
+          );
+        } on ApiException catch (e) {
+          // Un serveur qui ne connaît pas encore l'envoi en morceaux : on
+          // retombe sur l'envoi d'un seul bloc, qui marchait avant.
+          if (e.statusCode != 404) rethrow;
+        }
+      }
+      if (enMorceaux != null) {
+        confie = true;
+        unawaited(_suivreEnvoiMorceaux(
+          enMorceaux,
+          tempId,
+          suivi.progression,
+          pile: pile,
+          pair: pair,
+          moi: moi,
+          legende: legende,
+          replyToId: replyToId,
+          vueUnique: vueUnique,
+          erreur: erreur,
+        ));
+        return;
+      }
       final envoye = await EnvoiMediaChiffre.envoyer(
         pile: pile,
         medias: medias,
@@ -3940,6 +3997,74 @@ class _ChatScreenState extends State<ChatScreen>
       });
       showAppSnackBar("$erreur : $e");
     } finally {
+      // Confié en morceaux : c'est le suivi qui libérera la bulle.
+      if (!confie) _envoisChiffres.remove(tempId)?.progression.dispose();
+    }
+  }
+
+  /// Suit un envoi en morceaux jusqu'à sa publication, et remplace la bulle
+  /// d'attente par le message.
+  ///
+  /// ⚠️ L'ÉCRAN PEUT ÊTRE FERMÉ ENTRE-TEMPS : rien ne s'arrête pour autant
+  /// (Android envoie, le serveur publie) ; on cesse seulement d'afficher.
+  Future<void> _suivreEnvoiMorceaux(
+    EnvoiMorceauxSuivi envoi,
+    String tempId,
+    ValueNotifier<double> progression, {
+    required PileE2ee pile,
+    required String? pair,
+    required String moi,
+    required String legende,
+    String? replyToId,
+    required bool vueUnique,
+    required String erreur,
+  }) async {
+    void relayer() => progression.value = envoi.progression.value;
+    envoi.progression.addListener(relayer);
+    try {
+      final etat = await envoi.fin;
+      var envoye = envoi.message!;
+      if (!etat.publie) {
+        /*
+         * La publication différée a été REFUSÉE (clé de groupe changée pendant
+         * l'envoi, par exemple) : le fichier, lui, est arrivé. On renvoie le
+         * message par le chemin ordinaire, avec le MÊME média — rien à
+         * retéléverser. Un blocage, lui, sera refusé là aussi, et dit.
+         */
+        final d = envoye.mediaChiffre!;
+        final id = await pile.fil.envoyerMedia(
+          convId: widget.convId,
+          pairId: pair,
+          media: d,
+          legende: legende,
+          replyToId: replyToId,
+          vueUnique: vueUnique,
+        );
+        envoye = await EnvoiMediaChiffre.rangerMaCopie(
+          pile: pile,
+          convId: widget.convId,
+          moi: moi,
+          id: id,
+          d: d,
+          legende: legende,
+          replyToId: replyToId,
+          vueUnique: vueUnique,
+        );
+      }
+      if (!mounted) return;
+      setState(() {
+        _messages = remplacerEnvoiChiffre(_messages, tempId, envoye);
+        _rebuildCombined();
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _messages = _messages.where((m) => m.id != tempId).toList();
+        _rebuildCombined();
+      });
+      showAppSnackBar("$erreur : $e");
+    } finally {
+      envoi.progression.removeListener(relayer);
       _envoisChiffres.remove(tempId)?.progression.dispose();
     }
   }

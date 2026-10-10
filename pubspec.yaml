@@ -32,6 +32,10 @@ dependencies:
   flutter_svg: ^2.0.10
   # Réseau / API
   http: ^1.2.2
+  # Envoi des fichiers en MORCEAUX, application fermée (WorkManager / tâche
+  # de transfert lancée par l'utilisateur sur Android 14+). ÉPINGLÉ : la 9.6.x
+  # exige Flutter >= 3.47, les CI sont figées en 3.44.6.
+  background_downloader: 9.5.9
   http_parser: ^4.0.2
   # Stockage sécurisé des tokens JWT
   # v10 : corrige le build natif Linux (json.hpp) avec les clang récents.

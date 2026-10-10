@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'services/e2ee/e2ee_fournisseur.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:path_provider/path_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:media_store_plus/media_store_plus.dart';
@@ -58,6 +59,10 @@ import 'features/meetings/meetings_repository.dart';
 import 'features/status/status_repository.dart';
 import 'core/liens_entrants.dart';
 import 'core/partage_entrant.dart';
+import 'core/server_config.dart';
+import 'features/chat/envoi_morceaux/envoi_morceaux_api.dart';
+import 'features/chat/envoi_morceaux/envoi_morceaux_chiffre.dart';
+import 'features/chat/envoi_morceaux/transport_morceaux.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -81,6 +86,31 @@ void main() async {
   final realtime = RealtimeClient(storage);
 
   await PushService.instance.tryInitialize(api: api, storage: storage);
+
+  /*
+   * L'ENVOI DES FICHIERS EN MORCEAUX (cours, chapitre 44). Les morceaux sont
+   * confiés à Android, qui les envoie application fermée ; au démarrage, on
+   * relit ceux restés sur le disque — terminés, on nettoie ; en cours, on
+   * redonne à Android ce qu'il n'a plus.
+   *
+   * ⚠️ SANS ATTENDRE : la reprise parle au réseau, et le premier écran ne doit
+   * pas l'attendre. Un échec ici laisse simplement l'envoi d'un seul bloc.
+   */
+  if (!kIsWeb) {
+    try {
+      final documents = await getApplicationDocumentsDirectory();
+      final transport = TransportArrierePlan(ServerConfig.apiBase);
+      SuiviEnvoisMorceaux.instance.brancher(
+        api: EnvoiMorceauxApi(authedApi),
+        transport: transport,
+        racineDocuments: documents.path,
+      );
+      unawaited(transport
+          .demarrer()
+          .then((_) => SuiviEnvoisMorceaux.instance.reprendre())
+          .catchError((_) {}));
+    } catch (_) {}
+  }
   // Les transferts s'annoncent dans les notifications. Le lien se fait ICI et
   // non dans le magasin : lui ne doit connaître ni l'écran ni le système, c'est
   // ce qui lui permet de servir aussi bien un envoi qu'un modèle de langue.

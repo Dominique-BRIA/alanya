@@ -436,6 +436,57 @@ class E2eeFil {
     return messageId;
   }
 
+  /// Prépare un média chiffré pour la PUBLICATION DIFFÉRÉE d'un envoi en
+  /// morceaux (cours, chapitres 42 et 44) — RIEN n'est envoyé ici.
+  ///
+  /// Rend le corps de `POST /api/media/envois/:id/publication` : le serveur
+  /// publiera ce message, sans pouvoir le lire, quand le dernier morceau du
+  /// fichier sera arrivé — application fermée depuis, au besoin.
+  ///
+  /// 🔴 L'IDENTIFIANT DU MESSAGE EST TIRÉ ICI, et non obtenu du serveur comme
+  /// dans [envoyerMedia] : la charge v2 le scelle, et la ligne n'existera
+  /// qu'à la fin de l'envoi. Même règle qu'en groupe (chapitre 32).
+  ///
+  /// ⚠️ LE CHIFFREMENT A LIEU MAINTENANT, AU PREMIER PLAN. Le cliquet Signal
+  /// avance ici ; rien de cryptographique ne se passe plus après. Ne jamais
+  /// appeler ceci depuis une tâche de fond : deux exemplaires du code qui
+  /// chiffrent sur la même session la désynchroniseraient.
+  Future<Map<String, dynamic>> preparerMedia({
+    required String convId,
+    /// `null` pour un GROUPE.
+    required String? pairId,
+    required DescripteurMedia media,
+    String legende = '',
+    String? replyToId,
+    bool vueUnique = false,
+  }) async {
+    final type = typeMessagePour(media);
+    final commun = <String, dynamic>{
+      'convId': convId,
+      'type': type,
+      if (replyToId != null) 'replyToId': replyToId,
+      if (vueUnique) 'vueUnique': true,
+    };
+    if (pairId == null) {
+      final p = await groupe.preparer(
+          convId: convId, texte: legende, type: type, replyToId: replyToId, media: media);
+      return {...commun, 'messageId': p.id, 'groupe': p.groupe};
+    }
+    final appareils = await _service.ouvrirSessions(pairId);
+    if (appareils.isEmpty) {
+      throw const E2eeImpossible('Aucun appareil chiffré chez ce correspondant.');
+    }
+    final messageId = uuidV4();
+    final enveloppes = await _enveloppesPour(
+        pairId, appareils, ecrireCharge(messageId, legende, media, replyToId));
+    return {
+      ...commun,
+      'messageId': messageId,
+      'deviceId': await _monDeviceId(),
+      'enveloppes': enveloppes,
+    };
+  }
+
   /* ══════════════ RECEVOIR ══════════════ */
 
   /// Relève les enveloppes en attente et les déchiffre.

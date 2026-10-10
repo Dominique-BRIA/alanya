@@ -701,10 +701,13 @@ class EnvoiChiffreEnCours extends StatelessWidget {
                           valueColor:
                               const AlwaysStoppedAnimation(Colors.white),
                         ),
+                        // « 18 % », arrondi VERS LE BAS (demande du user,
+                        // 10/10/2026) : `round` affichait 100 alors que le
+                        // serveur n'avait pas encore confirmé l'arrivée.
                         if (valeur > 0.01)
-                          Text('${(valeur * 100).round()}',
+                          Text('${(valeur * 100).floor()} %',
                               style: const TextStyle(
-                                  fontSize: 11,
+                                  fontSize: 10,
                                   color: Colors.white,
                                   fontWeight: FontWeight.w600)),
                       ]),

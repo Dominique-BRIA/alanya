@@ -358,6 +358,41 @@ class GroupeChiffre {
     DescripteurMedia? media,
     bool vueUnique = false,
   }) async {
+    final p = await preparer(
+        convId: convId, texte: texte, type: type, replyToId: replyToId, media: media);
+    try {
+      final r = await _api('POST', '/api/conversations/$convId/messages', {
+        'id': p.id,
+        'type': type,
+        'chiffre': true,
+        if (media != null) 'mediaIds': [media.id],
+        if (replyToId != null) 'replyToId': replyToId,
+        if (vueUnique) 'vueUnique': true,
+        'groupe': p.groupe,
+      });
+      return r['id'] as String;
+    } on ApiException catch (e) {
+      if (e.code == 'VERSION_PERIMEE') throw const CleGroupeAbsente();
+      rethrow;
+    }
+  }
+
+  /// Le message de groupe PRÊT À PARTIR, sans l'envoyer : identifiant tiré,
+  /// charge chiffrée avec la clé COURANTE et signée.
+  ///
+  /// Séparé de [envoyer] pour la PUBLICATION DIFFÉRÉE d'un envoi en morceaux
+  /// (cours, chapitre 44) : le serveur publiera ce chiffré quand le fichier
+  /// aura fini d'arriver. Une seule fabrication pour les deux chemins.
+  ///
+  /// ⚠️ LA VERSION EST CELLE D'AUJOURD'HUI. Si la clé change pendant l'envoi
+  /// du fichier, le serveur refusera à la publication (`refus:VERSION_PERIMEE`).
+  Future<({String id, Map<String, dynamic> groupe})> preparer({
+    required String convId,
+    required String texte,
+    String type = 'TEXT',
+    String? replyToId,
+    DescripteurMedia? media,
+  }) async {
     final versions = await trousseauAvecRepli(convId);
     if (versions.isEmpty) throw const CleGroupeAbsente();
     final courante = versions.last;
@@ -374,21 +409,7 @@ class GroupeChiffre {
           convId: convId, messageId: id, version: courante.n, expediteurId: moi, deviceId: appareil),
       (await _maPaire()).priv,
     );
-    try {
-      final r = await _api('POST', '/api/conversations/$convId/messages', {
-        'id': id,
-        'type': type,
-        'chiffre': true,
-        if (media != null) 'mediaIds': [media.id],
-        if (replyToId != null) 'replyToId': replyToId,
-        if (vueUnique) 'vueUnique': true,
-        'groupe': {'version': courante.n, 'appareil': appareil, 'corps': corps},
-      });
-      return r['id'] as String;
-    } on ApiException catch (e) {
-      if (e.code == 'VERSION_PERIMEE') throw const CleGroupeAbsente();
-      rethrow;
-    }
+    return (id: id, groupe: {'version': courante.n, 'appareil': appareil, 'corps': corps});
   }
 
   /// Modifie un message : un NOUVEAU chiffré remplace l'ancien, avec la
