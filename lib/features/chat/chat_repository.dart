@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import '../../core/authed_api.dart';
+import '../../core/device_registry.dart';
 import '../../core/message_cache.dart';
 import '../../models/conversation.dart';
 import '../../models/message.dart';
@@ -308,7 +309,29 @@ class ChatRepository {
   ///
   /// Lève [ApiException] : 403 EXPEDITEUR, 410 DEJA_OUVERTE ou EFFACEE.
   Future<ResultatOuvertureVueUnique> ouvrirVueUnique(String messageId) async {
-    final data = await _api.post("/api/messages/$messageId/vue-unique", {});
+    /*
+     * 🔴 UNE VUE, UN APPAREIL (demande du user, 12/10/2026 : « si je l'ouvre
+     * déjà avec mon compte sur un appareil, en allant sur l'autre appareil, on
+     * ne doit pas pouvoir l'ouvrir »).
+     *
+     * Le serveur garantissait déjà UNE ouverture par COMPTE. Mais sa fenêtre de
+     * reprise de cinq minutes — qui évite de perdre la photo quand le réseau
+     * coupe en plein téléchargement — ne regardait pas QUI reprenait. En lui
+     * disant quel appareil demande, la reprise est réservée à celui qui a
+     * ouvert, et le second appareil est refusé.
+     *
+     * ⚠️ UN ÉCHEC DE LECTURE N'EMPÊCHE PAS D'OUVRIR : sans identifiant, le
+     * serveur retombe sur son ancien comportement. Perdre la photo de quelqu'un
+     * parce qu'une préférence locale est illisible serait pire.
+     */
+    String? appareil;
+    try {
+      appareil = await DeviceRegistry.instance.deviceId();
+    } catch (_) {}
+    final data = await _api.post(
+      "/api/messages/$messageId/vue-unique",
+      appareil == null ? {} : {"appareil": appareil},
+    );
     return ResultatOuvertureVueUnique(
       media: ((data["media"] as List?) ?? const [])
           .whereType<Map<String, dynamic>>()

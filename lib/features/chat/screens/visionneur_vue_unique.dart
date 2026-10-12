@@ -5,6 +5,8 @@ import 'dart:typed_data';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+
+import '../../../core/device_registry.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
 
@@ -89,11 +91,29 @@ class _VisionneurVueUniqueState extends State<VisionneurVueUnique> {
     unawaited(_ouvrir());
   }
 
-  String _adresse(MessageMedia m) =>
-      '${widget.baseUrl}${m.url}${widget.token != null ? '?token=${widget.token}' : ''}';
+  /// L'appareil qui a ouvert, retenu le temps du visionnage.
+  ///
+  /// 🔴 IL ACCOMPAGNE CHAQUE LECTURE DU FICHIER. Sans lui, la route des médias
+  /// ne connaîtrait que le COMPTE et servirait encore le fichier à un autre
+  /// appareil pendant la fenêtre — alors que l'adresse et la clé voyagent dans
+  /// le message, donc qu'il les a déjà. « Vue unique » n'aurait plus de sens.
+  String? _appareil;
+
+  String _adresse(MessageMedia m) {
+    final p = <String>[
+      if (widget.token != null) 'token=${widget.token}',
+      if (_appareil != null) 'appareil=${Uri.encodeComponent(_appareil!)}',
+    ];
+    return '${widget.baseUrl}${m.url}${p.isEmpty ? '' : '?${p.join('&')}'}';
+  }
 
   Future<void> _ouvrir() async {
     try {
+      // Le même identifiant que celui envoyé à l'ouverture : c'est lui que le
+      // serveur a retenu, et il n'en acceptera pas d'autre.
+      try {
+        _appareil = await DeviceRegistry.instance.deviceId();
+      } catch (_) {}
       final r = await widget.chat.ouvrirVueUnique(widget.message.id);
       if (!mounted) return;
       if (r.media.isEmpty) throw ApiException(410, 'EFFACEE', 'EFFACEE');
