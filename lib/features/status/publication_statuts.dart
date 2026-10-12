@@ -3,7 +3,6 @@ import 'dart:io' show SocketException;
 import 'dart:typed_data';
 
 import 'package:http/http.dart' show ClientException;
-import 'package:video_compress/video_compress.dart';
 
 import '../../core/api_client.dart';
 import '../../core/centre_transferts.dart';
@@ -41,8 +40,9 @@ class PublicationStatuts {
 
   /// La file : les publications s'enchaînent, jamais en parallèle.
   ///
-  /// ⚠️ CE N'EST PAS UN CONFORT. `video_compress` refuse un second transcodage
-  /// pendant le premier (il lève un `StateError`), et deux téléversements
+  /// ⚠️ CE N'EST PAS UN CONFORT. Le transcodeur refuse un second transcodage
+  /// pendant le premier (`CompresseurVideo.occupe()` — et les encodeurs
+  /// matériels sont de toute façon en nombre limité), et deux téléversements
   /// simultanés sur un réseau mobile se ralentissent l'un l'autre. Une file
   /// rend aussi l'ordre d'arrivée des statuts prévisible.
   Future<void> _file = Future.value();
@@ -214,22 +214,16 @@ class PublicationStatuts {
         // Le transcodage occupe la première moitié de la barre, l'envoi la
         // seconde : une seule progression pour l'utilisateur, qui ne sait pas
         // — et n'a pas à savoir — qu'il y a deux étapes.
-        final abonnement = VideoCompress.compressProgress$.subscribe((p) {
-          centre.avancer(id, (p / 100) * 0.5);
-        });
-        try {
-          final v = await compresserVideo(
-            m.octets,
-            chemin: m.chemin,
-            nomFichier: m.nomFichier,
-            mimeType: m.mimeType,
-          );
-          octets = v.octets;
-          nom = v.nomFichier;
-          mime = v.mimeType;
-        } finally {
-          abonnement.unsubscribe();
-        }
+        final v = await compresserVideo(
+          m.octets,
+          chemin: m.chemin,
+          nomFichier: m.nomFichier,
+          mimeType: m.mimeType,
+          onProgression: (avancement) => centre.avancer(id, avancement * 0.5),
+        );
+        octets = v.octets;
+        nom = v.nomFichier;
+        mime = v.mimeType;
       }
 
       await _televerserEtDeclarer(

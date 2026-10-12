@@ -4346,6 +4346,11 @@ class _ChatScreenState extends State<ChatScreen>
           fileName: pret.nomFichier,
           mimeType: pret.mimeType,
           path: chemin,
+          // Comme les trois autres sélecteurs : l'écran de légende annonce le
+          // gain et laisse revenir à l'original. Un fichier partagé depuis une
+          // autre application n'avait droit ni à l'un ni à l'autre.
+          compresse: pret.compresse,
+          tailleOriginale: pret.compresse ? pret.tailleAvant : null,
         ));
       } catch (_) {}
     }

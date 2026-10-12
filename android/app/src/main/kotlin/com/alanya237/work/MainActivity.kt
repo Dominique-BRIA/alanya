@@ -34,6 +34,7 @@ class MainActivity : FlutterActivity() {
         const val CANAL = "alanya/ecran_verrouille"
         const val CANAL_ENREGISTREMENT = "alanya/enregistrement"
         const val CANAL_ECRAN_PROTEGE = "alanya/ecran_protege"
+        const val CANAL_COMPRESSION_VIDEO = "alanya/compression_video"
         const val TAG_PROX = "AlanyaProximite"
     }
 
@@ -240,6 +241,55 @@ class MainActivity : FlutterActivity() {
                     else -> resultat.notImplemented()
                 }
             }
+
+        /*
+         * COMPRESSION VIDÉO AVEC UN DÉBIT IMPOSÉ — alignement sur le web.
+         *
+         * Le POURQUOI est dans `CompresseurVideo` : le greffon `video_compress`
+         * ne sait pas transmettre de débit, et le moteur en choisissait donc un
+         * deux fois trop élevé. Ici on ne fait que passer les consignes déjà
+         * calculées par Dart et renvoyer l'avancement.
+         *
+         * ⚠️ RIEN N'EST DÉCIDÉ ICI. Les dimensions et le débit arrivent tout
+         * faits : la règle est celle du web, et elle vit en un seul endroit
+         * (`core/compression_video.dart`).
+         */
+        val canalCompression =
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CANAL_COMPRESSION_VIDEO)
+        canalCompression.setMethodCallHandler { appel, resultat ->
+            when (appel.method) {
+                "compresser" -> {
+                    val chemin = appel.argument<String>("chemin") ?: ""
+                    val bordCourt = appel.argument<Int>("bordCourt") ?: 0
+                    val bordLong = appel.argument<Int>("bordLong") ?: 0
+                    val debit = (appel.argument<Int>("debit") ?: 0).toLong()
+                    if (chemin.isEmpty() || bordCourt <= 0 || bordLong <= 0 || debit <= 0) {
+                        resultat.success(null)
+                    } else {
+                        var dernierPourcent = -1
+                        CompresseurVideo.compresser(
+                            contexte = applicationContext,
+                            chemin = chemin,
+                            bordCourt = bordCourt,
+                            bordLong = bordLong,
+                            debit = debit,
+                            // Un `invokeMethod` par pour cent, pas par image :
+                            // Dart n'affiche que des entiers, et le canal n'a
+                            // pas à porter cent fois la même valeur.
+                            surProgression = { avancement ->
+                                val pourcent = (avancement * 100).toInt()
+                                if (pourcent != dernierPourcent) {
+                                    dernierPourcent = pourcent
+                                    canalCompression.invokeMethod("progression", avancement)
+                                }
+                            },
+                            surFin = { produit -> resultat.success(produit) },
+                        )
+                    }
+                }
+                else -> resultat.notImplemented()
+            }
+        }
     }
 
     /** Verrou de proximité, tenu pendant un appel audio à l'écouteur. */

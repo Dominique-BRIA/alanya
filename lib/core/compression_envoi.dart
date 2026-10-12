@@ -15,7 +15,6 @@ library;
 import 'dart:typed_data';
 
 import 'package:photo_manager/photo_manager.dart';
-import 'package:video_compress/video_compress.dart';
 
 import 'compression_image.dart';
 import 'compression_video.dart';
@@ -49,24 +48,19 @@ Future<ResultatCompression> compresserPourEnvoi({
   );
   try {
     if (mimeType.toLowerCase().startsWith("video/")) {
-      // Le module natif annonce son avancement de 0 à 100 ; les statuts s'en
-      // servent déjà pour leur barre (`publication_statuts.dart`).
-      final abonnement = onProgression == null
-          ? null
-          : VideoCompress.compressProgress$.subscribe((p) {
-              onProgression((p / 100).clamp(0.0, 1.0).toDouble());
-            });
-      final ResultatCompressionVideo v;
-      try {
-        v = await compresserVideo(
-          octets,
-          chemin: chemin,
-          nomFichier: nomFichier,
-          mimeType: mimeType,
-        );
-      } finally {
-        abonnement?.unsubscribe();
-      }
+      /*
+       * ⚠️ L'AVANCEMENT VIENT DU TRANSCODAGE LUI-MÊME, plus du flux global de
+       * `video_compress`. Il n'est donc émis QUE si un transcodage a vraiment
+       * lieu : une vidéo déjà légère n'affiche plus « Compression… » pour ne
+       * rien faire ensuite (défaut signalé par le user le 12/10/2026).
+       */
+      final v = await compresserVideo(
+        octets,
+        chemin: chemin,
+        nomFichier: nomFichier,
+        mimeType: mimeType,
+        onProgression: onProgression,
+      );
       return ResultatCompression(
         octets: v.octets,
         nomFichier: v.nomFichier,

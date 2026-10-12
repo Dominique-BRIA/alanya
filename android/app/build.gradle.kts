@@ -129,4 +129,20 @@ dependencies {
     // visibles sans rien ajouter : ce sont ses classes propres, pas une
     // dépendance transitive.
     implementation("io.github.webrtc-sdk:android:125.6422.03")
+
+    // ⚠️ MÊME ARTEFACT ET MÊME VERSION que celui de `video_compress`
+    // (son android/build.gradle : com.otaliastudios:transcoder:0.10.5).
+    //
+    // POURQUOI LE REDÉCLARER — exactement la raison de la ligne ci-dessus.
+    // `CompresseurVideo.kt` transcode les vidéos avec un débit IMPOSÉ, que
+    // l'API Dart de `video_compress` ne sait pas transmettre : sans débit, le
+    // moteur en choisissait un deux fois plus élevé que celui du web. Le
+    // greffon déclare le transcodeur en `implementation` : ses classes
+    // `com.otaliastudios.transcoder.*` ne sont donc PAS visibles depuis ce
+    // module, et le code ne compilerait pas.
+    //
+    // ⚠️ LA VERSION DOIT RESTER CELLE DU GREFFON. Deux versions différentes du
+    // même transcodeur, et Gradle en choisit une — celle que l'autre n'attend
+    // pas. À revérifier à chaque montée de `video_compress`.
+    implementation("com.otaliastudios:transcoder:0.10.5")
 }
