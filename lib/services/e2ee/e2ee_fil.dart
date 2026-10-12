@@ -716,6 +716,26 @@ class E2eeFil {
     return estChiffree(convId);
   }
 
+  /// L'état COMPLET, tel que le serveur le donne — pour décider d'activer.
+  ///
+  /// 🔴 LE BOUCLIER DE L'EN-TÊTE A DISPARU (décision du user, 12/10/2026) :
+  /// c'est le client qui active, tout seul, à l'ouverture. Il lui faut donc
+  /// tout en un appel : le réglage du compte, si cette conversation est
+  /// activable, et si j'en ai le droit quand c'est un groupe.
+  Future<EtatChiffrement> etatComplet(String convId) async {
+    final r = await _api('GET', '/api/conversations/$convId/e2ee', null);
+    noteEtat(convId, r['e2eeActif'] == true);
+    return EtatChiffrement(
+      actif: estChiffree(convId),
+      // ⚠️ ABSENT D'UN SERVEUR PLUS ANCIEN : on chiffre, parce que le défaut
+      // protège. Même choix que le serveur et que le web.
+      chiffrementActif: r['chiffrementActif'] != false,
+      activable: r['activable'] == true,
+      groupe: r['groupe'] == true,
+      jePeuxActiver: r['jePeuxActiver'] == true,
+    );
+  }
+
   /* ══════════════ ACTIVER ══════════════ */
 
   /// Active le chiffrement sur une conversation.
@@ -727,6 +747,34 @@ class E2eeFil {
     await _api('POST', '/api/conversations/$convId/e2ee', null);
     noteEtat(convId, true);
   }
+}
+
+/// Ce que le serveur dit d'une conversation, pour décider de l'activer seul.
+class EtatChiffrement {
+  const EtatChiffrement({
+    required this.actif,
+    required this.chiffrementActif,
+    required this.activable,
+    required this.groupe,
+    required this.jePeuxActiver,
+  });
+
+  /// Cette conversation est DÉJÀ chiffrée.
+  final bool actif;
+
+  /// Le réglage du COMPTE : chiffrer les nouvelles conversations, ou non.
+  final bool chiffrementActif;
+
+  /// Le serveur accepterait l'activation (périmètre, clés présentes…).
+  final bool activable;
+  final bool groupe;
+
+  /// En groupe, seul un administrateur active.
+  final bool jePeuxActiver;
+
+  /// Faut-il activer maintenant, sans rien demander à personne ?
+  bool get aActiverSilencieusement =>
+      !actif && chiffrementActif && activable && (!groupe || jePeuxActiver);
 }
 
 /// Le chiffrement n'a pas pu se faire — et on ne retombe pas en clair.

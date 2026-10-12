@@ -2116,8 +2116,37 @@ class _ChatScreenState extends State<ChatScreen>
       setState(() => _filChiffre = true);
     }
     try {
-      final r = await pile.fil.etat(widget.convId);
-      if (mounted && r != _filChiffre) setState(() => _filChiffre = r);
+      final e = await pile.fil.etatComplet(widget.convId);
+      if (mounted && e.actif != _filChiffre) setState(() => _filChiffre = e.actif);
+
+      /*
+       * ══════ L'ACTIVATION SILENCIEUSE ══════
+       *
+       * 🔴 PLUS PERSONNE N'ACTIVE À LA MAIN (décision du user, 12/10/2026 :
+       * « par défaut, dans l'application, le chiffrement doit être activé »).
+       * Le chiffrement s'allume ici, tout seul, à l'ouverture de la
+       * conversation.
+       *
+       * ⚠️ TOUTES LES CONDITIONS DU SERVEUR SONT RESPECTÉES, et c'est lui qui
+       * les donne : réglage du compte, périmètre, clés présentes, et droit
+       * d'administrateur pour un groupe. On ne force rien — une conversation
+       * qui ne PEUT pas être chiffrée reste en clair.
+       *
+       * ⚠️ ET SANS UN MOT, ni en cas de succès ni en cas d'échec : l'utilisateur
+       * n'a rien demandé, il n'a donc rien à comprendre. C'est toute la
+       * différence avec un bouton, qui devait expliquer pourquoi il était grisé.
+       */
+      if (!e.aActiverSilencieusement) return;
+      try {
+        if (e.groupe) {
+          await pile.fil.groupe.activer(widget.convId);
+        } else {
+          await pile.fil.activer(widget.convId);
+        }
+        if (mounted) setState(() => _filChiffre = true);
+      } catch (_) {
+        // Pas chiffrée aujourd'hui : on réessaiera à la prochaine ouverture.
+      }
     } catch (_) {
       // Sans réponse, on n'affirme rien : pas de bannière plutôt qu'une fausse.
     }

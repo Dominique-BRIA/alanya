@@ -94,18 +94,29 @@ class AccountRepository {
   }
 
   /// Réglages de confidentialité : {readReceipts (1/0), lastSeenVisibility (0/1/2)}.
+  ///
+  /// ⚠️ `chiffrementActif` EST UN BOOLÉEN, pas un entier comme les deux autres :
+  /// il est rangé ici sous `1`/`0` pour que la carte reste homogène, et
+  /// retraduit en booléen à l'envoi.
   Future<Map<String, int>> getPrivacy() async {
     final data = await _api.get("/api/account/privacy");
     return {
       "readReceipts": (data["readReceipts"] as num?)?.toInt() ?? 1,
       "lastSeenVisibility": (data["lastSeenVisibility"] as num?)?.toInt() ?? 2,
+      // ⚠️ ABSENT D'UN SERVEUR PLUS ANCIEN : chiffré. Le défaut protège.
+      "chiffrementActif": data["chiffrementActif"] == false ? 0 : 1,
     };
   }
 
-  Future<void> setPrivacy({int? readReceipts, int? lastSeenVisibility}) async {
+  Future<void> setPrivacy({
+    int? readReceipts,
+    int? lastSeenVisibility,
+    bool? chiffrementActif,
+  }) async {
     final body = <String, dynamic>{};
     if (readReceipts != null) body["readReceipts"] = readReceipts;
     if (lastSeenVisibility != null) body["lastSeenVisibility"] = lastSeenVisibility;
+    if (chiffrementActif != null) body["chiffrementActif"] = chiffrementActif;
     await _api.post("/api/account/privacy", body);
   }
 
