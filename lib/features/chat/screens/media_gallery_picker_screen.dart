@@ -306,7 +306,9 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
           // compression — d'où l'intérêt de ne pas garder ses octets en
           // mémoire.
           path: fichier?.path,
+          asset: asset,
           compresse: compresse.compresse,
+          niveauSuperieurPossible: compresse.niveauSuperieurPossible,
           tailleOriginale:
               compresse.compresse ? compresse.tailleAvant : null,
         ));

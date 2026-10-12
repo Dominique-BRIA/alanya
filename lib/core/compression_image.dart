@@ -27,12 +27,38 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:photo_manager/photo_manager.dart';
 
+/// LES DEUX NIVEAUX DE QUALITÉ À L'ENVOI — copie du web (`NiveauQualite`).
+///
+/// 🔴 ILS REMPLACENT LE BOUTON « ENVOYER L'ORIGINAL » (décision du user,
+/// 12/10/2026). Envoyer l'original, c'était envoyer 5 Mo pour une photo et 30 à
+/// 200 Mo pour une vidéo : sur une connexion lente et payée au volume, cet
+/// envoi n'aboutit pas. Les deux niveaux bornent ce qui part, le haut restant
+/// bien plus près de l'original que le normal.
+enum NiveauQualite { normal, haute }
+
 /// Bord le plus long après réduction. Repère WhatsApp ; un grand téléphone
 /// affiche environ 1290 px physiques.
 const int imageBordMax = 1600;
 
+/// Bord le plus long au niveau haut. Web : `IMAGE_BORD_MAX_HAUTE`.
+///
+/// ⚠️ C'EST UN PLAFOND, PAS UNE CIBLE : on n'agrandit jamais. Une photo de
+/// 2000 px reste à 2000 px, simplement ré-encodée plus finement.
+const int imageBordMaxHaute = 2560;
+
 /// Qualité JPEG, sur 100. `0.82` côté web — même valeur, autre échelle.
 const int imageQualite = 82;
+
+/// Qualité JPEG du niveau haut. Web : `IMAGE_QUALITE_HAUTE` (0,90).
+const int imageQualiteHaute = 90;
+
+/// Le plafond du niveau demandé.
+int bordMaxPour(NiveauQualite niveau) =>
+    niveau == NiveauQualite.haute ? imageBordMaxHaute : imageBordMax;
+
+/// La qualité JPEG du niveau demandé.
+int qualitePour(NiveauQualite niveau) =>
+    niveau == NiveauQualite.haute ? imageQualiteHaute : imageQualite;
 
 /// En dessous, le gain ne vaut pas le risque de perte : on garde l'original.
 const double gainMinimum = 0.9;
@@ -66,6 +92,7 @@ class ResultatCompression {
     required this.tailleAvant,
     required this.tailleApres,
     this.raisonSaut,
+    this.niveauSuperieurPossible = false,
   });
 
   /// Les octets à envoyer — CEUX D'ORIGINE si rien n'a été fait.
@@ -76,6 +103,13 @@ class ResultatCompression {
   final int tailleAvant;
   final int tailleApres;
   final RaisonSaut? raisonSaut;
+
+  /// Le niveau haut donnerait-il vraiment mieux que le normal ?
+  ///
+  /// 🔴 SERT À NE PAS PROPOSER UN CHOIX QUI NE CHANGE RIEN. On n'agrandit
+  /// jamais : une photo de 1200 px n'a pas un pixel de plus à offrir, et un
+  /// bouton « Meilleure qualité » serait un mensonge.
+  final bool niveauSuperieurPossible;
 
   /// Ce que l'envoi a économisé, entre 0 et 1. Sert à l'annoncer à l'écran.
   double get gain =>
@@ -95,7 +129,9 @@ Future<ResultatCompression> compresserAsset(
   Uint8List original, {
   required String nomFichier,
   required String mimeType,
+  NiveauQualite niveau = NiveauQualite.normal,
 }) async {
+  final bordMax = bordMaxPour(niveau);
   ResultatCompression intact(RaisonSaut raison) => ResultatCompression(
         octets: original,
         nomFichier: nomFichier,
@@ -155,19 +191,33 @@ Future<ResultatCompression> compresserAsset(
    * reconnaît. Le PNG n'est jamais dans ce cas : il n'est pas encore passé par
    * ici, puisque ce module rend du JPEG.
    */
+  /*
+   * ⚠️ LE PLAFOND DU NIVEAU DEMANDÉ, pas celui du niveau normal : au niveau
+   * haut, une photo de 2000 px n'est plus « trop petite », elle est ré-encodée
+   * à sa taille, plus finement.
+   */
   if (!png &&
       bordLong > 0 &&
-      bordLong <= imageBordMax &&
+      bordLong <= bordMax &&
       original.length <= largeur * hauteur * octetsParPixelMax) {
-    return intact(RaisonSaut.tropPetite);
+    return ResultatCompression(
+      octets: original,
+      nomFichier: nomFichier,
+      mimeType: mimeType,
+      compresse: false,
+      tailleAvant: original.length,
+      tailleApres: original.length,
+      raisonSaut: RaisonSaut.tropPetite,
+      niveauSuperieurPossible: bordLong > imageBordMax,
+    );
   }
 
   Uint8List? reduit;
   try {
     reduit = await asset.thumbnailDataWithSize(
-      consigneVignette(largeur, hauteur),
+      consigneVignette(largeur, hauteur, bordMax: bordMax),
       format: ThumbnailFormat.jpeg,
-      quality: imageQualite,
+      quality: qualitePour(niveau),
     );
   } catch (_) {
     // HEIC exotique, fichier tronqué, mémoire insuffisante : on ne sait pas le
@@ -196,6 +246,7 @@ Future<ResultatCompression> compresserAsset(
     compresse: true,
     tailleAvant: original.length,
     tailleApres: reduit.length,
+    niveauSuperieurPossible: bordLong > imageBordMax,
   );
 }
 
@@ -214,13 +265,19 @@ Future<ResultatCompression> compresserAsset(
  * consigne.
  */
 @visibleForTesting
-ThumbnailSize consigneVignette(int largeur, int hauteur, {bool? android}) {
+ThumbnailSize consigneVignette(
+  int largeur,
+  int hauteur, {
+  bool? android,
+  int bordMax = imageBordMax,
+}) {
   final long = math.max(largeur, hauteur);
   final court = math.min(largeur, hauteur);
   if (long <= 0 || court <= 0) {
-    return const ThumbnailSize(imageBordMax, imageBordMax);
+    return ThumbnailSize(bordMax, bordMax);
   }
-  final facteur = math.min(1.0, imageBordMax / long);
+  // ⚠️ JAMAIS AGRANDIR : le facteur est plafonné à 1.
+  final facteur = math.min(1.0, bordMax / long);
   final cote = (android ?? Platform.isAndroid)
       ? math.max(1, (court * facteur).round())
       : math.max(1, (long * facteur).round());

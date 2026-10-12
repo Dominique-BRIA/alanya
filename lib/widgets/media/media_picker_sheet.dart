@@ -43,6 +43,29 @@ class MediaPickResult {
   /// depuis [path] au moment où on le demande, et pas avant.
   final int? tailleOriginale;
 
+  /// Le niveau haut (1080p / 2560 px) donnerait-il mieux que celui-ci ?
+  ///
+  /// 🔴 C'EST CE QUI DÉCIDE SI LE BOUTON PARAÎT à l'écran de légende. On
+  /// n'agrandit jamais : pour une photo de 1200 px ou une vidéo filmée en 720p,
+  /// le niveau haut rendrait EXACTEMENT le même fichier, et le proposer serait
+  /// un mensonge.
+  final bool niveauSuperieurPossible;
+
+  /// Le niveau avec lequel [bytes] a été produit.
+  final NiveauQualite niveau;
+
+  /// La référence de la galerie, quand le média en vient.
+  ///
+  /// 🔴 INDISPENSABLE POUR RECOMPRESSER UNE PHOTO À UN AUTRE NIVEAU. Flutter ne
+  /// sait pas écrire de JPEG : la réduction passe par l'encodeur NATIF, via
+  /// `thumbnailDataWithSize` de `photo_manager`, qui travaille sur cette
+  /// référence et non sur des octets. Sans elle, l'écran de légende ne pourrait
+  /// pas honorer « Meilleure qualité » — et le bouton ne paraît donc pas.
+  ///
+  /// ⚠️ C'EST UNE POIGNÉE, PAS DES PIXELS : identifiant et métadonnées. La
+  /// garder ne coûte pas la mémoire d'une image.
+  final AssetEntity? asset;
+
   const MediaPickResult({
     required this.bytes,
     required this.fileName,
@@ -51,6 +74,9 @@ class MediaPickResult {
     this.path,
     this.compresse = false,
     this.tailleOriginale,
+    this.niveauSuperieurPossible = false,
+    this.niveau = NiveauQualite.normal,
+    this.asset,
   });
 
   MediaPickResult copieAvec({
@@ -58,6 +84,9 @@ class MediaPickResult {
     String? fileName,
     String? mimeType,
     bool? compresse,
+    int? tailleOriginale,
+    bool? niveauSuperieurPossible,
+    NiveauQualite? niveau,
   }) =>
       MediaPickResult(
         bytes: bytes ?? this.bytes,
@@ -65,8 +94,12 @@ class MediaPickResult {
         mimeType: mimeType ?? this.mimeType,
         durationMs: durationMs,
         path: path,
+        asset: asset,
         compresse: compresse ?? this.compresse,
-        tailleOriginale: tailleOriginale,
+        tailleOriginale: tailleOriginale ?? this.tailleOriginale,
+        niveauSuperieurPossible:
+            niveauSuperieurPossible ?? this.niveauSuperieurPossible,
+        niveau: niveau ?? this.niveau,
       );
 
   bool get estImage => mimeType.startsWith('image/');
@@ -251,7 +284,9 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
         path: chemin,
         // Sans ces deux champs, l'écran de légende n'annonçait pas le gain et
         // n'offrait pas « Envoyer l'original » depuis cette grille.
+        asset: asset,
         compresse: compresse.compresse,
+          niveauSuperieurPossible: compresse.niveauSuperieurPossible,
         tailleOriginale: compresse.compresse ? compresse.tailleAvant : null,
       ));
     }
@@ -335,6 +370,7 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
           mimeType: pret.mimeType,
           path: file.path,
           compresse: pret.compresse,
+          niveauSuperieurPossible: pret.niveauSuperieurPossible,
           tailleOriginale: pret.compresse ? pret.tailleAvant : null,
         ));
       }

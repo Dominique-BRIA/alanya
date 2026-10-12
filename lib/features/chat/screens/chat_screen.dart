@@ -4350,6 +4350,7 @@ class _ChatScreenState extends State<ChatScreen>
           // gain et laisse revenir à l'original. Un fichier partagé depuis une
           // autre application n'avait droit ni à l'un ni à l'autre.
           compresse: pret.compresse,
+          niveauSuperieurPossible: pret.niveauSuperieurPossible,
           tailleOriginale: pret.compresse ? pret.tailleAvant : null,
         ));
       } catch (_) {}

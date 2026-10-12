@@ -45,6 +45,10 @@ import 'dart:math' as math;
 import 'package:flutter/services.dart';
 import 'package:video_compress/video_compress.dart';
 
+// `NiveauQualite` vit dans le module IMAGE, comme sur le web : celui-ci
+// l'importe déjà, et l'inverse ferait un import circulaire.
+import 'compression_image.dart' show NiveauQualite;
+
 /// Petit côté visé, en pixels — du 720p, comme le web (`VIDEO_BORD_COURT`).
 ///
 /// ⚠️ LE PETIT CÔTÉ, PAS LE GRAND. Une vidéo 16/9 ramenée à 720 de petit côté
@@ -52,6 +56,18 @@ import 'package:video_compress/video_compress.dart';
 /// 720 × 405 — du 405p, quatre fois moins de pixels, sans que personne l'ait
 /// demandé. C'est l'écart n° 2 ci-dessus.
 const int videoBordCourtMax = 720;
+
+/// Petit côté visé au niveau haut : du 1080p (web : `VIDEO_BORD_COURT_HAUTE`).
+///
+/// 🔴 POURQUOI 1080p ET NON « 720p AVEC PLUS DE DÉBIT ». À 720p, les pixels
+/// perdus sont perdus : aucun débit ne les ramène. Or la demande vient d'une
+/// vidéo de COURS — un tableau, des diapositives. Là, c'est la définition qui
+/// rend le texte lisible, pas le débit.
+const int videoBordCourtHaute = 1080;
+
+/// Le petit côté visé pour un niveau donné.
+int bordCourtVise(NiveauQualite niveau) =>
+    niveau == NiveauQualite.haute ? videoBordCourtHaute : videoBordCourtMax;
 
 /// Débit visé pour du 720p, en bits par seconde (web : `DEBIT_720P`).
 ///
@@ -131,6 +147,13 @@ class ConsigneVideo {
   bool get transcode => raison == null;
 }
 
+/// Le niveau haut donnerait-il vraiment mieux ? (web : `hautePlusFine`)
+///
+/// 🔴 SERT À NE PAS PROPOSER UN CHOIX QUI NE CHANGE RIEN. On n'agrandit
+/// JAMAIS : une vidéo filmée en 720p ou moins n'a pas un pixel de plus à
+/// offrir, et le bouton « 1080p » serait un mensonge.
+bool hautePlusFine(int bordCourtSource) => bordCourtSource > videoBordCourtMax;
+
 /// Le débit d'une image de [largeur] × [hauteur], au prorata du 720p.
 ///
 /// Copie de la ligne du web : une vidéo plus petite que du 720p n'a pas besoin
@@ -153,6 +176,7 @@ ConsigneVideo consignePour({
   required int hauteur,
   required int tailleOctets,
   required int dureeMs,
+  NiveauQualite niveau = NiveauQualite.normal,
 }) {
   if (largeur <= 0 || hauteur <= 0) {
     return const ConsigneVideo.saut(RaisonSautVideo.dimensionsInconnues);
@@ -167,20 +191,33 @@ ConsigneVideo consignePour({
    * vidéo 720p filmée à 6 Mbit/s mérite encore d'être allégée, et c'est le cas
    * n° 3 que le mobile ratait.
    */
-  if (court <= videoBordCourtMax && debitReel <= debitDejaLeger) {
+  final vise = bordCourtVise(niveau);
+  if (court <= vise && debitReel <= debitDejaLeger) {
     return const ConsigneVideo.saut(RaisonSautVideo.dejaPetite);
   }
 
   // ⚠️ JAMAIS AGRANDIR : le facteur est plafonné à 1. Une vidéo 480 × 270 garde
   // ses dimensions et ne voit baisser que son débit.
-  final facteur = math.min(1.0, videoBordCourtMax / court);
+  final facteur = math.min(1.0, vise / court);
   final cibleLargeur = _pair(largeur * facteur);
   final cibleHauteur = _pair(hauteur * facteur);
+  final debitVise = debitPour(cibleLargeur, cibleHauteur);
+
+  /*
+   * ⚠️ RIEN À GAGNER : ON S'ABSTIENT PLUTÔT QUE DE TRANSCODER POUR RIEN. Au
+   * niveau haut, une vidéo déjà en 1080p peut avoir un débit INFÉRIEUR à celui
+   * qu'on viserait : la recompresser l'alourdirait. La règle du gain minimum,
+   * plus loin, rendrait bien l'original — mais après avoir fait tourner
+   * l'encodeur une minute pour rien, batterie comprise.
+   */
+  if (debitVise >= debitReel) {
+    return const ConsigneVideo.saut(RaisonSautVideo.dejaPetite);
+  }
 
   return ConsigneVideo.transcoder(
     bordCourt: math.min(cibleLargeur, cibleHauteur),
     bordLong: math.max(cibleLargeur, cibleHauteur),
-    debit: debitPour(cibleLargeur, cibleHauteur),
+    debit: debitVise,
   );
 }
 
@@ -193,6 +230,7 @@ class ResultatCompressionVideo {
     required this.tailleAvant,
     required this.tailleApres,
     this.raisonSaut,
+    this.niveauSuperieurPossible = false,
   });
 
   /// Les octets à envoyer — CEUX D'ORIGINE si rien n'a été fait.
@@ -203,6 +241,9 @@ class ResultatCompressionVideo {
   final int tailleAvant;
   final int tailleApres;
   final RaisonSautVideo? raisonSaut;
+
+  /// Le niveau haut donnerait-il mieux ? Voir [hautePlusFine].
+  final bool niveauSuperieurPossible;
 
   /// Ce que l'envoi a économisé, entre 0 et 1.
   double get gain => tailleAvant <= 0 ? 0 : 1 - (tailleApres / tailleAvant);
@@ -221,7 +262,11 @@ Future<ResultatCompressionVideo> compresserVideo(
   required String nomFichier,
   required String mimeType,
   void Function(double avancement)? onProgression,
+  NiveauQualite niveau = NiveauQualite.normal,
 }) async {
+  // Rempli dès que les dimensions sont connues : le bouton « 1080p » ne doit
+  // paraître que s'il change quelque chose.
+  var hautePossible = false;
   ResultatCompressionVideo intact(RaisonSautVideo raison) =>
       ResultatCompressionVideo(
         octets: original,
@@ -231,6 +276,7 @@ Future<ResultatCompressionVideo> compresserVideo(
         tailleAvant: original.length,
         tailleApres: original.length,
         raisonSaut: raison,
+        niveauSuperieurPossible: hautePossible,
       );
 
   if (!mimeType.toLowerCase().startsWith("video/")) {
@@ -258,11 +304,13 @@ Future<ResultatCompressionVideo> compresserVideo(
     // Fichier illisible par le module natif : on n'y touche pas.
   }
 
+  hautePossible = hautePlusFine(math.min(largeur, hauteur));
   final consigne = consignePour(
     largeur: largeur,
     hauteur: hauteur,
     tailleOctets: original.length,
     dureeMs: dureeMs,
+    niveau: niveau,
   );
   if (!consigne.transcode) return intact(consigne.raison!);
 
@@ -302,6 +350,7 @@ Future<ResultatCompressionVideo> compresserVideo(
     compresse: true,
     tailleAvant: original.length,
     tailleApres: octets.length,
+    niveauSuperieurPossible: hautePossible,
   );
 }
 

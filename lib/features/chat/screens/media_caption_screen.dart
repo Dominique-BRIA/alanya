@@ -7,6 +7,7 @@ import 'package:video_player/video_player.dart';
 import '../../../core/compression_envoi.dart';
 import '../../../core/compression_image.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../../widgets/media/avancement_compression.dart';
 import '../../../widgets/media/media_picker_sheet.dart';
 import '../../../l10n/app_localizations.dart';
 import 'visionneur_vue_unique.dart' show PastilleVueUnique;
@@ -89,6 +90,14 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
   /// Le « 1 » de WhatsApp : envoyer à vue unique.
   bool _vueUnique = false;
 
+  /// L'index du média en cours de recompression, et son avancement (0 à 1).
+  ///
+  /// 🔴 ON BLOQUE L'ENVOI PENDANT CE TEMPS. Partir avec les octets de l'ancien
+  /// niveau alors que l'utilisateur vient d'en demander un autre serait lui
+  /// désobéir en silence — et transcoder une vidéo prend des secondes.
+  int? _recompresse;
+  double _avancementNiveau = 0;
+
   /// Offert seulement pour UNE photo ou UNE vidéo : le serveur refuse un lot,
   /// et un document n'a pas de sens à vue unique.
   bool get _vueUniquePossible =>
@@ -162,6 +171,12 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
   }
 
   void _envoie() {
+    /*
+     * ⚠️ PAS D'ENVOI PENDANT UNE RECOMPRESSION. L'utilisateur vient de demander
+     * un autre niveau ; partir avec les octets de l'ancien serait lui désobéir
+     * en silence, et un transcodage vidéo prend des secondes.
+     */
+    if (_recompresse != null) return;
     final vueUnique = _vueUnique && _vueUniquePossible;
     // Une vue unique part SANS légende : elle resterait lisible bien après
     // l'effacement du média.
@@ -427,23 +442,52 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
     );
   }
 
-  /// « Compressée · 4,2 Mo → 320 Ko · **Envoyer l'original** ».
+  /// « 4,2 Mo → 320 Ko · **Meilleure qualité** », ou « 30 Mo → 3,9 Mo · **1080p** ».
   ///
-  /// 🔴 DIRE CE QU'ON A FAIT, ET LAISSER LE REFUSER (rattrapage du web,
+  /// 🔴 DIRE CE QU'ON A FAIT, ET LAISSER LE CHANGER (rattrapage du web,
   /// 31/08/2026). Réduire une photo sans le dire est une décision prise à la
   /// place de quelqu'un : celui qui envoie une ordonnance, un reçu ou un plan
   /// veut ses pixels, et il n'a aucun moyen de deviner qu'on les lui a retirés.
   ///
-  /// ⚠️ L'ORIGINAL SE RELIT DEPUIS LE DISQUE, il n'est pas gardé en mémoire :
-  /// dix photos de 8 Mo tenues en double feraient tomber l'application. Le
-  /// chemin vient du sélecteur ; sans lui (envoi web, sélecteur système qui ne
-  /// rend que des octets) la ligne ne s'affiche pas, faute de pouvoir tenir sa
-  /// promesse.
+  /// ⚠️ RIEN N'EST INVENTÉ POUR MEUBLER : quand il n'y a rien à annoncer, la
+  /// ligne ne paraît pas — exactement le web (décision du user, 12/10/2026 :
+  /// « lorsque le mobile ne peut pas compresser, il n'affiche juste pas ce
+  /// truc-là »).
+  ///
+  /// ⚠️ ELLE RESTE AFFICHÉE AU NIVEAU HAUT MÊME SANS GAIN, sinon le bouton du
+  /// retour disparaîtrait avec elle et l'utilisateur serait enfermé dans le
+  /// niveau qu'il vient de choisir.
+  ///
+  /// ⚠️ LE CHEMIN DU FICHIER EST REQUIS : sans lui (sélecteur système qui ne
+  /// rend que des octets) on ne pourrait pas repartir de l'original, et la
+  /// ligne ne tiendrait pas sa promesse.
   Widget? _ligneCompression() {
     final courant = _fichiers[_index];
-    if (!courant.compresse || courant.path == null) return null;
+    if (courant.path == null) return null;
+
+    // Pendant la recompression : on dit où on en est, comme à la sélection.
+    if (_recompresse == _index) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+        child: Row(children: [
+          const Icon(Icons.compress, size: 14, color: Colors.white54),
+          const SizedBox(width: 6),
+          AvancementCompression(
+            avancement: _avancementNiveau,
+            style: const TextStyle(color: Colors.white54, fontSize: 12),
+          ),
+        ]),
+      );
+    }
+
+    final haute = courant.niveau == NiveauQualite.haute;
+    if (!courant.compresse && !haute) return null;
     final avant = courant.tailleOriginale;
     if (avant == null) return null;
+
+    final bascule = courant.estVideo
+        ? (haute ? 'media_envoyer_720p' : 'media_envoyer_1080p')
+        : (haute ? 'media_qualite_normale' : 'media_meilleure_qualite');
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
@@ -452,64 +496,99 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
         const SizedBox(width: 6),
         Flexible(
           child: Text(
-            "${poidsLisible(avant)} → ${poidsLisible(courant.bytes.length)}",
+            courant.compresse
+                ? "${poidsLisible(avant)} → ${poidsLisible(courant.bytes.length)}"
+                : poidsLisible(courant.bytes.length),
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(color: Colors.white54, fontSize: 12),
           ),
         ),
-        const SizedBox(width: 10),
-        GestureDetector(
-          onTap: _restaureOriginal,
-          child: Text(
-            tr(context, 'send_original'),
-            style: TextStyle(
-                color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                decoration: TextDecoration.underline),
+        // Le bouton ne paraît que s'il change quelque chose : pour une photo de
+        // 1200 px ou une vidéo filmée en 720p, le niveau haut rendrait le même
+        // fichier. Au niveau haut, il reste pour pouvoir revenir.
+        if (courant.niveauSuperieurPossible || haute) ...[
+          const SizedBox(width: 10),
+          GestureDetector(
+            onTap: _basculerNiveau,
+            child: Text(
+              tr(context, bascule),
+              style: TextStyle(
+                  color: haute ? AlanyaColors.gold : Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  decoration: TextDecoration.underline),
+            ),
           ),
-        ),
+        ],
       ]),
     );
   }
 
-  /// Remplace les octets réduits par ceux du fichier d'origine.
+  /// Recompresse le média courant à l'AUTRE niveau — 1080p / 2560 px, ou retour.
   ///
-  /// Sans retour en arrière : reprendre la version réduite demanderait de la
-  /// garder en mémoire à côté de l'original, pour une hésitation. Celui qui
-  /// change d'avis ressort et resélectionne — c'est deux appuis, et ça ne coûte
-  /// la mémoire de personne.
-  Future<void> _restaureOriginal() async {
-    final courant = _fichiers[_index];
+  /// 🔴 IL A REMPLACÉ « ENVOYER L'ORIGINAL » (décision du user, 12/10/2026).
+  /// L'original partait tel quel — 5 Mo pour une photo, 30 à 200 Mo pour une
+  /// vidéo — et sur une connexion lente, cet envoi n'aboutissait pas. Le niveau
+  /// haut borne ce qui part en restant bien plus près de l'original.
+  ///
+  /// 🔴 ON REPART DE L'ORIGINAL SUR LE DISQUE, jamais des octets déjà réduits :
+  /// recompresser une réduction empilerait deux pertes. C'est aussi pourquoi
+  /// l'original n'est pas gardé en mémoire — dix photos de 8 Mo tenues en
+  /// double feraient tomber l'application.
+  ///
+  /// ⚠️ UNE RECOMPRESSION À LA FOIS, et l'envoi attend : partir avec les octets
+  /// de l'ancien niveau serait désobéir en silence.
+  Future<void> _basculerNiveau() async {
+    if (_recompresse != null) return;
+    final index = _index;
+    final courant = _fichiers[index];
     final chemin = courant.path;
     if (chemin == null) return;
+
+    final vise = courant.niveau == NiveauQualite.haute
+        ? NiveauQualite.normal
+        : NiveauQualite.haute;
+    setState(() {
+      _recompresse = index;
+      _avancementNiveau = 0;
+    });
     try {
-      final octets = await File(chemin).readAsBytes();
-      if (!mounted) return;
+      final original = await File(chemin).readAsBytes();
       final nom = chemin.split(Platform.pathSeparator).last;
+      final pret = await compresserPourEnvoi(
+        asset: courant.asset,
+        octets: original,
+        // Le nom et le type de l'ORIGINAL : la compression leur rendra ceux du
+        // JPEG ou du MP4 produit. Repartir du nom déjà transformé étiquetterait
+        // des octets d'origine en `.jpg`, et le serveur les servirait plus tard
+        // avec le mauvais en-tête.
+        nomFichier: nom,
+        mimeType: mimeDepuisNom(nom, repli: courant.mimeType),
+        chemin: chemin,
+        niveau: vise,
+        onProgression: (v) {
+          if (mounted) setState(() => _avancementNiveau = v);
+        },
+      );
+      if (!mounted) return;
       setState(() {
-        _fichiers[_index] = courant.copieAvec(
-          bytes: octets,
-          // Le nom et le type redeviennent ceux de l'original : le serveur
-          // choisit l'extension de stockage d'après le NOM, et des octets
-          // d'origine sous un nom `.jpg` seraient servis avec le mauvais
-          // en-tête. Même règle qu'à la compression, dans l'autre sens.
-          fileName: nom,
-          // Une capture `.png` ou une vidéo `.mov` rendue à l'original ne
-          // garde pas le type du JPEG ou du MP4 qui l'avait remplacée.
-          mimeType: mimeDepuisNom(nom, repli: courant.mimeType),
-          compresse: false,
+        _fichiers[index] = courant.copieAvec(
+          bytes: pret.octets,
+          fileName: pret.nomFichier,
+          mimeType: pret.mimeType,
+          compresse: pret.compresse,
+          tailleOriginale: original.length,
+          niveauSuperieurPossible: pret.niveauSuperieurPossible,
+          niveau: vise,
         );
       });
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(tr(context, 'original_will_be_sent'))),
-      );
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(tr(context, 'original_missing'))),
       );
+    } finally {
+      if (mounted) setState(() => _recompresse = null);
     }
   }
 

@@ -37,6 +37,9 @@ Future<ResultatCompression> compresserPourEnvoi({
   required String mimeType,
   String? chemin,
   void Function(double avancement)? onProgression,
+  /// Le niveau demandé. Le haut (1080p / 2560 px) est celui du bouton de
+  /// l'écran de légende, qui a remplacé « Envoyer l'original ».
+  NiveauQualite niveau = NiveauQualite.normal,
 }) async {
   final intact = ResultatCompression(
     octets: octets,
@@ -60,6 +63,7 @@ Future<ResultatCompression> compresserPourEnvoi({
         nomFichier: nomFichier,
         mimeType: mimeType,
         onProgression: onProgression,
+        niveau: niveau,
       );
       return ResultatCompression(
         octets: v.octets,
@@ -68,6 +72,7 @@ Future<ResultatCompression> compresserPourEnvoi({
         compresse: v.compresse,
         tailleAvant: v.tailleAvant,
         tailleApres: v.tailleApres,
+        niveauSuperieurPossible: v.niveauSuperieurPossible,
       );
     }
     if (asset != null && asset.type == AssetType.image) {
@@ -76,6 +81,7 @@ Future<ResultatCompression> compresserPourEnvoi({
         octets,
         nomFichier: nomFichier,
         mimeType: mimeType,
+        niveau: niveau,
       );
     }
   } catch (_) {

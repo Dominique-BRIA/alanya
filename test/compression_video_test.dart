@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:alanya/core/compression_image.dart';
 import 'package:alanya/core/compression_video.dart';
 
 /// LA RÈGLE DE COMPRESSION VIDÉO DU MOBILE EST-ELLE CELLE DU WEB ?
@@ -153,12 +154,106 @@ void main() {
     });
   });
 
+  group('le niveau haut — 1080p au lieu de l\'original', () {
+    test('du 4K descend à 1080p, pas à 720p', () {
+      final c = consignePour(
+        largeur: 3840,
+        hauteur: 2160,
+        tailleOctets: poids(10, 40000000),
+        dureeMs: 10000,
+        niveau: NiveauQualite.haute,
+      );
+      expect([c.bordLong, c.bordCourt], [1920, 1080]);
+      // Même formule que le normal : le débit suit la surface.
+      expect(c.debit, debitPour(1920, 1080));
+      expect(c.debit, greaterThan(debit720p),
+          reason: 'le niveau haut ne doit jamais rendre MOINS de débit');
+    });
+
+    test('une vidéo filmée en 720p n\'est PAS agrandie', () {
+      final c = consignePour(
+        largeur: 1280,
+        hauteur: 720,
+        tailleOctets: poids(30, 6000000),
+        dureeMs: 30000,
+        niveau: NiveauQualite.haute,
+      );
+      expect([c.bordCourt, c.bordLong], [720, 1280]);
+      expect(hautePlusFine(720), isFalse,
+          reason: 'le bouton 1080p ne doit pas être proposé');
+    });
+
+    test('une vidéo entre 720p et 1080p garde sa définition', () {
+      final c = consignePour(
+        largeur: 1600,
+        hauteur: 900,
+        tailleOctets: poids(20, 9000000),
+        dureeMs: 20000,
+        niveau: NiveauQualite.haute,
+      );
+      expect([c.bordCourt, c.bordLong], [900, 1600]);
+      expect(hautePlusFine(900), isTrue);
+    });
+
+    test('rien à gagner : une 1080p légère n\'est pas retranscodée', () {
+      // 1080p à 2 Mbit/s : le débit visé (3,6) est SUPÉRIEUR, recompresser
+      // l'alourdirait. On s'abstient avant de faire tourner l'encodeur.
+      final c = consignePour(
+        largeur: 1920,
+        hauteur: 1080,
+        tailleOctets: poids(30, 2000000),
+        dureeMs: 30000,
+        niveau: NiveauQualite.haute,
+      );
+      expect(c.transcode, isFalse);
+      expect(c.raison, RaisonSautVideo.dejaPetite);
+    });
+
+    test('la même, au niveau normal, est bien réduite en 720p', () {
+      final c = consignePour(
+        largeur: 1920,
+        hauteur: 1080,
+        tailleOctets: poids(30, 2000000),
+        dureeMs: 30000,
+      );
+      expect(c.transcode, isTrue);
+      expect([c.bordCourt, c.bordLong], [720, 1280]);
+    });
+
+    test('le haut est toujours au moins aussi fin que le normal', () {
+      for (final taille in [[640, 360], [1280, 720], [1600, 900], [1920, 1080], [3840, 2160]]) {
+        final normal = consignePour(
+          largeur: taille[0],
+          hauteur: taille[1],
+          tailleOctets: poids(10, 30000000),
+          dureeMs: 10000,
+        );
+        final haut = consignePour(
+          largeur: taille[0],
+          hauteur: taille[1],
+          tailleOctets: poids(10, 30000000),
+          dureeMs: 10000,
+          niveau: NiveauQualite.haute,
+        );
+        expect(haut.bordCourt, greaterThanOrEqualTo(normal.bordCourt),
+            reason: '${taille[0]}x${taille[1]} : définition');
+        expect(haut.debit, greaterThanOrEqualTo(normal.debit),
+            reason: '${taille[0]}x${taille[1]} : débit');
+      }
+    });
+  });
+
   group('les nombres sont bien ceux du web', () {
     test('720 de petit côté, 1,6 Mbit/s, 2,5 Mbit/s, 10 % de gain', () {
       expect(videoBordCourtMax, 720, reason: 'VIDEO_BORD_COURT');
       expect(debit720p, 1600000, reason: 'DEBIT_720P');
       expect(debitDejaLeger, 2500000, reason: 'DEBIT_DEJA_LEGER');
       expect(gainMinimumVideo, 0.9, reason: 'GAIN_MINIMUM');
+      expect(videoBordCourtHaute, 1080, reason: 'VIDEO_BORD_COURT_HAUTE');
+      expect(imageBordMax, 1600, reason: 'IMAGE_BORD_MAX');
+      expect(imageBordMaxHaute, 2560, reason: 'IMAGE_BORD_MAX_HAUTE');
+      expect(imageQualite, 82, reason: 'IMAGE_QUALITE (0,82 côté web)');
+      expect(imageQualiteHaute, 90, reason: 'IMAGE_QUALITE_HAUTE (0,90)');
     });
   });
 }
