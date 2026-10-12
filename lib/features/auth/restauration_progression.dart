@@ -33,10 +33,14 @@ double? fractionGlobale(ProgressionRestauration p) {
 }
 
 /// Le libellé de l'étape, tel que l'écran l'affiche.
+/// ⚠️ AUCUN DE CES LIBELLÉS NE PARLE DE CHIFFREMENT (décision du user,
+/// 12/10/2026). « Déchiffrement des messages » ne dit rien d'utile à qui attend
+/// ses conversations, et ne fait qu'ouvrir une question qu'il ne se posait pas.
+/// Ils disent où l'on en est, pas comment c'est fait.
 String libelleEtape(EtapeRestauration e) => switch (e) {
-  EtapeRestauration.ouverture => 'Ouverture de votre sauvegarde…',
-  EtapeRestauration.telechargement => 'Téléchargement de l’archive…',
-  EtapeRestauration.dechiffrement => 'Déchiffrement des messages…',
+  EtapeRestauration.ouverture => 'Connexion à votre compte…',
+  EtapeRestauration.telechargement => 'Récupération de vos messages…',
+  EtapeRestauration.dechiffrement => 'Préparation des messages…',
   EtapeRestauration.rangement => 'Enregistrement sur cet appareil…',
 };
 

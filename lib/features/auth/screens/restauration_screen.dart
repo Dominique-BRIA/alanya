@@ -23,7 +23,6 @@ import 'package:flutter/material.dart';
 
 import '../../../services/e2ee/e2ee_fournisseur.dart';
 import '../../../services/e2ee/e2ee_sauvegarde.dart';
-import '../../parametres/screens/sauvegarde_chiffree_screen.dart';
 import '../restauration_progression.dart';
 
 class RestaurationScreen extends StatefulWidget {
@@ -40,9 +39,6 @@ class _RestaurationScreenState extends State<RestaurationScreen> {
     EtapeRestauration.ouverture,
     0,
   );
-
-  /// Nulle tant que la restauration tourne.
-  IssueConnexion? _issue;
 
   @override
   void initState() {
@@ -67,7 +63,6 @@ class _RestaurationScreenState extends State<RestaurationScreen> {
 
   Future<void> _lancer() async {
     setState(() {
-      _issue = null;
       _progression = const ProgressionRestauration(
         EtapeRestauration.ouverture,
         0,
@@ -94,7 +89,32 @@ class _RestaurationScreenState extends State<RestaurationScreen> {
       _entrer();
       return;
     }
-    setState(() => _issue = r.issue);
+
+    /*
+     * 🔴 UNE SAUVEGARDE QUI NE S'OUVRE PAS N'ARRÊTE PLUS PERSONNE (décision du
+     * user, 12/10/2026 : « l'utilisateur lambda ne doit même pas savoir que
+     * l'application est chiffrée ; l'obliger à saisir des mots de passe pour
+     * voir ses fichiers, c'est trop »).
+     *
+     * On entrait ici dans un écran qui demandait les douze mots de la clé de
+     * récupération, juste après la connexion. Pour quelqu'un qui veut lire ses
+     * messages, c'est une porte fermée à l'endroit exact où il croyait entrer —
+     * et il ne comprend même pas de quoi on lui parle.
+     *
+     * ⚠️ RIEN N'EST PERDU, ET C'EST CE QUI REND CE SILENCE ACCEPTABLE :
+     *   · les messages à venir arrivent normalement, par leurs enveloppes —
+     *     la sauvegarde ne sert QU'À L'HISTORIQUE ANTÉRIEUR à cet appareil ;
+     *   · le rattrapage (`_completerParArchive`) retente à chaque ouverture de
+     *     conversation, et réussira dès que la clé sera là ;
+     *   · la clé de récupération reste offerte dans Réglages › Sauvegarde
+     *     chiffrée, pour qui la cherche.
+     *
+     * ⚠️ `fermee` N'EST PAS `echec` : la première est définitive (mot de passe
+     * changé, archive protégée par la seule clé de récupération), la seconde
+     * est passagère (réseau). Les deux entrent — mais seule la seconde mérite
+     * qu'on retente, et le rattrapage s'en charge.
+     */
+    _entrer();
   }
 
   void _entrer() {
@@ -102,17 +122,10 @@ class _RestaurationScreenState extends State<RestaurationScreen> {
     Navigator.of(context).popUntil((r) => r.isFirst);
   }
 
-  Future<void> _parCleDeRecuperation() async {
-    await Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => const SauvegardeChiffreeScreen()));
-    _entrer();
-  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final issue = _issue;
     return PopScope(
       // Le retour système équivaut à « Continuer en arrière-plan » : on ne
       // revient pas à l'écran de connexion, la session est déjà ouverte.
@@ -128,30 +141,24 @@ class _RestaurationScreenState extends State<RestaurationScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                // ⚠️ PAS DE CADENAS : l'icône parlerait de ce dont on a
+                // justement décidé de ne plus parler. Un nuage qui descend dit
+                // la seule chose vraie pour celui qui attend — ça arrive.
                 Icon(
-                  issue == null
-                      ? Icons.lock_outline
-                      : Icons.lock_person_outlined,
+                  Icons.cloud_download_outlined,
                   size: 56,
                   color: theme.colorScheme.primary,
                 ),
                 const SizedBox(height: 20),
                 Text(
-                  issue == null
-                      ? 'Récupération de vos messages'
-                      : issue == IssueConnexion.fermee
-                      ? 'Votre sauvegarde reste fermée'
-                      : 'La récupération n’a pas abouti',
+                  'Préparation de vos messages',
                   textAlign: TextAlign.center,
                   style: theme.textTheme.titleLarge?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
                 ),
                 const SizedBox(height: 12),
-                if (issue == null)
-                  ..._enCours(theme)
-                else
-                  ..._probleme(theme, issue),
+                ..._enCours(theme),
               ],
             ),
           ),
@@ -163,9 +170,15 @@ class _RestaurationScreenState extends State<RestaurationScreen> {
   List<Widget> _enCours(ThemeData theme) {
     final texteCompteur = compteur(_progression);
     return [
+      /*
+       * ⚠️ PAS UN MOT DE « CHIFFRÉ » ICI (décision du user, 12/10/2026).
+       * Celui qui vient de se connecter veut ses messages ; lui expliquer la
+       * cryptographie à cet instant ne l'aide pas, et l'inquiète. Ce qu'il a
+       * besoin de savoir, c'est que ça arrive et que ça ne dépend pas de lui.
+       */
       Text(
-        'Vos conversations chiffrées sont déchiffrées sur cet appareil. '
-        'Personne d’autre, pas même Alanya, ne peut les lire.',
+        'Vos messages reviennent sur cet appareil. '
+        'Vous pouvez continuer, cela se termine tout seul.',
         textAlign: TextAlign.center,
         style: theme.textTheme.bodyMedium,
       ),
@@ -204,43 +217,4 @@ class _RestaurationScreenState extends State<RestaurationScreen> {
     ];
   }
 
-  List<Widget> _probleme(ThemeData theme, IssueConnexion issue) {
-    if (issue == IssueConnexion.fermee) {
-      return [
-        Text(
-          'Votre mot de passe n’ouvre pas votre sauvegarde. Il a peut-être '
-          'changé depuis sa création, ou elle n’est protégée que par votre clé '
-          'de récupération (les 12 mots).',
-          textAlign: TextAlign.center,
-          style: theme.textTheme.bodyMedium,
-        ),
-        const SizedBox(height: 28),
-        FilledButton(
-          onPressed: _parCleDeRecuperation,
-          child: const Text('Utiliser ma clé de récupération'),
-        ),
-        const SizedBox(height: 10),
-        OutlinedButton(
-          onPressed: _entrer,
-          child: const Text('Continuer sans l’historique'),
-        ),
-      ];
-    }
-    return [
-      Text(
-        'Le serveur n’a pas pu être joint, ou n’a pas répondu comme prévu. '
-        'Votre historique est intact : vous pouvez réessayer maintenant, ou '
-        'plus tard depuis Réglages › Sauvegarde chiffrée.',
-        textAlign: TextAlign.center,
-        style: theme.textTheme.bodyMedium,
-      ),
-      const SizedBox(height: 28),
-      FilledButton(onPressed: _lancer, child: const Text('Réessayer')),
-      const SizedBox(height: 10),
-      OutlinedButton(
-        onPressed: _entrer,
-        child: const Text('Continuer sans l’historique'),
-      ),
-    ];
-  }
 }
