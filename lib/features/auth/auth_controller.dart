@@ -230,7 +230,6 @@ class AuthController extends ChangeNotifier {
         try {
           user =
               AuthUser.fromJson(jsonDecode(cachedUser) as Map<String, dynamic>);
-          // On reste en unknown le temps de valider le token, mais l'UI peut déjà afficher le pseudo
           notifyListeners();
         } catch (_) {}
       }
@@ -242,6 +241,25 @@ class AuthController extends ChangeNotifier {
         _set(AuthStatus.unauthenticated, null);
         return;
       }
+
+      /*
+       * 🔴 L'ACCUEIL TOUT DE SUITE, LA VÉRIFICATION EN ARRIÈRE-PLAN (demande du
+       * user, 12/10/2026 : « supprime ce chargement »).
+       *
+       * Avant, l'application restait sur une roue (`AuthStatus.unknown`) tant
+       * que le serveur n'avait pas répondu à `/api/me` — et, jeton expiré, à un
+       * renouvellement de plus. Sur un réseau lent, jusqu'au délai maximal de
+       * 30 s, alors que le profil était déjà là, en cache. Avec un profil ET une
+       * session enregistrés, on ouvre l'accueil immédiatement ; la suite de
+       * cette méthode valide la session en arrière-plan.
+       *
+       * ⚠️ RIEN N'EST PERDU EN SÛRETÉ : si le serveur CONDAMNE la session
+       * (`sessionMorteApresEchec`), l'étape 4 efface les jetons et bascule sur
+       * l'écran de connexion, avec son explication — comme avant, quelques
+       * secondes plus tard. Les écrans, eux, attendent le renouvellement sous le
+       * même verrou (`VerrouRafraichissement`) : un seul part.
+       */
+      if (user != null) _set(AuthStatus.authenticated, user);
 
       // 2. Essaye avec l'access token courant
       if (access != null) {

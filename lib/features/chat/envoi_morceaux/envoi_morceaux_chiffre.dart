@@ -146,6 +146,9 @@ class SuiviEnvoisMorceaux {
     required Future<Message> Function(String messageId, DescripteurMedia d) rangerMaCopie,
     /// L'aperçu : [fabriquerApercu] par défaut.
     Future<Apercu> Function(MediaPickResult fichier)? apercu,
+    /// L'avancement du CHIFFREMENT, de 0 à 1 : la bulle l'affiche avant que le
+    /// premier octet parte (chapitre 47).
+    void Function(double fraction)? onPreparation,
   }) async {
     final api = _api!, transport = _transport!, racine = _racine!;
     final mime = fichier.mimeType;
@@ -163,6 +166,7 @@ class SuiviEnvoisMorceaux {
       // octets servent quand il n'y a pas de fichier (un vocal).
       source: _cheminUtilisable(fichier),
       octets: _cheminUtilisable(fichier) == null ? fichier.bytes : null,
+      onProgression: onPreparation,
     );
 
     ReservationEnvoi? r;

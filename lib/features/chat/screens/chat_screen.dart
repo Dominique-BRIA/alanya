@@ -417,9 +417,15 @@ class _ChatScreenState extends State<ChatScreen>
   String? _token;
 
   /// Les envois de médias CHIFFRÉS en cours, par identifiant provisoire : le
-  /// fichier (pour la vignette) et l'avancement du téléversement.
-  final Map<String, ({MediaPickResult fichier, ValueNotifier<double> progression})>
-      _envoisChiffres = {};
+  /// fichier (pour la vignette), l'avancement de la PRÉPARATION (chiffrement)
+  /// et celui du téléversement.
+  final Map<
+      String,
+      ({
+        MediaPickResult fichier,
+        ValueNotifier<double> preparation,
+        ValueNotifier<double> progression,
+      })> _envoisChiffres = {};
   String _baseUrl = "";
   bool _uploading = false;
 
@@ -3834,6 +3840,7 @@ class _ChatScreenState extends State<ChatScreen>
             mime: _envoisChiffres[m.id]?.fichier.mimeType ?? '',
             progression: _envoisChiffres[m.id]?.progression ??
                 ValueNotifier<double>(0),
+            preparation: _envoisChiffres[m.id]?.preparation,
           )
         else if (d != null)
           BulleMediaChiffre(
@@ -3886,7 +3893,11 @@ class _ChatScreenState extends State<ChatScreen>
   }) async {
     final tempId = "tmp-${DateTime.now().microsecondsSinceEpoch}";
     final erreur = tr(context, 'send_failed');
-    final suivi = (fichier: fichier, progression: ValueNotifier<double>(0));
+    final suivi = (
+      fichier: fichier,
+      preparation: ValueNotifier<double>(0),
+      progression: ValueNotifier<double>(0),
+    );
     _envoisChiffres[tempId] = suivi;
     setState(() {
       _messages = [
@@ -3947,6 +3958,7 @@ class _ChatScreenState extends State<ChatScreen>
               vueUnique: vueUnique,
               octets: fichier.bytes,
             ),
+            onPreparation: (f) => suivi.preparation.value = f,
           );
         } on ApiException catch (e) {
           // Un serveur qui ne connaît pas encore l'envoi en morceaux : on
@@ -3998,8 +4010,14 @@ class _ChatScreenState extends State<ChatScreen>
       showAppSnackBar("$erreur : $e");
     } finally {
       // Confié en morceaux : c'est le suivi qui libérera la bulle.
-      if (!confie) _envoisChiffres.remove(tempId)?.progression.dispose();
+      if (!confie) _libererSuiviChiffre(tempId);
     }
+  }
+
+  void _libererSuiviChiffre(String tempId) {
+    final s = _envoisChiffres.remove(tempId);
+    s?.preparation.dispose();
+    s?.progression.dispose();
   }
 
   /// Suit un envoi en morceaux jusqu'à sa publication, et remplace la bulle
@@ -4065,7 +4083,7 @@ class _ChatScreenState extends State<ChatScreen>
       showAppSnackBar("$erreur : $e");
     } finally {
       envoi.progression.removeListener(relayer);
-      _envoisChiffres.remove(tempId)?.progression.dispose();
+      _libererSuiviChiffre(tempId);
     }
   }
 

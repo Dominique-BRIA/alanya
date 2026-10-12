@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -122,8 +123,19 @@ class PushService {
       FirebaseMessaging.onMessageOpenedApp.listen(_handleNotificationTap);
 
       // 7) Récupère le token FCM (sans l'envoyer au backend tout de suite)
-      _fcmToken = await FirebaseMessaging.instance.getToken();
-      debugPrint('[PushService] Token FCM obtenu: $_fcmToken');
+      //
+      // ⚠️ SANS L'ATTENDRE (12/10/2026). `getToken` interroge les serveurs de
+      // Firebase, et `main` attend cette méthode AVANT le premier affichage :
+      // sur un réseau lent, l'écran de démarrage restait là d'autant. Et hors
+      // ligne, son échec faisait échouer TOUTE l'initialisation (le `catch`
+      // plus bas laissait `_initialized` à faux). [registerTokenIfAuthenticated]
+      // va le chercher lui-même s'il n'est pas encore là.
+      unawaited(FirebaseMessaging.instance.getToken().then((jeton) {
+        _fcmToken ??= jeton;
+        debugPrint('[PushService] Token FCM obtenu: $_fcmToken');
+      }).catchError((Object e) {
+        debugPrint('[PushService] Token FCM pas encore disponible: $e');
+      }));
 
       // 8) Écoute les changements de token (refresh) → ré-enregistre si auth
       FirebaseMessaging.instance.onTokenRefresh.listen((newToken) {

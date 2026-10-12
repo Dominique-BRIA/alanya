@@ -93,6 +93,33 @@ void main() {
     expect(File(destination).existsSync(), isFalse);
   });
 
+  test("dans un isolat, avec la progression : croissante, jusqu'à 100 %, même fichier", () async {
+    // La bulle affiche « Préparation N % » pendant ce chiffrement (ch. 47).
+    final clair = octetsDe(5 * tailleBloc + 123);
+    final source = File('${dossier.path}/p-clair.bin')..writeAsBytesSync(clair);
+    final vus = <double>[];
+    final r = await chiffrerVersFichierHorsDuFil(
+        destination: '${dossier.path}/p.bin', source: source.path, onProgression: vus.add);
+    expect(vus, isNotEmpty);
+    for (var i = 1; i < vus.length; i++) {
+      expect(vus[i], greaterThan(vus[i - 1]), reason: "la progression ne recule ni ne se répète");
+    }
+    expect(vus.last, 1.0);
+    expect(vus.where((v) => v > 0 && v < 1), isNotEmpty, reason: "des étapes intermédiaires");
+    expect(dechiffrerFichier(File(r.chemin).readAsBytesSync(),
+        cle: r.cle, empreinte: r.empreinteBase64, taille: clair.length), clair);
+  });
+
+  test("avec la progression, une source introuvable lève, sans fichier à moitié écrit", () async {
+    final destination = '${dossier.path}/q.bin';
+    await expectLater(
+      chiffrerVersFichierHorsDuFil(
+          destination: destination, source: '${dossier.path}/absent.bin', onProgression: (_) {}),
+      throwsA(isA<FileSystemException>()),
+    );
+    expect(File(destination).existsSync(), isFalse);
+  });
+
   test("dans un isolat (le chemin de l'application)", () async {
     final clair = octetsDe(3 * tailleBloc + 1);
     final source = File('${dossier.path}/g-clair.bin')..writeAsBytesSync(clair);

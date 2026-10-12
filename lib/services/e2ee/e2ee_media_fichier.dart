@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
@@ -68,6 +69,8 @@ FichierChiffreSurDisque chiffrerVersFichier({
   String? source,
   Uint8List? octets,
   Uint8List? cleImposee,
+  /// Appelé après chaque bloc : octets du clair déjà chiffrés, sur le total.
+  void Function(int faits, int total)? progression,
 }) {
   if ((source == null) == (octets == null)) {
     throw ArgumentError('une source : un chemin OU des octets');
@@ -110,6 +113,7 @@ FichierChiffreSurDisque chiffrerVersFichier({
       sortie.writeFromSync(chiffre);
       sha.update(chiffre, 0, chiffre.length);
       taille += chiffre.length;
+      progression?.call(debut + n, tailleClair);
     }
     final empreinte = Uint8List(32);
     sha.doFinal(empreinte, 0);
@@ -134,11 +138,70 @@ FichierChiffreSurDisque chiffrerVersFichier({
 /// 🔴 TOUJOURS PAR ICI, JAMAIS PAR UN `Isolate.run` ÉCRIT SUR PLACE (cours,
 /// chapitre 27) : une fermeture emporte tout le contexte de la fonction qui
 /// l'a créée. Ici, le seul contexte est celui des paramètres.
+///
+/// [onProgression] reçoit l'avancement du chiffrement, de 0 à 1, au
+/// changement de pour cent (cours, chapitre 47). Sans lui, `Isolate.run`.
+///
+/// 🐛 POURQUOI CETTE PROGRESSION (user, 12/10/2026). Chiffrer une vidéo prend
+/// du temps, et la bulle tournait SANS CHIFFRE pendant tout ce temps : « ça
+/// tourne, ça stresse la personne qui envoie ». Un isolat lancé par
+/// `Isolate.run` ne dit rien avant d'avoir fini ; celui-ci envoie son
+/// avancement par un port.
 Future<FichierChiffreSurDisque> chiffrerVersFichierHorsDuFil({
   required String destination,
   String? source,
   Uint8List? octets,
-}) =>
-    Isolate.run(
+  void Function(double fraction)? onProgression,
+}) async {
+  if (onProgression == null) {
+    return Isolate.run(
       () => chiffrerVersFichier(destination: destination, source: source, octets: octets),
     );
+  }
+  final port = ReceivePort();
+  final fin = Completer<FichierChiffreSurDisque>();
+  port.listen((message) {
+    if (message is double) {
+      onProgression(message);
+    } else if (message is FichierChiffreSurDisque) {
+      fin.complete(message);
+    } else if (!fin.isCompleted) {
+      // Un échec rapporté par l'isolat, ou son erreur non rattrapée.
+      fin.completeError(FileSystemException('chiffrement impossible : $message'));
+    }
+  });
+  try {
+    await Isolate.spawn(
+      _chiffrerDansUnIsolat,
+      (port.sendPort, destination, source, octets),
+      onError: port.sendPort,
+      errorsAreFatal: true,
+    );
+    return await fin.future;
+  } finally {
+    port.close();
+  }
+}
+
+/// Le point d'entrée de l'isolat : de PREMIER NIVEAU, son seul contexte est
+/// son message (cours, chapitre 27).
+void _chiffrerDansUnIsolat((SendPort, String, String?, Uint8List?) message) {
+  final (port, destination, source, octets) = message;
+  try {
+    var dernier = -1;
+    final resultat = chiffrerVersFichier(
+      destination: destination,
+      source: source,
+      octets: octets,
+      progression: (faits, total) {
+        final p = total == 0 ? 100 : faits * 100 ~/ total;
+        if (p == dernier) return;
+        dernier = p;
+        port.send(p / 100);
+      },
+    );
+    port.send(resultat);
+  } catch (e) {
+    port.send('$e');
+  }
+}

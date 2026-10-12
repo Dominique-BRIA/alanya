@@ -645,6 +645,7 @@ class EnvoiChiffreEnCours extends StatelessWidget {
     required this.octets,
     required this.mime,
     required this.progression,
+    this.preparation,
   });
 
   /// Le fichier EN CLAIR, encore en mémoire chez l'expéditeur.
@@ -653,6 +654,14 @@ class EnvoiChiffreEnCours extends StatelessWidget {
 
   /// 0 pendant l'aperçu et le chiffrement, puis le téléversement, puis 1.
   final ValueListenable<double> progression;
+
+  /// L'avancement du CHIFFREMENT, de 0 à 1 (cours, chapitre 47).
+  ///
+  /// 🐛 SANS LUI, LA BULLE TOURNAIT SANS CHIFFRE pendant toute la préparation
+  /// d'une vidéo (user, 12/10/2026 : « ça tourne, ça stresse la personne qui
+  /// envoie »). Elle affiche désormais « Préparation 42 % », puis
+  /// « Envoi 18 % » : un chiffre à chaque étape.
+  final ValueListenable<double>? preparation;
 
   @override
   Widget build(BuildContext context) {
@@ -681,37 +690,9 @@ class EnvoiChiffreEnCours extends StatelessWidget {
           // Voile : sans lui, l'anneau blanc disparaît sur une photo claire.
           Container(color: Colors.black.withValues(alpha: 0.35)),
           Center(
-            child: ValueListenableBuilder<double>(
-              valueListenable: progression,
-              builder: (context, valeur, _) => valeur >= 1
-                  // Les octets sont partis ; restent la ligne et les
-                  // enveloppes. On n'écrit pas « terminé », ce serait faux.
-                  ? Text(tr(context, 'sending'),
-                      style: const TextStyle(color: Colors.white, fontSize: 13))
-                  : SizedBox(
-                      width: 46,
-                      height: 46,
-                      child: Stack(alignment: Alignment.center, children: [
-                        CircularProgressIndicator(
-                          // Indéterminé pendant le chiffrement : une barre
-                          // figée à 0 % ressemblerait à un envoi bloqué.
-                          value: valeur <= 0.01 ? null : valeur,
-                          strokeWidth: 3,
-                          backgroundColor: Colors.white24,
-                          valueColor:
-                              const AlwaysStoppedAnimation(Colors.white),
-                        ),
-                        // « 18 % », arrondi VERS LE BAS (demande du user,
-                        // 10/10/2026) : `round` affichait 100 alors que le
-                        // serveur n'avait pas encore confirmé l'arrivée.
-                        if (valeur > 0.01)
-                          Text('${(valeur * 100).floor()} %',
-                              style: const TextStyle(
-                                  fontSize: 10,
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w600)),
-                      ]),
-                    ),
+            child: ListenableBuilder(
+              listenable: Listenable.merge([progression, preparation]),
+              builder: (context, _) => _anneau(context),
             ),
           ),
           const Positioned(
@@ -722,5 +703,49 @@ class EnvoiChiffreEnCours extends StatelessWidget {
         ]),
       ),
     );
+  }
+
+  /// L'anneau, son pourcentage, et l'étape en cours sous lui : « Préparation »
+  /// pendant le chiffrement, « Envoi » pendant le téléversement.
+  ///
+  /// ⚠️ SEUL LE TOUT PREMIER INSTANT RESTE SANS CHIFFRE : l'aperçu, avant le
+  /// premier bloc chiffré. Une barre figée à 0 % y ressemblerait à un envoi
+  /// bloqué ; l'étape écrite dessous dit qu'on travaille.
+  Widget _anneau(BuildContext context) {
+    final envoi = progression.value;
+    // Les octets sont partis ; restent la ligne et les enveloppes (ou la
+    // publication par le serveur). On n'écrit pas « terminé », ce serait faux.
+    if (envoi >= 1) {
+      return Text(tr(context, 'sending'),
+          style: const TextStyle(color: Colors.white, fontSize: 13));
+    }
+    final enEnvoi = envoi > 0.01;
+    final valeur = enEnvoi ? envoi : (preparation?.value ?? 0);
+    final connu = valeur > 0.01;
+    return Column(mainAxisSize: MainAxisSize.min, children: [
+      SizedBox(
+        width: 46,
+        height: 46,
+        child: Stack(alignment: Alignment.center, children: [
+          CircularProgressIndicator(
+            value: connu ? valeur : null,
+            strokeWidth: 3,
+            backgroundColor: Colors.white24,
+            valueColor: const AlwaysStoppedAnimation(Colors.white),
+          ),
+          // « 18 % », arrondi VERS LE BAS (demande du user, 10/10/2026) :
+          // `round` affichait 100 avant que ce soit vrai.
+          if (connu)
+            Text('${(valeur * 100).floor()} %',
+                style: const TextStyle(
+                    fontSize: 10,
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600)),
+        ]),
+      ),
+      const SizedBox(height: 6),
+      Text(tr(context, enEnvoi ? 'sending' : 'envoi_preparation'),
+          style: const TextStyle(color: Colors.white, fontSize: 11)),
+    ]);
   }
 }
