@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
 import '../../../services/e2ee/e2ee_fil.dart' show MessageClair;
 import '../../../services/e2ee/e2ee_fournisseur.dart';
+import '../../../services/e2ee/e2ee_groupe_eclairage.dart';
 import '../../../services/e2ee/e2ee_groupe_fil.dart' show EchecGroupe;
 import '../../../services/e2ee/e2ee_media.dart';
 import '../../../services/e2ee/e2ee_media_envoi.dart';
@@ -1613,35 +1614,21 @@ class _ChatScreenState extends State<ChatScreen>
 
   Future<List<Message>> _ouvrirGroupe(List<Message> page) async {
     final pile = context.e2ee;
-    if (pile == null || !page.any((m) => m.chiffreGroupe != null)) return page;
-    final sortie = <Message>[];
-    for (final m in page) {
-      final c = m.chiffreGroupe;
-      if (c == null || m.isDeleted) {
-        sortie.add(m);
-        continue;
-      }
-      final (clair, echec) = await pile.fil.groupe.lire(
-          convId: widget.convId, messageId: m.id, expediteurId: m.senderId, chiffre: c);
-      if (clair == null) {
-        if (echec == EchecGroupe.cleAbsente) _attenteCle.add(m.id);
-        sortie.add(m);
-        continue;
-      }
-      _attenteCle.remove(m.id);
-      sortie.add(m.avecDechiffre(texte: clair.texte, media: clair.media));
-      unawaited(MessageCache.rangeTexteDechiffre(
-        id: m.id,
-        convId: widget.convId,
-        expediteurId: m.senderId,
-        texte: clair.texte,
-        quand: m.createdAt,
-        media: clair.media,
-        genre: clair.genre,
-        replyToId: clair.reponseA,
-      ).then((_) {}, onError: (_) {}));
-    }
-    return sortie;
+    if (pile == null) return page;
+    /*
+     * ⚠️ LA RÈGLE VIT DANS `e2ee_groupe_eclairage.dart`, PAS ICI. La liste des
+     * conversations en a besoin elle aussi, pour afficher l'aperçu d'un groupe
+     * jamais ouvert sur cet appareil ; deux copies finiraient par diverger.
+     */
+    final r = await ouvrirMessagesGroupe(
+      pile: pile,
+      convId: widget.convId,
+      page: page,
+    );
+    _attenteCle
+      ..removeAll([for (final m in r.messages) m.id])
+      ..addAll(r.attenteCle);
+    return r.messages;
   }
 
   /// Un message de GROUPE chiffré vient d'arriver (`e2ee_arrivee`, `groupe`) :

@@ -47,6 +47,7 @@ import '../auth/auth_controller.dart';
 import '../settings/deconnexion.dart';
 import '../chat/chat_repository.dart';
 import '../../services/e2ee/e2ee_fournisseur.dart';
+import '../../services/e2ee/e2ee_groupe_eclairage.dart';
 import '../chat/screens/chat_screen.dart';
 import '../calls/screens/dialer_screen.dart';
 import '../contacts/teintes_listes.dart';
@@ -961,6 +962,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
       });
       // Met à jour le cache pour la prochaine fois.
       await ConversationCache.putAll(convs);
+      unawaited(_eclairerGroupesJamaisOuverts(convs));
       // Signale à l'app qu'on est bien online.
       if (mounted) context.read<ConnectivityService>().markHttpSucceeded();
 
@@ -984,6 +986,51 @@ class _ConversationsTabState extends State<_ConversationsTab>
     // Chemin d'échec seulement : le cache local n'a pas d'aperçu d'appel plus
     // récent que ce qu'il contient déjà.
     _loadCalls();
+  }
+
+  /// Combien de GROUPES chiffrés sans aperçu on ouvre en silence, au plus.
+  ///
+  /// ⚠️ UNE BORNE, PARCE QUE C'EST UNE REQUÊTE PAR GROUPE. Trente groupes et un
+  /// téléphone neuf feraient trente appels d'un coup sur une connexion lente.
+  /// Les premiers de la liste sont ceux qu'on regarde ; les autres se
+  /// rempliront au prochain affichage, ou à l'ouverture.
+  static const int _groupesAEclairerMax = 8;
+
+  /// Donne leur aperçu aux GROUPES chiffrés jamais ouverts sur cet appareil.
+  ///
+  /// 🐛 ILS N'EN AVAIENT AUCUN (trouvé le 12/10/2026). Le pourquoi est dans
+  /// `e2ee_groupe_eclairage.dart` : le corps d'un message de groupe ne se
+  /// déchiffre qu'en chargeant les messages de son fil, là où un message de
+  /// tête-à-tête arrive par la relève de fond.
+  ///
+  /// ⚠️ EN ARRIÈRE-PLAN, ET SANS JAMAIS LEVER : la liste est déjà affichée, et
+  /// un groupe qui échoue garde l'aperçu qu'il avait — c'est-à-dire aucun.
+  Future<void> _eclairerGroupesJamaisOuverts(List<Conversation> convs) async {
+    final pile = context.e2ee;
+    if (pile == null) return;
+    final sansApercu = [
+      for (final c in convs)
+        if (c.e2eeActif && c.isGroup && (c.lastMessage?.content ?? '').isEmpty) c,
+    ].take(_groupesAEclairerMax).toList();
+    if (sansApercu.isEmpty) return;
+
+    final repo = context.read<ChatRepository>();
+    var change = false;
+    for (final c in sansApercu) {
+      try {
+        // Cinq : de quoi tomber sur un message qui porte du texte, même si les
+        // derniers sont des photos ou des messages effacés.
+        final page = await repo.getMessages(c.id, limit: 5);
+        final r = await ouvrirMessagesGroupe(pile: pile, convId: c.id, page: page);
+        if (r.messages.any((m) => (m.content ?? '').isNotEmpty)) change = true;
+      } catch (_) {
+        /* Hors ligne, clé pas encore reçue : la liste reste comme elle était. */
+      }
+    }
+    if (!change || !mounted) return;
+    // Le cache vient d'être rempli : on relit les aperçus et on rafraîchit.
+    final avecTextes = await avecDerniersTextesLocaux(convs);
+    if (mounted) setState(() => _convs = avecTextes);
   }
 
   Future<void> _poll() async {
