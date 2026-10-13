@@ -243,32 +243,50 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
       final mime = _mimeFromAsset(asset);
       final chemin = (await asset.file)?.path;
 
-      // Photo comme vidéo — voir `core/compression_envoi.dart`.
+      /*
+       * 🔴 UNE VIDÉO N'EST PLUS TRANSCODÉE ICI (décision du user, 13/10/2026 :
+       * « quand on sélectionne une vidéo, ça doit aller dans le lecteur
+       * intégré, qui sert de page intermédiaire, AVANT de charger le
+       * pourcentage de compression »).
+       *
+       * 🔴 POURQUOI C'EST MIEUX, ET PAS SEULEMENT PLUS JOLI. Transcoder ici
+       * retenait la grille — doigt levé, écran figé — pendant des dizaines de
+       * secondes, sans que rien ne soit encore visible de ce qu'on envoie. On
+       * ouvre maintenant l'aperçu TOUT DE SUITE : la vidéo se regarde et la
+       * légende s'écrit pendant que la compression tourne derrière, exactement
+       * comme sur le web.
+       *
+       * ⚠️ LA PHOTO, ELLE, RESTE COMPRESSÉE ICI : c'est l'affaire d'un instant,
+       * et l'encodeur JPEG natif a besoin de l'`AssetEntity` qu'on tient
+       * justement sous la main.
+       */
       final video = asset.type == AssetType.video;
-      if (video && mounted) {
-        setState(() {
-          _videoRang++;
-          _avancement = 0;
-        });
-      }
-      final compresse = await compresserPourEnvoi(
-        asset: asset,
-        octets: bytes,
-        nomFichier: name,
-        mimeType: mime,
-        chemin: chemin,
-        onProgression: (p) {
-          if (mounted) setState(() => _avancement = p);
-        },
-      );
-      if (video && mounted) setState(() => _avancement = null);
+      final compresse = video
+          ? ResultatCompression(
+              octets: bytes,
+              nomFichier: name,
+              mimeType: mime,
+              compresse: false,
+              tailleAvant: bytes.length,
+              tailleApres: bytes.length,
+            )
+          : await compresserPourEnvoi(
+              asset: asset,
+              octets: bytes,
+              nomFichier: name,
+              mimeType: mime,
+              chemin: chemin,
+            );
 
       /* ⚠️ LE PLAFOND SE MESURE APRÈS COMPRESSION, jamais avant : une photo de
        * 12 Mo sortie du capteur en fait 400 Ko une fois réduite, et la refuser
        * sur sa taille d'origine interdirait un envoi parfaitement acceptable.
-       * Ce contrôle manquait ici alors que les trois autres chemins l'avaient.
+       *
+       * ⚠️ UNE VIDÉO N'EST PLUS COMPRESSÉE ICI : son plafond se mesure donc à
+       * l'écran d'aperçu, une fois le transcodage fini. La refuser sur sa
+       * taille d'origine écarterait une vidéo qui tiendrait largement après.
        */
-      if (depassePlafondMedia(compresse.octets.length)) {
+      if (!video && depassePlafondMedia(compresse.octets.length)) {
         tropGros.add(compresse.nomFichier);
         continue;
       }

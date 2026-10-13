@@ -1,10 +1,13 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../../core/app_snackbar.dart';
 import '../../../core/compression_envoi.dart';
+import '../../../core/plafond_media.dart';
 import '../../../core/compression_image.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/media/avancement_compression.dart';
@@ -109,12 +112,104 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
   /// tous d'avance ouvrirait dix décodeurs pour dix vidéos.
   final Map<int, VideoPlayerController> _lecteurs = {};
 
+  /// L'index en cours de PREMIÈRE compression, et son avancement.
+  ///
+  /// 🔴 LA COMPRESSION A QUITTÉ LE SÉLECTEUR POUR CET ÉCRAN (décision du user,
+  /// 13/10/2026 : « quand on sélectionne une vidéo, ça doit aller dans le
+  /// lecteur intégré, qui sert de page intermédiaire, AVANT de charger le
+  /// pourcentage de compression »).
+  ///
+  /// 🔴 ET C'EST BIEN MIEUX AINSI. Transcoder dans le sélecteur retenait la
+  /// grille, doigt levé, sans que rien ne soit encore visible de ce qu'on
+  /// envoie. Ici, la vidéo se regarde et la légende s'écrit pendant que le
+  /// transcodage tourne — exactement ce que fait le web depuis toujours.
+  int? _compresse;
+  double _avancementCompression = 0;
+
+  /// Vrai tant qu'un fichier attend sa première compression : l'envoi patiente.
+  bool _enPreparation = false;
+
   @override
   void initState() {
     super.initState();
     _fichiers = List.of(widget.files);
     _pages = PageController();
     _prepareVideo(0);
+    unawaited(_compresserCeQuiReste());
+  }
+
+  /// Compresse les fichiers que le sélecteur a laissés intacts — les vidéos.
+  ///
+  /// ⚠️ UN PAR UN, et c'est voulu : les encodeurs matériels sont en nombre
+  /// limité, et deux transcodages simultanés finissent tous les deux plus tard
+  /// qu'en file.
+  ///
+  /// ⚠️ NE LÈVE JAMAIS. Une vidéo qui refuse de se transcoder part telle
+  /// quelle : c'est la règle de tout le module de compression.
+  Future<void> _compresserCeQuiReste() async {
+    final aFaire = <int>[
+      for (var i = 0; i < _fichiers.length; i++)
+        if (!_fichiers[i].compresse && _fichiers[i].estVideo) i,
+    ];
+    if (aFaire.isEmpty) return;
+    if (mounted) setState(() => _enPreparation = true);
+
+    for (final i in aFaire) {
+      if (!mounted) return;
+      final m = _fichiers[i];
+      setState(() {
+        _compresse = i;
+        _avancementCompression = 0;
+      });
+      try {
+        final pret = await compresserPourEnvoi(
+          asset: m.asset,
+          octets: m.bytes,
+          nomFichier: m.fileName,
+          mimeType: m.mimeType,
+          chemin: m.path,
+          onProgression: (v) {
+            if (mounted) setState(() => _avancementCompression = v);
+          },
+        );
+        if (!mounted) return;
+        setState(() {
+          _fichiers[i] = m.copieAvec(
+            bytes: pret.octets,
+            fileName: pret.nomFichier,
+            mimeType: pret.mimeType,
+            compresse: pret.compresse,
+            tailleOriginale: pret.compresse ? pret.tailleAvant : null,
+            niveauSuperieurPossible: pret.niveauSuperieurPossible,
+          );
+        });
+      } catch (_) {
+        // La vidéo partira telle quelle.
+      }
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _compresse = null;
+      _enPreparation = false;
+    });
+
+    /*
+     * ⚠️ LE PLAFOND SE MESURE MAINTENANT, et pas avant : une vidéo de 80 Mo en
+     * fait 6 une fois transcodée. La refuser sur sa taille d'origine aurait
+     * écarté un envoi parfaitement acceptable.
+     */
+    final tropGros = <String>[];
+    for (var i = _fichiers.length - 1; i >= 0; i--) {
+      if (depassePlafondMedia(_fichiers[i].bytes.length)) {
+        tropGros.add(_fichiers[i].fileName);
+        setState(() => _fichiers.removeAt(i));
+      }
+    }
+    if (tropGros.isEmpty || !mounted) return;
+    final avis = messageMediasEcartes(tropGros, context: context);
+    if (avis != null) showAppSnackBar(avis);
+    if (_fichiers.isEmpty && mounted) Navigator.of(context).pop();
   }
 
   @override
@@ -177,6 +272,13 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
      * en silence, et un transcodage vidéo prend des secondes.
      */
     if (_recompresse != null) return;
+    /*
+     * ⚠️ PAS D'ENVOI TANT QU'UNE VIDÉO SE TRANSCODE. Partir avec les octets
+     * d'origine enverrait les 80 Mo qu'on est précisément en train de réduire —
+     * et le serveur les refuserait. L'utilisateur voit le pourcentage ; le
+     * bouton attend qu'il finisse.
+     */
+    if (_enPreparation) return;
     final vueUnique = _vueUnique && _vueUniquePossible;
     // Une vue unique part SANS légende : elle resterait lisible bien après
     // l'effacement du média.
@@ -474,15 +576,16 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
   Widget? _ligneCompression() {
     final courant = _fichiers[_index];
 
-    // Pendant la recompression : on dit où on en est, comme à la sélection.
-    if (_recompresse == _index) {
+    // Pendant une compression — la première comme un changement de niveau.
+    if (_compresse == _index || _recompresse == _index) {
       return Padding(
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
         child: Row(children: [
           const Icon(Icons.compress, size: 14, color: Colors.white54),
           const SizedBox(width: 6),
           AvancementCompression(
-            avancement: _avancementNiveau,
+            avancement:
+                _compresse == _index ? _avancementCompression : _avancementNiveau,
             style: const TextStyle(color: Colors.white54, fontSize: 12),
           ),
         ]),

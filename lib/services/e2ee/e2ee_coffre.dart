@@ -18,6 +18,8 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
 
@@ -83,10 +85,90 @@ class CoffreE2ee implements SignalProtocolStore {
 
   String _cle(String suffixe) => 'e2ee/$_compte/$suffixe';
 
-  Future<String?> _lire(String k) => _magasin.read(key: _cle(k));
-  Future<void> _ecrire(String k, String v) =>
-      _magasin.write(key: _cle(k), value: v);
-  Future<void> _effacer(String k) => _magasin.delete(key: _cle(k));
+  /*
+   * ══════════════ QUAND LE COFFRE MATÉRIEL DEVIENT ILLISIBLE ══════════════
+   *
+   * 🐛 « ENVOI IMPOSSIBLE : Migration failed after algorithm change (Invalid
+   * key, key type incompatible with cipher) » (capture du user, 13/10/2026).
+   * Sur ce téléphone, la clé maîtresse du coffre Android ne peut plus
+   * déballer ce qu'elle a scellé — cela arrive après une mise à jour du
+   * système, une restauration de sauvegarde, ou un changement de l'algorithme
+   * par la bibliothèque.
+   *
+   * 🔴 ET C'ÉTAIT SANS RETOUR. Avec `resetOnError: false`, CHAQUE lecture
+   * levait, pour toujours : plus d'identité, donc plus un seul message
+   * déchiffrable (« Média chiffré — indisponible sur cet appareil » partout) et
+   * plus un seul envoi possible. Le compte était mort sur cet appareil, et rien
+   * ne pouvait l'en sortir — sauf désinstaller l'application.
+   *
+   * 🔴 ON RÉPARE DONC, MAIS SEULEMENT POUR CETTE PANNE-LÀ. `resetOnError: true`
+   * effacerait sur N'IMPORTE quelle erreur, y compris une lecture refusée parce
+   * que l'écran est verrouillé — et jetterait des clés parfaitement saines. On
+   * reconnaît la signature exacte, et elle seule.
+   *
+   * ⚠️ CE QUE LA RÉPARATION COÛTE, ET POURQUOI C'EST LE MOINDRE MAL : l'appareil
+   * repart avec une identité neuve. Les messages déjà chiffrés POUR L'ANCIENNE
+   * deviennent définitivement illisibles ici — mais ils l'étaient déjà, puisque
+   * la clé ne se lisait plus. On ne perd rien qu'on avait encore.
+   */
+  static bool _coffreIllisible(Object e) {
+    if (e is! PlatformException) return false;
+    final texte = '${e.message ?? ''} ${e.details ?? ''}';
+    return texte.contains('Migration failed') ||
+        texte.contains('Failed to unwrap key') ||
+        texte.contains('key type incompatible');
+  }
+
+  /// Vide l'espace de ce coffre après la panne ci-dessus. Ne lève jamais.
+  Future<void> _reparer() async {
+    try {
+      await _magasin.deleteAll(aOptions: _options);
+      debugPrint('[e2ee] coffre matériel illisible : espace vidé, identité neuve.');
+    } catch (_) {
+      // Même l'effacement peut échouer : on laissera `preparer()` retenter.
+    }
+  }
+
+  /// Tout l'espace, avec la même réparation que [_lire].
+  Future<Map<String, String>> _lireTout() async {
+    try {
+      return await _magasin.readAll(aOptions: _options);
+    } catch (e) {
+      if (!_coffreIllisible(e)) rethrow;
+      await _reparer();
+      return const {};
+    }
+  }
+
+  Future<String?> _lire(String k) async {
+    try {
+      return await _magasin.read(key: _cle(k));
+    } catch (e) {
+      if (!_coffreIllisible(e)) rethrow;
+      await _reparer();
+      return null;
+    }
+  }
+
+  Future<void> _ecrire(String k, String v) async {
+    try {
+      await _magasin.write(key: _cle(k), value: v);
+    } catch (e) {
+      if (!_coffreIllisible(e)) rethrow;
+      await _reparer();
+      // Une seule reprise : si elle échoue encore, l'appelant le saura.
+      await _magasin.write(key: _cle(k), value: v);
+    }
+  }
+
+  Future<void> _effacer(String k) async {
+    try {
+      await _magasin.delete(key: _cle(k));
+    } catch (e) {
+      if (!_coffreIllisible(e)) rethrow;
+      await _reparer();
+    }
+  }
 
   /* ══════════════ IDENTITÉ ══════════════ */
 
@@ -284,7 +366,7 @@ class CoffreE2ee implements SignalProtocolStore {
 
   @override
   Future<void> deleteAllSessions(String name) async {
-    final tout = await _magasin.readAll(aOptions: _options);
+    final tout = await _lireTout();
     // Une copie des clés : voir `oublier()`.
     for (final k in tout.keys.toList()) {
       if (k.startsWith(_cle('session.$name.'))) await _magasin.delete(key: k);
@@ -319,7 +401,7 @@ class CoffreE2ee implements SignalProtocolStore {
   /// avertissement de changement de clé chez tous les correspondants — une
   /// alerte de sécurité pour une opération de maintenance.
   Future<int> effacerToutesLesSessions() async {
-    final tout = await _magasin.readAll(aOptions: _options);
+    final tout = await _lireTout();
     final prefixe = _cle('session.');
     var n = 0;
     // Une copie des clés : voir `oublier()`.
@@ -554,7 +636,7 @@ class CoffreE2ee implements SignalProtocolStore {
   /// déconnexion reviendrait à laisser sur l'appareil de quoi lire ce qui a été
   /// échangé, alors que se déconnecter veut dire le contraire.
   Future<void> oublier() async {
-    final tout = await _magasin.readAll(aOptions: _options);
+    final tout = await _lireTout();
     // ⚠️ UNE COPIE DES CLÉS : effacer en parcourant la table elle-même casse la
     // boucle dès que `readAll` rend la table vivante (le stockage simulé des
     // tests le fait) — et le coffre restait à moitié plein.

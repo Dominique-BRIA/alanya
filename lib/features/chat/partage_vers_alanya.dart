@@ -161,7 +161,11 @@ class _ChoixConversationState extends State<_ChoixConversation> {
                         : Text(titre.isEmpty ? '?' : titre.characters.first.toUpperCase()),
                   ),
                   title: Text(titre, maxLines: 1, overflow: TextOverflow.ellipsis),
-                  trailing: c.e2eeActif ? const Icon(Icons.lock_outline, size: 16) : null,
+                  // 🔴 PLUS DE CADENAS (décision du user, 13/10/2026). Le
+                  // chiffrement est partout et par défaut : le montrer sur
+                  // CERTAINES conversations laissait croire que les autres ne
+                  // le sont pas, et donnait à l'utilisateur une distinction
+                  // qu'il n'a pas à connaître.
                   onTap: () => Navigator.of(context).pop(c),
                 );
               },

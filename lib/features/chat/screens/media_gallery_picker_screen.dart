@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
 
 import '../../../core/compression_envoi.dart';
+import '../../../core/compression_image.dart' show ResultatCompression;
 import '../../../core/plafond_media.dart';
 import '../../../core/galerie.dart';
 import '../../../theme/alanya_theme.dart';
@@ -264,24 +265,30 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
          * moindre incertitude. Les vidéos passent par `compression_video.dart`
          * depuis le 06/10/2026 — elles partaient entières.
          */
+        /*
+         * 🔴 UNE VIDÉO N'EST PLUS TRANSCODÉE ICI (décision du user, 13/10/2026).
+         * Elle l'est à l'écran d'aperçu, qui s'ouvre tout de suite : on
+         * regarde la vidéo et l'on écrit sa légende pendant que la compression
+         * tourne, au lieu d'attendre devant une grille figée. Le pourquoi
+         * complet est dans `media_picker_sheet.dart`.
+         */
         final video = asset.type == AssetType.video;
-        if (video && mounted) {
-          setState(() {
-            _videoRang++;
-            _avancement = 0;
-          });
-        }
-        final compresse = await compresserPourEnvoi(
-          asset: asset,
-          octets: octets,
-          nomFichier: asset.title ?? 'media_${asset.id}',
-          mimeType: _mime(asset),
-          chemin: fichier?.path,
-          onProgression: (p) {
-            if (mounted) setState(() => _avancement = p);
-          },
-        );
-        if (video && mounted) setState(() => _avancement = null);
+        final compresse = video
+            ? ResultatCompression(
+                octets: octets,
+                nomFichier: asset.title ?? 'media_${asset.id}',
+                mimeType: _mime(asset),
+                compresse: false,
+                tailleAvant: octets.length,
+                tailleApres: octets.length,
+              )
+            : await compresserPourEnvoi(
+                asset: asset,
+                octets: octets,
+                nomFichier: asset.title ?? 'media_${asset.id}',
+                mimeType: _mime(asset),
+                chemin: fichier?.path,
+              );
         /*
          * ⚠️ LE PLAFOND SE MESURE APRÈS COMPRESSION, jamais avant.
          *
@@ -290,7 +297,9 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
          * parfaitement acceptables. Ce contrôle vise donc ce qui PART
          * réellement — en pratique, les longues vidéos, même transcodées.
          */
-        if (depassePlafondMedia(compresse.octets.length)) {
+        // ⚠️ Une vidéo n'est plus compressée ici : son plafond se mesure à
+        // l'écran d'aperçu, une fois le transcodage fini.
+        if (!video && depassePlafondMedia(compresse.octets.length)) {
           tropGros.add(compresse.nomFichier);
           continue;
         }
