@@ -458,12 +458,21 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
   /// retour disparaîtrait avec elle et l'utilisateur serait enfermé dans le
   /// niveau qu'il vient de choisir.
   ///
-  /// ⚠️ LE CHEMIN DU FICHIER EST REQUIS : sans lui (sélecteur système qui ne
-  /// rend que des octets) on ne pourrait pas repartir de l'original, et la
-  /// ligne ne tiendrait pas sa promesse.
+  /// 🐛 ELLE NE S'AFFICHAIT JAMAIS SUR LE MOBILE (signalé par le user le
+  /// 13/10/2026 : « même quand ça doit compresser, ça n'affiche pas ça »).
+  /// Elle exigeait TROIS choses pour paraître : une compression, un chemin de
+  /// fichier, et une taille d'origine. Les deux dernières servent au BOUTON et
+  /// à la FLÈCHE, pas au fait qu'il y ait quelque chose à dire — et il manque
+  /// souvent un chemin (photo venue du nuage, fichier partagé par une autre
+  /// application). Toute la ligne disparaissait alors, gain compris.
+  ///
+  /// ⚠️ CHAQUE MORCEAU A DÉSORMAIS SA PROPRE CONDITION :
+  ///   · la ligne paraît dès qu'il y a eu compression ;
+  ///   · la flèche « avant → après » demande la taille d'origine ;
+  ///   · le bouton demande le chemin — sans lui on ne pourrait pas repartir de
+  ///     l'original, et le proposer serait une promesse qu'on ne tient pas.
   Widget? _ligneCompression() {
     final courant = _fichiers[_index];
-    if (courant.path == null) return null;
 
     // Pendant la recompression : on dit où on en est, comme à la sélection.
     if (_recompresse == _index) {
@@ -483,7 +492,6 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
     final haute = courant.niveau == NiveauQualite.haute;
     if (!courant.compresse && !haute) return null;
     final avant = courant.tailleOriginale;
-    if (avant == null) return null;
 
     final bascule = courant.estVideo
         ? (haute ? 'media_envoyer_720p' : 'media_envoyer_1080p')
@@ -496,7 +504,7 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
         const SizedBox(width: 6),
         Flexible(
           child: Text(
-            courant.compresse
+            courant.compresse && avant != null
                 ? "${poidsLisible(avant)} → ${poidsLisible(courant.bytes.length)}"
                 : poidsLisible(courant.bytes.length),
             overflow: TextOverflow.ellipsis,
@@ -506,7 +514,10 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
         // Le bouton ne paraît que s'il change quelque chose : pour une photo de
         // 1200 px ou une vidéo filmée en 720p, le niveau haut rendrait le même
         // fichier. Au niveau haut, il reste pour pouvoir revenir.
-        if (courant.niveauSuperieurPossible || haute) ...[
+        // ⚠️ LE CHEMIN EST REQUIS POUR LE BOUTON SEUL : la bascule repart de
+        // l'original sur le disque. Sans lui, on dit le gain sans proposer
+        // mieux, plutôt que de ne rien dire du tout.
+        if (_rebasculable(courant) && (courant.niveauSuperieurPossible || haute)) ...[
           const SizedBox(width: 10),
           GestureDetector(
             onTap: _basculerNiveau,
@@ -538,12 +549,22 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
   ///
   /// ⚠️ UNE RECOMPRESSION À LA FOIS, et l'envoi attend : partir avec les octets
   /// de l'ancien niveau serait désobéir en silence.
+  /// Peut-on vraiment rebasculer ce média ?
+  ///
+  /// ⚠️ UNE VIDÉO EXIGE UN CHEMIN : le transcodeur natif lit un fichier, jamais
+  /// des octets. Une PHOTO se contente de la référence de galerie — c'est par
+  /// elle que passe l'encodeur JPEG du téléphone. Sans l'une ni l'autre, le
+  /// bouton ne paraît pas : promettre ce qu'on ne peut pas tenir est pire que
+  /// de ne rien proposer.
+  static bool _rebasculable(MediaPickResult m) =>
+      m.path != null || (!m.estVideo && m.asset != null);
+
   Future<void> _basculerNiveau() async {
     if (_recompresse != null) return;
     final index = _index;
     final courant = _fichiers[index];
     final chemin = courant.path;
-    if (chemin == null) return;
+    if (!_rebasculable(courant)) return;
 
     final vise = courant.niveau == NiveauQualite.haute
         ? NiveauQualite.normal
@@ -553,8 +574,17 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
       _avancementNiveau = 0;
     });
     try {
-      final original = await File(chemin).readAsBytes();
-      final nom = chemin.split(Platform.pathSeparator).last;
+      /*
+       * ⚠️ L'ORIGINAL VIENT DU DISQUE, OU DE LA GALERIE. Une photo du nuage n'a
+       * pas toujours de chemin local : `originBytes` la fait descendre, et
+       * c'est la seule façon d'honorer le bouton pour elle.
+       */
+      final original = chemin != null
+          ? await File(chemin).readAsBytes()
+          : (await courant.asset!.originBytes)!;
+      final nom = chemin != null
+          ? chemin.split(Platform.pathSeparator).last
+          : courant.fileName;
       final pret = await compresserPourEnvoi(
         asset: courant.asset,
         octets: original,

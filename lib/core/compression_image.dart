@@ -60,6 +60,39 @@ int bordMaxPour(NiveauQualite niveau) =>
 int qualitePour(NiveauQualite niveau) =>
     niveau == NiveauQualite.haute ? imageQualiteHaute : imageQualite;
 
+/// L'ESCALIER DES PALIERS — décision du user, 13/10/2026, jumeau du web
+/// (`PALIERS_IMAGE`) et de la vidéo.
+///
+/// 🐛 UNE PHOTO DÉJÀ SOUS 1600 px NE SE COMPRESSAIT PLUS. La nouvelle règle
+/// descend toujours d'une marche :
+///   · plus de 1600 → 1600   · 1001 à 1600 → 1000
+///   · 641 à 1000 → 640      · 640 ou moins → on ne touche plus à rien
+const List<int> paliersImage = [1600, 1000, 640];
+
+/// Le plus petit palier : en dessous, on ne réduit plus.
+const int imagePalierPlancher = 640;
+
+/// Le palier visé pour un bord long de [long], ou `null` s'il n'y a plus rien
+/// à faire.
+int? palierImage(int long) {
+  if (long <= imagePalierPlancher) return null;
+  for (final p in paliersImage) {
+    if (long > p) return p;
+  }
+  return null;
+}
+
+/// CETTE PHOTO EST-ELLE DÉJÀ SORTIE DE CHEZ NOUS ?
+///
+/// 🔴 LA GARDE CONTRE LA CASCADE, jumelle de celle de la vidéo. Deux conditions,
+/// et les deux comptent : le bord long doit être EXACTEMENT un de nos paliers,
+/// et le poids par pixel celui d'une de nos sorties. Une photo de 1000 px
+/// lourde comme une brute n'est pas la nôtre.
+bool dejaUnPalierImageAlanya(int long, int octets, int pixels) {
+  if (!paliersImage.contains(long)) return false;
+  return pixels > 0 && octets <= pixels * octetsParPixelMax;
+}
+
 /// En dessous, le gain ne vaut pas le risque de perte : on garde l'original.
 const double gainMinimum = 0.9;
 
@@ -196,26 +229,56 @@ Future<ResultatCompression> compresserAsset(
    * haut, une photo de 2000 px n'est plus « trop petite », elle est ré-encodée
    * à sa taille, plus finement.
    */
-  if (!png &&
-      bordLong > 0 &&
-      bordLong <= bordMax &&
-      original.length <= largeur * hauteur * octetsParPixelMax) {
-    return ResultatCompression(
-      octets: original,
-      nomFichier: nomFichier,
-      mimeType: mimeType,
-      compresse: false,
-      tailleAvant: original.length,
-      tailleApres: original.length,
-      raisonSaut: RaisonSaut.tropPetite,
-      niveauSuperieurPossible: bordLong > imageBordMax,
-    );
+  ResultatCompression tropPetite() => ResultatCompression(
+        octets: original,
+        nomFichier: nomFichier,
+        mimeType: mimeType,
+        compresse: false,
+        tailleAvant: original.length,
+        tailleApres: original.length,
+        raisonSaut: RaisonSaut.tropPetite,
+        niveauSuperieurPossible: bordLong > imageBordMax,
+      );
+
+  /*
+   * ══════ OÙ L'ON DESCEND, ET DE COMBIEN ══════
+   *
+   * Au niveau NORMAL, l'escalier des paliers ; au niveau HAUT, un plafond.
+   *
+   * ⚠️ LE PNG N'EST JAMAIS « DÉJÀ SORTI DE CHEZ NOUS » : ce module rend du
+   * JPEG. Et sous le plancher, un PNG est quand même ré-encodé À SA TAILLE :
+   * son gain vient du FORMAT, pas de la taille — c'est ce qui a corrigé « ça
+   * ne compresse pas » le 06/10/2026.
+   */
+  final int cible;
+  if (niveau == NiveauQualite.haute) {
+    if (!png &&
+        bordLong > 0 &&
+        bordLong <= bordMax &&
+        original.length <= largeur * hauteur * octetsParPixelMax) {
+      return tropPetite();
+    }
+    cible = bordMax;
+  } else {
+    if (!png &&
+        bordLong > 0 &&
+        dejaUnPalierImageAlanya(bordLong, original.length, largeur * hauteur)) {
+      return tropPetite();
+    }
+    final palier = bordLong > 0 ? palierImage(bordLong) : null;
+    if (palier == null && !png) return tropPetite();
+    /*
+     * ⚠️ DIMENSIONS INCONNUES : ON RETOMBE SUR LE PLAFOND. Sans elles, on ne
+     * sait pas sur quelle marche on se trouve ; viser `bordLong` donnerait une
+     * consigne de 0 pixel, et le module natif rendrait une vignette vide.
+     */
+    cible = palier ?? (bordLong > 0 ? bordLong : bordMax);
   }
 
   Uint8List? reduit;
   try {
     reduit = await asset.thumbnailDataWithSize(
-      consigneVignette(largeur, hauteur, bordMax: bordMax),
+      consigneVignette(largeur, hauteur, bordMax: cible),
       format: ThumbnailFormat.jpeg,
       quality: qualitePour(niveau),
     );

@@ -136,6 +136,24 @@ class _HomeScreenState extends State<HomeScreen> {
     // Ouvre la connexion temps réel dès que l'utilisateur est sur l'accueil.
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
+      /*
+       * 🐛 UN PARTAGE REÇU N'ARRIVAIT JAMAIS DANS L'APPLICATION (signalé par le
+       * user le 13/10/2026 : « ça ouvre l'application, mais on ne voit rien
+       * qui a été envoyé »).
+       *
+       * 🔴 LA CAUSE : CE BLOC EST UNE FILE D'ATTENTE, et il se termine par
+       * l'ouverture des liens et des partages. Un seul des appels réseau du
+       * début — `isAgent()`, par exemple — qui LÈVE, et tout ce qui suit était
+       * abandonné : `_pretPourLiens` restait faux pour toujours, et le partage
+       * attendait indéfiniment. Or une application lancée PAR un partage l'est
+       * souvent sur une connexion à peine réveillée : l'échec est le cas
+       * normal, pas l'exception.
+       *
+       * ⚠️ LE `finally` EST LA CORRECTION, et il doit le rester : ce qui
+       * dépend de l'utilisateur (son partage, son lien) ne doit jamais dépendre
+       * de ce qui dépend du réseau.
+       */
+      try {
       context.read<RealtimeClient>().connect();
       final user = context.read<AuthController>().user;
       if (user != null) {
@@ -169,10 +187,16 @@ class _HomeScreenState extends State<HomeScreen> {
       await _assureLeSuiviDePosition();
       // Le lien Alanya qui a lancé l'application passe APRÈS les questions
       // ci-dessus, pour la même raison : une question à la fois.
-      if (!mounted) return;
-      _pretPourLiens = true;
-      _traiterLienEnAttente();
-      _traiterPartageEnAttente();
+      } catch (_) {
+        // Réseau endormi, serveur injoignable : rien de tout cela n'empêche
+        // d'ouvrir ce que l'utilisateur vient de partager.
+      } finally {
+        if (mounted) {
+          _pretPourLiens = true;
+          _traiterLienEnAttente();
+          _traiterPartageEnAttente();
+        }
+      }
     });
     LiensEntrants.instance.enAttente.addListener(_traiterLienEnAttente);
     PartageEntrant.instance.enAttente.addListener(_traiterPartageEnAttente);

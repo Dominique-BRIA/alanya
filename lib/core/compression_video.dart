@@ -69,6 +69,54 @@ const int videoBordCourtHaute = 1080;
 int bordCourtVise(NiveauQualite niveau) =>
     niveau == NiveauQualite.haute ? videoBordCourtHaute : videoBordCourtMax;
 
+/// L'ESCALIER DES PALIERS — décision du user, 13/10/2026. Copie du web
+/// (`PALIERS_VIDEO`).
+///
+/// 🐛 « SI LA TAILLE DE LA VIDÉO EST INFÉRIEURE À 720, ON NE COMPRESSE PLUS.
+/// Ce n'est pas bon du tout. » On visait 720 et une vidéo déjà en dessous y
+/// était déjà : elle repartait intacte.
+///
+/// 🔴 ON DESCEND TOUJOURS D'UNE MARCHE :
+///   · plus grand que 720 → 720   · 361 à 720 → 360
+///   · 241 à 360 → 240            · 240 ou moins → on ne touche plus à rien
+const List<int> paliersVideo = [720, 360, 240];
+
+/// Le plus petit palier : en dessous, on ne convertit plus.
+const int videoPalierPlancher = 240;
+
+/// Le débit de chaque palier, en bits par seconde (web : `DEBIT_PALIER`).
+///
+/// ⚠️ DES VALEURS EXPLICITES, PAS UNE RÈGLE DE TROIS. Une petite image a besoin
+/// de PLUS de bits par pixel qu'une grande pour rester regardable : un 240p
+/// calculé au prorata d'un 720p tomberait à 180 kbit/s et serait une bouillie.
+const Map<int, int> debitPalier = {720: 1600000, 360: 600000, 240: 300000};
+
+/// Ce que le son ajoute au débit mesuré — marge ADDITIVE, voir le web.
+const int margeSon = 250000;
+
+/// Le palier visé pour un petit côté de [court], ou `null` s'il n'y a plus
+/// rien à faire. On descend d'une marche, jamais plus, jamais vers le haut.
+int? palierVideo(int court) {
+  if (court <= videoPalierPlancher) return null;
+  for (final p in paliersVideo) {
+    if (court > p) return p;
+  }
+  return null;
+}
+
+/// CE FICHIER EST-IL DÉJÀ SORTI DE CHEZ NOUS ? (web : `dejaUnPalierAlanya`)
+///
+/// 🔴 LA GARDE CONTRE LA CASCADE. L'escalier descend à chaque passage : une
+/// vidéo reçue, enregistrée dans la galerie puis renvoyée perdrait une marche
+/// à chaque tour. On reconnaît notre propre sortie À SA FORME — petit côté
+/// EXACTEMENT un palier, débit au plus celui de ce palier — parce qu'un
+/// marqueur, lui, ne survit pas au passage par la galerie.
+bool dejaUnPalierAlanya(int court, double debit) {
+  final attendu = debitPalier[court];
+  if (attendu == null) return false;
+  return debit <= attendu + margeSon;
+}
+
 /// Débit visé pour du 720p, en bits par seconde (web : `DEBIT_720P`).
 ///
 /// 🔴 C'EST UN DÉBIT DE RÉFÉRENCE, PAS UN PLAFOND FIXE. Il vaut pour du 720p
@@ -79,13 +127,10 @@ const int debit720p = 1600000;
 /// Plancher de débit : en dessous, l'image devient méconnaissable.
 const int debitPlancher = 400000;
 
-/// Au-dessus de ce débit seulement, une vidéo déjà en 720p est retouchée
-/// (web : `DEBIT_DEJA_LEGER`).
-///
-/// 🔴 C'EST LUI QUI EMPÊCHE UNE VIDÉO DE S'ABÎMER À CHAQUE PARTAGE. Une vidéo
-/// sortie d'ici tourne autour de 1,8 Mbit/s, son compris : sans cette marge,
-/// elle serait retranscodée à chaque transfert, un peu plus pâle chaque fois.
-const int debitDejaLeger = 2500000;
+/* ⚠️ `debitDejaLeger` A DISPARU (13/10/2026) : un seuil unique épargnait TOUTE
+ * vidéo déjà sous 720p et déjà légère — le défaut signalé. Son rôle de garde
+ * contre la cascade est repris, en mieux, par `dejaUnPalierAlanya` : un seuil
+ * PAR PALIER. */
 
 /// En dessous, le gain ne vaut pas le risque de perte : on garde l'original.
 const double gainMinimumVideo = 0.9;
@@ -191,17 +236,35 @@ ConsigneVideo consignePour({
    * vidéo 720p filmée à 6 Mbit/s mérite encore d'être allégée, et c'est le cas
    * n° 3 que le mobile ratait.
    */
-  final vise = bordCourtVise(niveau);
-  if (court <= vise && debitReel <= debitDejaLeger) {
-    return const ConsigneVideo.saut(RaisonSautVideo.dejaPetite);
+  /*
+   * ══════ OÙ L'ON DESCEND, ET DE COMBIEN ══════
+   *
+   * Au niveau NORMAL, l'escalier des paliers : on descend d'une marche et l'on
+   * s'arrête à 240. Au niveau HAUT, pas d'escalier — un plafond à 1080, parce
+   * que le bouton promet mieux et que le faire descendre serait l'inverse.
+   */
+  final int vise;
+  if (niveau == NiveauQualite.haute) {
+    vise = math.min(court, videoBordCourtHaute);
+  } else {
+    // Déjà sortie de chez nous : on ne descend pas d'une marche de plus.
+    if (dejaUnPalierAlanya(court, debitReel)) {
+      return const ConsigneVideo.saut(RaisonSautVideo.dejaPetite);
+    }
+    final palier = palierVideo(court);
+    if (palier == null) {
+      return const ConsigneVideo.saut(RaisonSautVideo.dejaPetite);
+    }
+    vise = palier;
   }
 
-  // ⚠️ JAMAIS AGRANDIR : le facteur est plafonné à 1. Une vidéo 480 × 270 garde
-  // ses dimensions et ne voit baisser que son débit.
+  // ⚠️ JAMAIS AGRANDIR : le facteur est plafonné à 1.
   final facteur = math.min(1.0, vise / court);
   final cibleLargeur = _pair(largeur * facteur);
   final cibleHauteur = _pair(hauteur * facteur);
-  final debitVise = debitPour(cibleLargeur, cibleHauteur);
+  final debitVise = niveau == NiveauQualite.haute
+      ? debitPour(cibleLargeur, cibleHauteur)
+      : debitPalier[vise]!;
 
   /*
    * ⚠️ RIEN À GAGNER : ON S'ABSTIENT PLUTÔT QUE DE TRANSCODER POUR RIEN. Au

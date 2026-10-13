@@ -23,8 +23,9 @@ void main() {
   int poids(double secondes, int debit) => (secondes * debit / 8).round();
 
   group('consignePour — ce qu\'on ne touche pas', () {
-    test('une vidéo déjà en 720p et déjà légère est laissée intacte', () {
-      // 1280 × 720 à 1,8 Mbit/s : exactement ce qui sort de chez nous.
+    test('une vidéo SORTIE DE CHEZ NOUS n\'est pas redescendue d\'une marche', () {
+      // 1280 × 720 à 1,8 Mbit/s : exactement ce qui sort de chez nous. Sans la
+      // garde, l'escalier la ferait tomber à 360p.
       final c = consignePour(
         largeur: 1280,
         hauteur: 720,
@@ -57,7 +58,7 @@ void main() {
   });
 
   group('consignePour — ce qu\'on réduit', () {
-    test('du 1080p devient du 720p à 1,6 Mbit/s', () {
+    test('du 1080p devient du 720p à 1,6 Mbit/s (une seule marche)', () {
       final c = consignePour(
         largeur: 1920,
         hauteur: 1080,
@@ -91,10 +92,8 @@ void main() {
       expect(c.bordLong, 1280);
     });
 
-    test('une vidéo 720p filmée à très haut débit est allégée SANS être réduite',
-        () {
-      // C'est le cas que le mobile ratait : l'image est déjà bonne, c'est le
-      // débit qui est absurde.
+    test('une vidéo 720p à très haut débit descend d\'une marche : 360p', () {
+      // 6 Mbit/s en 720p : ce n'est pas une de nos sorties, l'escalier joue.
       final c = consignePour(
         largeur: 1280,
         hauteur: 720,
@@ -102,11 +101,12 @@ void main() {
         dureeMs: 30000,
       );
       expect(c.transcode, isTrue);
-      expect([c.bordCourt, c.bordLong], [720, 1280]);
-      expect(c.debit, 1600000);
+      expect([c.bordCourt, c.bordLong], [360, 640]);
+      expect(c.debit, debitPalier[360]);
     });
 
     test('une vidéo PLUS PETITE que 720p n\'est jamais agrandie', () {
+      // 360p à 5 Mbit/s : pas une de nos sorties, donc une marche de plus.
       final c = consignePour(
         largeur: 640,
         hauteur: 360,
@@ -114,10 +114,9 @@ void main() {
         dureeMs: 10000,
       );
       expect(c.transcode, isTrue);
-      expect([c.bordCourt, c.bordLong], [360, 640],
-          reason: 'les dimensions d\'origine sont conservées');
-      // Un quart de la surface d'un 720p : un quart du débit, soit le plancher.
-      expect(c.debit, debitPlancher);
+      expect([c.bordCourt, c.bordLong], [240, 426],
+          reason: 'jamais agrandie — descendue d\'une marche');
+      expect(c.debit, debitPalier[240]);
     });
 
     test('durée inconnue : on transcode plutôt que de conclure à la légère',
@@ -243,11 +242,65 @@ void main() {
     });
   });
 
+  group('l\'escalier des paliers (13/10/2026)', () {
+    test('on descend d\'UNE marche, jamais plus', () {
+      expect(palierVideo(1080), 720);
+      expect(palierVideo(721), 720);
+      expect(palierVideo(720), 360, reason: '720 exactement : marche suivante');
+      expect(palierVideo(480), 360);
+      expect(palierVideo(360), 240);
+      expect(palierVideo(241), 240);
+      expect(palierVideo(240), isNull, reason: 'le plancher');
+      expect(palierVideo(144), isNull);
+    });
+
+    test('la garde reconnaît nos sorties, et elles seules', () {
+      // Nos sorties : exactement un palier, et le débit de ce palier (+ son).
+      expect(dejaUnPalierAlanya(720, 1800000), isTrue);
+      expect(dejaUnPalierAlanya(360, 700000), isTrue);
+      expect(dejaUnPalierAlanya(240, 400000), isTrue);
+      // Même taille, mais bien trop lourde : ce n'est pas nous.
+      expect(dejaUnPalierAlanya(720, 6000000), isFalse);
+      // Une taille qui n'est pas un palier n'est jamais la nôtre.
+      expect(dejaUnPalierAlanya(480, 300000), isFalse);
+      expect(dejaUnPalierAlanya(1080, 1000000), isFalse);
+    });
+
+    test('UNE VIDÉO NE SE DÉGRADE PAS À CHAQUE PARTAGE', () {
+      // Le scénario qui a motivé la garde : on envoie, le correspondant
+      // enregistre dans sa galerie et renvoie, trois fois de suite.
+      var largeur = 1920;
+      var hauteur = 1080;
+      var debit = 8000000;
+      final tailles = <int>[];
+      for (var tour = 0; tour < 4; tour++) {
+        final c = consignePour(
+          largeur: largeur,
+          hauteur: hauteur,
+          tailleOctets: poids(30, debit),
+          dureeMs: 30000,
+        );
+        if (!c.transcode) break;
+        hauteur = c.bordCourt;
+        largeur = c.bordLong;
+        // Ce qui sort de chez nous : le débit du palier, plus le son.
+        debit = c.debit + 128000;
+        tailles.add(c.bordCourt);
+      }
+      expect(tailles, [720],
+          reason: 'une seule réduction : ensuite la garde reconnaît notre '
+              'sortie et ne descend plus');
+    });
+  });
+
   group('les nombres sont bien ceux du web', () {
-    test('720 de petit côté, 1,6 Mbit/s, 2,5 Mbit/s, 10 % de gain', () {
+    test('les paliers et leurs débits, à l\'identique', () {
       expect(videoBordCourtMax, 720, reason: 'VIDEO_BORD_COURT');
       expect(debit720p, 1600000, reason: 'DEBIT_720P');
-      expect(debitDejaLeger, 2500000, reason: 'DEBIT_DEJA_LEGER');
+      expect(paliersVideo, [720, 360, 240], reason: 'PALIERS_VIDEO');
+      expect(debitPalier, {720: 1600000, 360: 600000, 240: 300000},
+          reason: 'DEBIT_PALIER');
+      expect(paliersImage, [1600, 1000, 640], reason: 'PALIERS_IMAGE');
       expect(gainMinimumVideo, 0.9, reason: 'GAIN_MINIMUM');
       expect(videoBordCourtHaute, 1080, reason: 'VIDEO_BORD_COURT_HAUTE');
       expect(imageBordMax, 1600, reason: 'IMAGE_BORD_MAX');
