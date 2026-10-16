@@ -1,3 +1,4 @@
+import 'badge_compte.dart';
 import '../core/alanya_id_formatter.dart';
 import 'call_record.dart';
 
@@ -124,6 +125,10 @@ class Conversation {
   /// absent, il vaut « non ».
   final bool officiel;
 
+  /// Le badge à côté du nom, DÉCIDÉ PAR LE SERVEUR (`badge` de la charge) :
+  /// l'application le dessine tel quel. Absent : pas de badge.
+  final BadgeCompte? badge;
+
   Conversation({
     required this.id,
     required this.isGroup,
@@ -140,6 +145,7 @@ class Conversation {
     this.sourdine = false,
     this.e2eeActif = false,
     this.officiel = false,
+    this.badge,
   });
 
   /// Copie avec la sourdine changée — le reste est intact.
@@ -163,6 +169,7 @@ class Conversation {
         sourdine: valeur,
         e2eeActif: e2eeActif,
         officiel: officiel,
+        badge: badge,
       );
 
   /// Copie avec un autre dernier message — le reste est intact.
@@ -186,6 +193,7 @@ class Conversation {
         sourdine: sourdine,
         e2eeActif: e2eeActif,
         officiel: officiel,
+        badge: badge,
       );
 
   Map<String, String> get memberNames => {
@@ -216,5 +224,6 @@ class Conversation {
         sourdine: (j["sourdine"] as bool?) ?? false,
         e2eeActif: (j["e2eeActif"] as bool?) ?? false,
         officiel: (j["officiel"] as bool?) ?? false,
+        badge: BadgeCompte.fromJson(j["badge"]),
       );
 }

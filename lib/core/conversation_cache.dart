@@ -4,6 +4,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
 import '../models/conversation.dart';
+import '../models/badge_compte.dart';
 
 /// Cache local des conversations (offline-first).
 ///
@@ -131,6 +132,9 @@ class ConversationCache {
         // Fil avec le compte officiel : sans lui, l'écran ouvert depuis le
         // cache proposerait une saisie que le serveur refuse.
         'officiel': c.officiel,
+        // Le badge du serveur : sans lui, l'en-tête ouvert depuis le cache
+        // n'aurait pas de badge.
+        'badge': c.badge?.toJson(),
       };
 
   /// Ce fil est-il avec le compte officiel « Alanya Work » ?
@@ -149,6 +153,21 @@ class ConversationCache {
       return (j['officiel'] as bool?) ?? false;
     } catch (_) {
       return false;
+    }
+  }
+
+  /// Le badge (décidé par le serveur) de l'interlocuteur de ce fil, s'il en a.
+  /// Lu à l'ouverture de la discussion, comme `estOfficielle`.
+  static Future<BadgeCompte?> badgeDe(String convId) async {
+    try {
+      final db = await _database();
+      final rows = await db.query('conversations',
+          columns: ['payload'], where: 'id = ?', whereArgs: [convId], limit: 1);
+      if (rows.isEmpty) return null;
+      final j = jsonDecode(rows.first['payload'] as String) as Map<String, dynamic>;
+      return BadgeCompte.fromJson(j['badge']);
+    } catch (_) {
+      return null;
     }
   }
 }

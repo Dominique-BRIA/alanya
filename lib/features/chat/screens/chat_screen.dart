@@ -63,7 +63,8 @@ import '../../../models/conversation.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/auth_network_image.dart';
 import '../../../widgets/avatar_circle.dart';
-import '../../../widgets/badge_officiel.dart';
+import '../../../widgets/badge_compte.dart';
+import '../../../models/badge_compte.dart';
 import '../../../widgets/choix_langue_interlocuteur.dart';
 import '../../../widgets/contact_share_sheet.dart';
 import '../../../widgets/dialogues_traduction.dart';
@@ -2067,9 +2068,14 @@ class _ChatScreenState extends State<ChatScreen>
   /// d'avis sur un compte officiel.
   bool _officiel = false;
 
+  /// Le badge de l'interlocuteur, décidé par le serveur (lu dans le cache).
+  BadgeCompte? _badge;
+
   Future<void> _lireOfficiel() async {
     final officiel = await ConversationCache.estOfficielle(widget.convId);
     if (officiel && mounted && !_officiel) setState(() => _officiel = true);
+    final badge = await ConversationCache.badgeDe(widget.convId);
+    if (badge != null && mounted) setState(() => _badge = badge);
   }
 
   /// Le serveur vient de refuser un envoi au compte officiel.
@@ -5599,7 +5605,7 @@ class _ChatScreenState extends State<ChatScreen>
                         style: const TextStyle(
                             fontSize: 16, fontWeight: FontWeight.w600)),
                   ),
-                  if (_officiel) const BadgeOfficiel(taille: 17),
+                  if (_badge != null) BadgeCompteWidget(_badge!, taille: 17),
                 ]),
                 if (widget.isGroup)
                   Text(trN(context, 'grp_members', widget.memberNames.length),
