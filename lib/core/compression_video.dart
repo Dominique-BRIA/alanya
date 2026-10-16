@@ -469,6 +469,15 @@ Future<ResultatCompressionVideo> compresserVideo(
     tailleAvant: original.length,
     tailleApres: octets.length,
     niveauSuperieurPossible: hautePossible,
+    /*
+     * 🐛 CE CHAMP MANQUAIT ICI, ET SEULEMENT ICI (16/10/2026). Il voyageait
+     * bien par le chemin des refus, mais pas par celui du SUCCÈS — c'est-à-dire
+     * dans le cas normal, le seul que l'utilisateur voit. Le bouton retombait
+     * donc sur « 1080p » par défaut, le mensonge qu'on venait de corriger.
+     * `compression_video_bout_en_bout_test.dart` monte toute la chaîne pour que
+     * cela ne puisse plus arriver sans qu'un banc tombe.
+     */
+    definitionAutreNiveau: definitionAutre,
   );
 }
 
