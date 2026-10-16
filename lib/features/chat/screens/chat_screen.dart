@@ -21,6 +21,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import '../../../core/avec_reprises.dart';
 import '../../../core/compression_image.dart';
 import '../../../core/connectivity_service.dart';
+import '../../../core/conversation_cache.dart';
 import '../../../core/delais_message.dart';
 import '../../../core/memoire_langues.dart';
 import '../../../core/message_cache.dart';
@@ -542,6 +543,7 @@ class _ChatScreenState extends State<ChatScreen>
     // qui s'affiche traduite dès la première image vaut mieux qu'une bulle qui
     // se traduit sous les yeux une seconde plus tard.
     _chargeTraductions();
+    _lireOfficiel();
     _load();
     _loadPinned();
     _loadDisappearing();
@@ -1064,6 +1066,10 @@ class _ChatScreenState extends State<ChatScreen>
   void _onRealtimeEvent(Map<String, dynamic> e) {
     if (!mounted) return;
     final type = e["type"];
+    if (type == "error" && e["code"] == "COMPTE_OFFICIEL") {
+      _surRefusOfficiel(tempId: e["tempId"] as String?);
+      return;
+    }
     if (type == "error" && _surRefus(e)) return;
     if (type == "message") {
       final recu = e["message"] as Map<String, dynamic>?;
@@ -2051,6 +2057,27 @@ class _ChatScreenState extends State<ChatScreen>
   /// que le fil ne l'est pas — et la bannière clignoterait au défilement.
   bool _filChiffre = false;
 
+  /// Fil avec le compte officiel « Alanya Work » : on n'y répond pas.
+  ///
+  /// La saisie cède la place à un bandeau, et l'appel disparaît de la barre
+  /// (décision du user, 16/10/2026, « comme sur WhatsApp »). Lu dans le cache
+  /// des conversations ; à défaut, le premier refus `COMPTE_OFFICIEL` du
+  /// serveur le pose. Ne repasse jamais à `false` : le serveur ne change pas
+  /// d'avis sur un compte officiel.
+  bool _officiel = false;
+
+  Future<void> _lireOfficiel() async {
+    final officiel = await ConversationCache.estOfficielle(widget.convId);
+    if (officiel && mounted && !_officiel) setState(() => _officiel = true);
+  }
+
+  /// Le serveur vient de refuser un envoi au compte officiel.
+  void _surRefusOfficiel({String? tempId}) {
+    if (!mounted) return;
+    if (tempId != null) _marquerStatut(tempId, "FAILED");
+    setState(() => _officiel = true);
+  }
+
   /// Peut-on modifier ce message ?
   ///
   /// 🐛 « MODIFIER » ÉTAIT PROPOSÉ SUR UNE BULLE CHIFFRÉE, et le nouveau texte
@@ -2799,6 +2826,10 @@ class _ChatScreenState extends State<ChatScreen>
       });
     } on ApiException catch (e) {
       if (!mounted) return;
+      if (e.code == "COMPTE_OFFICIEL") {
+        _surRefusOfficiel(tempId: tempId);
+        return;
+      }
       _marquerStatut(tempId, "FAILED");
       _showError(e.message);
     } catch (_) {
@@ -5622,14 +5653,17 @@ class _ChatScreenState extends State<ChatScreen>
               tooltip: tr(context, 'translated'),
               icon: const Icon(Icons.translate),
               onPressed: _openTranslation),
-          IconButton(
-              tooltip: tr(context, 'video_call'),
-              icon: const Icon(Icons.videocam),
-              onPressed: () => _startCall("VIDEO")),
-          IconButton(
-              tooltip: tr(context, 'audio_call'),
-              icon: const Icon(Icons.call),
-              onPressed: () => _startCall("AUDIO")),
+          // Le compte officiel ne décroche jamais : pas de bouton d'appel.
+          if (!_officiel) ...[
+            IconButton(
+                tooltip: tr(context, 'video_call'),
+                icon: const Icon(Icons.videocam),
+                onPressed: () => _startCall("VIDEO")),
+            IconButton(
+                tooltip: tr(context, 'audio_call'),
+                icon: const Icon(Icons.call),
+                onPressed: () => _startCall("AUDIO")),
+          ],
         ],
         PopupMenuButton<String>(
           tooltip: tr(context, 'more'),
@@ -6012,8 +6046,12 @@ class _ChatScreenState extends State<ChatScreen>
                 typing: _peerTyping, recording: _peerRecording),
           // Juste au-dessus du champ : la liste sort du `@` qu'on vient de
           // taper, et doit rester sous les yeux, au-dessus du clavier.
-          _panneauMentions(),
-          _composer(),
+          if (_officiel)
+            _bandeauOfficiel()
+          else ...[
+            _panneauMentions(),
+            _composer(),
+          ],
         ]),
       ),
     );
@@ -7594,6 +7632,24 @@ class _ChatScreenState extends State<ChatScreen>
   // ══════════════════════════════════════════════
   // COMPOSER (inchangé)
   // ══════════════════════════════════════════════
+  /// À la place de la saisie, dans un fil avec le compte officiel : on dit
+  /// pourquoi on ne peut pas écrire, comme les comptes d'entreprise de WhatsApp.
+  Widget _bandeauOfficiel() {
+    return SafeArea(
+      top: false,
+      child: Container(
+        width: double.infinity,
+        color: _composerBg,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        child: Text(
+          tr(context, 'officiel_pas_de_reponse'),
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 13, color: _muted),
+        ),
+      ),
+    );
+  }
+
   Widget _composer() {
     if (_recordLocked) {
       return SafeArea(

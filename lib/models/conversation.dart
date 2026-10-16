@@ -117,6 +117,13 @@ class Conversation {
   /// Facultatif dans la charge : absent, il vaut « non ».
   final bool e2eeActif;
 
+  /// Un fil avec le compte officiel « Alanya Work » : on n'y répond pas.
+  ///
+  /// L'écran remplace la saisie par un bandeau et masque l'appel ; le serveur
+  /// refuse de toute façon (`COMPTE_OFFICIEL`). Facultatif dans la charge :
+  /// absent, il vaut « non ».
+  final bool officiel;
+
   Conversation({
     required this.id,
     required this.isGroup,
@@ -132,6 +139,7 @@ class Conversation {
     this.isArchived = false,
     this.sourdine = false,
     this.e2eeActif = false,
+    this.officiel = false,
   });
 
   /// Copie avec la sourdine changée — le reste est intact.
@@ -154,6 +162,7 @@ class Conversation {
         isArchived: isArchived,
         sourdine: valeur,
         e2eeActif: e2eeActif,
+        officiel: officiel,
       );
 
   /// Copie avec un autre dernier message — le reste est intact.
@@ -176,6 +185,7 @@ class Conversation {
         isArchived: isArchived,
         sourdine: sourdine,
         e2eeActif: e2eeActif,
+        officiel: officiel,
       );
 
   Map<String, String> get memberNames => {
@@ -205,5 +215,6 @@ class Conversation {
         isArchived: (j["isArchived"] as bool?) ?? false,
         sourdine: (j["sourdine"] as bool?) ?? false,
         e2eeActif: (j["e2eeActif"] as bool?) ?? false,
+        officiel: (j["officiel"] as bool?) ?? false,
       );
 }

@@ -128,5 +128,27 @@ class ConversationCache {
         // L’état chiffré : sans lui, l’affichage depuis le cache ne saurait pas
         // qu’il faut chercher le dernier texte en local (fil chiffré).
         'e2eeActif': c.e2eeActif,
+        // Fil avec le compte officiel : sans lui, l'écran ouvert depuis le
+        // cache proposerait une saisie que le serveur refuse.
+        'officiel': c.officiel,
       };
+
+  /// Ce fil est-il avec le compte officiel « Alanya Work » ?
+  ///
+  /// Lu à l'ouverture de la discussion, qui s'ouvre par une vingtaine de
+  /// chemins (liste, appels, contacts, notification…) sans recevoir l'objet
+  /// `Conversation`. Un fil absent du cache rend `false` : le premier refus du
+  /// serveur (`COMPTE_OFFICIEL`) corrige alors l'écran.
+  static Future<bool> estOfficielle(String convId) async {
+    try {
+      final db = await _database();
+      final rows = await db.query('conversations',
+          columns: ['payload'], where: 'id = ?', whereArgs: [convId], limit: 1);
+      if (rows.isEmpty) return false;
+      final j = jsonDecode(rows.first['payload'] as String) as Map<String, dynamic>;
+      return (j['officiel'] as bool?) ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
 }
