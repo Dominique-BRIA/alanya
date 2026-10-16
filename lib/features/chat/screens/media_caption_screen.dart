@@ -9,6 +9,7 @@ import '../../../core/app_snackbar.dart';
 import '../../../core/compression_envoi.dart';
 import '../../../core/plafond_media.dart';
 import '../../../core/compression_image.dart';
+import '../../../core/compression_video.dart' show videoBordCourtHaute;
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/media/avancement_compression.dart';
 import '../../../widgets/media/media_picker_sheet.dart';
@@ -181,6 +182,7 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
             compresse: pret.compresse,
             tailleOriginale: pret.compresse ? pret.tailleAvant : null,
             niveauSuperieurPossible: pret.niveauSuperieurPossible,
+            definitionAutreNiveau: pret.definitionAutreNiveau,
           );
         });
       } catch (_) {
@@ -596,9 +598,21 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
     if (!courant.compresse && !haute) return null;
     final avant = courant.tailleOriginale;
 
+    /*
+     * 🐛 L'ÉTIQUETTE ANNONÇAIT « Envoyer en 1080p » QUOI QU'IL ARRIVE, et
+     * « Envoyer en 720p » pour en revenir. C'était faux dès que la source
+     * faisait moins : une vidéo filmée en 720p ne rend pas du 1080p, on
+     * n'agrandit jamais — et depuis l'escalier elle part en 360p, si bien que le
+     * retour se fait vers 720p, non vers 1080p. Le bouton dit maintenant la
+     * définition qu'il va réellement produire (voir
+     * `definitionAutreNiveauVideo`).
+     */
     final bascule = courant.estVideo
-        ? (haute ? 'media_envoyer_720p' : 'media_envoyer_1080p')
+        ? (haute ? 'media_revenir_definition' : 'media_envoyer_definition')
         : (haute ? 'media_qualite_normale' : 'media_meilleure_qualite');
+    final parametresBascule = courant.estVideo
+        ? {'def': '${courant.definitionAutreNiveau ?? videoBordCourtHaute}'}
+        : null;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
@@ -625,7 +639,7 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
           GestureDetector(
             onTap: _basculerNiveau,
             child: Text(
-              tr(context, bascule),
+              tr(context, bascule, parametresBascule),
               style: TextStyle(
                   color: haute ? AlanyaColors.gold : Colors.white,
                   fontSize: 12,
@@ -712,6 +726,7 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
           compresse: pret.compresse,
           tailleOriginale: original.length,
           niveauSuperieurPossible: pret.niveauSuperieurPossible,
+          definitionAutreNiveau: pret.definitionAutreNiveau,
           niveau: vise,
         );
       });

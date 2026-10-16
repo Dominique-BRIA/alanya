@@ -89,7 +89,7 @@ const int videoPalierPlancher = 240;
 /// ⚠️ DES VALEURS EXPLICITES, PAS UNE RÈGLE DE TROIS. Une petite image a besoin
 /// de PLUS de bits par pixel qu'une grande pour rester regardable : un 240p
 /// calculé au prorata d'un 720p tomberait à 180 kbit/s et serait une bouillie.
-const Map<int, int> debitPalier = {720: 1600000, 360: 600000, 240: 300000};
+const Map<int, int> debitPalier = {720: 1200000, 360: 600000, 240: 300000};
 
 /// Ce que le son ajoute au débit mesuré — marge ADDITIVE, voir le web.
 const int margeSon = 250000;
@@ -104,33 +104,48 @@ int? palierVideo(int court) {
   return null;
 }
 
-/// CE FICHIER EST-IL DÉJÀ SORTI DE CHEZ NOUS ? (web : `dejaUnPalierAlanya`)
+/// LE SEUIL DE DÉCLENCHEMENT, EN DÉBIT DE FICHIER (web : `SEUIL_DEBIT`).
 ///
-/// 🔴 LA GARDE CONTRE LA CASCADE. L'escalier descend à chaque passage : une
-/// vidéo reçue, enregistrée dans la galerie puis renvoyée perdrait une marche
-/// à chaque tour. On reconnaît notre propre sortie À SA FORME — petit côté
-/// EXACTEMENT un palier, débit au plus celui de ce palier — parce qu'un
-/// marqueur, lui, ne survit pas au passage par la galerie.
-bool dejaUnPalierAlanya(int court, double debit) {
-  final attendu = debitPalier[court];
-  if (attendu == null) return false;
-  return debit <= attendu + margeSon;
-}
+/// 🔴 DEMANDE DU PROFESSEUR, VALIDÉE PAR LE USER LE 16/10/2026 : « tout ce qui
+/// est au-dessus de 1,2 Mbit/s, on compresse ». On déclenchait sur la
+/// DÉFINITION : une vidéo en 720p à 1 Mbit/s — déjà parfaitement légère —
+/// descendait quand même en 360p, parce que l'escalier voulait sa marche.
+///
+/// Le débit est la bonne variable, et c'est de l'arithmétique : le poids d'un
+/// fichier vaut débit × durée. La définition ne fait que plafonner le détail
+/// que ce débit peut porter.
+///
+/// 🔴 CE SEUIL REMPLACE LA GARDE CONTRE LA CASCADE (`dejaUnPalierAlanya`,
+/// 13 au 16/10/2026), qui reconnaissait nos propres sorties à leur forme pour
+/// qu'une vidéo enregistrée dans la galerie puis renvoyée ne perde pas une
+/// marche à chaque tour. Il n'y a plus de forme à reconnaître : AUCUNE de nos
+/// sorties ne dépasse le seuil, puisque le seuil EST le débit du palier 720p
+/// plus ce que le son ajoute. L'invariant tient par construction.
+final int seuilDebit = debitPalier[720]! + margeSon;
+
+/// Ce fichier est-il déjà assez léger pour qu'on n'y touche pas ?
+bool dejaAssezLegere(double debit) => debit <= seuilDebit;
 
 /// Débit visé pour du 720p, en bits par seconde (web : `DEBIT_720P`).
 ///
 /// 🔴 C'EST UN DÉBIT DE RÉFÉRENCE, PAS UN PLAFOND FIXE. Il vaut pour du 720p
 /// plein ; une image plus petite reçoit sa part, au prorata de sa surface (voir
-/// [debitPour]). Repère WhatsApp : 1,2 à 1,6 Mbit/s.
-const int debit720p = 1600000;
+/// [debitPour]).
+///
+/// ⚠️ C'EST LE MÊME NOMBRE QUE `debitPalier[720]`, et il doit le rester : le
+/// banc `compression_video_test.dart` le vérifie. Dart ne sait pas lire une
+/// `const Map` dans un contexte constant, d'où la duplication.
+const int debit720p = 1200000;
 
 /// Plancher de débit : en dessous, l'image devient méconnaissable.
 const int debitPlancher = 400000;
 
-/* ⚠️ `debitDejaLeger` A DISPARU (13/10/2026) : un seuil unique épargnait TOUTE
- * vidéo déjà sous 720p et déjà légère — le défaut signalé. Son rôle de garde
- * contre la cascade est repris, en mieux, par `dejaUnPalierAlanya` : un seuil
- * PAR PALIER. */
+/* ⚠️ DEUX RÈGLES ONT VÉCU ICI AVANT `seuilDebit` :
+ *   · `debitDejaLeger` (jusqu'au 13/10/2026) — un seuil unique qui épargnait
+ *     TOUTE vidéo sous 720p, même lourde : le défaut signalé par le user ;
+ *   · `dejaUnPalierAlanya` (13 au 16/10/2026) — un seuil par palier, reconnu à
+ *     la forme du fichier. Juste, mais il fallait deux règles pour décider.
+ * `seuilDebit` fait le travail des deux avec un seul nombre. */
 
 /// En dessous, le gain ne vaut pas le risque de perte : on garde l'original.
 const double gainMinimumVideo = 0.9;
@@ -194,10 +209,31 @@ class ConsigneVideo {
 
 /// Le niveau haut donnerait-il vraiment mieux ? (web : `hautePlusFine`)
 ///
-/// 🔴 SERT À NE PAS PROPOSER UN CHOIX QUI NE CHANGE RIEN. On n'agrandit
-/// JAMAIS : une vidéo filmée en 720p ou moins n'a pas un pixel de plus à
-/// offrir, et le bouton « 1080p » serait un mensonge.
-bool hautePlusFine(int bordCourtSource) => bordCourtSource > videoBordCourtMax;
+/// 🔴 SERT À NE PAS PROPOSER UN CHOIX QUI NE CHANGE RIEN. On n'agrandit JAMAIS.
+///
+/// 🐛 LA QUESTION ÉTAIT CELLE D'AVANT L'ESCALIER : « la source dépasse-t-elle
+/// 720p ? ». C'était juste quand le niveau normal VISAIT 720p ; depuis
+/// l'escalier (13/10/2026) il descend UNE MARCHE EN DESSOUS. Une vidéo filmée
+/// en 720p partait donc en 360p et aucun bouton ne permettait de remonter
+/// (signalé par le professeur le 16/10/2026). La question juste est
+/// COMPARATIVE : le niveau haut donne-t-il une définition plus fine ?
+bool hautePlusFine(int bordCourtSource) {
+  final normal = palierVideo(bordCourtSource);
+  // L'escalier ne fait rien (240p ou moins) : le plafond haut n'y ferait rien
+  // non plus, puisqu'on n'agrandit jamais.
+  if (normal == null) return false;
+  return math.min(bordCourtSource, videoBordCourtHaute) > normal;
+}
+
+/// La définition que l'AUTRE niveau donnerait, pour que le bouton l'annonce.
+///
+/// 🔴 L'ÉTIQUETTE NE PEUT PAS ÊTRE ÉCRITE EN DUR. Elle disait « Envoyer en
+/// 1080p », ce qui était faux dès que la source faisait moins : une vidéo
+/// filmée en 720p ne rend pas du 1080p.
+int definitionAutreNiveauVideo(int court, NiveauQualite niveau) =>
+    niveau == NiveauQualite.haute
+        ? (palierVideo(court) ?? court)
+        : math.min(court, videoBordCourtHaute);
 
 /// Le débit d'une image de [largeur] × [hauteur], au prorata du 720p.
 ///
@@ -232,11 +268,6 @@ ConsigneVideo consignePour({
       dureeMs > 0 ? (tailleOctets * 8) / (dureeMs / 1000) : double.infinity;
 
   /*
-   * DÉJÀ À L'OBJECTIF : on n'y touche pas. Les DEUX conditions comptent — une
-   * vidéo 720p filmée à 6 Mbit/s mérite encore d'être allégée, et c'est le cas
-   * n° 3 que le mobile ratait.
-   */
-  /*
    * ══════ OÙ L'ON DESCEND, ET DE COMBIEN ══════
    *
    * Au niveau NORMAL, l'escalier des paliers : on descend d'une marche et l'on
@@ -247,8 +278,13 @@ ConsigneVideo consignePour({
   if (niveau == NiveauQualite.haute) {
     vise = math.min(court, videoBordCourtHaute);
   } else {
-    // Déjà sortie de chez nous : on ne descend pas d'une marche de plus.
-    if (dejaUnPalierAlanya(court, debitReel)) {
+    /*
+     * ⚠️ LE DÉCLENCHEUR PASSE AVANT L'ESCALIER — voir [seuilDebit]. Un fichier
+     * déjà sous le seuil repart intact, quelle que soit sa définition : c'est ce
+     * qui évite de descendre une marche pour rien, et c'est aussi ce qui
+     * interdit la cascade.
+     */
+    if (dejaAssezLegere(debitReel)) {
       return const ConsigneVideo.saut(RaisonSautVideo.dejaPetite);
     }
     final palier = palierVideo(court);
@@ -294,6 +330,7 @@ class ResultatCompressionVideo {
     required this.tailleApres,
     this.raisonSaut,
     this.niveauSuperieurPossible = false,
+    this.definitionAutreNiveau,
   });
 
   /// Les octets à envoyer — CEUX D'ORIGINE si rien n'a été fait.
@@ -307,6 +344,11 @@ class ResultatCompressionVideo {
 
   /// Le niveau haut donnerait-il mieux ? Voir [hautePlusFine].
   final bool niveauSuperieurPossible;
+
+  /// La définition que l'autre niveau donnerait, pour l'étiquette du bouton.
+  /// `null` tant que les dimensions sont inconnues. Voir
+  /// [definitionAutreNiveauVideo].
+  final int? definitionAutreNiveau;
 
   /// Ce que l'envoi a économisé, entre 0 et 1.
   double get gain => tailleAvant <= 0 ? 0 : 1 - (tailleApres / tailleAvant);
@@ -327,9 +369,10 @@ Future<ResultatCompressionVideo> compresserVideo(
   void Function(double avancement)? onProgression,
   NiveauQualite niveau = NiveauQualite.normal,
 }) async {
-  // Rempli dès que les dimensions sont connues : le bouton « 1080p » ne doit
-  // paraître que s'il change quelque chose.
+  // Remplis dès que les dimensions sont connues : le bouton ne doit paraître
+  // que s'il change quelque chose, et doit dire ce qu'il va produire.
   var hautePossible = false;
+  int? definitionAutre;
   ResultatCompressionVideo intact(RaisonSautVideo raison) =>
       ResultatCompressionVideo(
         octets: original,
@@ -340,6 +383,7 @@ Future<ResultatCompressionVideo> compresserVideo(
         tailleApres: original.length,
         raisonSaut: raison,
         niveauSuperieurPossible: hautePossible,
+        definitionAutreNiveau: definitionAutre,
       );
 
   if (!mimeType.toLowerCase().startsWith("video/")) {
@@ -367,7 +411,9 @@ Future<ResultatCompressionVideo> compresserVideo(
     // Fichier illisible par le module natif : on n'y touche pas.
   }
 
-  hautePossible = hautePlusFine(math.min(largeur, hauteur));
+  final courtSource = math.min(largeur, hauteur);
+  hautePossible = hautePlusFine(courtSource);
+  definitionAutre = definitionAutreNiveauVideo(courtSource, niveau);
   final consigne = consignePour(
     largeur: largeur,
     hauteur: hauteur,
@@ -375,7 +421,16 @@ Future<ResultatCompressionVideo> compresserVideo(
     dureeMs: dureeMs,
     niveau: niveau,
   );
-  if (!consigne.transcode) return intact(consigne.raison!);
+  if (!consigne.transcode) {
+    /*
+     * ⚠️ RIEN N'A ÉTÉ FAIT, ET LE NIVEAU HAUT NE FERAIT RIEN NON PLUS : il
+     * n'agrandit jamais, et il ne recompresse pas un fichier déjà plus léger
+     * que sa propre cible. Le bouton serait une promesse sans suite — c'est la
+     * règle du web, à l'identique.
+     */
+    hautePossible = false;
+    return intact(consigne.raison!);
+  }
 
   final produit = await _transcoder(chemin, consigne, onProgression);
   if (produit == null) return intact(RaisonSautVideo.transcodageImpossible);

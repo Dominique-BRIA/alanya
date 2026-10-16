@@ -51,6 +51,13 @@ class MediaPickResult {
   /// un mensonge.
   final bool niveauSuperieurPossible;
 
+  /// La définition que l'autre niveau donnerait, en pixels (vidéo seulement).
+  ///
+  /// 🔴 C'EST CE QUE LE BOUTON ANNONCE. Il disait « Envoyer en 1080p » même
+  /// quand la source ne pouvait pas le rendre — une vidéo filmée en 720p ne
+  /// rend pas du 1080p, on n'agrandit jamais.
+  final int? definitionAutreNiveau;
+
   /// Le niveau avec lequel [bytes] a été produit.
   final NiveauQualite niveau;
 
@@ -75,6 +82,7 @@ class MediaPickResult {
     this.compresse = false,
     this.tailleOriginale,
     this.niveauSuperieurPossible = false,
+    this.definitionAutreNiveau,
     this.niveau = NiveauQualite.normal,
     this.asset,
   });
@@ -86,6 +94,7 @@ class MediaPickResult {
     bool? compresse,
     int? tailleOriginale,
     bool? niveauSuperieurPossible,
+    int? definitionAutreNiveau,
     NiveauQualite? niveau,
   }) =>
       MediaPickResult(
@@ -99,6 +108,8 @@ class MediaPickResult {
         tailleOriginale: tailleOriginale ?? this.tailleOriginale,
         niveauSuperieurPossible:
             niveauSuperieurPossible ?? this.niveauSuperieurPossible,
+        definitionAutreNiveau:
+            definitionAutreNiveau ?? this.definitionAutreNiveau,
         niveau: niveau ?? this.niveau,
       );
 
@@ -305,6 +316,7 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
         asset: asset,
         compresse: compresse.compresse,
           niveauSuperieurPossible: compresse.niveauSuperieurPossible,
+          definitionAutreNiveau: compresse.definitionAutreNiveau,
         tailleOriginale: compresse.compresse ? compresse.tailleAvant : null,
       ));
     }
@@ -389,6 +401,7 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
           path: file.path,
           compresse: pret.compresse,
           niveauSuperieurPossible: pret.niveauSuperieurPossible,
+          definitionAutreNiveau: pret.definitionAutreNiveau,
           tailleOriginale: pret.compresse ? pret.tailleAvant : null,
         ));
       }

@@ -126,6 +126,7 @@ class ResultatCompression {
     required this.tailleApres,
     this.raisonSaut,
     this.niveauSuperieurPossible = false,
+    this.definitionAutreNiveau,
   });
 
   /// Les octets à envoyer — CEUX D'ORIGINE si rien n'a été fait.
@@ -144,10 +145,31 @@ class ResultatCompression {
   /// bouton « Meilleure qualité » serait un mensonge.
   final bool niveauSuperieurPossible;
 
+  /// La définition que l'autre niveau donnerait, en pixels, quand elle se dit
+  /// en toutes lettres sur le bouton. Renseignée pour la VIDÉO seulement :
+  /// l'étiquette d'une photo reste « Meilleure qualité », sans nombre.
+  final int? definitionAutreNiveau;
+
   /// Ce que l'envoi a économisé, entre 0 et 1. Sert à l'annoncer à l'écran.
   double get gain =>
       tailleAvant <= 0 ? 0 : 1 - (tailleApres / tailleAvant);
 }
+/// Le niveau haut donnerait-il une définition plus fine que le normal ?
+///
+/// 🐛 LA QUESTION ÉTAIT MAL POSÉE : on comparait le grand côté au plafond du
+/// niveau normal (1600 px), ce qui valait AVANT L'ESCALIER. Depuis le
+/// 13/10/2026 le niveau normal descend d'une marche : une photo de 1200 px part
+/// en 1000 px, et le niveau haut lui rendrait ses 1200 px — sans que le bouton
+/// paraisse. Invisible sur une photo de téléphone (4000 px, au-dessus du
+/// plafond), le défaut ne se voyait qu'entre 640 et 1600 px.
+///
+/// ⚠️ Jumelle de `hautePlusFine` côté vidéo : les deux doivent rester d'accord.
+bool hautePlusFineImage(int bordLong) {
+  final normal = palierImage(bordLong);
+  if (normal == null) return false;
+  return math.min(bordLong, imageBordMaxHaute) > normal;
+}
+
 
 /// Compresse l'image d'un `AssetEntity` de la galerie, ou rend l'original.
 ///
@@ -237,7 +259,7 @@ Future<ResultatCompression> compresserAsset(
         tailleAvant: original.length,
         tailleApres: original.length,
         raisonSaut: RaisonSaut.tropPetite,
-        niveauSuperieurPossible: bordLong > imageBordMax,
+        niveauSuperieurPossible: false,
       );
 
   /*
@@ -309,7 +331,7 @@ Future<ResultatCompression> compresserAsset(
     compresse: true,
     tailleAvant: original.length,
     tailleApres: reduit.length,
-    niveauSuperieurPossible: bordLong > imageBordMax,
+    niveauSuperieurPossible: hautePlusFineImage(bordLong),
   );
 }
 

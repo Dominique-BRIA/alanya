@@ -73,6 +73,7 @@ Future<ResultatCompression> compresserPourEnvoi({
         tailleAvant: v.tailleAvant,
         tailleApres: v.tailleApres,
         niveauSuperieurPossible: v.niveauSuperieurPossible,
+        definitionAutreNiveau: v.definitionAutreNiveau,
       );
     }
     if (asset != null && asset.type == AssetType.image) {

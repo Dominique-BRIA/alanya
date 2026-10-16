@@ -22,14 +22,22 @@ void main() {
   /// Le poids d'une vidéo de [secondes] à [debit] bits/s.
   int poids(double secondes, int debit) => (secondes * debit / 8).round();
 
+  /// LE DÉBIT D'UNE DE NOS PROPRES SORTIES EN 720p — image plus son.
+  ///
+  /// ⚠️ DÉRIVÉ DES CONSTANTES, JAMAIS ÉCRIT EN DUR : ces bancs se sont déjà
+  /// périmés une fois pour avoir figé 1,8 Mbit/s dans le code. Si le débit du
+  /// palier change, ce nombre suit, et les bancs continuent de poser la bonne
+  /// question.
+  final int debitDeNotreSortie720p = debitPalier[720]! + 128000;
+
   group('consignePour — ce qu\'on ne touche pas', () {
     test('une vidéo SORTIE DE CHEZ NOUS n\'est pas redescendue d\'une marche', () {
-      // 1280 × 720 à 1,8 Mbit/s : exactement ce qui sort de chez nous. Sans la
-      // garde, l'escalier la ferait tomber à 360p.
+      // 1280 × 720 au débit de notre palier : exactement ce qui sort de chez
+      // nous. Sans le seuil, l'escalier la ferait tomber à 360p.
       final c = consignePour(
         largeur: 1280,
         hauteur: 720,
-        tailleOctets: poids(30, 1800000),
+        tailleOctets: poids(30, debitDeNotreSortie720p),
         dureeMs: 30000,
       );
       expect(c.transcode, isFalse);
@@ -43,7 +51,7 @@ void main() {
         final c = consignePour(
           largeur: 1280,
           hauteur: 720,
-          tailleOctets: poids(12, 1800000),
+          tailleOctets: poids(12, debitDeNotreSortie720p),
           dureeMs: 12000,
         );
         expect(c.transcode, isFalse, reason: 'saut $saut');
@@ -58,7 +66,7 @@ void main() {
   });
 
   group('consignePour — ce qu\'on réduit', () {
-    test('du 1080p devient du 720p à 1,6 Mbit/s (une seule marche)', () {
+    test('du 1080p devient du 720p au débit du palier (une seule marche)', () {
       final c = consignePour(
         largeur: 1920,
         hauteur: 1080,
@@ -67,7 +75,7 @@ void main() {
       );
       expect(c.transcode, isTrue);
       expect([c.bordLong, c.bordCourt], [1280, 720]);
-      expect(c.debit, 1600000);
+      expect(c.debit, debitPalier[720]);
     });
 
     test('la 4K aussi, et pas davantage', () {
@@ -78,7 +86,7 @@ void main() {
         dureeMs: 10000,
       );
       expect([c.bordLong, c.bordCourt], [1280, 720]);
-      expect(c.debit, 1600000);
+      expect(c.debit, debitPalier[720]);
     });
 
     test('une vidéo PORTRAIT garde son sens : 720 de large, 1280 de haut', () {
@@ -178,8 +186,17 @@ void main() {
         niveau: NiveauQualite.haute,
       );
       expect([c.bordCourt, c.bordLong], [720, 1280]);
-      expect(hautePlusFine(720), isFalse,
-          reason: 'le bouton 1080p ne doit pas être proposé');
+      /*
+       * 🐛 CE BANC DISAIT L'INVERSE, ET IL AVAIT TORT DEPUIS L'ESCALIER. Au
+       * niveau normal, une vidéo filmée en 720p part en 360p : le niveau haut
+       * lui rend ses 720p, le bouton a donc tout son sens. C'est le défaut
+       * signalé par le professeur le 16/10/2026 — « il n'y a pas le bouton pour
+       * envoyer à meilleure qualité comme ça se fait sur les photos ».
+       */
+      expect(hautePlusFine(720), isTrue,
+          reason: 'le niveau normal donne 360p : le bouton rend du 720p');
+      expect(hautePlusFine(240), isFalse,
+          reason: 'sous le plancher, rien à surclasser');
     });
 
     test('une vidéo entre 720p et 1080p garde sa définition', () {
@@ -254,16 +271,51 @@ void main() {
       expect(palierVideo(144), isNull);
     });
 
-    test('la garde reconnaît nos sorties, et elles seules', () {
-      // Nos sorties : exactement un palier, et le débit de ce palier (+ son).
-      expect(dejaUnPalierAlanya(720, 1800000), isTrue);
-      expect(dejaUnPalierAlanya(360, 700000), isTrue);
-      expect(dejaUnPalierAlanya(240, 400000), isTrue);
-      // Même taille, mais bien trop lourde : ce n'est pas nous.
-      expect(dejaUnPalierAlanya(720, 6000000), isFalse);
-      // Une taille qui n'est pas un palier n'est jamais la nôtre.
-      expect(dejaUnPalierAlanya(480, 300000), isFalse);
-      expect(dejaUnPalierAlanya(1080, 1000000), isFalse);
+    test('LE SEUIL AU DÉBIT ÉPARGNE CE QUI EST DÉJÀ LÉGER (16/10/2026)', () {
+      // La demande du professeur : le débit décide, pas la définition.
+      expect(dejaAssezLegere(1000000), isTrue, reason: '1 Mbit/s : on n\'y touche pas');
+      expect(dejaAssezLegere(seuilDebit.toDouble()), isTrue, reason: 'le seuil est inclus');
+      expect(dejaAssezLegere(seuilDebit + 1), isFalse);
+      expect(dejaAssezLegere(6000000), isFalse);
+    });
+
+    test('UNE DE NOS SORTIES NE REDÉCLENCHE JAMAIS LA COMPRESSION', () {
+      /*
+       * 🔴 L'INVARIANT QUI REMPLACE LA GARDE CONTRE LA CASCADE. Elle
+       * reconnaissait nos fichiers à leur FORME (petit côté sur un palier,
+       * débit sous celui du palier). Elle n'a plus lieu d'être : aucune de nos
+       * sorties ne dépasse le seuil. ⚠️ Si ce banc tombe, la cascade est
+       * rouverte et une vidéo reperd une marche à chaque partage.
+       */
+      for (final palier in paliersVideo) {
+        expect(debitPalier[palier]! + margeSon, lessThanOrEqualTo(seuilDebit),
+            reason: 'palier $palier : notre sortie doit rester sous le seuil');
+      }
+    });
+
+    test('une vidéo 720p LÉGÈRE reste intacte — le défaut signalé', () {
+      // Le cas même du professeur : 720p à 1 Mbit/s. Avant le 16/10, l'escalier
+      // la faisait tomber en 360p pour un gain dérisoire.
+      final c = consignePour(
+        largeur: 1280,
+        hauteur: 720,
+        tailleOctets: poids(30, 1000000),
+        dureeMs: 30000,
+      );
+      expect(c.transcode, isFalse);
+      expect(c.raison, RaisonSautVideo.dejaPetite);
+    });
+
+    test('et une 1080p légère aussi : la définition ne décide plus', () {
+      final c = consignePour(
+        largeur: 1920,
+        hauteur: 1080,
+        tailleOctets: poids(60, 1200000),
+        dureeMs: 60000,
+      );
+      expect(c.transcode, isFalse,
+          reason: 'déjà sous le seuil : la descendre en 720p ne rendrait '
+              'presque rien et coûterait des pixels');
     });
 
     test('UNE VIDÉO NE SE DÉGRADE PAS À CHAQUE PARTAGE', () {
@@ -288,17 +340,38 @@ void main() {
         tailles.add(c.bordCourt);
       }
       expect(tailles, [720],
-          reason: 'une seule réduction : ensuite la garde reconnaît notre '
-              'sortie et ne descend plus');
+          reason: 'une seule réduction : ensuite notre sortie est sous le '
+              'seuil, et le seuil ne la touche plus');
+    });
+  });
+
+  group('l\'étiquette du bouton dit ce qu\'elle va faire', () {
+    test('la définition de l\'autre niveau, et non un 1080p de principe', () {
+      // 🐛 Le bouton annonçait « Envoyer en 1080p » même pour une source qui
+      // ne pouvait pas le rendre : on n'agrandit jamais.
+      expect(definitionAutreNiveauVideo(1080, NiveauQualite.normal), 1080);
+      expect(definitionAutreNiveauVideo(720, NiveauQualite.normal), 720,
+          reason: 'une vidéo filmée en 720p remonte à 720p, pas à 1080p');
+      expect(definitionAutreNiveauVideo(360, NiveauQualite.normal), 360);
+      expect(definitionAutreNiveauVideo(4000, NiveauQualite.normal), 1080,
+          reason: 'le plafond du niveau haut');
+      // Depuis le niveau haut, le retour annonce la marche de l'escalier.
+      expect(definitionAutreNiveauVideo(720, NiveauQualite.haute), 360);
+      expect(definitionAutreNiveauVideo(1080, NiveauQualite.haute), 720);
     });
   });
 
   group('les nombres sont bien ceux du web', () {
     test('les paliers et leurs débits, à l\'identique', () {
       expect(videoBordCourtMax, 720, reason: 'VIDEO_BORD_COURT');
-      expect(debit720p, 1600000, reason: 'DEBIT_720P');
+      expect(debit720p, 1200000, reason: 'DEBIT_720P');
+      expect(debit720p, debitPalier[720],
+          reason: 'Dart ne lit pas une const Map dans un contexte constant : '
+              'les deux nombres sont écrits deux fois et doivent concorder');
+      expect(seuilDebit, 1450000, reason: 'SEUIL_DEBIT');
+      expect(margeSon, 250000, reason: 'MARGE_SON');
       expect(paliersVideo, [720, 360, 240], reason: 'PALIERS_VIDEO');
-      expect(debitPalier, {720: 1600000, 360: 600000, 240: 300000},
+      expect(debitPalier, {720: 1200000, 360: 600000, 240: 300000},
           reason: 'DEBIT_PALIER');
       expect(paliersImage, [1600, 1000, 640], reason: 'PALIERS_IMAGE');
       expect(gainMinimumVideo, 0.9, reason: 'GAIN_MINIMUM');

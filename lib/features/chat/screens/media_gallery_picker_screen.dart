@@ -318,6 +318,7 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
           asset: asset,
           compresse: compresse.compresse,
           niveauSuperieurPossible: compresse.niveauSuperieurPossible,
+          definitionAutreNiveau: compresse.definitionAutreNiveau,
           tailleOriginale:
               compresse.compresse ? compresse.tailleAvant : null,
         ));
