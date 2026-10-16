@@ -35,6 +35,7 @@ import '../../theme/alanya_theme.dart';
 import '../../core/theme_controller.dart';
 import '../../widgets/alanya_wordmark.dart';
 import '../../widgets/alanya_nav_bar.dart';
+import '../../widgets/badge_officiel.dart';
 import '../../widgets/avatar_circle.dart';
 import '../../widgets/motif_background.dart';
 import '../../widgets/multi_select_mixin.dart';
@@ -1993,6 +1994,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontWeight: FontWeight.w600)),
           ),
+          if (c.officiel) const BadgeOfficiel(),
           // Étiquette « Groupe », comme le web : à côté du nom, discrète.
           if (c.isGroup)
             Container(
