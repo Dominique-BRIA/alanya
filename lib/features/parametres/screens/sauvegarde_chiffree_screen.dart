@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/app_snackbar.dart';
+import '../../../core/erreur_lisible.dart';
 import '../../../services/e2ee/e2ee_fournisseur.dart';
 import '../../../services/e2ee/e2ee_serrures.dart';
 
@@ -83,6 +84,61 @@ class _SauvegardeChiffreeScreenState extends State<SauvegardeChiffreeScreen> {
         }
         await _montrerCle(cle);
         await _relire();
+      });
+
+  /// CRÉE L'ARCHIVE, AVEC SES DEUX SERRURES.
+  ///
+  /// 🔴 ELLE NE SE CRÉAIT QUE DEPUIS LA FICHE D'UN CONTACT (jusqu'au
+  /// 16/10/2026), derrière un bouton « activer le chiffrement » qui n'a plus
+  /// lieu d'être : le chiffrement s'active désormais en UN SEUL endroit, les
+  /// réglages de l'application. L'archive, elle, doit rester créable — sans
+  /// elle, on se déconnecte et tous les messages chiffrés deviennent vides,
+  /// sans le moindre avertissement (défaut signalé le 26/09/2026). Elle se crée
+  /// donc ici, à l'endroit où le web la met déjà.
+  ///
+  /// 🔴 DEUX SERRURES D'UN COUP. Le mot de passe rouvre l'archive à chaque
+  /// connexion sans rien demander ; la clé de récupération la rouvre sur un
+  /// appareil neuf, ou si le mot de passe est oublié. Avec une seule des deux,
+  /// il resterait toujours un cas où l'archive se referme pour de bon.
+  Future<void> _activer() => _avec(() async {
+        final pile = context.e2ee;
+        if (pile == null) return;
+
+        final mdp = await _demanderTexte(
+          titre: 'Activer la sauvegarde',
+          explication:
+              'Saisissez le mot de passe de votre compte. Il ne quitte pas '
+              'cet appareil : il sert à fermer la serrure, rien de plus.',
+          champ: 'Mot de passe',
+        );
+        if (mdp == null || mdp.isEmpty) return;
+
+        try {
+          final cle =
+              await pile.sauvegarde.activerAvecDeuxSerrures(mdp, pile.coffre);
+          if (!mounted) return;
+          // `null` : une archive existait déjà et vient d'être ouverte — il n'y
+          // a pas de NOUVELLE clé de récupération à montrer.
+          if (cle != null) await _montrerCle(cle);
+          await _relire();
+        } catch (e) {
+          if (!mounted) return;
+          /*
+           * 🔴 NOTRE PROPRE ÉCHEC PASSE AVANT CELUI DU SERVEUR. Quand la
+           * préparation de cet appareil a échoué au démarrage, le serveur
+           * répond « un participant n'a pas encore publié ses clés » — exact,
+           * mais celui qui le lit comprend « mon correspondant » et va le
+           * relancer pour rien. Le participant sans clés, c'est nous, et nous
+           * sommes les seuls à pouvoir le savoir.
+           */
+          final echec = pile.echecDemarrage;
+          showAppSnackBar(
+            echec == null
+                ? messageDErreur(context, e)
+                : "Ce téléphone n'a pas pu préparer ses clés de chiffrement : "
+                    "${messageDErreur(context, echec)}",
+          );
+        }
       });
 
   /// Rouvre une archive que cet appareil n'a jamais ouverte.
@@ -380,6 +436,13 @@ class _SauvegardeChiffreeScreenState extends State<SauvegardeChiffreeScreen> {
                  * une ne pouvait pas la renforcer. Même geste : le serveur
                  * REMPLACE la serrure, l'ancienne clé cesse d'ouvrir.
                  */
+                if (!active) ...[
+                  FilledButton(
+                    onPressed: _occupe ? null : _activer,
+                    child: const Text('Activer la sauvegarde'),
+                  ),
+                  const SizedBox(height: 8),
+                ],
                 if (active)
                   FilledButton(
                     onPressed: _occupe ? null : _nouvelleCle,
