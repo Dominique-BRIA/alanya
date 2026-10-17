@@ -38,6 +38,11 @@
          lève une SecurityException et l'appel se coupe dès que l'application
          passe en arrière-plan. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
+    <!-- Même règle, pour les envois et téléchargements qui doivent survivre à la
+         fermeture de l'application. ⚠️ Depuis Android 15, un service `dataSync`
+         est plafonné à 6 h par jour cumulées : sans effet sur des transferts de
+         fichiers, rédhibitoire pour un usage continu. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <!-- Empêche la mise en veille de la puce Wi-Fi pendant un appel : c'est elle
          qui coupe les connexions WebRTC quand l'écran s'éteint. -->
@@ -115,10 +120,64 @@
               android:name="io.flutter.embedding.android.NormalTheme"
               android:resource="@style/NormalTheme"
               />
+            <!-- 🔴 Flutter traite les liens entrants LUI-MÊME quand ce réglage
+                 est absent (`deepLinkEnabled` vaut vrai par défaut, lu dans
+                 FlutterActivityLaunchConfigs) : il pousserait une route
+                 « /u/82312187 » que l'application ne connaît pas. Les liens
+                 passent par `app_links` (voir lib/core/liens_entrants.dart). -->
+            <meta-data android:name="flutter_deeplinking_enabled" android:value="false" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- Liens Alanya : le QR du profil (/u/<ID>) et l'invitation à
+                 usage unique (/i/<jeton>) ouvrent l'application au lieu du
+                 navigateur. `autoVerify` : Android vérifie à l'installation
+                 que https://alanyavox.com/.well-known/assetlinks.json porte
+                 l'empreinte de la clé qui a signé l'APK — sans cette
+                 vérification, il propose un choix « navigateur ou appli ».
+                 ⚠️ Deux filtres séparés PAR CHEMIN plutôt qu'un seul : un
+                 filtre unique déclarant tout l'hôte ferait aussi intercepter
+                 /webapp/ et les pages du site par l'application. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https"
+                      android:host="alanyavox.com"
+                      android:pathPrefix="/u/"/>
+            </intent-filter>
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https"
+                      android:host="alanyavox.com"
+                      android:pathPrefix="/i/"/>
+            </intent-filter>
+            <!-- PARTAGER VERS ALANYA (07/10/2026, demande du user). Alanya
+                 apparaît dans la feuille de partage des autres applications,
+                 pour un texte, un lien ou n'importe quel fichier, seul ou
+                 plusieurs. Reçu par share_handler (lib/core/partage_entrant.dart). -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <!-- LES CONTACTS ALANYA EN HAUT DE LA FEUILLE DE PARTAGE : les
+                 conversations récentes sont publiées comme raccourcis de partage
+                 (recordSentMessage), déclarés dans res/xml/share_targets.xml. -->
+            <meta-data
+                android:name="android.service.chooser.chooser_target_service"
+                android:value="androidx.sharetarget.ChooserTargetServiceCompat" />
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/share_targets" />
         </activity>
         <!-- Service qui maintient l'appel actif quand l'application quitte le
              premier plan. `foregroundServiceType` est OBLIGATOIRE depuis
@@ -129,6 +188,18 @@
             android:name=".CallForegroundService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+
+        <!-- Maintient les envois et téléchargements quand l'application quitte
+             l'écran, ou est balayée des tâches récentes.
+
+             ⚠️ Service DISTINCT de celui de `flutter_foreground_task`, qui n'en
+             expose qu'un seul et le déclare `foregroundServiceType="location"`
+             pour le relevé de position. Le réutiliser aurait lié les deux :
+             arrêter les transferts aurait arrêté la géolocalisation. -->
+        <service
+            android:name=".TransferForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <!-- Service de relevé de position, fourni par `flutter_foreground_task`.
 

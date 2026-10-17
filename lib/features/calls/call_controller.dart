@@ -3,22 +3,49 @@ import 'dart:async';
 // `widgets.dart` plutôt que `foundation.dart`, qu'il réexporte :
 // `WidgetsBinding.lifecycleState` sert à distinguer l'application ouverte
 // (bandeau interne) de l'application réduite ou fermée (écran d'appel natif).
+import 'package:alanya_telecom/alanya_telecom.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
+import '../../core/alanya_id_formatter.dart';
 import '../../core/api_client.dart';
 import '../../core/call_permissions.dart';
 import '../../core/debug_overlay.dart';
 import '../../core/call_foreground_service.dart';
 import '../../core/call_ui_native.dart';
 import '../../core/lock_screen_call.dart';
+import '../../core/proximite_appel.dart';
 import '../../core/push_service.dart';
 import '../../core/realtime_client.dart';
+import '../../core/enregistreur_appel.dart';
 import '../../core/ringtone_service.dart';
+import '../../core/sonneries_listes.dart';
+import '../../l10n/app_localizations.dart';
+import 'enregistrements_repository.dart';
 import '../../models/call_record.dart';
 import 'calls_repository.dart';
+import 'prechargement_accueil.dart';
+import 'repondeur_repository.dart';
+import '../../core/server_config.dart';
+import '../../core/token_storage.dart';
 import 'webrtc_group_mesh.dart';
 import 'webrtc_peer_session.dart';
+
+/// Traduit une chaîne du module appels depuis n'importe où dans ce fichier
+/// (parseurs JSON, sessions IVR, contrôleur), sans BuildContext : pendant un
+/// appel, le navigateur de l'application est monté (l'écran d'appel en
+/// dépend). Repli français s'il ne l'est pas — même logique que
+/// `CallUiNative._libelle`.
+String _trAppel(String cle, String repliFrancais,
+    [Map<String, String>? params]) {
+  final ctx = PushService.navigatorKey.currentContext;
+  if (ctx == null) return repliFrancais;
+  try {
+    return tr(ctx, cle, params);
+  } catch (_) {
+    return repliFrancais;
+  }
+}
 
 enum ActiveCallRole { outgoing, incoming, ongoing }
 
@@ -32,7 +59,11 @@ enum ActiveCallRole { outgoing, incoming, ongoing }
 /// [attente] n'existe que pour un centre d'APPELS (on attend un agent), [lecture]
 /// que pour un centre VOCAL (un son tourne en boucle). Une même énumération pour
 /// les deux : l'écran, lui, ne veut savoir qu'une chose — que montrer.
-enum IvrEtape { menu, attente, lecture }
+/// ⚠️ `enregistrement` est l'étape de la PLAINTE VOCALE (touche 0 d'un centre
+/// vocal). Elle se comporte comme `lecture` pour tout ce qui touche à la mise
+/// en page — le pavé reste affiché et à la même taille — et s'en distingue
+/// pour ce qui se joue dessus. Voir `IvrPanel`.
+enum IvrEtape { menu, attente, lecture, enregistrement }
 
 /// Une touche du menu d'un standard.
 ///
@@ -72,7 +103,7 @@ class IvrOption {
     if (digit == null) return null;
     return IvrOption(
       digit: digit,
-      label: brut["label"] as String? ?? "Service $digit",
+      label: brut["label"] as String? ?? _trAppel('ivr_service_n', "Service $digit", {'n': '$digit'}),
       // Absent = disponible : un serveur plus ancien ne connaît pas ce champ,
       // et griser toutes les options serait pire que de laisser essayer.
       disponible: brut["disponible"] as bool? ?? true,
@@ -146,6 +177,20 @@ class IvrSession {
   /// La touche dont le son joue, pour la mettre en évidence sur le pavé.
   int? toucheEnLecture;
 
+  /// Le bip à jouer AVANT de démarrer l'enregistrement d'une plainte, ou nul.
+  ///
+  /// ⚠️ Nul est un cas NORMAL, pas une panne : la variable d'environnement peut
+  /// ne pas être renseignée. L'enregistrement démarre alors sans annonce plutôt
+  /// que de ne pas démarrer — voir `urlBipEnregistrement` côté serveur.
+  String? bipEnregistrementUrl;
+
+  /// Plafond de durée d'une plainte, donné par le serveur avec `ivr_record`.
+  ///
+  /// Reçu et non codé en dur : la borne pourra changer sans nouvel APK, comme
+  /// la règle de boucle d'`ivr_play`. Le défaut ne sert qu'au cas où un serveur
+  /// plus ancien l'omettrait.
+  int plainteMaxMs = 3 * 60 * 1000;
+
   /// Libellé du service choisi, pendant que l'agent sonne.
   String? serviceChoisi;
 
@@ -173,16 +218,105 @@ class IvrSession {
   bool envoiEnCours = false;
 }
 
+/// LE REPONDEUR DU CORRESPONDANT, vu par l'appelant.
+///
+/// 🔴 CE CHEMIN N'EXISTAIT PAS SUR MOBILE. Quand quelqu'un posait une
+/// absence, le serveur cloturait l'appel et envoyait `repondeur_direct` — que
+/// l'application ne connaissait pas. Aucun `call_ended` ne suivait (l'appel
+/// etait deja `NO_ANSWER`, le balayage ne ramasse que les `RINGING`) : l'ecran
+/// sonnait donc SOIXANTE SECONDES dans le vide, jusqu'a son propre minuteur,
+/// sans accueil et sans pouvoir laisser de message.
+class SessionRepondeur {
+  SessionRepondeur({
+    required this.callId,
+    required this.nomCorrespondant,
+    required this.accueilUrl,
+    required this.absence,
+  });
+
+  final String callId;
+  final String nomCorrespondant;
+
+  /// L'accueil, DEJA JOUABLE : adresse absolue et jeton joints. Nul quand le
+  /// correspondant n'a pas d'accueil enregistre — on peut alors encore laisser
+  /// un message, il n'y a simplement rien a ecouter d'abord.
+  final String? accueilUrl;
+
+  /// Vrai : le correspondant a pose une ABSENCE. Faux : il n'a pas repondu.
+  /// La nuance se dit a l'ecran, elle ne change aucun comportement.
+  final bool absence;
+
+  /// Un message a-t-il deja ete depose ? Le serveur n'en accepte qu'un par
+  /// appel (index unique partiel sur `callID`), autant ne pas le proposer deux
+  /// fois.
+  bool depose = false;
+}
+
 /// Appels directs et de groupe — mesh WebRTC (une connexion par participant).
 class CallController extends ChangeNotifier {
-  CallController(this._calls, this._rt) {
+  CallController(
+    this._calls,
+    this._rt,
+    this._sonneriesListes,
+    this._enregistrements,
+    this._repondeurDepot,
+  ) {
     _sub = _rt.events.listen(_onEvent);
+    // Sans préchargement, le PREMIER appel de la session sonnerait toujours par
+    // défaut : les listes n'arrivent qu'avec l'écran d'accueil.
+    _sonneriesListes.prechargerSiBesoin();
+    // Reprise des enregistrements qu'une session précédente n'a pas pu déposer
+    // (coupure réseau, app tuée). Non attendu : c'est un rattrapage de fond.
+    unawaited(_enregistrements.traiterEnAttente());
   }
 
   final CallsRepository _calls;
   final RealtimeClient _rt;
+  final RepondeurRepository _repondeurDepot;
+
+  /// Combien de temps on accepte d'attendre l'accueil préchargé.
+  ///
+  /// ⚠️ DEUX VALEURS, POUR DEUX SITUATIONS QUI N'ONT RIEN À VOIR. Après trente
+  /// secondes de sonnerie, le fichier est arrivé depuis longtemps : le court
+  /// délai ne couvre qu'un serveur qui a répondu au ralenti. En mode absence on
+  /// vient de lancer l'appel, le téléchargement commence à l'instant, et c'est
+  /// la tonalité qui fait patienter — on accepte d'attendre plus, mais pas
+  /// indéfiniment, sinon un réseau lent ferait sonner une minute dans le vide.
+  static const Duration _attenteAccueilCourte = Duration(milliseconds: 1500);
+  static const Duration _attenteAccueilLongue = Duration(seconds: 9);
+
+  /// Le temps minimal de tonalité avant que le répondeur ne prenne, en absence.
+  ///
+  /// 🔴 SANS LUI, L'APPEL PARAÎT CASSÉ : le serveur répond instantanément, la
+  /// feuille surgissait sans qu'aucune sonnerie n'ait eu lieu, et l'on croyait
+  /// à un défaut de l'application. Une seconde et demie suffit à dire « on a
+  /// essayé de joindre quelqu'un ».
+  static const Duration _tonaliteMinimale = Duration(milliseconds: 1500);
+
+  /// Le repondeur en cours de consultation, ou `null`.
+  ///
+  /// ⚠️ SURVIT VOLONTAIREMENT A `_clear()`. L'appel est termine — c'est meme
+  /// la condition pour qu'un repondeur ait un sens — et l'ecran d'appel se
+  /// referme : si cet etat partait avec lui, la feuille disparaitrait a
+  /// l'instant meme ou elle devrait s'ouvrir. Il se ferme par
+  /// [fermerRepondeur], et par lui seul.
+  SessionRepondeur? repondeur;
+  final SonneriesDeListes _sonneriesListes;
+  final EnregistrementsRepository _enregistrements;
   StreamSubscription<Map<String, dynamic>>? _sub;
   Timer? _ringTimeout;
+
+  /// Combien de temps on laisse sonner avant de passer au répondeur.
+  ///
+  /// ⚠️ MÊME VALEUR QUE `RING_TIMEOUT_MS` CÔTÉ WEB, et c'est tout l'objet de
+  /// cette constante. Le mobile attendait 60 s quand le web en attendait 30 :
+  /// appeler la même personne depuis l'un ou l'autre ne donnait pas la même
+  /// attente avant d'entendre son accueil (aligné sur demande du user le
+  /// 21/09/2026).
+  ///
+  /// ⚠️ ELLE EST NOMMÉE PARCE QUE DEUX MINUTEURS L'UTILISENT — départ ordinaire
+  /// et reprise. Écrite deux fois en clair, elle avait déjà tout pour diverger.
+  static const _dureeSonnerie = Duration(seconds: 30);
 
   /// Délai de lecture d'un message de fin du standard, avant de raccrocher.
   ///
@@ -388,7 +522,7 @@ class CallController extends ChangeNotifier {
 
   Future<void> startOutgoing(String convId, String type, String title) async {
     if (isBusy) {
-      lastError = "Termine l'appel en cours avant d'en lancer un autre";
+      lastError = _trAppel('call_busy_start', "Termine l'appel en cours avant d'en lancer un autre");
       notifyListeners();
       throw StateError("BUSY");
     }
@@ -418,19 +552,68 @@ class CallController extends ChangeNotifier {
       _initialMemberIds.add(myUserId!);
     }
     for (final c in started.callees) {
-      participantNames[c.userId] = c.pseudo ?? c.publicNumber ?? "Membre";
+      participantNames[c.userId] = c.pseudo ??
+          (c.publicNumber == null ? null : formatAlanyaId(c.publicNumber!)) ??
+          _trAppel('grp_member', "Membre");
       if (c.avatarUrl != null) participantAvatars[c.userId] = c.avatarUrl!;
       _initialMemberIds.add(c.userId); // membres appelés dès le départ
     }
+    /*
+     * 🔴 L'ACCUEIL SE TÉLÉCHARGE PENDANT QUE ÇA SONNE.
+     *
+     * Trente secondes d'attente qu'on ne peut pas raccourcir, et un fichier
+     * qu'il faudra jouer au bout : les faire l'un APRÈS l'autre était du temps
+     * perdu, et c'est ce qui laissait la feuille muette le temps d'une requête.
+     * Menés ensemble, le fichier est là AVANT qu'on en ait besoin.
+     *
+     * ⚠️ IL S'ANNULE DÈS QUE L'APPEL ABOUTIT OU QU'ON RACCROCHE — voir `_clear`.
+     * Sans cela on paierait les données d'un accueil que personne n'entendra, à
+     * chaque appel décroché.
+     */
+    PrechargementAccueil.instance
+        .demarrer(started.id, depot: _repondeurDepot);
+
     _ringTimeout?.cancel();
-    _ringTimeout = Timer(const Duration(seconds: 60), () {
-      if (activeRole == ActiveCallRole.outgoing && activeCallId != null) {
-        hangUp();
+    _ringTimeout = Timer(_dureeSonnerie, () async {
+      if (activeRole != ActiveCallRole.outgoing || activeCallId == null) {
+        return;
       }
+      /*
+       * 🐛 LE REPONDEUR NE S'OUVRAIT JAMAIS SUR UN SIMPLE « PERSONNE NE
+       * DECROCHE » (signale par le user le 21/09/2026).
+       *
+       * `_proposerRepondeurApresEchec` n'etait appele que depuis la reception
+       * d'un `call_state ended`. Or cet evenement-la est ECARTE quand il vient
+       * de nous : `fromUserId == myUserId` le traite comme l'echo de notre
+       * propre raccrochage et sort aussitot.
+       *
+       * Et c'est bien NOUS qui raccrochons : le serveur ne balaie les appels
+       * restes en sonnerie qu'a la CREATION d'un autre appel, sans rien
+       * diffuser. Passe le delai, ce minuteur est donc le seul a agir — et il
+       * se contentait de couper.
+       *
+       * Resultat : repondeur allume, sans absence ni plage, l'appel sonnait
+       * puis retombait dans le vide. Le web, lui, demande l'accueil depuis SON
+       * propre minuteur de sonnerie ; le mobile ne le faisait pas.
+       *
+       * ⚠️ RETENUS AVANT `hangUp`, qui les efface : c'est exactement la raison
+       * pour laquelle l'autre appelant de cette fonction les capture aussi.
+       */
+      final id = activeCallId!;
+      final nom = activePeerName;
+      await hangUp();
+      // ⚠️ APRES `hangUp`, jamais avant : la fonction refuse de se poser
+      // par-dessus un appel encore actif, et se retirerait d'elle-meme.
+      await _proposerRepondeurApresEchec(id, nom);
     });
     // Sonnerie sortante (bip d'attente) tant que le destinataire n'a pas
     // décroché. Arrêtée dans _onPeerJoined / _clear / hangUp.
-    RingtoneService.instance.startOutgoing();
+    //
+    // ⚠️ La route audio est posée AVANT la tonalité, et celle-ci la suit :
+    // écouteur pour un appel audio, haut-parleur pour la vidéo. Le « bip bip »
+    // partait auparavant toujours au haut-parleur, quel que soit l'affichage.
+    await _routeAudioInitiale();
+    RingtoneService.instance.startOutgoing(hautParleur: isSpeakerOn);
     notifyListeners();
     // Initialise le stream local immédiatement pour que l'appelant soit prêt
     // à envoyer de l'audio/vidéo dès que le destinataire accepte.
@@ -456,7 +639,7 @@ class CallController extends ChangeNotifier {
   Future<void> startCallback(
       String centerAlanyaID, String customerId, String title) async {
     if (isBusy) {
-      lastError = "Termine l'appel en cours avant d'en lancer un autre";
+      lastError = _trAppel('call_busy_start', "Termine l'appel en cours avant d'en lancer un autre");
       notifyListeners();
       throw StateError("BUSY");
     }
@@ -482,17 +665,64 @@ class CallController extends ChangeNotifier {
       _initialMemberIds.add(myUserId!);
     }
     for (final c in started.callees) {
-      participantNames[c.userId] = c.pseudo ?? c.publicNumber ?? "Membre";
+      participantNames[c.userId] = c.pseudo ??
+          (c.publicNumber == null ? null : formatAlanyaId(c.publicNumber!)) ??
+          _trAppel('grp_member', "Membre");
       if (c.avatarUrl != null) participantAvatars[c.userId] = c.avatarUrl!;
       _initialMemberIds.add(c.userId);
     }
+    /*
+     * 🔴 L'ACCUEIL SE TÉLÉCHARGE PENDANT QUE ÇA SONNE.
+     *
+     * Trente secondes d'attente qu'on ne peut pas raccourcir, et un fichier
+     * qu'il faudra jouer au bout : les faire l'un APRÈS l'autre était du temps
+     * perdu, et c'est ce qui laissait la feuille muette le temps d'une requête.
+     * Menés ensemble, le fichier est là AVANT qu'on en ait besoin.
+     *
+     * ⚠️ IL S'ANNULE DÈS QUE L'APPEL ABOUTIT OU QU'ON RACCROCHE — voir `_clear`.
+     * Sans cela on paierait les données d'un accueil que personne n'entendra, à
+     * chaque appel décroché.
+     */
+    PrechargementAccueil.instance
+        .demarrer(started.id, depot: _repondeurDepot);
+
     _ringTimeout?.cancel();
-    _ringTimeout = Timer(const Duration(seconds: 60), () {
-      if (activeRole == ActiveCallRole.outgoing && activeCallId != null) {
-        hangUp();
+    _ringTimeout = Timer(_dureeSonnerie, () async {
+      if (activeRole != ActiveCallRole.outgoing || activeCallId == null) {
+        return;
       }
+      /*
+       * 🐛 LE REPONDEUR NE S'OUVRAIT JAMAIS SUR UN SIMPLE « PERSONNE NE
+       * DECROCHE » (signale par le user le 21/09/2026).
+       *
+       * `_proposerRepondeurApresEchec` n'etait appele que depuis la reception
+       * d'un `call_state ended`. Or cet evenement-la est ECARTE quand il vient
+       * de nous : `fromUserId == myUserId` le traite comme l'echo de notre
+       * propre raccrochage et sort aussitot.
+       *
+       * Et c'est bien NOUS qui raccrochons : le serveur ne balaie les appels
+       * restes en sonnerie qu'a la CREATION d'un autre appel, sans rien
+       * diffuser. Passe le delai, ce minuteur est donc le seul a agir — et il
+       * se contentait de couper.
+       *
+       * Resultat : repondeur allume, sans absence ni plage, l'appel sonnait
+       * puis retombait dans le vide. Le web, lui, demande l'accueil depuis SON
+       * propre minuteur de sonnerie ; le mobile ne le faisait pas.
+       *
+       * ⚠️ RETENUS AVANT `hangUp`, qui les efface : c'est exactement la raison
+       * pour laquelle l'autre appelant de cette fonction les capture aussi.
+       */
+      final id = activeCallId!;
+      final nom = activePeerName;
+      await hangUp();
+      // ⚠️ APRES `hangUp`, jamais avant : la fonction refuse de se poser
+      // par-dessus un appel encore actif, et se retirerait d'elle-meme.
+      await _proposerRepondeurApresEchec(id, nom);
     });
-    RingtoneService.instance.startOutgoing();
+    // Même règle que sur un départ ordinaire : la route d'abord, la tonalité
+    // ensuite, et elle la suit.
+    await _routeAudioInitiale();
+    RingtoneService.instance.startOutgoing(hautParleur: isSpeakerOn);
     notifyListeners();
     try {
       await _ensureMesh();
@@ -555,10 +785,24 @@ class CallController extends ChangeNotifier {
   /// qui rebâtit la session et relance l'invite. Anticiper l'état ici ferait
   /// diverger les deux si le message se perdait — et laisserait surtout un
   /// écran sans son, l'invite n'étant relancée que par la réponse.
+  /// Retour au menu d'accueil d'un centre vocal.
+  ///
+  /// 🔴 **`enregistrement` DOIT ÊTRE ACCEPTÉ ICI AUSSI.** La garde ne laissait
+  /// passer que `lecture` : après une plainte envoyée, l'étape vaut
+  /// `enregistrement`, la fonction sortait sans rien émettre, le serveur ne
+  /// renvoyait jamais le menu — et le panneau tournait indéfiniment sur
+  /// « Envoi… ». Le bouton « Accueil » était inerte pour la même raison.
+  ///
+  /// ⚠️ **J'AVAIS CORRIGÉ LA MÊME GARDE CÔTÉ SERVEUR** (`handleIvrBack`) et
+  /// laissé celle-ci. Une règle partagée entre deux bouts se corrige des DEUX
+  /// côtés — c'est la troisième fois que ce projet paie cet oubli.
   Future<void> retourAccueilIvr() async {
     final session = ivr;
     if (session == null || !session.vocal) return;
-    if (session.etape != IvrEtape.lecture) return;
+    if (session.etape != IvrEtape.lecture &&
+        session.etape != IvrEtape.enregistrement) {
+      return;
+    }
     _rt.ivrBack(session.callId);
   }
 
@@ -607,7 +851,7 @@ class CallController extends ChangeNotifier {
         return;
       }
       // Vraie fin : appelant qui a renoncé, délai expiré, appel déjà clos.
-      lastError = "Cet appel n'est plus disponible";
+      lastError = _trAppel('call_no_longer_available', "Cet appel n'est plus disponible");
       _clear();
       notifyListeners();
       return;
@@ -616,7 +860,7 @@ class CallController extends ChangeNotifier {
       // et laissait l'état à mi-chemin : sonnerie coupée, notification retirée,
       // mais ni appel actif ni appel entrant — plus aucun moyen d'en sortir.
       _acceptationEnCours = null;
-      lastError = "Impossible de rejoindre l'appel";
+      lastError = _trAppel('call_join_failed', "Impossible de rejoindre l'appel");
       _clear();
       notifyListeners();
       return;
@@ -665,6 +909,7 @@ class CallController extends ChangeNotifier {
     traceAppel(
         "acceptIncoming — moi=$myUserId, participants actifs renvoyes par /accept : "
         "${result.activeParticipants.map((p) => p.userId).toList()}, mesh=${_mesh != null ? "pret" : "ABSENT"}");
+    _demarrerEnregistrementSiAutorise(inc.callId, result);
     for (final p in result.activeParticipants) {
       if (p.userId != myUserId) {
         // J'ARRIVE dans l'appel : ceux qui y sont déjà m'enverront leur offre.
@@ -674,6 +919,10 @@ class CallController extends ChangeNotifier {
     // La mesh existe enfin : rejouer l'offre arrivée pendant sa construction.
     await _viderTamponSignaux(inc.callId);
     _armerMinuteurConnexion();
+    // ⚠️ APRÈS que `activeType` a pris le type de l'appel entrant : c'est lui
+    // qui décide de la sortie. Sans cet appel, un appel vidéo REÇU sortait par
+    // l'écouteur comme un appel audio.
+    await _routeAudioInitiale();
     notifyListeners();
   }
 
@@ -715,8 +964,31 @@ class CallController extends ChangeNotifier {
       isCallInitiator = false;
       activeCallId = callId;
       activePeerName =
-          result.groupName ?? nomAffiche ?? activePeerName ?? "Appel";
+          result.groupName ?? nomAffiche ?? activePeerName ?? _trAppel('call_word', "Appel");
       activeRole = ActiveCallRole.ongoing;
+
+      /*
+       * 🔴 SANS CETTE LIGNE, QUI REJOINT UN APPEL VIDÉO Y ENTRE EN AUDIO.
+       *
+       * Ce chemin-ci n'a JAMAIS vu la trame `incoming_call` : il sert quand
+       * l'application était fermée et qu'on décroche depuis l'écran natif. Il
+       * ne reçoit qu'un identifiant d'appel. `activeType` restait donc sur sa
+       * valeur de naissance — « AUDIO » —, et `_ensureMesh` ouvrait le micro
+       * seul, sans jamais demander la caméra.
+       *
+       * C'est le cas ORDINAIRE d'un invité : on l'ajoute à un appel en cours
+       * pendant qu'il fait autre chose, son application n'est donc pas au
+       * premier plan.
+       *
+       * ⚠️ L'ORDRE COMPTE : `_ensureMesh()` plus bas lit `activeType` pour
+       * décider s'il demande la caméra, et il ne repasse pas — un mesh déjà
+       * créé le fait sortir aussitôt. Poser le type APRÈS n'aurait rien changé.
+       */
+      activeType = result.type ??
+          // Serveur antérieur au champ : l'écran natif, lui, savait. C'est ce
+          // même drapeau qui lui a fait afficher « appel vidéo ».
+          (await _typeSelonEcranNatif() ?? activeType);
+
       incoming = null;
       // Même raison que dans `acceptIncoming` : sans ce signal, l'écran natif
       // reste sur « appel entrant » pendant toute la communication.
@@ -758,6 +1030,7 @@ class CallController extends ChangeNotifier {
       traceAppel(
           "acceptById — moi=$myUserId, participants actifs renvoyes par /accept : "
           "${result.activeParticipants.map((p) => p.userId).toList()}, mesh=${_mesh != null ? "pret" : "ABSENT"}");
+      _demarrerEnregistrementSiAutorise(callId, result);
       for (final p in result.activeParticipants) {
         // Même règle que dans `acceptIncoming` : j'arrive, je ne suis pas
         // l'offreur — ceux déjà présents m'offriront.
@@ -799,12 +1072,12 @@ class CallController extends ChangeNotifier {
       }
       // Les autres 409 sont de vraies fins : appelant qui a renoncé pendant le
       // démarrage, délai expiré, appel déjà clos.
-      lastError = "Cet appel n'est plus disponible";
+      lastError = _trAppel('call_no_longer_available', "Cet appel n'est plus disponible");
       _clear(idAppel: callId);
       notifyListeners();
       return false;
     } catch (_) {
-      lastError = "Cet appel n'est plus disponible";
+      lastError = _trAppel('call_no_longer_available', "Cet appel n'est plus disponible");
       _clear(idAppel: callId);
       notifyListeners();
       return false;
@@ -904,7 +1177,114 @@ class CallController extends ChangeNotifier {
   /// minuteur compris, et le paquet gardait l'appel dans ses « appels actifs ».
   /// La reprise au démarrage y retrouvait alors un appel fantôme et tentait de
   /// l'accepter — d'où « Cet appel n'est plus disponible » à l'appel suivant.
+  /// Démarre l'enregistrement si, et seulement si, le SERVEUR l'a autorisé.
+  ///
+  /// ⚠️ La décision n'est jamais prise ici : le client ne fait qu'obéir à
+  /// `enregistrer`, calculé par le serveur depuis `center.enregistrement`. La
+  /// dupliquer côté client ferait deux règles à tenir d'accord — et celle qui
+  /// compte, juridiquement comme fonctionnellement, est celle du serveur.
+  ///
+  /// ⚠️ **NI CONSENTEMENT NI ANNONCE AU CORRESPONDANT** — décision explicite du
+  /// user (20/08/2026). Rien n'est joué, rien n'est affiché de son côté.
+  ///
+  /// Non attendu : l'appel ne doit pas attendre le micro pour se connecter.
+  void _demarrerEnregistrementSiAutorise(
+      String callId, AcceptCallResult result) {
+    if (!result.enregistrer) return;
+    // Sans entreprise de destination, le dépôt ne pourra JAMAIS aboutir (le
+    // serveur l'exige) : ne rien enregistrer plutôt que produire des fichiers
+    // qu'on ne saurait où déposer. Cas réel : un centre `enregistrement = true`
+    // dont l'`idCompany` est nul.
+    final entreprise = result.enregistrementCompanyId;
+    if (entreprise == null) {
+      traceAppel("enregistrement REFUSÉ (entreprise absente)");
+      return;
+    }
+    // La voix de l'agent, c'est la piste audio locale. Sans elle, rien à
+    // enregistrer — le natif refuserait de toute façon.
+    final pistesLocales =
+        _mesh?.localStream?.getAudioTracks() ?? const <MediaStreamTrack>[];
+    if (pistesLocales.isEmpty) {
+      traceAppel("enregistrement REFUSÉ (aucune piste audio locale)");
+      return;
+    }
+    final localTrackId = pistesLocales.first.id;
+    if (localTrackId == null || localTrackId.isEmpty) return;
+    _companyEnregistrement = entreprise;
+    unawaited(EnregistreurAppel.instance.demarrer(callId, localTrackId).then((ok) {
+      if (!ok) {
+        // Refus du natif : on oublie l'entreprise, sinon `_clore` croirait
+        // avoir des pistes à déposer et chercherait des fichiers absents.
+        _companyEnregistrement = null;
+      } else {
+        // La voix du correspondant n'existe peut-être pas encore (négociation
+        // en cours) ; on tente tout de suite, `_onMeshUpdated` retentera dès
+        // que le flux distant apparaît.
+        _brancherVoixDistanteSiPossible();
+      }
+      traceAppel(ok ? "enregistrement démarré" : "enregistrement REFUSÉ");
+    }));
+  }
+
+  /// Branche la voix du correspondant sur l'enregistrement en cours, si sa
+  /// piste distante est déjà là. Idempotent (la façade native garde l'état) :
+  /// on peut l'appeler à chaque mise à jour du mesh sans risque de doublon.
+  void _brancherVoixDistanteSiPossible() {
+    if (!EnregistreurAppel.instance.enCours) return;
+    for (final flux in (_mesh?.remoteStreams ?? const {}).values) {
+      final audios = flux.getAudioTracks();
+      if (audios.isEmpty) continue;
+      final id = audios.first.id;
+      if (id == null || id.isEmpty) continue;
+      unawaited(EnregistreurAppel.instance.attacherDistant(id));
+      return;
+    }
+  }
+
+  /// L'entreprise qui recevra l'enregistrement de l'appel en cours, ou nulle.
+  ///
+  /// Retenue au décrochage : à la fin de l'appel, `activeCallId` est déjà
+  /// neutralisé et le serveur ne nous redemandera rien.
+  int? _companyEnregistrement;
+
+  /// Arrête l'enregistrement et dépose les deux pistes, s'il y en a un.
+  ///
+  /// ⚠️ **N'ATTEND RIEN ET NE LÈVE RIEN.** L'appel est terminé : ni l'écran ni
+  /// l'utilisateur n'attendent cette opération, et un échec de téléversement ne
+  /// doit surtout pas remonter dans un chemin de fin d'appel.
+  void _cloreEnregistrement(String? callId) {
+    final entreprise = _companyEnregistrement;
+    _companyEnregistrement = null;
+    if (!EnregistreurAppel.instance.enCours) return;
+    unawaited(() async {
+      try {
+        final fichiers = await EnregistreurAppel.instance.arreter();
+        if (fichiers == null || entreprise == null) return;
+        // On INSCRIT en file plutôt que de déposer directement : ce qui échoue
+        // ici (réseau coupé au raccrochage) sera repris plus tard, et les
+        // fichiers restent sur disque jusqu'à confirmation du serveur.
+        await _enregistrements.enfiler(
+          callId: callId,
+          companyId: entreprise,
+          cheminAgent: fichiers.agent,
+          cheminClient: fichiers.client,
+          dureeMs: fichiers.dureeMs,
+        );
+      } catch (e) {
+        debugPrint("[CallController] mise en file de l'enregistrement : $e");
+      }
+    }());
+  }
+
   void _clear({String? idAppel}) {
+    /*
+     * ⚠️ LE PRÉCHARGEMENT S'ARRÊTE ICI, et c'est sans danger pour la feuille :
+     * `attendre` lui a déjà transféré le fichier, qui ne dépend plus de ce
+     * téléchargement. Ce qu'on annule, c'est un accueil que plus personne
+     * n'entendra — on décroche, on raccroche — et qu'on paierait pour rien sur
+     * un forfait mobile.
+     */
+    PrechargementAccueil.instance.annuler();
     _ringTimeout?.cancel();
     _ringTimeout = null;
     _finIvr?.cancel();
@@ -912,6 +1292,14 @@ class CallController extends ChangeNotifier {
     // Le standard meurt avec l'appel. `_clear` étant le point de passage de
     // TOUTES les fins d'appel, c'est le seul endroit où l'oubli est impossible.
     ivr = null;
+    // L'enregistrement s'arrête ICI pour la MÊME raison : raccroché, refusé,
+    // expiré, terminé d'en face — tout passe par `_clear`. Le poser dans
+    // `hangUp` aurait laissé le micro tourner sur toutes les autres sorties.
+    //
+    // Volontairement NON attendu : `_clear` est synchrone et appelé depuis des
+    // chemins qui ne peuvent pas l'attendre. Le téléversement se poursuit tout
+    // seul, l'appel est déjà fini.
+    _cloreEnregistrement(idAppel ?? activeCallId);
     RingtoneService.instance.stopIvr();
     _annulerMinuteurConnexion();
     // Filet de sécurité : coupe toute sonnerie encore en cours.
@@ -931,6 +1319,11 @@ class CallController extends ChangeNotifier {
     // refusé, expiré, terminé d'en face : c'est le seul endroit où l'arrêt ne
     // peut pas être oublié.
     CallForegroundService.arreter();
+    // Retrait du chip, au même point de passage obligé. Le natif le retire déjà
+    // de son côté quand Telecom porte l'appel (`cleanupUi`) ; ici on couvre les
+    // cas où Telecom n'a jamais rien porté — appel décroché application ouverte,
+    // appel sortant. Idempotent : sans effet si aucun chip n'est posé.
+    AlanyaTelecom.chipArreter();
     incoming = null;
     activeCallId = null;
     activeConvId = null;
@@ -962,6 +1355,11 @@ class CallController extends ChangeNotifier {
       isSpeakerOn = false;
       unawaited(Helper.setSpeakerphoneOn(false).catchError((_) {}));
     }
+    // L'état audio du standard ne doit pas survivre à l'appel qui l'a produit.
+    RingtoneService.instance.reinitialiserIvr();
+    // Relâché sans condition : l'appel est fini, et un verrou oublié
+    // éteindrait l'écran au premier objet passant devant le capteur.
+    unawaited(ProximiteAppel.regler(false));
     connectedSince = null;
     // Remise à zéro du compteur : l'appel est fini, plus aucun écran ne le
     // concerne. Les `dispose` qui suivront décrémenteraient dans le vide, ce
@@ -986,9 +1384,33 @@ class CallController extends ChangeNotifier {
       // protéger, et la notification persistante ferait doublon avec celle de
       // l'appel entrant.
       CallForegroundService.demarrer(
-        titre: activePeerName ?? "Appel en cours",
+        titre: activePeerName ?? _trAppel('call_ongoing', "Appel en cours"),
       );
+      // Chip vert de la barre d'état, au MÊME endroit et pour la même raison :
+      // c'est ici, et nulle part ailleurs, qu'on sait qu'une communication est
+      // réellement établie — quel que soit son sens et quel que soit l'état de
+      // l'application.
+      //
+      // Le chip natif ne couvrait qu'un cas : un appel ENTRANT reçu
+      // application en arrière-plan, seul cas où Telecom porte l'appel et où
+      // `onAnswer` se déclenche. Application déjà ouverte, l'appel n'est jamais
+      // déclaré au système (voir plus bas dans ce fichier) ; un appel SORTANT
+      // ne l'est pas non plus, faute d'`onCreateOutgoingConnection`. Ce point
+      // d'appel-ci couvre les trois.
+      //
+      // Sans risque de doublon : quand Telecom a DÉJÀ posé le chip au décroché,
+      // cet appel-ci ne fait que rafraîchir la notification — le natif garde
+      // l'instant de départ du chronomètre.
+      AlanyaTelecom.chipDemarrer(nom: activePeerName ?? _trAppel('call_ongoing', "Appel en cours"));
     }
+    // Ce rappel porte AUSSI les changements de caméra : c'est donc le bon
+    // endroit pour réévaluer la proximité, qu'il s'agisse de la connexion du
+    // média ou d'un passage audio ↔ vidéo en cours d'appel.
+    _majProximite();
+    // Le flux distant peut apparaître ICI, après le décrochage : c'est le seul
+    // moment fiable pour brancher la voix du correspondant sur un enregistrement
+    // déjà démarré. Sans coût si elle l'est déjà, ou s'il n'y a rien à enregistrer.
+    _brancherVoixDistanteSiPossible();
     notifyListeners();
   }
 
@@ -1002,12 +1424,110 @@ class CallController extends ChangeNotifier {
 
   Future<void> toggleSpeaker() => _appliqueHautParleur(!isSpeakerOn);
 
+  /// Pose la route audio À L'OUVERTURE de l'appel, selon son type.
+  ///
+  /// 🔴 ELLE MANQUAIT, et c'est ce qui rendait la vidéo inutilisable sans un
+  /// appui supplémentaire : `isSpeakerOn` valait `false` quel que soit le type,
+  /// donc on lançait un appel vidéo, on éloignait le téléphone pour voir
+  /// l'écran, et le son restait dans l'écouteur.
+  ///
+  /// Ce que l'incohérence avait de démontrable : l'application SAIT déjà que la
+  /// vidéo n'est pas un usage à l'oreille — `_majProximite` refuse d'éteindre
+  /// l'écran quand `activeType == "VIDEO"`. Elle refusait donc d'éteindre
+  /// l'écran parce qu'on ne colle pas le téléphone à sa joue, tout en envoyant
+  /// le son là où il aurait fallu le coller.
+  ///
+  /// ⚠️ Appelée APRÈS que `activeType` est posé, jamais avant : c'est lui qui
+  /// décide.
+  Future<void> _routeAudioInitiale() async {
+    final vise = activeType == "VIDEO";
+    if (isSpeakerOn == vise) {
+      // Le drapeau est déjà bon, mais la ROUTE SYSTÈME, elle, appartient à
+      // l'appel précédent. On la repose quand même — c'est exactement l'oubli
+      // qui fait mentir le bouton des réunions.
+      try {
+        await Helper.setSpeakerphoneOn(vise);
+      } catch (_) {}
+      // Telecom aussi : un appel entrant accepté depuis l'écran natif arrive
+      // ici avec un `Connection` déjà ouvert, qui possède la route.
+      await AlanyaTelecom.setSpeaker(vise);
+      return;
+    }
+    await _appliqueHautParleur(vise);
+  }
+
   Future<void> _appliqueHautParleur(bool actif) async {
     isSpeakerOn = actif;
     try {
       await Helper.setSpeakerphoneOn(actif);
     } catch (_) {}
+
+    /*
+     * 🔴 ET TELECOM AUSSI — sans quoi le bouton ne marche QUE sur les appels
+     * sortants.
+     *
+     * Un appel ENTRANT passe par `reportIncomingCall`, qui crée un `Connection`
+     * self-managed. À partir de là, c'est le système Telecom qui POSSÈDE la
+     * route audio : `Helper.setSpeakerphoneOn` agit sur `AudioManager`, et
+     * Telecom la réécrit au premier changement d'état qu'il observe. Le réglage
+     * partait donc, puis revenait tout seul — ou ne prenait jamais.
+     *
+     * Un appel SORTANT n'ouvre aucun `Connection` : `Helper` seul suffisait, et
+     * le bouton fonctionnait. D'où le « parfois » du symptôme, qui ne suivait
+     * pas le type d'appel mais son SENS.
+     *
+     * ⚠️ APRÈS `Helper`, JAMAIS AVANT : quand Telecom est actif, c'est son
+     * routage qui doit avoir le dernier mot. Dans l'ordre inverse, `Helper`
+     * écraserait ce que Telecom vient de poser.
+     *
+     * ⚠️ SANS EFFET QUAND AUCUN APPEL NATIF N'EXISTE — le natif fait
+     * `current?.setAudioRoute(...)`, et `current` est remis à `null` à la fin de
+     * chaque appel. On peut donc l'appeler sans condition, y compris pendant une
+     * réunion : c'est un no-op qui coûte un aller-retour de plateforme.
+     */
+    await AlanyaTelecom.setSpeaker(actif);
+    /*
+     * 🔴 LE SON DU STANDARD DOIT SUIVRE, et c'est ce qui manquait.
+     *
+     * `Helper.setSpeakerphoneOn` route la session WebRTC. Or pendant un
+     * standard — et pendant TOUT l'appel d'un centre vocal, qui n'établit
+     * jamais de conversation — le son est joué par `audioplayers`, avec son
+     * propre contexte audio. La bascule agissait donc sur un flux muet, et
+     * couper le haut-parleur ne changeait rien (signalé par le user le
+     * 18/08/2026).
+     */
+    unawaited(RingtoneService.instance.reglerHautParleurIvr(actif));
+    _majProximite();
     notifyListeners();
+  }
+
+  /// Verrou de proximité : écran éteint ET tactile ignoré quand le téléphone
+  /// est à l'oreille.
+  ///
+  /// Il n'est tenu que dans le seul cas où il protège : conversation établie,
+  /// en audio, à l'écouteur.
+  ///
+  ///  * au HAUT-PARLEUR, le téléphone est posé ou tenu à distance — l'éteindre
+  ///    parce qu'une main passe devant le capteur serait une gêne, pas une
+  ///    protection ;
+  ///  * en VIDÉO, l'utilisateur regarde l'écran, c'est tout l'objet de l'appel ;
+  ///
+  /// ⚠️ LE TYPE D'APPEL SE LIT SUR [activeType], PAS SUR [isVideoEnabled].
+  /// Ce dernier retombe sur `_mesh.cameraEnabled`, qui vaut `true` DÈS LE
+  /// DÉPART (`webrtc_group_mesh.dart:42`) et n'est modifié que par `setCamera`.
+  /// Dans un appel audio aucune caméra n'est jamais démarrée, le drapeau reste
+  /// donc à `true` — et la première version de ce code n'a jamais tenu le
+  /// verrou, en croyant chaque appel audio filmé.
+  ///  * AVANT la connexion du média, il n'y a encore rien à protéger, et
+  ///    l'utilisateur manipule justement son écran.
+  ///
+  /// Appelé depuis les trois endroits qui changent l'une de ces conditions,
+  /// plus la fin d'appel. [ProximiteAppel] absorbe les répétitions.
+  void _majProximite() {
+    final vise = mediaConnected && !isSpeakerOn && activeType != "VIDEO";
+    traceAppel("proximité → $vise (média=$mediaConnected, "
+        "hp=$isSpeakerOn, type=$activeType)");
+    unawaited(ProximiteAppel.regler(vise));
   }
 
   /// 🐛 LE STANDARD ALLUME LE HAUT-PARLEUR, ET C'EST UN CORRECTIF, PAS UN CONFORT.
@@ -1070,13 +1590,13 @@ class CallController extends ChangeNotifier {
   String _inviteErrorText(String? reason) {
     switch (reason) {
       case "NOT_FOUND":
-        return "Numéro introuvable";
+        return _trAppel('invite_not_found', "Numéro introuvable");
       case "ALREADY_IN":
-        return "Ce correspondant est déjà dans l'appel";
+        return _trAppel('invite_already_in', "Ce correspondant est déjà dans l'appel");
       case "BLOCKED":
-        return "Ce correspondant vous a bloqué";
+        return _trAppel('invite_blocked', "Ce correspondant vous a bloqué");
       default:
-        return "Invitation impossible";
+        return _trAppel('invite_failed', "Invitation impossible");
     }
   }
 
@@ -1123,7 +1643,7 @@ class CallController extends ChangeNotifier {
     _transferTimeout = Timer(_transfertDelai, () {
       if (!_pendingTransfer) return;
       DebugOverlay.log("CC ⏱ transfert: la cible n'a pas rejoint, annulation");
-      cancelTransfer(reason: "Transfert annulé : la cible n'a pas répondu");
+      cancelTransfer(reason: _trAppel('transfer_no_answer', "Transfert annulé : la cible n'a pas répondu"));
     });
   }
 
@@ -1159,6 +1679,32 @@ class CallController extends ChangeNotifier {
     _clear(idAppel: callId);
   }
 
+  /// Le type d'appel tel que l'écran natif le connaît — « VIDEO », « AUDIO »,
+  /// ou `null` s'il ne porte aucun appel.
+  ///
+  /// Sert de SECOURS à [acceptById] quand le serveur ne renvoie pas encore le
+  /// type dans sa réponse d'`/accept`. L'écran natif, lui, l'a toujours su :
+  /// c'est ce drapeau qui lui a fait annoncer « appel vidéo ». La donnée est
+  /// donc déjà sur l'appareil — il suffit de la relire.
+  ///
+  /// ⚠️ ON INTERROGE LES DEUX REGISTRES. Au moment où l'on arrive ici, le
+  /// natif a déjà basculé l'appel de « en sonnerie » à « accepté » : ne lire
+  /// que le premier le manquerait à tous les coups.
+  Future<String?> _typeSelonEcranNatif() async {
+    try {
+      final natif = (await AlanyaTelecom.getAcceptedCall()) ??
+          (await AlanyaTelecom.getRingingCall());
+      final brut = natif?["callType"]?.toString().toLowerCase();
+      if (brut == null) return null;
+      return brut == "video" ? "VIDEO" : "AUDIO";
+    } catch (e) {
+      // Le natif est indisponible sur ce téléphone : on ne sait pas, et on le
+      // dit. L'appelant gardera la valeur qu'il avait.
+      debugPrint("[CallController] type natif illisible: $e");
+      return null;
+    }
+  }
+
   Future<void> _ensureMesh() async {
     if (myUserId == null || activeCallId == null) return;
 
@@ -1166,8 +1712,8 @@ class CallController extends ChangeNotifier {
     final perms = await ensureCallPermissions(video: isVideo);
     if (!perms) {
       lastError = isVideo
-          ? "Micro et caméra requis pour l'appel"
-          : "Micro requis pour l'appel";
+          ? _trAppel('call_perms_video', "Micro et caméra requis pour l'appel")
+          : _trAppel('call_perms_audio', "Micro requis pour l'appel");
       notifyListeners();
       throw Exception(
           "PERMISSION_DENIED"); // ← FIX: throw au lieu de return silencieux
@@ -1208,7 +1754,7 @@ class CallController extends ChangeNotifier {
       await _mesh!.ensureLocal();
       notifyListeners();
     } catch (e) {
-      lastError = "Connexion WebRTC impossible : micro/caméra inaccessible";
+      lastError = _trAppel('call_webrtc_failed', "Connexion WebRTC impossible : micro/caméra inaccessible");
       debugPrint("[webrtc] mesh ensureLocal: $e");
       // Nettoie la mesh cassée pour permettre une nouvelle tentative
       await _mesh?.close();
@@ -1307,7 +1853,7 @@ class CallController extends ChangeNotifier {
     _connectingTimeout = Timer(const Duration(seconds: 30), () {
       if (mediaConnected || activeCallId == null) return;
       traceAppel("30 s sans media etabli → echec de connexion");
-      lastError = "Connexion impossible";
+      lastError = _trAppel('call_connect_failed', "Connexion impossible");
       hangUp();
     });
   }
@@ -1331,7 +1877,7 @@ class CallController extends ChangeNotifier {
     final autres = joinedParticipantIds.where((id) => id != myUserId).toSet();
     if (autres.length <= 1) {
       traceAppel("perte du dernier pair ($userId) → raccrochage");
-      lastError = "Connexion perdue";
+      lastError = _trAppel('call_connection_lost', "Connexion perdue");
       await hangUp();
       return;
     }
@@ -1377,7 +1923,7 @@ class CallController extends ChangeNotifier {
         convId: e["convId"] as String?,
         callType: e["callType"] as String? ?? "AUDIO",
         callerId: e["callerId"] as String,
-        callerName: e["callerName"] as String? ?? "Appel",
+        callerName: e["callerName"] as String? ?? _trAppel('call_word', "Appel"),
         callerAvatarUrl: e["callerAvatarUrl"] as String?,
         isGroup: (e["isGroup"] as bool?) ?? false,
         groupName: e["groupName"] as String?,
@@ -1417,8 +1963,44 @@ class CallController extends ChangeNotifier {
 
       // Sonnerie interne dès que l'écran natif ne porte pas l'appel : il joue
       // la sienne, et les deux ensemble donneraient une double sonnerie.
+      //
+      // ⚠️ `natifAffiche` NE SUFFIT PAS À LE SAVOIR. Il ne dit que ceci : « ai-je
+      // déclaré l'appel à l'instant ? » Or au démarrage à froid, c'est le PUSH
+      // qui l'a déjà déclaré à Telecom, plusieurs secondes avant que la trame
+      // socket n'arrive ici — l'application est alors au premier plan, donc
+      // `natifAffiche` vaut faux, et une seconde sonnerie partirait par-dessus
+      // celle qui joue déjà.
+      //
+      // On interroge donc l'état RÉEL du natif. Mesuré sur TECNO KL5 : sans ce
+      // contrôle, la sonnerie native était coupée à 3,1 s pour laisser la place
+      // à l'interne, qui ne démarrait qu'à 16,0 s — huit secondes de silence.
       if (!natifAffiche) {
-        RingtoneService.instance.startIncoming();
+        final natifSonneDeja =
+            (await AlanyaTelecom.getRingingCall())?['callId']?.toString() ==
+                callId;
+        if (!natifSonneDeja) {
+          // Sonnerie propre à la LISTE DE CONTACTS de l'appelant, s'il y en a
+          // une. ⚠️ Le délai est BORNÉ et l'échec vaut « pas de sonnerie
+          // personnalisée » : un appel ne doit jamais attendre le réseau pour
+          // sonner. Le cache est en mémoire, donc la réponse est immédiate dans
+          // le cas normal ; la borne ne couvre que la lecture du jeton.
+          final sonnerieListe = await _sonneriesListes
+              .sonneriePourAppelant(callerId: incoming!.callerId)
+              .timeout(const Duration(milliseconds: 400),
+                  onTimeout: () => null)
+              .catchError((_) => null);
+          // Livrée : elle se joue depuis le paquet, sans réseau ni jeton.
+          RingtoneService.instance.startIncoming(
+            asset: sonnerieListe != null && sonnerieListe.estLivree
+                ? sonnerieListe.valeur
+                : null,
+            url: sonnerieListe != null && !sonnerieListe.estLivree
+                ? sonnerieListe.valeur
+                : null,
+          );
+        } else {
+          traceAppel("sonnerie interne ignorée — le natif sonne déjà");
+        }
       }
       // Autorise l'écran d'appel à passer par-dessus le verrouillage, et allume
       // l'écran. Activé ICI et non au montage de l'écran d'appel : quand le
@@ -1446,6 +2028,85 @@ class CallController extends ChangeNotifier {
       } else {
         _bufferSignal(callId, from, signal);
       }
+    } else if (type == "repondeur_direct") {
+      /*
+       * ABSENCE : le serveur repond a la place de la sonnerie.
+       *
+       * JUMEAU EXACT D'`ivr_menu` juste en dessous — meme forme, meme raison
+       * d'etre : le serveur repond quelque chose au lieu de faire sonner. Le
+       * serveur le dit lui-meme dans `ws-server.mjs`.
+       *
+       * 🔴 IL N'Y A RIEN A ATTENDRE ET RIEN A RACCROCHER : l'appel est deja
+       * cloture en base (`NO_ANSWER`) et n'a jamais sonne chez personne. C'est
+       * pour cela qu'aucun `call_ended` ne viendra, et donc que ce message DOIT
+       * etre traite ici — sans lui, l'ecran sonne dans le vide jusqu'a son
+       * propre minuteur.
+       */
+      final callId = e["callId"] as String?;
+      if (callId == null || callId != activeCallId) return;
+
+      // ⚠️ COUPER LE MINUTEUR DE SONNERIE, comme pour un standard : arme
+      // pour soixante secondes d'attente qui n'auront pas lieu, il raccrocherait
+      // en plein milieu de l'accueil.
+      _ringTimeout?.cancel();
+      _ringTimeout = null;
+      /*
+       * 🔴 LA TONALITÉ CONTINUE, ET LE RÉPONDEUR PREND ENSUITE.
+       *
+       * En mode absence — durée fixe ou plage programmée — le serveur répond
+       * INSTANTANÉMENT. La tonalité était coupée ici, et la feuille surgissait
+       * dans la seconde : on appuyait sur « appeler » et il ne s'était rien
+       * passé d'audible. On ne comprenait pas qu'un appel avait été lancé.
+       *
+       * Le téléphone d'en face reste silencieux — c'est ce que la personne a
+       * demandé — mais l'APPELANT entend ce qu'il entend toujours. Et pendant
+       * qu'il l'entend, L'ACCUEIL SE TÉLÉCHARGE : quand la tonalité s'arrête,
+       * le fichier est là et part sans latence.
+       *
+       * ⚠️ DEUX BORNES, CHACUNE SA RAISON. Un plancher, sinon la tonalité
+       * clignote et l'on n'a rien entendu. Un plafond, sinon un réseau lent
+       * ferait sonner une minute dans le vide pour un appel sans issue.
+       */
+      final accueilTrame = e["accueil"] is Map ? e["accueil"] as Map : null;
+      final urlDirecte = accueilTrame?["url"] as String?;
+      // L'adresse fixe du bucket ouvert, quand l'accueil y est : le
+      // préchargement l'essaie d'abord, et retombe sur `urlDirecte` sinon.
+      final urlPublique = accueilTrame?["urlPublique"] as String?;
+      PrechargementAccueil.instance.demarrer(
+        callId,
+        urlDirecte: urlDirecte,
+        urlPubliqueDirecte: urlPublique,
+      );
+
+      final debut = DateTime.now();
+      final localAbsence = await PrechargementAccueil.instance
+          .attendre(callId, _attenteAccueilLongue);
+      final reste = _tonaliteMinimale - DateTime.now().difference(debut);
+      if (reste > Duration.zero) await Future<void>.delayed(reste);
+
+      // L'appel a pu etre raccroche pendant la tonalite : on ne pose pas une
+      // feuille de repondeur sur un ecran qu'on vient de quitter.
+      if (activeCallId != null && activeCallId != callId) {
+        return;
+      }
+
+      await RingtoneService.instance.stop();
+
+      repondeur = SessionRepondeur(
+        callId: callId,
+        nomCorrespondant: (e["peerName"] as String?)?.trim().isNotEmpty == true
+            ? e["peerName"] as String
+            : activePeerName ?? "",
+        accueilUrl: localAbsence ?? await _accueilJouable(e["accueil"]),
+        absence: true,
+      );
+      traceAppel("repondeur direct — accueil ${repondeur?.accueilUrl ?? "absent"}");
+
+      // L'appel est fini : on rend l'ecran d'appel, mais PAS la session de
+      // repondeur, que `_clear` ne touche pas.
+      await _stopMesh();
+      _clear(idAppel: callId);
+      notifyListeners();
     } else if (type == "ivr_menu") {
       // Le serveur répond « voici le menu » au lieu de faire sonner : ce numéro
       // était un centre d'appels. Le client ne l'avait pas demandé et n'avait
@@ -1466,7 +2127,7 @@ class CallController extends ChangeNotifier {
       final session = IvrSession(
         callId: callId,
         centerId: e["centerId"] as String? ?? "",
-        centerName: e["centerName"] as String? ?? activePeerName ?? "Standard",
+        centerName: e["centerName"] as String? ?? activePeerName ?? _trAppel('call_standard_fallback', "Standard"),
         centerNumber: e["centerNumber"] as String?,
         promptUrl: e["promptUrl"] as String?,
         holdUrl: e["holdUrl"] as String?,
@@ -1523,6 +2184,26 @@ class CallController extends ChangeNotifier {
       // génération, donc sans risque de superposition.
       unawaited(RingtoneService.instance
           .playIvrPrompt(url, loop: e["loop"] != false));
+    } else if (type == "ivr_record") {
+      // Touche 0 d'un centre vocal : l'appelant va dicter une plainte.
+      //
+      // ⚠️ ON NE DÉMARRE PAS LE MICRO ICI. Le serveur donne le départ, le
+      // panneau enchaîne : bip d'abord, enregistrement ensuite. C'est le seul
+      // endroit qui sache quand la lecture se termine — le serveur ne connaît
+      // ni la durée du fichier ni le temps de mise en cache.
+      final session = ivr;
+      if (session == null || e["callId"] != session.callId) return;
+      session.etape = IvrEtape.enregistrement;
+      session.toucheEnLecture = null;
+      session.titreEnLecture = null;
+      session.bipEnregistrementUrl = e["bipUrl"] as String?;
+      final borne = (e["maxMs"] as num?)?.toInt();
+      if (borne != null && borne > 0) session.plainteMaxMs = borne;
+      session.message = null;
+      session.envoiEnCours = false;
+      notifyListeners();
+      DebugOverlay.log(
+          "CC ☎️ plainte vocale — bip ${session.bipEnregistrementUrl ?? "ABSENT"}");
     } else if (type == "ivr_hold") {
       final session = ivr;
       if (session == null || e["callId"] != session.callId) return;
@@ -1546,7 +2227,7 @@ class CallController extends ChangeNotifier {
       final callId = e["callId"] as String?;
       final retry = e["retry"] == true;
       final message =
-          e["message"] as String? ?? "Le standard n'a pas pu aboutir";
+          e["message"] as String? ?? _trAppel('ivr_standard_failed', "Le standard n'a pas pu aboutir");
       final enCours = ivr;
 
       /*
@@ -1757,8 +2438,8 @@ class CallController extends ChangeNotifier {
         // La réservation ne se périme plus : elle tient jusqu'à ce que le poste
         // qui l'a posée la rende. Inutile de laisser espérer en réessayant.
         if (callId == activeCallId) {
-          lastError =
-              "Cette conversation est réservée par un autre appareil de ce compte";
+          lastError = _trAppel('call_locked_elsewhere',
+              "Cette conversation est réservée par un autre appareil de ce compte");
           notifyListeners();
           await hangUp();
         }
@@ -1788,7 +2469,7 @@ class CallController extends ChangeNotifier {
                 _pendingTransfer &&
                 (_transferTargetId == null || userId == _transferTargetId);
         if (isTransferDecline) {
-          cancelTransfer(reason: "Transfert refusé");
+          cancelTransfer(reason: _trAppel('transfer_refused_word', "Transfert refusé"));
           return;
         }
         // La cible a quitté prématurément après avoir rejoint : on annule.
@@ -1796,7 +2477,7 @@ class CallController extends ChangeNotifier {
             _pendingTransfer &&
             _transferTargetId != null &&
             userId == _transferTargetId) {
-          cancelTransfer(reason: "La cible a quitté l'appel");
+          cancelTransfer(reason: _trAppel('transfer_target_left', "La cible a quitté l'appel"));
           return;
         }
         if (callId == activeCallId && userId != null) {
@@ -1813,14 +2494,129 @@ class CallController extends ChangeNotifier {
             callId == incoming?.callId ||
             (activeCallId == null && activeRole != null);
         if (isOurCall) {
+          // Retenus AVANT `_clear`, qui les efface : le repondeur se demande
+          // apres, avec l'identifiant et le nom de celui qu'on appelait.
+          final etaitSortant = activeRole == ActiveCallRole.outgoing;
+          final nomAppele = activePeerName;
           await _stopMesh();
           _signalBuffer.remove(callId);
           // L'identifiant vient de l'événement : le troisième cas de
           // `isOurCall` couvre justement un `activeCallId` déjà nul.
           _clear(idAppel: callId);
+          // Personne n'a decroche : son repondeur a peut-etre quelque chose a
+          // dire. Non attendu — l'ecran d'appel doit se refermer tout de suite,
+          // la feuille s'ouvrira quand la reponse arrivera.
+          //
+          // ⚠️ `rejected` EST EXCLU : un refus expres n'est pas une absence,
+          // et proposer de laisser un message a quelqu'un qui vient de decliner
+          // serait deplace. Le serveur le refuserait d'ailleurs — l'appel est
+          // alors `DECLINED`, pas `NO_ANSWER`.
+          if (etaitSortant && state == "ended") {
+            unawaited(_proposerRepondeurApresEchec(callId, nomAppele));
+          }
         }
       }
     }
+  }
+
+  /// Rend jouable l'accueil que le serveur envoie dans `repondeur_direct`.
+  ///
+  /// ⚠️ L'URL EST RELATIVE ET LA ROUTE DES MEDIAS EXIGE UN JETON, que le
+  /// lecteur audio ne sait pas joindre en en-tete : il passe en parametre,
+  /// comme partout ailleurs (sonneries de liste, invites de standard).
+  ///
+  /// Rend `null` plutot qu'une adresse batie au hasard : sans accueil, la
+  /// feuille propose quand meme de laisser un message, ce qui vaut mieux qu'un
+  /// lecteur qui tourne dans le vide.
+  Future<String?> _accueilJouable(dynamic media) async {
+    if (media is! Map) return null;
+    final url = media["url"]?.toString();
+    if (url == null || url.isEmpty || !url.startsWith("/")) return null;
+    final jeton = await TokenStorage().accessToken;
+    if (jeton == null || jeton.isEmpty) return null;
+    return "${ServerConfig.apiBase}$url?token=$jeton";
+  }
+
+  /// Referme la feuille du repondeur.
+  ///
+  /// C'est le SEUL chemin qui l'efface : `_clear()` ne la touche pas, l'appel
+  /// etant deja termine quand elle s'ouvre.
+  void fermerRepondeur() {
+    if (repondeur == null) return;
+    // Le fichier d'accueil n'a plus de raison d'occuper le cache : sans cela,
+    // chaque appel manqué y laisserait le sien, que rien ne reprendrait jamais.
+    unawaited(PrechargementAccueil.instance.libererAdopte());
+    repondeur = null;
+    unawaited(RingtoneService.instance.stop());
+    notifyListeners();
+  }
+
+  /// Depose un message vocal sur l'appel manque.
+  ///
+  /// [mediaId] designe un media DEJA TELEVERSE : le serveur ne recoit pas
+  /// d'octets ici, il rattache un media existant a l'appel.
+  ///
+  /// ⚠️ LEVE SI LE SERVEUR REFUSE, et l'appelant doit le dire : la personne
+  /// a parle, elle ne doit pas croire son message parti. Les refus attendus
+  /// portent un code lisible (`CALL_ANSWERED`, `ALREADY_LEFT`, `CALL_TOO_OLD`).
+  Future<void> deposerMessage(String mediaId) async {
+    final session = repondeur;
+    if (session == null) return;
+    await _repondeurDepot.deposerMessagerie(
+      callId: session.callId,
+      mediaId: mediaId,
+    );
+    session.depose = true;
+    notifyListeners();
+  }
+
+  /// Apres un appel SANS REPONSE, propose le repondeur s'il y en a un.
+  ///
+  /// 🔴 CE CHEMIN EST DISTINCT DE `repondeur_direct`, et les deux sont
+  /// necessaires. L'absence est decidee AVANT que ca sonne, et le serveur
+  /// l'annonce. Le simple « personne n'a decroche » n'est annonce par rien :
+  /// au bout de trente secondes le serveur cloture et diffuse `call_state
+  /// ended`, sans un mot du repondeur. C'est donc a l'appelant de demander.
+  ///
+  /// ⚠️ LE SERVEUR SEUL JUGE. On ne verifie ici NI que l'appel etait
+  /// sortant, NI qu'il n'a pas ete decroche : la route repond 404 des que l'une
+  /// des quatre conditions manque — appel initie par moi, jamais decroche,
+  /// recent, et a deux. Refaire ce controle ici en donnerait une seconde
+  /// version, qui finirait par diverger.
+  ///
+  /// ⚠️ NE LEVE JAMAIS : ne pas proposer le repondeur est un repli
+  /// acceptable, faire remonter une exception a la fin d'un appel ne l'est pas.
+  Future<void> _proposerRepondeurApresEchec(String callId, String? nom) async {
+    if (repondeur != null) return;
+    final accueil = await _repondeurDepot.accueilDeLAppel(callId);
+    if (accueil == null) return;
+    // L'ecran a pu repartir dans un autre appel entre-temps : on ne s'y
+    // superpose pas.
+    if (activeCallId != null || repondeur != null) return;
+    /*
+     * 🔴 L'ACCUEIL EST DÉJÀ LÀ — il s'est téléchargé pendant les trente
+     * secondes de sonnerie. On obtient un FICHIER LOCAL, ce qui change tout au
+     * moment de jouer : aucune requête, aucune latence, aucun jeton, donc aucun
+     * refus possible. C'est ce qui permet à l'accueil de démarrer sans le
+     * silence qu'on prenait pour un bouton en panne.
+     *
+     * ⚠️ ON N'ATTEND QUE TRÈS PEU ICI : le fichier est normalement arrivé
+     * depuis longtemps. Ce court délai ne couvre que le cas d'un serveur qui a
+     * répondu au ralenti — au-delà, on retombe sur l'adresse réseau.
+     */
+    final local = await PrechargementAccueil.instance
+        .attendre(callId, _attenteAccueilCourte);
+    final jeton = await TokenStorage().accessToken;
+    repondeur = SessionRepondeur(
+      callId: callId,
+      nomCorrespondant: nom ?? "",
+      accueilUrl: local ??
+          ((jeton == null || jeton.isEmpty)
+              ? null
+              : "${ServerConfig.apiBase}${accueil.url}?token=$jeton"),
+      absence: accueil.absence,
+    );
+    notifyListeners();
   }
 
   @override

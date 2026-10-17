@@ -25,6 +25,60 @@ class AccountRepository {
     );
   }
 
+  /// Change le PAYS du compte.
+  ///
+  /// 🔴 NE TOUCHE NI À L'ALANYA ID NI AU NUMÉRO. Un numéro appartient à
+  /// l'opérateur qui l'a attribué, pas au pays où l'on vit : déménager en
+  /// gardant sa ligne est le cas normal, et renormaliser sur le nouvel
+  /// indicatif transformerait un numéro juste en numéro faux.
+  Future<void> changerPays(int idPays) async {
+    await _api.patch("/api/account/profile", {"idPays": idPays});
+  }
+
+  /// Change le NUMÉRO DE TÉLÉPHONE, sous mot de passe.
+  ///
+  /// 🔴 `users.mobile` UNIQUEMENT — l'Alanya ID ne bouge jamais. C'est lui que
+  /// les contacts ont enregistré et par lequel on appelle ; le changer
+  /// détruirait le compte.
+  ///
+  /// ⚠️ La saisie part TELLE QUELLE. C'est le serveur qui normalise, avec la
+  /// même règle qu'à l'inscription — et il respecte un « + » initial, donc une
+  /// ligne étrangère garde son propre indicatif.
+  ///
+  /// Rend le numéro TEL QU'ENREGISTRÉ, pour que l'écran affiche ce que la base
+  /// contient et non ce qui a été tapé.
+  /// [idPaysNumero] : le pays DE LA LIGNE, quand il diffère de celui du compte.
+  ///
+  /// 🔴 IL N'EST JAMAIS ÉCRIT SUR LE COMPTE. Il ne sert qu'à donner le bon
+  /// indicatif au numéro : normaliser une ligne camerounaise avec l'indicatif
+  /// français d'un compte expatrié produisait « +33691234567 », injoignable.
+  Future<String> changerMobile({
+    required String motDePasse,
+    required String mobile,
+    int? idPaysNumero,
+  }) async {
+    final data = await _api.post("/api/account/mobile", {
+      "password": motDePasse,
+      "mobile": mobile,
+      if (idPaysNumero != null) "idPaysNumero": idPaysNumero,
+    });
+    return data["mobile"] as String? ?? "";
+  }
+
+  /// Le mot de passe fourni est-il bien celui du compte ?
+  ///
+  /// Rend normalement, ou lève une [ApiException] — « Mot de passe incorrect »
+  /// en 403, et un 429 si les essais s'enchaînent.
+  ///
+  /// ⚠️ NE DONNE AUCUN DROIT ET NE MODIFIE RIEN. Sert aux écrans qui se ferment
+  /// derrière une confirmation : demander le mot de passe AVANT d'ouvrir
+  /// l'écran, plutôt que de le découvrir faux à l'enregistrement, une fois le
+  /// formulaire rempli. Le serveur le revérifie de toute façon à l'écriture —
+  /// une porte côté client ne protège rien par elle-même.
+  Future<void> verifierMotDePasse(String motDePasse) async {
+    await _api.post("/api/account/verify-password", {"password": motDePasse});
+  }
+
   /// Change le mot de passe de l'utilisateur connecté (vérifie l'actuel).
   /// Lève ApiException avec un message lisible en cas d'échec.
   Future<void> changePassword(String currentPassword, String newPassword) async {
@@ -40,18 +94,29 @@ class AccountRepository {
   }
 
   /// Réglages de confidentialité : {readReceipts (1/0), lastSeenVisibility (0/1/2)}.
+  ///
+  /// ⚠️ `chiffrementActif` EST UN BOOLÉEN, pas un entier comme les deux autres :
+  /// il est rangé ici sous `1`/`0` pour que la carte reste homogène, et
+  /// retraduit en booléen à l'envoi.
   Future<Map<String, int>> getPrivacy() async {
     final data = await _api.get("/api/account/privacy");
     return {
       "readReceipts": (data["readReceipts"] as num?)?.toInt() ?? 1,
       "lastSeenVisibility": (data["lastSeenVisibility"] as num?)?.toInt() ?? 2,
+      // ⚠️ ABSENT D'UN SERVEUR PLUS ANCIEN : chiffré. Le défaut protège.
+      "chiffrementActif": data["chiffrementActif"] == false ? 0 : 1,
     };
   }
 
-  Future<void> setPrivacy({int? readReceipts, int? lastSeenVisibility}) async {
+  Future<void> setPrivacy({
+    int? readReceipts,
+    int? lastSeenVisibility,
+    bool? chiffrementActif,
+  }) async {
     final body = <String, dynamic>{};
     if (readReceipts != null) body["readReceipts"] = readReceipts;
     if (lastSeenVisibility != null) body["lastSeenVisibility"] = lastSeenVisibility;
+    if (chiffrementActif != null) body["chiffrementActif"] = chiffrementActif;
     await _api.post("/api/account/privacy", body);
   }
 

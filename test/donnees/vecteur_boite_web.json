@@ -1,0 +1,25 @@
+{
+  "source": "web",
+  "contexte": {
+    "convId": "11111111-aaaa-4bbb-8ccc-dddddddddddd",
+    "destinataireId": "44444444-1111-4222-8333-444444444444",
+    "destinataireDevice": 7,
+    "expediteurId": "33333333-2222-4333-8444-555555555555",
+    "expediteurDevice": 4
+  },
+  "clair": "\u0000G1{\"v\":1,\"type\":\"trousseau\",\"convId\":\"11111111-aaaa-4bbb-8ccc-dddddddddddd\",\"motif\":\"AJOUT\",\"versions\":[]}",
+  "corps": "AQXZSBB/XSmCM33Rk83SYyPbSUqFjYf7AGnk6DaZKzXCRVpbXF1eX2BhYmNkZQUB2C593cHgWmVJM+k78aTm7vTyyVixrbpsLuXM3vGt5e/NgUUnQDB9VqBIpil51naMNUsSso+DGzZ0GDNC4wcIhdjnJr2hN+B7f04d6jdgaHQvGi1v0jYxpj3QhKicOa1kC7wVjE2YTKS3F05WWP0xK7RWYu5ZjED80GJY4MwthVJdXxCSltu5gWJ5NWy5jei1p27ZpJifJY6xEKXZn1gr59DPghGxMQUDX8d1P9iPlKjDn+olxJ26ig0=",
+  "destinataire": {
+    "pub": "BdK9OVzUniWsNJ9EBDC5yTIM/JG57J57LYQwrW1uFL9v",
+    "priv": "WHNtH5wezZqYE343Oj5DyosbS2cRaETfyXzmj9PQ7kk="
+  },
+  "expediteur": {
+    "pub": "BbQdKnn7Fl4NYLOmRSONiTyh+Vd+1IHLst1THKxj3s0u",
+    "priv": "8APexuU4ZiJlr2afIFaEA5vJyYNNTPCRBCm49TmbtFY="
+  },
+  "ephemere": {
+    "pub": "BdlIEH9dKYIzfdGTzdJjI9tJSoWNh/sAaeToNpkrNcJF",
+    "priv": "oHvS1VhOdcF1XXs45M3ZrRv+h+AGcWSwrmhsthAm5XQ="
+  },
+  "nonce": "WltcXV5fYGFiY2Rl"
+}

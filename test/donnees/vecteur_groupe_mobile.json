@@ -1,0 +1,32 @@
+{
+  "source": "mobile",
+  "cle": "//79/Pv6+fj39vX08/Lx8O/u7ezr6uno5+bl5OPi4eA=",
+  "nonce": "MjM0NTY3ODk6Ozw9",
+  "contexte": {
+    "convId": "11111111-aaaa-4bbb-8ccc-dddddddddddd",
+    "messageId": "22222222-eeee-4fff-8000-111111111111",
+    "version": 2,
+    "expediteurId": "33333333-2222-4333-8444-555555555555",
+    "deviceId": 4
+  },
+  "clair": "\u0000A2{\"v\":2,\"id\":\"22222222-eeee-4fff-8000-111111111111\",\"texte\":\"Message du téléphone — ç 🎉\"}",
+  "corps": "ATIzNDU2Nzg5Ojs8PVBmNMGX5qKYCqAVmApSENZImyAQDyeKDdpn31eLUphdxnAPYuEa1AGC3hJwwImc62iYyOmUO5AGFLGyWk0jEvxiqrnD4u926aEe1snqHIWDbedJPJNGtH5gyeI0IIpKo8KRKne8gFykaS6FBGEJI73eAh8uGR/bh4JWOIYF4DbPqPp4i9pEHa/Oqh/BTIL29vChzb+PFLybG1M2Azf3MXI622KHe77u+CACoZp7QbN2TGcM",
+  "clePublique": "BSOLSv693GZuogafJ81ra9v96YnaAsjJ0MonWWv489M6",
+  "chargeTrousseau": "\u0000G1{\"v\":1,\"type\":\"trousseau\",\"convId\":\"11111111-aaaa-4bbb-8ccc-dddddddddddd\",\"motif\":\"EXCLUSION\",\"versions\":[{\"n\":1,\"cle\":\"AAcOFRwjKjE4P0ZNVFtiaXB3foWMk5qhqK+2vcTL0tk=\",\"creeLe\":1758000000000},{\"n\":2,\"cle\":\"Aw4ZJC86RVBbZnF8h5KdqLO+ydTf6vUACxYhLDdCTVg=\",\"creeLe\":1760500000000}]}",
+  "trousseau": {
+    "convId": "11111111-aaaa-4bbb-8ccc-dddddddddddd",
+    "motif": "EXCLUSION",
+    "versions": [
+      {
+        "n": 1,
+        "cle": "AAcOFRwjKjE4P0ZNVFtiaXB3foWMk5qhqK+2vcTL0tk=",
+        "creeLe": 1758000000000
+      },
+      {
+        "n": 2,
+        "cle": "Aw4ZJC86RVBbZnF8h5KdqLO+ydTf6vUACxYhLDdCTVg=",
+        "creeLe": 1760500000000
+      }
+    ]
+  }
+}

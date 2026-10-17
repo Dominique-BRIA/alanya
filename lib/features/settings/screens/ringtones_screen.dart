@@ -1,0 +1,396 @@
+import 'package:file_picker/file_picker.dart';
+import '../../../l10n/app_localizations.dart';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import '../../../core/api_client.dart';
+import '../../../core/app_snackbar.dart';
+import '../../../core/ringtone_service.dart';
+import '../../../core/sonneries_livrees.dart';
+import '../../../core/token_storage.dart';
+import '../../../core/texte_recherche.dart';
+import '../../../models/sonnerie.dart';
+import '../../../theme/alanya_theme.dart';
+import '../../../widgets/back_app_bar.dart';
+import '../ringtones_repository.dart';
+
+/// Catalogue de sonneries importées.
+///
+/// L'import se fait en deux temps — téléversement puis inscription — mais
+/// l'utilisateur ne voit qu'un geste : choisir un fichier.
+class RingtonesScreen extends StatefulWidget {
+  const RingtonesScreen({super.key});
+
+  @override
+  State<RingtonesScreen> createState() => _RingtonesScreenState();
+}
+
+class _RingtonesScreenState extends State<RingtonesScreen> {
+  List<Sonnerie>? _sonneries;
+  bool _chargement = false;
+  String? _erreur;
+
+  /// Progression de l'import en cours, entre 0 et 1. Nulle hors import.
+  double? _progression;
+
+  /// L'URL en cours d'écoute, pour montrer quel élément joue.
+  String? _enEcoute;
+
+  @override
+  void initState() {
+    super.initState();
+    _charger();
+  }
+
+  @override
+  void dispose() {
+    // Une écoute laissée en cours continuerait après la fermeture de l'écran.
+    RingtoneService.instance.stopIvr();
+    super.dispose();
+  }
+
+  Future<void> _charger() async {
+    if (_chargement) return;
+    setState(() {
+      _chargement = true;
+      _erreur = null;
+    });
+    final depot = context.read<RingtonesRepository>();
+    try {
+      final l = await depot.list();
+      if (!mounted) return;
+      setState(() {
+        _sonneries = l;
+        _chargement = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _chargement = false;
+        _erreur = tr(context, 'error_with_code', {'code': '${e.statusCode}', 'message': e.message});
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _chargement = false;
+        _erreur = tr(context, 'ring_load_error');
+      });
+    }
+  }
+
+  Future<void> _importer() async {
+    final depot = context.read<RingtonesRepository>();
+
+    // `withData: true` : on a besoin des OCTETS, pas d'un chemin. Sur Android,
+    // un fichier choisi hors du bac à sable de l'application n'est pas lisible
+    // par son chemin — c'est le sélecteur qui doit les fournir.
+    final choix = await FilePicker.platform.pickFiles(
+      type: FileType.audio,
+      withData: true,
+    );
+    if (choix == null || choix.files.isEmpty) return;
+    // ⚠️ `tr()` LIT LE CONTEXTE, ce qu'un libellé en dur ne faisait pas : le
+    // sélecteur de fichiers rend la main après un aller-retour hors de l'app,
+    // pendant lequel l'écran a pu être quitté. Lire le contexte d'un widget
+    // démonté lève.
+    if (!mounted) return;
+    final f = choix.files.first;
+    final octets = f.bytes;
+    if (octets == null) {
+      showAppSnackBar(tr(context, 'ring_unreadable'));
+      return;
+    }
+
+    // ⚠️ Un plafond ANNONCÉ vaut mieux qu'un 413 après une minute d'envoi sur un
+    // réseau lent. 10 Mo laisse largement la place à une sonnerie ; au-delà,
+    // c'est un morceau entier, pas une sonnerie.
+    const plafondOctets = 10 * 1024 * 1024;
+    if (octets.length > plafondOctets) {
+      showAppSnackBar(tr(context, 'ring_too_big'));
+      return;
+    }
+
+    setState(() => _progression = 0);
+    try {
+      await depot.importer(
+        octets: octets,
+        nomFichier: f.name,
+        // Le sélecteur ne rend pas toujours un type MIME : on retombe sur un
+        // type audio générique plutôt que d'échouer, le serveur ne relit pas le
+        // fichier de toute façon.
+        typeMime: _typeMimeDe(f.extension),
+        // Le nom du fichier SANS son extension : « ma-sonnerie.mp3 » se lit mal
+        // dans une liste de choix. Le serveur coupe à 80 caractères de son côté.
+        libelle: _libelleDepuis(f.name),
+        onProgress: (envoyes, total) {
+          if (!mounted || total <= 0) return;
+          setState(() => _progression = envoyes / total);
+        },
+      );
+      if (!mounted) return;
+      setState(() => _progression = null);
+      await _charger();
+      // `_charger()` est un second `await` : la garde d'avant ne couvre pas
+      // ce qui suit.
+      if (!mounted) return;
+      showAppSnackBar(tr(context, 'ring_added'));
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _progression = null);
+      showAppSnackBar(e.message);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _progression = null);
+      showAppSnackBar(tr(context, 'ring_import_failed'));
+    }
+  }
+
+  static String _libelleDepuis(String nomFichier) {
+    final point = nomFichier.lastIndexOf('.');
+    final sansExtension =
+        point > 0 ? nomFichier.substring(0, point) : nomFichier;
+    final propre = sansExtension.trim();
+    return propre.isEmpty ? "Sonnerie" : propre;
+  }
+
+  static String _typeMimeDe(String? extension) {
+    switch ((extension ?? "").toLowerCase()) {
+      case "mp3":
+        return "audio/mpeg";
+      case "wav":
+        return "audio/wav";
+      case "ogg":
+        return "audio/ogg";
+      case "m4a":
+      case "aac":
+        return "audio/aac";
+      default:
+        return "audio/mpeg";
+    }
+  }
+
+  /// Écoute une sonnerie LIVRÉE avec l'application.
+  ///
+  /// ⚠️ CHEMIN SÉPARÉ, ET C'EST OBLIGATOIRE : une sonnerie du paquet n'est sur
+  /// AUCUN serveur. La demander par URL enverrait chercher un 404, jeton
+  /// compris, pour finir sur un silence sans erreur.
+  Future<void> _ecouterLivree(SonnerieLivree s) async {
+    final service = RingtoneService.instance;
+    if (_enEcoute == s.fichier) {
+      await service.stop();
+      if (mounted) setState(() => _enEcoute = null);
+      return;
+    }
+    // Les deux lecteurs sont distincts — celui de l'IVR sert aux importées.
+    // Couper les deux, sinon deux sonneries se superposeraient.
+    await service.stopIvr();
+    setState(() => _enEcoute = s.fichier);
+    await service.apercu(asset: "sounds/${s.fichier}");
+  }
+
+  Future<void> _ecouter(Sonnerie s) async {
+    if (_enEcoute == s.url) {
+      await RingtoneService.instance.stopIvr();
+      if (mounted) setState(() => _enEcoute = null);
+      return;
+    }
+    /*
+     * ⚠️ L'URL DU CATALOGUE EST RELATIVE — `/api/media/<id>` — et la route des
+     * médias exige un JETON. Le lecteur audio ne sait pas joindre d'en-tête
+     * `Authorization` : le jeton passe donc en paramètre, comme partout ailleurs
+     * dans l'application (voir la citation d'un message dans la discussion).
+     *
+     * La donner telle quelle au lecteur donnerait un silence sans erreur — le
+     * pire des échecs, et exactement celui qu'on vient de corriger sur l'IVR.
+     */
+    // ⚠️ LES DEUX DÉPÔTS SONT SAISIS AVANT TOUT `await`, et l'ordre compte :
+    // l'arrêt de l'autre lecteur, juste en dessous, est un point d'attente
+    // après lequel l'écran peut avoir été quitté — lire le contexte là serait
+    // lire celui d'un widget démonté.
+    final base = context.read<ApiClient>().baseUrl;
+    final stockage = context.read<TokenStorage>();
+
+    // Une livrée jouait peut-être : elle passe par l'autre lecteur.
+    await RingtoneService.instance.stop();
+    final jeton = await stockage.accessToken;
+    if (!mounted) return;
+
+    setState(() => _enEcoute = s.url);
+    // Une seule écoute à la fois : `playIvrPrompt` coupe la précédente.
+    await RingtoneService.instance
+        .playIvrPrompt("$base${s.url}?token=$jeton", loop: false);
+  }
+
+  Future<void> _supprimer(Sonnerie s) async {
+    final depot = context.read<RingtonesRepository>();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(tr(context, 'ring_remove_q')),
+        content: Text(
+          tr(context, 'ring_remove_body', {'nom': s.label}),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(tr(context, 'cancel'))),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(tr(context, 'remove'))),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await depot.supprimer(s.id);
+      await _charger();
+    } catch (_) {
+      if (!mounted) return;
+      showAppSnackBar(tr(context, 'delete_failed'));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: backAppBar(context, tr(context, 'set_ringtones')),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _progression != null ? null : _importer,
+        icon: const Icon(Icons.library_music_outlined),
+        label: Text(_progression == null ? tr(context, 'import_action') : tr(context, 'sending')),
+      ),
+      body: Column(children: [
+        if (_progression != null)
+          LinearProgressIndicator(
+            value: _progression,
+            color: accentOf(context),
+          ),
+        Expanded(
+          child: RefreshIndicator(onRefresh: _charger, child: _corps()),
+        ),
+      ]),
+    );
+  }
+
+  Widget _corps() {
+    if (_sonneries == null && _chargement) {
+      return Center(child: CircularProgressIndicator(color: accentOf(context)));
+    }
+    if (_erreur != null) {
+      return ListView(children: [
+        const SizedBox(height: 80),
+        Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(children: [
+              Text(_erreur!, textAlign: TextAlign.center),
+              const SizedBox(height: 16),
+              OutlinedButton(
+                  onPressed: _charger, child: Text(tr(context, 'retry'))),
+            ]),
+          ),
+        ),
+      ]);
+    }
+
+    final importees = List<Sonnerie>.from(_sonneries ?? const <Sonnerie>[])
+      ..sort((a, b) => comparePourTri(a.label, b.label));
+
+    /*
+     * LES SONNERIES LIVRÉES FIGURENT ICI AUSSI, et c'est ce qui manquait.
+     *
+     * 🔴 Cet écran ne montrait QUE les sonneries importées. Or ce sont les
+     * livrées que tout le monde possède — ce sont même celles des quatre listes
+     * créées d'office. Un compte qui n'avait jamais rien importé arrivait donc
+     * sur un écran vide intitulé « Mes sonneries », alors qu'il en avait
+     * dix-huit : il ne pouvait ni les entendre, ni savoir qu'elles existaient.
+     *
+     * ⚠️ ELLES NE SE SUPPRIMENT PAS : elles font partie du paquet de
+     * l'application, aucune route ne les retire, et le geste n'aurait aucun
+     * sens. Le bouton de suppression est donc absent — pas grisé : une action
+     * impossible ne doit pas être proposée, c'est la règle déjà appliquée aux
+     * listes créées d'office.
+     */
+    /*
+     * 🔴 SÉPARÉES PAR GENRE, et non plus triées toutes ensemble. Le tri
+     * alphabétique intercalait « Bip » et « Carillon » entre « Amis » et
+     * « Sonnerie 1 » : rien ne disait qu'une moitié de cet écran sonne un appel
+     * et l'autre annonce un message, alors que les deux familles ne durent même
+     * pas le même temps.
+     *
+     * ⚠️ AUCUNE N'EST RETIRÉE : cet écran fait ÉCOUTER, il ne fait pas choisir.
+     * C'est le sélecteur de l'écran des listes qui filtre. Ici, tout ce que
+     * l'application embarque doit rester atteignable.
+     */
+    List<SonnerieLivree> livreesPour(GenreSonnerie genre) =>
+        sonneriesLivreesPour(genre)
+          ..sort((a, b) => comparePourTri(a.libelle, b.libelle));
+
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 88),
+      children: [
+        _entete(tr(context, 'ring_bundled_calls')),
+        for (final s in livreesPour(GenreSonnerie.appel)) _tuileLivree(s),
+        _entete(tr(context, 'ring_bundled_messages')),
+        for (final s in livreesPour(GenreSonnerie.message)) _tuileLivree(s),
+        _entete(tr(context, 'ring_imported')),
+        if (importees.isEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+            child: Text(
+              tr(context, 'ring_empty_hint'),
+              style: TextStyle(
+                  fontSize: 13.5,
+                  height: 1.4,
+                  color: mutedOf(context, Colors.black54)),
+            ),
+          ),
+        for (final s in importees) _tuileImportee(s),
+      ],
+    );
+  }
+
+  Widget _entete(String texte) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
+        child: Text(
+          texte.toUpperCase(),
+          style: TextStyle(
+            fontSize: 11.5,
+            letterSpacing: 0.8,
+            fontWeight: FontWeight.w700,
+            color: mutedOf(context, Colors.black54),
+          ),
+        ),
+      );
+
+  Widget _boutonEcoute(bool joue, VoidCallback onPressed) => IconButton(
+        icon:
+            Icon(joue ? Icons.stop_circle_outlined : Icons.play_circle_outline),
+        color: accentOf(context),
+        iconSize: 34,
+        onPressed: onPressed,
+        tooltip: joue ? tr(context, 'stop') : tr(context, 'listen'),
+      );
+
+  Widget _tuileLivree(SonnerieLivree s) {
+    final joue = _enEcoute == s.fichier;
+    return ListTile(
+      leading: _boutonEcoute(joue, () => _ecouterLivree(s)),
+      title: Text(s.libelle, maxLines: 1, overflow: TextOverflow.ellipsis),
+      // Pas de `trailing` : rien à supprimer, donc rien à montrer.
+    );
+  }
+
+  Widget _tuileImportee(Sonnerie s) {
+    final joue = _enEcoute == s.url;
+    return ListTile(
+      leading: _boutonEcoute(joue, () => _ecouter(s)),
+      title: Text(s.label, maxLines: 1, overflow: TextOverflow.ellipsis),
+      trailing: IconButton(
+        icon: const Icon(Icons.delete_outline),
+        onPressed: () => _supprimer(s),
+        tooltip: tr(context, 'remove'),
+      ),
+    );
+  }
+}

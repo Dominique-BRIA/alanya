@@ -64,8 +64,12 @@ class CallRecord {
         peerAvatarUrl: j["peerAvatarUrl"] as String?,
         participantCount: (j["participantCount"] as num?)?.toInt() ?? 2,
         startedAt: DateTime.parse(j["startedAt"] as String),
-        answeredAt: j["answeredAt"] == null ? null : DateTime.parse(j["answeredAt"] as String),
-        endedAt: j["endedAt"] == null ? null : DateTime.parse(j["endedAt"] as String),
+        answeredAt: j["answeredAt"] == null
+            ? null
+            : DateTime.parse(j["answeredAt"] as String),
+        endedAt: j["endedAt"] == null
+            ? null
+            : DateTime.parse(j["endedAt"] as String),
         durationSec: (j["durationSec"] as num?)?.toInt(),
         callerId: j["callerId"] as String?,
         preciseStatus: j["preciseStatus"] as String?,
@@ -127,7 +131,8 @@ class CallParticipantInfo {
     this.avatarUrl,
   });
 
-  factory CallParticipantInfo.fromJson(Map<String, dynamic> j) => CallParticipantInfo(
+  factory CallParticipantInfo.fromJson(Map<String, dynamic> j) =>
+      CallParticipantInfo(
         userId: j["userId"] as String,
         displayName: j["displayName"] as String? ?? "Membre",
         avatarUrl: j["avatarUrl"] as String?,
@@ -145,6 +150,7 @@ class IncomingCallInfo {
   final bool isGroup;
   final String? groupName;
   final int memberCount;
+
   /// Nom et Alanya ID du centre qui a routé cet appel vers moi (agent) — nuls
   /// pour un appel ordinaire. `ivrFromId` sert à interroger la file d'attente
   /// du centre (`/api/queue/live`, `/api/queue/history`) depuis l'écran d'appel.

@@ -1,0 +1,32 @@
+{
+  "source": "web",
+  "cle": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+  "nonce": "ZGVmZ2hpamtsbW5v",
+  "contexte": {
+    "convId": "aaaaaaaa-1111-4222-8333-444444444444",
+    "messageId": "bbbbbbbb-5555-4666-8777-888888888888",
+    "version": 3,
+    "expediteurId": "cccccccc-9999-4aaa-8bbb-cccccccccccc",
+    "deviceId": 7
+  },
+  "clair": "\u0000A2{\"v\":2,\"id\":\"bbbbbbbb-5555-4666-8777-888888888888\",\"texte\":\"Bonjour le groupe — éàü 👋\"}",
+  "corps": "AWRlZmdoaWprbG1ub0ha7B1bn3SkDE59gb5HUN8goGRo6Q6REIrkmX3OjpF+ot9t+HslrCnFy0AHxXry9yNjoN8CZmNcn4nYs827h8hn4rFhozkbae5PijF+/0GDRJqfoIcGJAV/Morki4zf2qwMBmnwvQn2Nq2iAcB3tMxnLLAXV0rmD8ESnBUDuJ8zpYXMmALJwXu467EHJ0kqf1Wam8LirtfSKh6369gi1BRi+eoLvtMJwKLGZhK9W86RnAU=",
+  "clePublique": "Bd1axarb9M2a4f8V7u0FlulUJmgUgVzBHycuvqA5nWsg",
+  "chargeTrousseau": "\u0000G1{\"v\":1,\"type\":\"trousseau\",\"convId\":\"aaaaaaaa-1111-4222-8333-444444444444\",\"motif\":\"AJOUT\",\"versions\":[{\"n\":1,\"cle\":\"AAMGCQwPEhUYGx4hJCcqLTAzNjk8P0JFSEtOUVRXWl0=\",\"creeLe\":1759000000000},{\"n\":2,\"cle\":\"yMfGxcTDwsHAv769vLu6ubi3trW0s7KxsK+urayrqqk=\",\"creeLe\":1760000000000}]}",
+  "trousseau": {
+    "convId": "aaaaaaaa-1111-4222-8333-444444444444",
+    "motif": "AJOUT",
+    "versions": [
+      {
+        "n": 2,
+        "cle": "yMfGxcTDwsHAv769vLu6ubi3trW0s7KxsK+urayrqqk=",
+        "creeLe": 1760000000000
+      },
+      {
+        "n": 1,
+        "cle": "AAMGCQwPEhUYGx4hJCcqLTAzNjk8P0JFSEtOUVRXWl0=",
+        "creeLe": 1759000000000
+      }
+    ]
+  }
+}

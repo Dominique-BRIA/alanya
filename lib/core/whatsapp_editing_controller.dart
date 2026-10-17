@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'whatsapp_text.dart' show facteurManuscrit;
 import 'whatsapp_text_parser.dart';
 
 /// Controller WYSIWYG pour le champ de saisie Alanya Work.
@@ -45,6 +46,12 @@ class WhatsappFormattingController extends TextEditingController {
   TextStyle _fusion(TextStyle base, StyleWhatsApp style) {
     final extra = _styles[style];
     if (extra == null) return base;
+    // Le manuscrit agrandi comme à l'affichage (`facteurManuscrit`) : on
+    // écrit le message tel qu'il sera lu.
+    if (style == StyleWhatsApp.manuscrit) {
+      return base.merge(extra).copyWith(
+          fontSize: (base.fontSize ?? 15) * facteurManuscrit, height: 1.05);
+    }
     return base.merge(extra);
   }
 

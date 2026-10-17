@@ -4,18 +4,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:provider/provider.dart';
 
+import '../../../l10n/app_localizations.dart';
 import '../../../core/app_snackbar.dart';
 import '../../../core/authed_api.dart';
 import '../../../core/push_service.dart';
-import '../../../l10n/app_localizations.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
 import '../../../widgets/call_rating_sheet.dart';
 import '../../../widgets/contact_picker_sheet.dart';
 import '../../chat/screens/chat_screen.dart';
 import '../call_controller.dart';
+import '../disposition_vignettes.dart';
 import '../widgets/call_avatar_waves.dart';
 import '../widgets/ivr_panel.dart';
+import '../widgets/plainte_recorder.dart';
 import '../widgets/queue_status_sheet.dart';
 
 class ActiveCallScreen extends StatefulWidget {
@@ -82,7 +84,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
         setState(() => _elapsed++);
       } else if (DateTime.now().difference(_ongoingSince!).inSeconds >= 35) {
         // Le média ne s'est pas connecté 35s après le décrochage → on abandonne.
-        showAppSnackBar("Connexion impossible. Vérifie ta connexion réseau.");
+        showAppSnackBar(tr(context, 'call_connect_failed'));
         _hangUp(cc);
       }
     });
@@ -165,8 +167,9 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
         r.srcObject = remotes[id];
       }
     }
-    final stale =
-        _remoteRenderers.keys.where((k) => !remotes.containsKey(k)).toList();
+    final stale = _remoteRenderers.keys
+        .where((k) => !remotes.containsKey(k))
+        .toList();
     for (final id in stale) {
       await _remoteRenderers.remove(id)?.dispose();
     }
@@ -205,7 +208,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     try {
       await cc.rejectIncoming();
     } catch (_) {
-      showAppSnackBar("Impossible de refuser l'appel");
+      showAppSnackBar(tr(context, 'call_decline_failed'));
     } finally {
       _popScreen();
     }
@@ -218,7 +221,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
       await cc.acceptIncoming();
       if (mounted) setState(() {});
     } on Object catch (e) {
-      showAppSnackBar("Impossible d'accepter l'appel");
+      showAppSnackBar(tr(context, 'call_accept_failed'));
       debugPrint("[call] accept: $e");
     } finally {
       if (mounted) _actionBusy = false;
@@ -231,7 +234,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     try {
       await cc.hangUp();
     } catch (_) {
-      showAppSnackBar("Erreur lors du raccrochage");
+      showAppSnackBar(tr(context, 'call_end_failed'));
     } finally {
       _popScreen();
     }
@@ -263,8 +266,9 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
   /// lire garantit que les deux affichages concordent toujours.
   String _formatElapsed(CallController cc) {
     final depuis = cc.connectedSince;
-    final secondes =
-        depuis == null ? 0 : DateTime.now().difference(depuis).inSeconds;
+    final secondes = depuis == null
+        ? 0
+        : DateTime.now().difference(depuis).inSeconds;
     final m = secondes ~/ 60;
     final s = secondes % 60;
     return "${m.toString().padLeft(2, "0")}:${s.toString().padLeft(2, "0")}";
@@ -293,20 +297,49 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
   /// l'écran d'appel doit céder de la hauteur à ce qu'il contient. Pendant la
   /// mise en relation, le pavé a disparu au profit du rond de progression —
   /// l'avatar reprend donc sa taille normale.
+  ///
+  /// 🔴 **LA RÉPONSE VIENT DU PANNEAU LUI-MÊME** (`IvrPanel.afficheLePave`), et
+  /// n'est plus redevinée ici. Cette fonction testait `etape == menu` : dès
+  /// qu'une étape s'est ajoutée — la lecture d'un centre vocal —, le panneau
+  /// montrait le pavé pendant que cet écran croyait le contraire. L'avatar
+  /// repassait donc de 64 à 104 points au premier appui sur une touche, et le
+  /// pavé, seul `Expanded` de la colonne, payait la différence en rétrécissant.
+  /// C'est le défaut signalé par le user le 18/08/2026, de la même famille que
+  /// celui du 17/08 : **tout ce qui varie au-dessus du pavé se prend sur lui**.
   bool _menuStandardAffiche(CallController cc) =>
-      cc.ivr != null && cc.ivr!.etape == IvrEtape.menu;
+      cc.ivr != null && IvrPanel.afficheLePave(cc.ivr!);
 
   String _statusText(CallController cc) {
     if (widget.incoming && cc.incoming != null) {
       final inc = cc.incoming!;
-      if (inc.isGroup) return "Groupe · ${inc.memberCount} membres";
-      return "Appel entrant…";
+      if (inc.isGroup) {
+        return tr(context, 'call_group_members', {'n': '${inc.memberCount}'});
+      }
+      return tr(context, 'incoming_call');
     }
     // Standard : personne ne sonne tant que l'appelant n'a pas choisi. Laisser
     // « Sonnerie… » dirait exactement le contraire de ce qui se passe.
     final ivr = cc.ivr;
     if (ivr != null) {
-      if (ivr.etape == IvrEtape.menu) return "Serveur vocal";
+      /*
+       * 🔴 `ivr.vocal` AUSSI, et pas seulement l'étape « menu » (18/08/2026).
+       *
+       * Sans lui, la ligne tombait sur `nomServiceChoisi ?? ""` dès qu'un son
+       * se mettait à jouer — or ce champ n'est JAMAIS renseigné pour un centre
+       * vocal, qui ne met en relation avec personne. Elle rendait donc "" et
+       * disparaissait entièrement (le bloc appelant l'omet quand elle est vide,
+       * volontairement, pour ne pas laisser un trou sous le nom).
+       *
+       * Deux dégâts d'un coup : le sous-titre s'évanouissait au premier appui,
+       * et sa disparition rendait ~32 points au pavé, qui changeait donc de
+       * taille — le second morceau du défaut signalé.
+       *
+       * Un centre vocal reste un serveur vocal du début à la fin de l'appel :
+       * son sous-titre n'a aucune raison de bouger.
+       */
+      if (ivr.etape == IvrEtape.menu || ivr.vocal) {
+        return tr(context, 'company_center_vocal');
+      }
       /*
        * Sous le nom du centre : `nom_service`, et RIEN s'il est vide — demande
        * du user du 12/08/2026, qui remplace « Mise en relation — <libelle> ».
@@ -320,8 +353,10 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
       return ivr.nomServiceChoisi ?? "";
     }
     if (cc.activeRole == ActiveCallRole.outgoing) {
-      if (cc.isGroupCall) return "Sonnerie du groupe…";
-      return cc.remoteRinging ? "En train de sonner…" : "Sonnerie…";
+      if (cc.isGroupCall) return tr(context, 'call_group_ringing');
+      return cc.remoteRinging
+          ? tr(context, 'call_ringing_remote')
+          : tr(context, 'call_ringing');
     }
     if (cc.activeRole == ActiveCallRole.ongoing) {
       /*
@@ -332,9 +367,9 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
        */
       if (cc.reconnexionEnCours) return tr(context, 'call_reconnecting');
       if (cc.mediaConnected) return _formatElapsed(cc);
-      return "Connexion en cours…";
+      return tr(context, 'call_connecting');
     }
-    return "Connexion en cours…";
+    return tr(context, 'call_connecting');
   }
 
   /// [afficheCommeGroupe] et non `cc.isGroupCall` : après un transfert, l'appel
@@ -345,11 +380,11 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
   String _mediaHint(CallController cc, bool afficheCommeGroupe) {
     if (cc.activeRole != ActiveCallRole.ongoing) return "";
     if (afficheCommeGroupe) {
-      return "${cc.connectedPeerCount} connecté(s) · ${cc.joinedParticipantIds.length} dans l'appel";
+      return tr(context, 'call_connected_in_call', {'a': '${cc.connectedPeerCount}', 'b': '${cc.joinedParticipantIds.length}'});
     }
     if (cc.mediaConnected) {
       // return cc.activeType == "VIDEO" ? "Vidéo connectée" : "Audio connectée";
-      return "Appel en cours…";
+      return tr(context, 'call_ongoing_dots');
     }
     return "";
   }
@@ -361,10 +396,12 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     // --- Interlocuteur affiché : calculé depuis les participants RÉELLEMENT
     // présents (pas depuis activePeerName figé) → dès qu'une personne quitte
     // (ex. transfert), son nom disparaît et le nouvel interlocuteur s'affiche.
-    final others =
-        cc.joinedParticipantIds.where((id) => id != cc.myUserId).toList();
-    final invitedOthers =
-        others.where((id) => cc.invitedParticipantIds.contains(id)).toList();
+    final others = cc.joinedParticipantIds
+        .where((id) => id != cc.myUserId)
+        .toList();
+    final invitedOthers = others
+        .where((id) => cc.invitedParticipantIds.contains(id))
+        .toList();
 
     // --- TRANSFERT VU PAR CELUI QUI RESTE ---
     //
@@ -414,8 +451,8 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     final String? callAvatarUrl = (widget.incoming && cc.incoming != null)
         ? cc.incoming!.callerAvatarUrl
         : (primaryId != null
-            ? cc.participantAvatars[primaryId]
-            : cc.activePeerAvatarUrl);
+              ? cc.participantAvatars[primaryId]
+              : cc.activePeerAvatarUrl);
 
     // FIX appel entrant : après décroché, cc.incoming repasse à null (acceptIncoming)
     // alors que widget.incoming reste true. L'ancien code faisait
@@ -426,12 +463,15 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     if (widget.incoming && cc.incoming != null) {
       name = cc.incoming!.displayTitle;
     } else if (primaryId != null) {
-      name = cc.participantNames[primaryId] ??
+      name =
+          cc.participantNames[primaryId] ??
           cc.activePeerName ??
           cc.incoming?.displayTitle ??
-          "Contact";
+          tr(context, 'call_contact_fallback');
     } else {
-      name = cc.activePeerName ?? cc.incoming?.displayTitle ?? "Contact";
+      name = cc.activePeerName ??
+          cc.incoming?.displayTitle ??
+          tr(context, 'call_contact_fallback');
     }
     // Après acceptation d'un appel entrant, cc.incoming repasse à null alors que
     // widget.incoming reste true : l'ancien code lisait donc cc.incoming?.callType
@@ -440,7 +480,8 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     // retombe sur activeType une fois l'appel actif.
     final isVideo = _estVideo(cc);
     final remotes = cc.remoteStreams;
-    final showVideo = isVideo &&
+    final showVideo =
+        isVideo &&
         cc.activeRole == ActiveCallRole.ongoing &&
         remotes.isNotEmpty;
     final showIncoming = widget.incoming && cc.incoming != null;
@@ -448,7 +489,8 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
 
     // Lot 3 : appel vidéo 1-1 actif → plein écran dynamique (principal + PiP).
     // Les appels de groupe gardent la grille ; l'audio garde l'avatar.
-    final useDynamic = isVideo &&
+    final useDynamic =
+        isVideo &&
         showActive &&
         !cc.isGroupCall &&
         remotes.length <= 1 &&
@@ -517,8 +559,16 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                   ),
                 )
               else if (showVideo)
-                _remoteGrid(cc, remotes,
-                    anonymiseLesInvites: transfereVersUnInvite),
+                _remoteGrid(
+                  cc,
+                  remotes,
+                  anonymiseLesInvites: transfereVersUnInvite,
+                  // Ma propre image devient UNE VIGNETTE PARMI LES AUTRES, au
+                  // lieu de l'encart épinglé dans le coin. C'est ce que fait
+                  // WhatsApp en appel de groupe, et cela règle le chevauchement
+                  // : l'encart couvrait le haut de la première vignette.
+                  local: cc.localStream != null ? _localRenderer : null,
+                ),
               // Lot 6 : couche de tap plein écran (toggle des contrôles en vidéo).
               Positioned.fill(
                 child: GestureDetector(
@@ -550,7 +600,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                                   : Icons.keyboard_arrow_down,
                               color: Colors.white70,
                             ),
-                            tooltip: showIncoming ? "Refuser" : "Réduire",
+                            tooltip: showIncoming ? tr(context, 'decline') : tr(context, 'call_minimize'),
                             onPressed: () async {
                               if (showIncoming) {
                                 await _reject(cc);
@@ -565,9 +615,11 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                           // (`acceptById` n'a pas cette info).
                           if (cc.activeIvrFromId != null)
                             IconButton(
-                              icon: const Icon(Icons.groups_outlined,
-                                  color: Colors.white70),
-                              tooltip: "Liste d'attente",
+                              icon: const Icon(
+                                Icons.groups_outlined,
+                                color: Colors.white70,
+                              ),
+                              tooltip: tr(context, 'queue'),
                               onPressed: () {
                                 QueueStatusSheet.show(
                                   context,
@@ -593,15 +645,18 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                           // 17/08/2026) : le vert du thème se distinguait mal
                           // du fond sombre de l'écran d'appel.
                           color: AlanyaColors.bleuAppel,
-                          active: cc.activeRole == ActiveCallRole.ongoing ||
+                          active:
+                              cc.activeRole == ActiveCallRole.ongoing ||
                               cc.activeRole == ActiveCallRole.outgoing,
                           child: afficheCommeGroupe
                               ? CircleAvatar(
                                   radius: _menuStandardAffiche(cc) ? 32 : 52,
                                   backgroundColor: AlanyaColors.terracotta,
-                                  child: Icon(Icons.groups,
-                                      size: _menuStandardAffiche(cc) ? 30 : 48,
-                                      color: Colors.white),
+                                  child: Icon(
+                                    Icons.groups,
+                                    size: _menuStandardAffiche(cc) ? 30 : 48,
+                                    color: Colors.white,
+                                  ),
                                 )
                               : AvatarCircle(
                                   name: name,
@@ -641,9 +696,13 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                       // précisément dans le cas « pas de nom de service ».
                       if (_statusText(cc).isNotEmpty) ...[
                         const SizedBox(height: 8),
-                        Text(_statusText(cc),
-                            style: const TextStyle(
-                                color: Colors.white70, fontSize: 16)),
+                        Text(
+                          _statusText(cc),
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 16,
+                          ),
+                        ),
                       ],
                       // ── Message du standard, SOUS le libellé du service ──
                       //
@@ -659,13 +718,61 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                       // aller-retour vers l'attente — le défaut signalé. Ce qui
                       // compte n'est pas OÙ elle est posée, mais qu'elle occupe
                       // toujours la même place.
+                      // 🔴 LE LECTEUR DE PLAINTE FLOTTE ICI, ET NE PREND AUCUNE
+                      // HAUTEUR. Emplacement demandé par le user (20/08/2026) :
+                      // l'espace entre le nom du centre et la bande « Accueil ».
+                      //
+                      // Il est posé en SURCOUCHE et non dans la colonne, parce
+                      // que le pavé numérique est un `Expanded` qui prend « ce
+                      // qui reste » : l'ajouter comme un frère lui aurait pris
+                      // sa hauteur et l'aurait fait rétrécir — le défaut
+                      // signalé deux fois (17/08 puis 18/08), qu'un test
+                      // surveille depuis. `Clip.none` lui permet de déborder de
+                      // la bande sans que la géométrie bouge d'un pixel.
+                      //
+                      // L'espace qu'il recouvre est vide pendant un
+                      // enregistrement : le message est effacé par `ivr_record`,
+                      // et aucune touche n'est maintenue.
+                      // 🔴 LE LECTEUR OCCUPE LA PLACE DE LA BANDE, IL NE FLOTTE
+                      // PLUS AU-DESSUS. Première version : un `Stack` en
+                      // `Clip.none` qui débordait des 52 points de la bande. Le
+                      // panneau était bien construit — c'est lui qui joue le bip,
+                      // et le bip s'entendait — mais INVISIBLE : dans une
+                      // `Column`, les enfants déclarés APRÈS se peignent
+                      // par-dessus, et le pavé numérique recouvrait tout le
+                      // débordement vers le bas. Signalé sur device le
+                      // 20/08/2026 : « ni le minuteur ni rien ».
+                      //
+                      // Les deux se relaient donc dans la MÊME hauteur, qui
+                      // était déjà réservée : le pavé ne perd pas un point, et
+                      // rien ne peut plus recouvrir le lecteur. C'est aussi
+                      // l'emplacement demandé — entre le nom du centre et la
+                      // bande « Accueil ».
+                      //
+                      // Ils ne peuvent pas coexister : `ivr_record` efface le
+                      // message en posant l'étape.
                       if (cc.ivr != null)
-                        IvrMessageBand(message: cc.ivr!.message),
+                        if (cc.ivr!.etape == IvrEtape.enregistrement)
+                          PlainteRecorder(
+                            // La clé porte l'identifiant de l'appel : un second
+                            // appel dans la même session d'écran doit repartir
+                            // d'un panneau NEUF, pas reprendre l'état du
+                            // précédent.
+                            key: ValueKey("plainte-${cc.ivr!.callId}"),
+                            session: cc.ivr!,
+                            onTermine: cc.retourAccueilIvr,
+                          )
+                        else
+                          IvrMessageBand(message: cc.ivr!.message),
                       if (cc.activeRole == ActiveCallRole.ongoing) ...[
                         const SizedBox(height: 10),
-                        Text(_mediaHint(cc, afficheCommeGroupe),
-                            style: const TextStyle(
-                                color: Colors.white54, fontSize: 13)),
+                        Text(
+                          _mediaHint(cc, afficheCommeGroupe),
+                          style: const TextStyle(
+                            color: Colors.white54,
+                            fontSize: 13,
+                          ),
+                        ),
                       ],
                       if (cc.lastError != null) ...[
                         const SizedBox(height: 10),
@@ -675,7 +782,9 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                             cc.lastError!,
                             textAlign: TextAlign.center,
                             style: const TextStyle(
-                                color: Colors.orangeAccent, fontSize: 13),
+                              color: Colors.orangeAccent,
+                              fontSize: 13,
+                            ),
                           ),
                         ),
                       ],
@@ -712,7 +821,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                         _roundBtn(
                           icon: Icons.close,
                           color: Colors.grey,
-                          label: "Fermer",
+                          label: tr(context, 'close'),
                           onPressed: () => _popScreen(),
                         ),
                       const SizedBox(height: 40),
@@ -720,9 +829,20 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                   ),
                 ),
               ),
-              // Auto-vue locale (mode NON dynamique : groupe). En 1-1 vidéo, le
-              // PiP est géré par _draggablePip ci-dessous.
+              // Auto-vue locale dans le COIN — uniquement quand il n'y a pas de
+              // grille où se ranger.
+              //
+              // ⚠️ CE CAS EXISTE ENCORE, ne pas le supprimer : `showVideo`
+              // exige au moins un flux distant. Entre le décrochage et
+              // l'arrivée de la première image des autres, il n'y a aucune
+              // grille — sans cet encart, on ne se verrait pas du tout pendant
+              // toute la négociation WebRTC.
+              //
+              // Dès que la grille apparaît, on y est une vignette comme les
+              // autres : c'est `_remoteGrid(local: …)` plus haut qui s'en
+              // charge, et l'encart disparaît au lieu de la recouvrir.
               if (!useDynamic &&
+                  !showVideo &&
                   isVideo &&
                   showActive &&
                   cc.localStream != null)
@@ -852,74 +972,235 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     );
   }
 
-  Widget _remoteGrid(CallController cc, Map<String, MediaStream> remotes,
-      {required bool anonymiseLesInvites}) {
+  Widget _remoteGrid(
+    CallController cc,
+    Map<String, MediaStream> remotes, {
+    required bool anonymiseLesInvites,
+    RTCVideoRenderer? local,
+  }) {
     final ids = remotes.keys.toList();
+    if (ids.isEmpty) return const SizedBox.shrink();
+
+    /*
+     * MA PROPRE VIGNETTE EN DERNIER, ET NON DANS UN COIN.
+     *
+     * Avant, l'auto-vue était un encart de 100 × 140 épinglé en haut à droite,
+     * PAR-DESSUS la grille : il recouvrait le coin de la première vignette, et
+     * ne bougeait pas quand le nombre de participants changeait. WhatsApp ne
+     * fait ça qu'en tête-à-tête ; en groupe, on est une tuile comme les autres.
+     *
+     * ⚠️ EN DERNIER, pas en premier : l'ordre des autres ne doit pas se
+     * déplacer sous les yeux quand ma caméra s'ouvre avec un temps de retard.
+     */
+    final tuiles = <Widget>[
+      for (final id in ids) _vignette(cc, id, anonymise: anonymiseLesInvites),
+      if (local != null) _vignetteLocale(local),
+    ];
+
+    // Beaucoup de monde : on garde une grille qui défile, mais on la laisse
+    // courir jusqu'en bas — les contrôles flottent par-dessus, comme ailleurs.
+    if (tuiles.length > maxVignettesSansDefilement) {
+      return Positioned.fill(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(4, 4, 4, 96),
+          child: GridView.builder(
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              mainAxisSpacing: 4,
+              crossAxisSpacing: 4,
+              childAspectRatio: 0.75,
+            ),
+            itemCount: tuiles.length,
+            itemBuilder: (_, i) => tuiles[i],
+          ),
+        ),
+      );
+    }
+
+    final rangees = dispositionVignettes(tuiles.length);
+    var curseur = 0;
+    final lignes = <Widget>[];
+    for (final combien in rangees) {
+      final deLaRangee = tuiles.sublist(curseur, curseur + combien);
+      curseur += combien;
+      lignes.add(
+        Expanded(
+          child: Row(
+            children: [
+              for (final tuile in deLaRangee)
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.all(2),
+                    child: tuile,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    /*
+     * LES VIGNETTES VONT JUSQU'AUX BORDS, et passent SOUS les contrôles.
+     *
+     * L'ancienne version réservait 160 points en bas pour ne rien cacher. Le
+     * remède coûtait plus cher que le mal : cette bande restait vide en
+     * permanence, y compris quand les contrôles étaient masqués — c'est-à-dire
+     * la plupart du temps, puisqu'ils s'effacent tout seuls.
+     *
+     * Les dégradés de `_scrims` assurent déjà la lisibilité par-dessus l'image,
+     * et l'étiquette de nom est placée assez haut pour rester visible.
+     */
     return Positioned.fill(
       child: Padding(
-        padding: const EdgeInsets.only(top: 8, left: 8, right: 8, bottom: 160),
-        child: GridView.builder(
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: ids.length <= 1 ? 1 : 2,
-            mainAxisSpacing: 8,
-            crossAxisSpacing: 8,
-            childAspectRatio: 0.85,
-          ),
-          itemCount: ids.length,
-          itemBuilder: (_, i) {
-            final id = ids[i];
-            final r = _remoteRenderers[id];
-            final invited = cc.invitedParticipantIds.contains(id);
-            // Même règle que pour le titre de l'écran, et seulement dans le même
-            // cas : un tête-à-tête où un tiers a été amené par le correspondant.
-            // Dans un VRAI groupe, savoir qui a rejoint reste utile — on ne
-            // masque donc rien.
-            final label = anonymiseLesInvites && invited
-                ? "Invité"
-                : (cc.participantNames[id] ?? "Participant");
-            return ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  if (r != null)
-                    RTCVideoView(
-                      r,
-                      objectFit:
-                          RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-                    )
-                  else
-                    const ColoredBox(color: AlanyaColors.gold),
-                  Positioned(
-                    left: 8,
-                    bottom: 8,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: invited
-                            ? AlanyaColors.forest.withValues(alpha: 0.9)
-                            : Colors.black.withValues(alpha: 0.45),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        // « Invité (invité) » quand le nom est déjà masqué :
-                        // le libellé anonyme se suffit à lui-même.
-                        invited && label != "Invité"
-                            ? "$label (invité)"
-                            : label,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
+        padding: const EdgeInsets.all(2),
+        child: Column(children: lignes),
+      ),
+    );
+  }
+
+  /// Une vignette de participant : son image, ou son initiale s'il n'a pas
+  /// encore de flux, et son nom en bas à gauche.
+  Widget _vignette(
+    CallController cc,
+    String id, {
+    required bool anonymise,
+  }) {
+    final r = _remoteRenderers[id];
+    final invited = cc.invitedParticipantIds.contains(id);
+    // Même règle que pour le titre de l'écran, et seulement dans le même cas :
+    // un tête-à-tête où un tiers a été amené par le correspondant. Dans un VRAI
+    // groupe, savoir qui a rejoint reste utile — on ne masque donc rien.
+    final label = anonymise && invited
+        ? tr(context, 'guest')
+        : (cc.participantNames[id] ?? tr(context, 'meet_participant'));
+    // « Invité (invité) » quand le nom est déjà masqué : le libellé anonyme se
+    // suffit à lui-même.
+    final texte = invited && label != tr(context, 'guest')
+        ? tr(context, 'label_guest', {'label': label})
+        : label;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (r != null)
+            RTCVideoView(
+              r,
+              objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+            )
+          else
+            // ⚠️ PAS UN APLAT DE COULEUR VIVE. Le fond doré d'avant se lisait
+            // comme une erreur d'affichage ; un fond sombre portant l'initiale
+            // dit « cette personne est là, sans image », ce qui est le cas
+            // pendant toute la négociation WebRTC.
+            _vignetteSansImage(label),
+          Positioned(
+            left: 8,
+            right: 8,
+            bottom: 8,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                decoration: BoxDecoration(
+                  color: invited
+                      ? AlanyaColors.forest.withValues(alpha: 0.92)
+                      : Colors.black.withValues(alpha: 0.55),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Text(
+                  texte,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
                   ),
-                ],
+                ),
               ),
-            );
-          },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Ma propre vignette dans la grille — image en MIROIR, et « Vous » pour
+  /// étiquette.
+  ///
+  /// ⚠️ LE MIROIR N'EST PAS UN DÉTAIL. Sans lui, on se voit inversé par rapport
+  /// à ce qu'un miroir montre, et lever la main droite fait bouger celle de
+  /// gauche à l'écran — c'est la seule vignette concernée, les autres doivent
+  /// rester telles qu'elles arrivent.
+  Widget _vignetteLocale(RTCVideoRenderer local) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          RTCVideoView(
+            local,
+            mirror: true,
+            objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+          ),
+          Positioned(
+            left: 8,
+            right: 8,
+            bottom: 8,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.55),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Text(
+                  tr(context, 'you'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Le fond d'une vignette dont le flux vidéo n'est pas encore arrivé.
+  Widget _vignetteSansImage(String label) {
+    final initiale = label.trim().isNotEmpty ? label.trim()[0].toUpperCase() : "?";
+    return ColoredBox(
+      color: AlanyaColors.chocolate,
+      child: Center(
+        child: Container(
+          width: 56,
+          height: 56,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: Colors.white.withValues(alpha: 0.16),
+          ),
+          child: Center(
+            child: Text(
+              initiale,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 22,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -941,13 +1222,13 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
           ),
         ],
       ),
-      child: const Row(
+      child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.person_add_alt_1_rounded, color: Colors.white, size: 15),
-          SizedBox(width: 6),
+          const Icon(Icons.person_add_alt_1_rounded, color: Colors.white, size: 15),
+          const SizedBox(width: 6),
           Text(
-            "Invité",
+            tr(context, 'guest'),
             style: TextStyle(
               color: Colors.white,
               fontWeight: FontWeight.w700,
@@ -970,7 +1251,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
         runSpacing: 8,
         alignment: WrapAlignment.center,
         children: ids.map((id) {
-          final label = cc.participantNames[id] ?? "Invité";
+          final label = cc.participantNames[id] ?? tr(context, 'guest');
           final connected = cc.remoteStreams.containsKey(id);
           return Container(
             padding: const EdgeInsets.fromLTRB(6, 4, 12, 4),
@@ -987,14 +1268,15 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                   child: Text(
                     label.isNotEmpty ? label[0].toUpperCase() : "?",
                     style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700),
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 7),
                 Text(
-                  "$label (invité)",
+                  tr(context, 'label_guest', {'label': label}),
                   style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.w600,
@@ -1027,13 +1309,13 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
         _roundBtn(
           icon: Icons.call_end,
           color: Colors.red,
-          label: "Refuser",
+          label: tr(context, 'decline'),
           onPressed: () => _reject(cc),
         ),
         _roundBtn(
           icon: Icons.call,
           color: AlanyaColors.forest,
-          label: "Accepter",
+          label: tr(context, 'accept'),
           onPressed: () => _accept(cc),
         ),
       ],
@@ -1078,7 +1360,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
             _controlBtn(
               icon: cc.isMuted ? Icons.mic_off : Icons.mic,
               active: cc.isMuted,
-              label: cc.isMuted ? "Muet" : "Micro",
+              label: cc.isMuted ? tr(context, 'muted') : tr(context, 'microphone'),
               onPressed: cc.toggleMute,
               taille: 52,
             ),
@@ -1086,7 +1368,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
             _roundBtn(
               icon: Icons.call_end,
               color: Colors.red,
-              label: "Raccrocher",
+              label: tr(context, 'end_call'),
               onPressed: () => _hangUp(cc),
               taille: 64,
             ),
@@ -1094,7 +1376,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
             _controlBtn(
               icon: cc.isSpeakerOn ? Icons.volume_up : Icons.hearing,
               active: cc.isSpeakerOn,
-              label: "Haut-parleur",
+              label: tr(context, 'speaker'),
               onPressed: () => cc.toggleSpeaker(),
               taille: 52,
             ),
@@ -1106,7 +1388,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
       return _roundBtn(
         icon: Icons.call_end,
         color: Colors.red,
-        label: "Raccrocher",
+        label: tr(context, 'end_call'),
         onPressed: () => _hangUp(cc),
       );
     }
@@ -1123,49 +1405,49 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
             _controlBtn(
               icon: cc.isMuted ? Icons.mic_off : Icons.mic,
               active: cc.isMuted,
-              label: cc.isMuted ? "Muet" : "Micro",
+              label: cc.isMuted ? tr(context, 'muted') : tr(context, 'microphone'),
               onPressed: cc.toggleMute,
             ),
             _controlBtn(
               icon: cc.isSpeakerOn ? Icons.volume_up : Icons.hearing,
               active: cc.isSpeakerOn,
-              label: "Haut-parleur",
+              label: tr(context, 'speaker'),
               onPressed: () => cc.toggleSpeaker(),
             ),
             if (isVideo)
               _controlBtn(
                 icon: cc.isVideoEnabled ? Icons.videocam : Icons.videocam_off,
                 active: !cc.isVideoEnabled,
-                label: "Vidéo",
+                label: tr(context, 'video'),
                 onPressed: cc.toggleVideo,
               ),
             if (isVideo)
               _controlBtn(
                 icon: Icons.cameraswitch,
                 active: false,
-                label: "Caméra",
+                label: tr(context, 'camera_short'),
                 onPressed: () => cc.switchCamera(),
               ),
             _controlBtn(
               icon: Icons.chat_bubble_outline,
               active: false,
-              label: "Message",
+              label: tr(context, 'message'),
               onPressed: () => _openChatDuringCall(cc),
             ),
             _controlBtn(
               icon: Icons.person_add_alt_1,
               active: false,
-              label: "Inviter",
+              label: tr(context, 'invite'),
               onPressed: () => _invite(cc),
             ),
             _controlBtn(
               icon: cc.isTransferring ? Icons.close : Icons.phone_forwarded,
               active: cc.isTransferring,
-              label: cc.isTransferring ? "Annuler" : "Transférer",
+              label: cc.isTransferring ? tr(context, 'cancel') : tr(context, 'transfer_action'),
               onPressed: cc.isTransferring
                   ? () {
-                      cc.cancelTransfer(reason: "Transfert annulé");
-                      showAppSnackBar("Transfert annulé");
+                      cc.cancelTransfer(reason: tr(context, 'transfer_cancelled'));
+                      showAppSnackBar(tr(context, 'transfer_cancelled'));
                     }
                   : () => _transfer(cc),
             ),
@@ -1175,8 +1457,9 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
         _roundBtn(
           icon: Icons.call_end,
           color: Colors.red,
-          label:
-              cc.isGroupCall && !cc.isCallInitiator ? "Quitter" : "Raccrocher",
+          label: cc.isGroupCall && !cc.isCallInitiator
+              ? tr(context, 'leave_action')
+              : tr(context, 'end_call'),
           onPressed: () => _hangUp(cc),
         ),
       ],
@@ -1188,16 +1471,18 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
   Future<void> _invite(CallController cc) async {
     final numbers = await ContactPickerSheet.show(
       context,
-      title: "Inviter dans l'appel",
-      confirmLabel: "Inviter",
+      title: tr(context, 'invite_to_call'),
+      confirmLabel: tr(context, 'invite'),
     );
     if (numbers == null || numbers.isEmpty || !mounted) return;
     for (final n in numbers) {
       cc.inviteToCall(n);
     }
-    showAppSnackBar(numbers.length == 1
-        ? "Invitation envoyée"
-        : "${numbers.length} invitations envoyées");
+    showAppSnackBar(
+      numbers.length == 1
+          ? tr(context, 'invite_sent_one')
+          : tr(context, 'invite_sent_many', {'n': '${numbers.length}'}),
+    );
   }
 
   /// Transfert supervisé : choisit un contact, l'invite dans l'appel, puis
@@ -1205,13 +1490,14 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
   Future<void> _transfer(CallController cc) async {
     final numbers = await ContactPickerSheet.show(
       context,
-      title: "Transférer l'appel à…",
-      confirmLabel: "Transférer",
+      title: tr(context, 'transfer_call_to'),
+      confirmLabel: tr(context, 'transfer_action'),
     );
     if (numbers == null || numbers.isEmpty || !mounted) return;
     cc.transferCall(numbers.first);
     showAppSnackBar(
-        "Transfert en cours… l'appel basculera quand le contact décroche.");
+      tr(context, 'transfer_pending'),
+    );
   }
 
   /// Ouvre la conversation pendant l'appel : minimise l'écran d'appel (le
@@ -1220,11 +1506,11 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
   void _openChatDuringCall(CallController cc) {
     final convId = cc.activeConvId;
     if (convId == null) {
-      showAppSnackBar("Conversation indisponible");
+      showAppSnackBar(tr(context, 'conversation_unavailable'));
       return;
     }
     final title =
-        cc.activePeerName ?? cc.incoming?.displayTitle ?? "Conversation";
+        cc.activePeerName ?? cc.incoming?.displayTitle ?? tr(context, 'conversation');
     final isGroup = cc.isGroupCall;
     final nav = Navigator.of(context, rootNavigator: true);
     if (nav.canPop()) nav.pop();
@@ -1259,15 +1545,19 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
             child: SizedBox(
               width: taille,
               height: taille,
-              child: Icon(icon,
-                  color: active ? AlanyaColors.chocolate : Colors.white,
-                  size: taille * 0.46),
+              child: Icon(
+                icon,
+                color: active ? AlanyaColors.chocolate : Colors.white,
+                size: taille * 0.46,
+              ),
             ),
           ),
         ),
         const SizedBox(height: 6),
-        Text(label,
-            style: const TextStyle(color: Colors.white70, fontSize: 12)),
+        Text(
+          label,
+          style: const TextStyle(color: Colors.white70, fontSize: 12),
+        ),
       ],
     );
   }
@@ -1297,8 +1587,10 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
           ),
         ),
         const SizedBox(height: 8),
-        Text(label,
-            style: const TextStyle(color: Colors.white70, fontSize: 13)),
+        Text(
+          label,
+          style: const TextStyle(color: Colors.white70, fontSize: 13),
+        ),
       ],
     );
   }

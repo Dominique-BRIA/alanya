@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 import '../models/call_record.dart';
+import 'push_service.dart';
 
 /// Formalisme des statuts d'appel.
 ///
@@ -18,6 +20,12 @@ import '../models/call_record.dart';
 /// exactement le désordre que ce chantier corrige. Toute évolution du
 /// formalisme se fait dans `libelleAppel()` côté backend.
 ///
+/// 🌍 TRADUCTION (≠ règle). Le serveur formule ses libellés en français :
+/// `_clesServeur` les associe à leurs équivalents du catalogue l10n, affichés
+/// dans la langue de l'app. Un libellé absent de la table s'affiche tel quel,
+/// sans interprétation client — la source de vérité du formalisme ne bouge
+/// pas d'un iota, seule sa langue d'affichage change.
+///
 /// Le formalisme, pour mémoire :
 ///
 /// * Appel manqué (Missed) : entrant sans réponse de votre part
@@ -32,11 +40,57 @@ import '../models/call_record.dart';
 /// B rejette => chez A "Appel refusé", chez B "Appel rejeté"
 
 class CallStatusFormalisme {
+  /// Traduit depuis un contexte statique, sans BuildContext : les listes qui
+  /// affichent ce formalisme ne le transportent pas. Repli français si le
+  /// navigateur de l'application n'est pas monté — même logique que
+  /// [CallUiNative._libelle].
+  static String _traduire(String cle, String repliFrancais,
+      [Map<String, String>? params]) {
+    final ctx = PushService.navigatorKey.currentContext;
+    if (ctx == null) return repliFrancais;
+    try {
+      return tr(ctx, cle, params);
+    } catch (_) {
+      return repliFrancais;
+    }
+  }
+
+  /// Libellés formulés par le serveur (en français) → clés du catalogue l10n.
+  /// Couvre `preciseStatus` ET `detail` — voir l'avertissement 🌍 en tête de
+  /// fichier : c'est une table de traduction, pas une règle.
+  static const Map<String, String> _clesServeur = {
+    // preciseStatus
+    'Appel manqué': 'missed_call',
+    'Appel rejeté': 'call_declined_in',
+    'Appel sans réponse': 'call_no_answer',
+    'Appel refusé': 'call_refused_out',
+    'Occupé': 'call_busy',
+    'Appel entrant': 'call_incoming_word',
+    'Appel sortant': 'call_outgoing',
+    'En cours': 'call_ongoing_short',
+    // detail
+    'Manqué': 'call_missed_short',
+    'Rejeté': 'call_rejected_short',
+    'Refusé': 'call_refused_short',
+    'Sans réponse': 'call_no_answer_short',
+    'Répondu': 'call_answered_short',
+  };
+
+  /// Traduit un libellé venu du serveur, ou le renvoie tel quel s'il n'est
+  /// pas répertorié — jamais d'interprétation côté client.
+  static String _traduireDuServeur(String libelle) {
+    final cle = _clesServeur[libelle];
+    if (cle == null) return libelle;
+    return _traduire(cle, libelle);
+  }
+
   /// Libellé précis pour la **liste d'appels** + **aperçu conversations**
   /// Ex: "Appel manqué", "Appel rejeté", "Appel sans réponse", "Appel refusé", "Occupé", "Appel entrant", "Appel sortant"
   static String preciseLabel(CallRecord c) {
     final duServeur = c.preciseStatus;
-    if (duServeur != null && duServeur.isNotEmpty) return duServeur;
+    if (duServeur != null && duServeur.isNotEmpty) {
+      return _traduireDuServeur(duServeur);
+    }
     return _preciseLabelRepli(c);
   }
 
@@ -48,26 +102,38 @@ class CallStatusFormalisme {
     switch (s) {
       case "MISSED":
         // Backend dit MISSED : déjà nuancé par isOutgoing côté serveur
-        return outgoing ? "Appel sans réponse" : "Appel manqué";
+        return outgoing
+            ? _traduire('call_no_answer', "Appel sans réponse")
+            : _traduire('missed_call', "Appel manqué");
       case "NO_ANSWER":
-        return outgoing ? "Appel sans réponse" : "Appel manqué";
+        return outgoing
+            ? _traduire('call_no_answer', "Appel sans réponse")
+            : _traduire('missed_call', "Appel manqué");
       case "REJECTED":
       case "DECLINED":
         // Rejeté par moi (entrant) vs refusé par l'autre (sortant)
-        return outgoing ? "Appel refusé" : "Appel rejeté";
+        return outgoing
+            ? _traduire('call_refused_out', "Appel refusé")
+            : _traduire('call_declined_in', "Appel rejeté");
       case "BUSY":
-        return "Occupé";
+        return _traduire('call_busy', "Occupé");
       case "ENDED":
         if (c.durationSec != null && c.durationSec! > 0) {
-          return outgoing ? "Appel sortant" : "Appel entrant";
+          return outgoing
+              ? _traduire('call_outgoing', "Appel sortant")
+              : _traduire('call_incoming_word', "Appel entrant");
         } else {
           // Sans durée => pas décroché
-          return outgoing ? "Appel sans réponse" : "Appel manqué";
+          return outgoing
+              ? _traduire('call_no_answer', "Appel sans réponse")
+              : _traduire('missed_call', "Appel manqué");
         }
       case "RINGING":
-        return outgoing ? "Appel sortant" : "Appel entrant";
+        return outgoing
+            ? _traduire('call_outgoing', "Appel sortant")
+            : _traduire('call_incoming_word', "Appel entrant");
       case "ONGOING":
-        return "En cours";
+        return _traduire('call_ongoing_short', "En cours");
       default:
         return s;
     }
@@ -75,16 +141,27 @@ class CallStatusFormalisme {
 
   /// Titre pour bulle dans fil discussion : "Appel vocal entrant", "Appel vocal sortant", "Appel vidéo entrant" etc.
   static String titleInChat(CallRecord c) {
-    final typeLabel = c.type == "VIDEO" ? "Appel vidéo" : "Appel vocal";
-    if (c.isGroup) return "$typeLabel de groupe";
-    return c.isOutgoing ? "$typeLabel sortant" : "$typeLabel entrant";
+    final typeLabel = c.type == "VIDEO"
+        ? _traduire('video_call', "Appel vidéo")
+        : _traduire('call_voice_word', "Appel vocal");
+    if (c.isGroup) {
+      return _traduire(
+          'call_title_group', "$typeLabel de groupe", {'type': typeLabel});
+    }
+    return c.isOutgoing
+        ? _traduire(
+            'call_title_out', "$typeLabel sortant", {'type': typeLabel})
+        : _traduire(
+            'call_title_in', "$typeLabel entrant", {'type': typeLabel});
   }
 
   /// Détail court pour bulle chat : "Manqué", "Rejeté", "Refusé", "Sans réponse", "Occupé", "Répondu"
   /// On garde la nuance Refusé vs Rejeté dans la bulle aussi.
   static String detailInChat(CallRecord c) {
     final duServeur = c.detail;
-    if (duServeur != null && duServeur.isNotEmpty) return duServeur;
+    if (duServeur != null && duServeur.isNotEmpty) {
+      return _traduireDuServeur(duServeur);
+    }
     return _detailRepli(c);
   }
 
@@ -94,18 +171,23 @@ class CallStatusFormalisme {
     final outgoing = c.isOutgoing;
     final hasDuration = c.durationSec != null && c.durationSec! > 0;
 
-    if (s == "BUSY") return "Occupé";
+    if (s == "BUSY") return _traduire('call_busy', "Occupé");
     if (s == "REJECTED" || s == "DECLINED") {
-      return outgoing ? "Refusé" : "Rejeté";
+      return outgoing
+          ? _traduire('call_refused_short', "Refusé")
+          : _traduire('call_rejected_short', "Rejeté");
     }
     if (s == "MISSED" || s == "NO_ANSWER") {
-      return "Sans réponse"; // image montre "Sans réponse" même pour entrant
+      // image montre "Sans réponse" même pour entrant
+      return _traduire('call_no_answer_short', "Sans réponse");
     }
     if (s == "ENDED") {
-      if (hasDuration) return "Répondu";
-      return "Sans réponse";
+      if (hasDuration) return _traduire('call_answered_short', "Répondu");
+      return _traduire('call_no_answer_short', "Sans réponse");
     }
-    if (s == "RINGING" || s == "ONGOING") return "En cours";
+    if (s == "RINGING" || s == "ONGOING") {
+      return _traduire('call_ongoing_short', "En cours");
+    }
     return s;
   }
 

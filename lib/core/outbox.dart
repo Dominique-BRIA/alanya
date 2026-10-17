@@ -180,10 +180,18 @@ class Outbox extends ChangeNotifier {
       for (final entry in toSend) {
         if (!_conn.isOnline) break; // stop si le réseau retombe
         try {
+          // 🔴 `tempId` TRANSMIS AU SERVEUR, et c'est ce qui empêche le doublon.
+          //
+          // L'entrée n'est retirée qu'après la réponse. Une coupure survenue
+          // APRÈS l'écriture serveur mais AVANT la réponse fait compter l'envoi
+          // comme échoué, et la boucle le rejoue — le message partait alors une
+          // seconde fois. Avec cet identifiant, le serveur reconnaît le rejeu et
+          // renvoie le message déjà écrit au lieu d'en créer un autre.
           final sent = await _chat.sendText(
             entry.convId,
             entry.content,
             replyToId: entry.replyToId,
+            tempId: entry.tempId,
           );
           // Succès : retire de la file, met le vrai message en cache.
           _entries.removeWhere((e) => e.tempId == entry.tempId);

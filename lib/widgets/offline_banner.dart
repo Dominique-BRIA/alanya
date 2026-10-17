@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../core/connectivity_service.dart';
 import '../theme/alanya_theme.dart';
+import '../l10n/app_localizations.dart';
 
 /// Bannière grise "Sans connexion" affichée en haut de l'écran quand l'app
 /// est offline. Disparaît automatiquement dès que la connexion revient.
@@ -47,13 +48,13 @@ class OfflineBanner extends StatelessWidget {
             child: AnimatedOpacity(
               duration: const Duration(milliseconds: 250),
               opacity: conn.isOffline ? 1 : 0,
-              child: const Row(
+              child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(Icons.wifi_off, size: 14, color: Colors.white70),
                   SizedBox(width: 8),
                   Text(
-                    "En attente de connexion…",
+                    tr(context, 'waiting_for_connection_dots'),
                     style: TextStyle(
                       color: Colors.white70,
                       fontSize: 12,

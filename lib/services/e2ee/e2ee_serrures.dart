@@ -17,6 +17,8 @@ import 'dart:typed_data';
 
 import 'package:pointycastle/export.dart';
 
+import 'mots_recuperation.dart';
+
 /// D'où vient le secret qui ouvre une serrure.
 enum TypeSerrure { trousseau, motdepasse, recuperation }
 
@@ -92,8 +94,13 @@ class Serrure {
       );
     case TypeSerrure.trousseau:
     case TypeSerrure.recuperation:
-      // 256 bits tirés au sort : une itération suffit, et ce n'est pas une
-      // négligence.
+      // Un secret TIRÉ AU SORT : 256 bits pour le trousseau, 132 pour la clé de
+      // récupération (12 mots parmi 2 048). Une itération suffit — étirer ne
+      // protège que ce qui se devine.
+      //
+      // 🐛 CE COMMENTAIRE DISAIT « 256 BITS » POUR LES DEUX, alors que la clé de
+      // récupération n’en valait que 60 (12 mots parmi 32). Il justifiait une
+      // itération unique par un chiffre qui n’était pas le bon.
       return (algo: 'pbkdf2-sha256', parametres: {'iterations': 1});
   }
 }
@@ -187,12 +194,60 @@ Serrure poserSerrure(
 /// ⚠️ LÈVE SI LE SECRET EST MAUVAIS, et c'est AES-GCM qui le dit. Il n'y a pas
 /// de cas où la clé serait bonne et le déchiffrement échouerait : chercher une
 /// autre cause fait perdre du temps.
+/// Les réglages servis par le serveur — mais seulement s'ils sont les nôtres.
+///
+/// 🔴 LE CLIENT OBÉISSAIT AU SERVEUR SUR LA DÉRIVATION. `algo` et `parametres`
+/// sont écrits par nous à la pose, puis RELUS TELS QUELS à l'ouverture : une
+/// base modifiée pouvait donc choisir la fonction que le téléphone allait
+/// exécuter.
+///
+/// ⚠️ CE N'EST PAS UNE DIVULGATION DE CLÉ, et il faut le dire honnêtement : le
+/// paquet reste chiffré sous la vraie KEK. Ce qu'on évite, c'est le déni de
+/// service — `memoireKio: 4000000` réclame quatre gigaoctets à un téléphone,
+/// qui tombe — et le déclassement le jour où un algorithme plus faible sera
+/// accepté pour lire d'anciennes serrures.
+///
+/// 🔴 ON NE FAIT JAMAIS TOURNER UNE DÉRIVATION DONT UN TIERS CHOISIT LES
+/// PARAMÈTRES. La règle vaut même sans attaque visible.
+///
+/// ⚠️ ON COMPARE À `reglagePour`, déjà la vérité à la pose : une seconde liste
+/// divergerait. Même contrôle, mêmes mots que sur le web.
+Map<String, dynamic> _reglagesSurs(Serrure s) {
+  /*
+   * ⚠️ UN TYPE INCONNU EST REFUSÉ, PAS DEVINÉ. `Serrure.type` est une chaîne
+   * venue du serveur : s'il en invente une, on ne sait pas quels réglages
+   * appliquer, et « au plus proche » serait exactement le déclassement qu'on
+   * cherche à empêcher.
+   */
+  final type = TypeSerrure.values.where((t) => t.name == s.type).firstOrNull;
+  if (type == null) {
+    throw StateError('Serrure refusée : type inconnu « ${s.type} ».');
+  }
+  final attendu = reglagePour(type);
+  if (s.algo != attendu.algo) {
+    throw StateError(
+      'Serrure refusée : le serveur annonce « ${s.algo} » là où cette serrure '
+      "s'écrit en « ${attendu.algo} ».",
+    );
+  }
+  final recu = jsonDecode(s.parametres);
+  if (recu is! Map ||
+      recu.length != attendu.parametres.length ||
+      attendu.parametres.entries.any((e) => recu[e.key] != e.value)) {
+    throw StateError(
+      'Serrure refusée : les paramètres de dérivation ne sont pas ceux '
+      'attendus pour ce type de serrure.',
+    );
+  }
+  return Map<String, dynamic>.from(attendu.parametres);
+}
+
 Uint8List ouvrirArchive(String secret, Serrure s) {
   final kek = _kek(
     secret,
     Uint8List.fromList(base64.decode(s.sel)),
     s.algo,
-    jsonDecode(s.parametres) as Map<String, dynamic>,
+    _reglagesSurs(s),
   );
   return _gcm(
     kek,
@@ -204,49 +259,68 @@ Uint8List ouvrirArchive(String secret, Serrure s) {
 
 /* ══════════════ LA CLÉ DE RÉCUPÉRATION ══════════════ */
 
-/// ⚠️ SANS ACCENT NI CARACTÈRE AMBIGU : elle sera recopiée à la main, sur un
-/// carnet, peut-être par quelqu'un qui n'a pas de clavier français.
+/// Tire une clé de récupération : 12 mots parmi 2 048, soit 132 bits.
 ///
-/// 🐛 CETTE LISTE A ÉTÉ ALIGNÉE SUR CELLE DU WEB APRÈS COUP. J'en avais écrit
-/// une autre — 36 mots différents — en affirmant dans un commentaire qu'elle
-/// était identique. Elle ne l'était pas.
+/// 🐛 ELLE N’EN VALAIT QUE 60 : 12 mots parmi une liste de 32. Ce secret n’est
+/// PAS étiré (PBKDF2, une itération — voir `reglagePour`), sa force est donc sa
+/// seule protection. 2^60 essais d’un HMAC, c’est à la portée d’une ferme de
+/// cartes graphiques louée pour quelques jours — et la serrure « récupération »
+/// est justement celle qui devait tenir face à un serveur compromis.
 ///
-/// ⚠️ ET L'AFFIRMATION ELLE-MÊME ÉTAIT FAUSSE : deux dictionnaires différents ne
-/// rendraient PAS une clé illisible d'un client à l'autre. Le secret est la
-/// CHAÎNE DE MOTS elle-même, pas un indice dans une liste — n'importe quelle
-/// suite de mots ouvre la serrure si elle est exacte. La liste ne sert qu'à
-/// TIRER une clé, jamais à la relire.
+/// ⚠️ L’ANCIEN RAISONNEMENT SE TROMPAIT DE LEVIER. Il disait : « 128 bits,
+/// ce serait vingt-quatre mots à recopier ». C’est vrai avec 32 mots (5 bits
+/// chacun) ; avec 2 048 mots, chacun en porte 11. La longueur de la LISTE fait
+/// l’entropie, pas le nombre de mots.
 ///
-/// On l'aligne quand même, pour que les deux clients produisent des clés de même
-/// nature — et parce qu'un commentaire faux dans un fichier de cryptographie est
-/// plus dangereux que pas de commentaire.
-const List<String> motsRecuperation = [
-  'tortue', 'riviere', 'lampe', 'cousin', 'fenetre', 'orage',
-  'sable', 'guitare', 'renard', 'marbre', 'pluie', 'cerise',
-  'montagne', 'velours', 'hibou', 'bambou', 'falaise', 'encrier',
-  'girafe', 'menthe', 'tambour', 'nuage', 'corail', 'pivoine',
-  'safran', 'brume', 'loutre', 'cypres', 'silex', 'harpe',
-  'jonquille', 'ocean',
-];
-
-/// Tire une clé de récupération : 12 mots parmi 32, soit 60 bits.
+/// ⚠️ LES CLÉS DÉJÀ DISTRIBUÉES S’OUVRENT TOUJOURS : une serrure dérive sa clé
+/// du TEXTE saisi, jamais d’une position dans la liste.
 ///
-/// 🐛 J'AVAIS ÉCRIT QUE 60 BITS ÉTAIENT INSUFFISANTS. C'est faux, et le web
-/// l'explique mieux : ce secret n'étant pas étiré, sa force EST sa seule
-/// protection — et soixante bits résistent à une attaque hors ligne pour un coût
-/// qui dépasse de très loin l'intérêt d'une archive de messagerie personnelle.
-///
-/// ⚠️ LES PORTER À 128 FERAIT VINGT-QUATRE MOTS À RECOPIER, et c'est le papier
-/// perdu qui deviendrait le vrai risque. Durcir un chiffre sans regarder ce
-/// qu'il coûte ailleurs n'est pas une amélioration.
-String tirerCleRecuperation() =>
-    List.generate(12, (_) => motsRecuperation[_sort.nextInt(motsRecuperation.length)])
-        .join(' ');
+/// ⚠️ `nextInt(2048)` : Random.secure tire sans biais sur une puissance de deux.
+String tirerCleRecuperation() => List.generate(
+        12, (_) => motsRecuperation[_sort.nextInt(motsRecuperation.length)])
+    .join(' ');
 
 /// Nettoie une saisie recopiée à la main.
 ///
-/// ⚠️ MAJUSCULES, ESPACES EN TROP, RETOUR À LA LIGNE : c'est ainsi qu'elle
-/// arrivera vraiment. Refuser pour cela ferait perdre l'archive pour une raison
-/// qui n'a rien à voir avec la sécurité.
-String normaliserCleRecuperation(String saisie) =>
-    saisie.trim().toLowerCase().split(RegExp(r'\s+')).join(' ');
+/// ⚠️ MAJUSCULES, ESPACES EN TROP, RETOUR À LA LIGNE : c’est ainsi qu’elle
+/// arrivera vraiment. Refuser pour cela ferait perdre l’archive pour une raison
+/// qui n’a rien à voir avec la sécurité.
+///
+/// ⚠️ ET LES ACCENTS SONT RETIRÉS : la liste n’en contient aucun, mais la liste
+/// BIP39 d’où elle vient en porte (« abîme », « élève »). Qui la connaît, ou
+/// dont le clavier corrige, taperait un mot accentué que la serrure refuserait.
+String normaliserCleRecuperation(String saisie) => _sansAccents(
+        saisie.trim().toLowerCase())
+    .split(RegExp(r'\s+'))
+    .join(' ');
+
+String _sansAccents(String s) {
+  const avec = 'àâäáãéèêëíìîïóòôöõúùûüçñÿ';
+  const sans = 'aaaaaeeeeiiiiooooouuuucny';
+  final b = StringBuffer();
+  for (final c in s.split('')) {
+    final i = avec.indexOf(c);
+    b.write(i < 0 ? c : sans[i]);
+  }
+  return b.toString();
+}
+
+/* ══════════════ LE CONTENU DE L'ARCHIVE ══════════════ */
+
+/// Un IV neuf, à chaque bloc.
+///
+/// 🔴 JAMAIS RÉUTILISÉ. Deux blocs chiffrés avec le même IV et la même clé
+/// laissent AES-GCM s'effondrer : leur différence révèle la différence des
+/// clairs. C'est la faute la plus classique de ce mode, et la plus grave.
+Uint8List ivNeuf() => _auHasard(12);
+
+/// Chiffre un bloc d'archive avec la clé maîtresse.
+Uint8List chiffrerAvec(Uint8List maitresse, Uint8List iv, Uint8List clair) =>
+    _gcm(maitresse, iv, clair, true);
+
+/// Déchiffre un bloc d'archive.
+///
+/// ⚠️ LÈVE SI LE BLOC A ÉTÉ TOUCHÉ : AES-GCM authentifie. L'appelant compte le
+/// bloc comme illisible plutôt que de rendre des octets douteux.
+Uint8List dechiffrerAvec(Uint8List maitresse, Uint8List iv, Uint8List chiffre) =>
+    _gcm(maitresse, iv, chiffre, false);

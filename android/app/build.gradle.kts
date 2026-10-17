@@ -115,4 +115,34 @@ flutter {
 dependencies {
     // Requis par flutter_local_notifications (core library desugaring)
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+
+    // ⚠️ MÊME ARTEFACT ET MÊME VERSION que ceux de `flutter_webrtc`
+    // (android/build.gradle : io.github.webrtc-sdk:android:125.6422.03).
+    //
+    // POURQUOI LE REDÉCLARER. `AppelEnregistreur.kt` enregistre les appels en
+    // branchant un `org.webrtc.AudioTrackSink` sur les pistes audio. Or
+    // `flutter_webrtc` déclare le SDK WebRTC en `implementation` : ses classes
+    // `org.webrtc.*` ne sont donc PAS exposées transitivement à ce module, et le
+    // code ne compilerait pas. On rajoute la dépendance ici — Gradle résout une
+    // seule et même copie (versions identiques), sans conflit de classes.
+    // Les classes du greffon lui-même (`com.cloudwebrtc.webrtc.*`) restent
+    // visibles sans rien ajouter : ce sont ses classes propres, pas une
+    // dépendance transitive.
+    implementation("io.github.webrtc-sdk:android:125.6422.03")
+
+    // ⚠️ MÊME ARTEFACT ET MÊME VERSION que celui de `video_compress`
+    // (son android/build.gradle : com.otaliastudios:transcoder:0.10.5).
+    //
+    // POURQUOI LE REDÉCLARER — exactement la raison de la ligne ci-dessus.
+    // `CompresseurVideo.kt` transcode les vidéos avec un débit IMPOSÉ, que
+    // l'API Dart de `video_compress` ne sait pas transmettre : sans débit, le
+    // moteur en choisissait un deux fois plus élevé que celui du web. Le
+    // greffon déclare le transcodeur en `implementation` : ses classes
+    // `com.otaliastudios.transcoder.*` ne sont donc PAS visibles depuis ce
+    // module, et le code ne compilerait pas.
+    //
+    // ⚠️ LA VERSION DOIT RESTER CELLE DU GREFFON. Deux versions différentes du
+    // même transcodeur, et Gradle en choisit une — celle que l'autre n'attend
+    // pas. À revérifier à chaque montée de `video_compress`.
+    implementation("com.otaliastudios:transcoder:0.10.5")
 }

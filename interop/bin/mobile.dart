@@ -131,7 +131,21 @@ Future<void> main(List<String> args) async {
 
       resultat = {
         'clair': utf8.decode(clair),
-        'reponseType': reponse.getType(),
+        /*
+         * 🔴 LE TYPE TEL QU'IL PART SUR LE FIL, pas celui de la bibliothèque.
+         *
+         * 🐛 `libsignal_protocol_dart` numérote un message ordinaire à 2 ;
+         * le web et le serveur attendent 1. Ce banc émettait la valeur brute,
+         * et le scénario web ne la regardait même pas : la divergence a donc
+         * traversé le banc d'interopérabilité sans être vue, jusqu'à ce que le
+         * vrai serveur refuse les enveloppes avec un 400.
+         *
+         * ⚠️ UN BANC D'INTEROPÉRABILITÉ DOIT PORTER LE FORMAT D'ÉCHANGE, pas
+         * les conventions internes de chaque bibliothèque. C'est précisément
+         * ce qu'il est censé éprouver.
+         */
+        'reponseType':
+            reponse.getType() == CiphertextMessage.prekeyType ? 3 : 1,
         'reponseCorps': base64.encode(reponse.serialize()),
       };
 

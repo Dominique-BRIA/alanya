@@ -13,7 +13,9 @@ library;
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../../services/e2ee/e2ee_service.dart';
+import '../../theme/alanya_theme.dart';
 
 /// Le bouclier de la barre de conversation — ticket 4.11.
 ///
@@ -88,7 +90,11 @@ class BanniereChiffrement extends StatelessWidget {
         color: const Color(0xFFFFF4E8),
         borderRadius: BorderRadius.circular(10),
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           const Icon(Icons.verified_user, size: 15, color: Color(0xFFB85C38)),
@@ -111,9 +117,57 @@ class BanniereChiffrement extends StatelessWidget {
                 style: TextStyle(fontSize: 11.5, color: Color(0xFF2C6B34))),
           ],
         ],
+          ),
+          /*
+           * 🐛 CETTE BANNIÈRE DISAIT « LES FICHIERS JOINTS NE SONT PAS ENCORE
+           * CHIFFRÉS » — vrai le 21/09, FAUX depuis le 03/10 (médias chiffrés,
+           * lots A à D), en tête-à-tête comme en groupe. Le web l'avait retirée
+           * à ce moment-là (8fa17e1) ; le mobile l'avait gardée, et faisait
+           * croire au user, le 10/10, que les fichiers des groupes n'étaient
+           * pas chiffrés. Retirée, avec la phrase des deux dictionnaires.
+           */
+        ],
       ),
     );
   }
+}
+
+/// Affiche l'avertissement de changement de clé d'un correspondant, et rend
+/// le messager qui le porte — pour que l'écran puisse le retirer en partant.
+///
+/// 🐛 LE BANDEAU RESTAIT BLOQUÉ SUR L'ACCUEIL, BOUTONS MORTS (capture du user,
+/// 29/09/2026). Il est posé sur le messager de TOUTE l'application, donc
+/// survivait à la sortie de la conversation ; et ses boutons cherchaient ce
+/// messager à partir de l'écran de conversation, déjà détruit : « Looking up a
+/// deactivated widget's ancestor is unsafe ». Ni fermeture, ni effacement de
+/// l'alerte — elle revenait à chaque ouverture, et chaque ouverture en
+/// ajoutait un de plus EN FILE. Prouvé par `test/avertissement_cle_test.dart`.
+///
+/// ⚠️ LE MESSAGER EST PRIS UNE FOIS, ICI, tant que l'écran est vivant ; les
+/// boutons s'en servent directement.
+/// ⚠️ LES BANDEAUX EN FILE SONT EFFACÉS avant d'en montrer un : un seul à la fois.
+ScaffoldMessengerState montrerAvertissementCle(
+  BuildContext context, {
+  required String nomPair,
+  required VoidCallback onVerifier,
+  required VoidCallback onIgnorer,
+}) {
+  final messager = ScaffoldMessenger.of(context);
+  messager.clearMaterialBanners();
+  messager.showMaterialBanner(
+    AvertissementCleChangee(
+      nomPair: nomPair,
+      onVerifier: () {
+        messager.hideCurrentMaterialBanner();
+        onVerifier();
+      },
+      onIgnorer: () {
+        messager.hideCurrentMaterialBanner();
+        onIgnorer();
+      },
+    ).build(context) as MaterialBanner,
+  );
+  return messager;
 }
 
 /// L'avertissement de changement de clé — ticket 4.12.
@@ -137,21 +191,87 @@ class AvertissementCleChangee extends StatelessWidget {
   final VoidCallback onVerifier;
   final VoidCallback onIgnorer;
 
+  /*
+   * 🎨 REFAIT LE 02/10/2026 (« rends-le plus beau et professionnel ») : un
+   * titre, le nom du correspondant, ce qui est NORMAL avant ce qui inquiète,
+   * et une action principale qui ouvre directement la vérification. Ambre
+   * plutôt que rouge : c'est le plus souvent une réinstallation, pas une
+   * attaque. Mêmes textes et même ordre que le web (`chat.tsx`,
+   * `.e2ee-alerte`), traduits dans les 9 langues.
+   */
   @override
   Widget build(BuildContext context) {
+    final titre = themed(context,
+        light: const Color(0xFF7C2D12), dark: const Color(0xFFFCD9B6));
+    final corps = themed(context,
+        light: const Color(0xFF6B3A1F), dark: const Color(0xFFE8C3A3));
+    final pastille = themed(context,
+        light: const Color(0xFFFDE7CC), dark: const Color(0xFF4A2E18));
+    final icone = themed(context,
+        light: const Color(0xFFB45309), dark: const Color(0xFFFDBA74));
     return MaterialBanner(
-      backgroundColor: const Color(0xFFFDF0F0),
-      content: Text(
-        'La clé de sécurité de $nomPair a changé. '
-        'Cela arrive après une réinstallation — ou si quelqu’un s’interpose.',
-        style: const TextStyle(fontSize: 13, color: Color(0xFF9B2C2C)),
+      backgroundColor: themed(context,
+          light: const Color(0xFFFFF6EC), dark: const Color(0xFF2A1D14)),
+      dividerColor: themed(context,
+          light: const Color(0xFFF5D9BC), dark: const Color(0xFF4A2E18)),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+      leading: Container(
+        width: 38,
+        height: 38,
+        decoration: BoxDecoration(color: pastille, shape: BoxShape.circle),
+        child: Icon(Icons.gpp_maybe_outlined, color: icone, size: 21),
+      ),
+      content: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _TexteTraduit('e2ee_cle_titre',
+              style: TextStyle(
+                  fontSize: 14.5, fontWeight: FontWeight.w700, color: titre)),
+          const SizedBox(height: 4),
+          _TexteTraduit('e2ee_cle_corps',
+              params: {'nom': nomPair},
+              style: TextStyle(fontSize: 13, height: 1.4, color: corps)),
+        ],
       ),
       actions: [
-        TextButton(onPressed: onVerifier, child: const Text('Vérifier')),
-        TextButton(onPressed: onIgnorer, child: const Text('Plus tard')),
+        TextButton(
+          onPressed: onIgnorer,
+          style: TextButton.styleFrom(foregroundColor: corps),
+          child: const _TexteTraduit('e2ee_cle_plus_tard'),
+        ),
+        FilledButton.icon(
+          onPressed: onVerifier,
+          style: FilledButton.styleFrom(
+            backgroundColor: accentOf(context),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10)),
+          ),
+          icon: const Icon(Icons.verified_user_outlined, size: 18),
+          label: const _TexteTraduit('e2ee_cle_verifier'),
+        ),
       ],
     );
   }
+}
+
+/// Un texte traduit AU MOMENT DE L'AFFICHAGE.
+///
+/// ⚠️ LE BANDEAU EST CONSTRUIT HORS DU CYCLE D'AFFICHAGE — par
+/// `montrerAvertissementCle`, depuis un rappel asynchrone — et `tr()` passe par
+/// `context.watch`, que Provider refuse hors de l'arbre (assertion en debug).
+/// Ce petit widget repousse l'appel à son propre `build`. Même piège que
+/// `horodatageStatut` le 15/09/2026.
+class _TexteTraduit extends StatelessWidget {
+  const _TexteTraduit(this.cle, {this.params, this.style});
+
+  final String cle;
+  final Map<String, String>? params;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) =>
+      Text(tr(context, cle, params), style: style);
 }
 
 /// L'écran de vérification — ticket 4.13.
@@ -159,28 +279,45 @@ class AvertissementCleChangee extends StatelessWidget {
 /// ⚠️ LE CODE VIENT AVANT LE QR, jamais l'inverse. Face à quelqu'un sans
 /// caméra — un ordinateur — les chiffres sont le SEUL moyen. Les cacher derrière
 /// une image les rendrait inaccessibles là où ils sont indispensables.
+/// Le code d'UN appareil du correspondant.
+///
+/// 🔴 UN CODE PAR APPAREIL, ET NON UN SEUL. Le code de sécurité compare DEUX
+/// clés d'identité ; le correspondant en a une par appareil. N'en montrer qu'un
+/// laissait les autres invisibles — et c'est précisément un appareil qu'on
+/// n'aurait pas remarqué qui serait celui d'un intrus.
+///
+/// ⚠️ LE WEB LE FAISAIT DÉJÀ, en nommant chaque appareil. Le mobile en
+/// affichait un seul, pris au hasard dans la liste : deux personnes qui
+/// comparent pouvaient regarder deux appareils différents et conclure à une
+/// attaque là où il n'y avait qu'un désaccord d'affichage.
+class CodeAppareil {
+  const CodeAppareil({required this.deviceId, required this.code});
+  final int deviceId;
+  final String code;
+}
+
 class EcranVerification extends StatelessWidget {
   const EcranVerification({
     super.key,
-    required this.code,
+    required this.codes,
     required this.nomPair,
     required this.verifie,
     required this.onBasculer,
     this.onScanner,
   });
 
-  final String code;
+  final List<CodeAppareil> codes;
   final String nomPair;
   final bool verifie;
   final VoidCallback onBasculer;
   final VoidCallback? onScanner;
 
-  /// Les six groupes de cinq chiffres.
+  /// Les douze groupes de cinq chiffres.
   ///
   /// ⚠️ GROUPÉS POUR ÊTRE LUS À VOIX HAUTE. Soixante chiffres d'affilée ne se
   /// dictent pas : on perd sa place, on recommence, et on finit par renoncer à
   /// vérifier — ce qui est exactement le résultat qu'on cherche à éviter.
-  List<String> get _groupes =>
+  static List<String> _groupesDe(String code) =>
       List.generate(12, (i) => code.substring(i * 5, i * 5 + 5));
 
   @override
@@ -206,30 +343,50 @@ class EcranVerification extends StatelessWidget {
             style: TextStyle(fontSize: 12, color: Color(0xFF8A8A90)),
           ),
           const SizedBox(height: 18),
-          Wrap(
-            alignment: WrapAlignment.center,
-            spacing: 10,
-            runSpacing: 6,
-            children: _groupes
-                .map((g) => Text(g,
-                    style: const TextStyle(
-                        fontFamily: 'monospace', fontSize: 17, letterSpacing: 1)))
-                .toList(),
-          ),
-          const SizedBox(height: 22),
-          Center(
-            /*
-             * 🔴 LE QR ENCODE LE CODE LUI-MÊME. Deux formats — l'un pour l'œil,
-             * l'autre pour la caméra — pourraient DIVERGER, et le défaut ne se
-             * verrait qu'au moment où quelqu'un s'inquiète vraiment.
-             */
-            child: QrImageView(
-              data: E2eeService.qrDepuisCode(code),
-              size: 190,
-              // ⚠️ FOND BLANC IMPOSÉ : un QR sur fond sombre ne se scanne pas.
-              backgroundColor: Colors.white,
+          /*
+           * ⚠️ CHAQUE APPAREIL EST NOMMÉ. Sans son numéro, deux codes à la suite
+           * ne se distinguent pas — et la personne en face ne saurait pas
+           * lequel des siens elle doit lire.
+           */
+          for (final c in codes) ...[
+            if (codes.length > 1) ...[
+              Text(
+                'Appareil n° ${c.deviceId}',
+                style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF8A8A90)),
+              ),
+              const SizedBox(height: 8),
+            ],
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 10,
+              runSpacing: 6,
+              children: _groupesDe(c.code)
+                  .map((g) => Text(g,
+                      style: const TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 17,
+                          letterSpacing: 1)))
+                  .toList(),
             ),
-          ),
+            const SizedBox(height: 16),
+            Center(
+              /*
+               * 🔴 LE QR ENCODE LE CODE LUI-MÊME. Deux formats — l'un pour l'œil,
+               * l'autre pour la caméra — pourraient DIVERGER, et le défaut ne se
+               * verrait qu'au moment où quelqu'un s'inquiète vraiment.
+               */
+              child: QrImageView(
+                data: E2eeService.qrDepuisCode(c.code),
+                size: 190,
+                // ⚠️ FOND BLANC IMPOSÉ : un QR sur fond sombre ne se scanne pas.
+                backgroundColor: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 22),
+          ],
           if (onScanner != null) ...[
             const SizedBox(height: 14),
             Center(

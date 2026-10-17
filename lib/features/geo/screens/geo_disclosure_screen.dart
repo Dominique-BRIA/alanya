@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/geo_service.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Écran de divulgation du suivi de position.
 ///
@@ -65,15 +66,14 @@ class _GeoDisclosureScreenState extends State<GeoDisclosureScreen> {
                 ),
               ),
               const SizedBox(height: 24),
-              const Text(
-                "Suivi de votre position",
+              Text(
+                tr(context, 'geo_tracking_title'),
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 16),
               Text(
-                "Votre compte est rattaché à une entreprise. Dans le cadre du "
-                "suivi de son activité, Alanya Work enregistre votre position.",
+                tr(context, 'geo_disclosure_body'),
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 14, color: muted),
               ),
@@ -82,36 +82,28 @@ class _GeoDisclosureScreenState extends State<GeoDisclosureScreen> {
               _point(
                 context,
                 Icons.schedule,
-                "Toutes les 5 minutes",
-                "Un relevé est enregistré. Si vous n'avez pas changé d'endroit, "
-                    "aucune nouvelle ligne n'est créée : seule la durée de votre "
-                    "présence est prolongée.",
+                tr(context, 'geo_every_5min'),
+                tr(context, 'geo_5min_detail'),
               ),
               // Mention EXPLICITE de l'arrière-plan : c'est celle que Google
               // vérifie, et celle qui manque le plus souvent.
               _point(
                 context,
                 Icons.phonelink_lock,
-                "Y compris application fermée",
-                "La collecte continue lorsque l'application est en arrière-plan "
-                    "ou fermée. Une notification permanente vous le rappelle "
-                    "tant qu'elle est active.",
+                tr(context, 'geo_background_title'),
+                tr(context, 'geo_background_detail'),
               ),
               _point(
                 context,
                 Icons.business_center_outlined,
-                "Visible par votre entreprise",
-                "Ces relevés sont destinés à l'entreprise à laquelle votre "
-                    "compte est rattaché. Ils ne sont partagés avec personne "
-                    "d'autre.",
+                tr(context, 'geo_company_title'),
+                tr(context, 'geo_company_detail'),
               ),
               _point(
                 context,
                 Icons.do_not_disturb_on_outlined,
-                "Vous pouvez refuser",
-                "L'application reste entièrement utilisable : messages, appels "
-                    "et réunions fonctionnent à l'identique. Votre entreprise "
-                    "sera informée que le suivi n'est pas actif.",
+                tr(context, 'geo_refuse_title'),
+                tr(context, 'geo_refuse_detail'),
               ),
 
               const SizedBox(height: 28),
@@ -119,7 +111,7 @@ class _GeoDisclosureScreenState extends State<GeoDisclosureScreen> {
                 height: 52,
                 child: ElevatedButton(
                   onPressed: _enCours ? null : () => _repondre(true),
-                  child: Text(_enCours ? "Un instant…" : "J'accepte le suivi"),
+                  child: Text(_enCours ? tr(context, 'one_moment') : tr(context, 'geo_accept_tracking')),
                 ),
               ),
               const SizedBox(height: 10),
@@ -127,7 +119,7 @@ class _GeoDisclosureScreenState extends State<GeoDisclosureScreen> {
                 height: 48,
                 child: TextButton(
                   onPressed: _enCours ? null : () => _repondre(false),
-                  child: const Text("Refuser"),
+                  child: Text(tr(context, 'decline')),
                 ),
               ),
             ],

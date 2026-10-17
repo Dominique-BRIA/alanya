@@ -1,3 +1,5 @@
+import '../core/alanya_id_formatter.dart';
+
 /// Résultat d'une recherche d'utilisateur par numéro public.
 class UserSearchResult {
   final String id;
@@ -50,7 +52,20 @@ class Contact {
     this.lastSeen,
   });
 
-  String get displayName => alias ?? pseudo ?? publicNumber;
+  /// Ce qu'on montre pour désigner ce contact.
+  ///
+  /// 🔴 LE REPLI EST FORMATÉ (18/08/2026). Il rendait `publicNumber` BRUT, si
+  /// bien que tout écran listant des personnes affichait un numéro collé dès
+  /// qu'elles n'avaient pas de pseudo — signalé par le user sur le transfert
+  /// d'appel et l'ajout d'une personne à un appel, mais le défaut touchait tous
+  /// les écrans à la fois, parce que le repli se décide ICI et non chez eux.
+  ///
+  /// ⚠️ Formater ce getter est sûr, vérifié avant de le faire :
+  ///  - les trois écrans qui CHERCHENT dessus testent aussi `publicNumber`
+  ///    brut, donc taper « 123456 » trouve toujours ;
+  ///  - le `displayName` qui part sur le WebSocket ne vient PAS d'ici mais
+  ///    d'`AuthUser` (`home_screen.dart`), le protocole n'est donc pas touché.
+  String get displayName => alias ?? pseudo ?? formatAlanyaId(publicNumber);
   bool get online => isOnline == 1;
 
   String get onlineStatus {
@@ -74,7 +89,9 @@ class Contact {
       pseudo: user["pseudo"] as String?,
       avatarUrl: user["avatarUrl"] as String?,
       isOnline: (user["isOnline"] as num?)?.toInt() ?? 0,
-      lastSeen: user["lastSeen"] != null ? DateTime.tryParse(user["lastSeen"] as String) : null,
+      lastSeen: user["lastSeen"] != null
+          ? DateTime.tryParse(user["lastSeen"] as String)
+          : null,
     );
   }
 }

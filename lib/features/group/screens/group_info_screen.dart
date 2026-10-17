@@ -4,14 +4,24 @@ import '../../media/media_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/alanya_id_formatter.dart';
 import '../../../core/api_client.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
 import '../../../widgets/back_app_bar.dart';
+import '../../../widgets/glass_card.dart';
+import '../../../widgets/media/cached_media.dart';
+import '../../chat/medias_partages.dart';
+import '../../chat/screens/media_gallery_viewer.dart';
+import '../../chat/screens/shared_content_screen.dart';
+import '../../chat/widgets/bulle_media_chiffre.dart';
 import '../../auth/auth_controller.dart';
 import '../../chat/chat_repository.dart';
 import '../../../widgets/contact_picker_sheet.dart';
 import '../../chat/screens/chat_screen.dart';
+import '../../../l10n/app_localizations.dart';
+import '../../../services/e2ee/e2ee_fournisseur.dart';
+import '../../contacts/verification_cle.dart';
 
 /// Écran d'infos d'un groupe — style WhatsApp.
 ///
@@ -46,6 +56,131 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     _title = widget.title;
     _avatarUrl = widget.avatarUrl;
     _refreshMembers();
+    _lireEtatChiffrement();
+    _chargerMedias();
+  }
+
+  /* ══════════════ LES MÉDIAS DU GROUPE (carte « Médias, liens et docs ») ══════════════ */
+
+  /// Les photos et vidéos du fil, en clair ou chiffrées — le même chargement
+  /// que la fiche contact (`medias_partages.dart`). `null` tant qu'il tourne.
+  List<ConvMediaItem>? _medias;
+  String _baseUrl = '';
+  String? _token;
+
+  Future<void> _chargerMedias() async {
+    _baseUrl = context.read<ApiClient>().baseUrl;
+    // Le cache local d'abord : la carte se remplit sans attendre le réseau.
+    try {
+      final local = await filPourMediasEnCache(context, widget.convId);
+      if (mounted && _medias == null) {
+        setState(() {
+          _token = local.token;
+          _medias = mediasGalerie(local.messages,
+              baseUrl: _baseUrl, token: local.token, chiffreDe: local.chiffreDe);
+        });
+      }
+    } catch (_) {}
+    if (!mounted) return;
+    try {
+      final fil = await chargerFilPourMedias(context, widget.convId);
+      if (!mounted) return;
+      setState(() {
+        _token = fil.token;
+        _medias = mediasGalerie(fil.messages,
+            baseUrl: _baseUrl, token: fil.token, chiffreDe: fil.chiffreDe);
+      });
+    } catch (_) {
+      // Hors ligne : on garde ce que le cache a donné.
+      if (mounted && _medias == null) setState(() => _medias = const []);
+    }
+  }
+
+  /* ══════════════ LE CHIFFREMENT DU GROUPE (lot 5, chapitre 35) ══════════════ */
+
+  /// Ce groupe est-il chiffré ? `null` tant qu'on ne sait pas.
+  bool? _chiffre;
+  bool _chiffrementEnCours = false;
+
+  Future<void> _lireEtatChiffrement() async {
+    final pile = context.e2ee;
+    if (pile == null) return;
+    try {
+      final actif = await pile.fil.etat(widget.convId);
+      if (mounted) setState(() => _chiffre = actif);
+    } catch (_) {}
+  }
+
+  void _dire(String texte) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(texte)));
+  }
+
+  /// ACTIVER : le serveur réserve la version 1, CE téléphone tire la clé et la
+  /// distribue à chaque appareil de chaque membre.
+  Future<void> _activerChiffrement() async {
+    final pile = context.e2ee;
+    if (pile == null || _chiffrementEnCours) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Chiffrer ce groupe ?'),
+        content: const Text(
+            "Les messages suivants seront chiffrés de bout en bout pour tous les membres. "
+            "Le chiffrement ne se retire pas."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr(context, 'cancel'))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Chiffrer')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => _chiffrementEnCours = true);
+    try {
+      final r = await pile.fil.groupe.activer(widget.convId);
+      pile.fil.noteEtat(widget.convId, true);
+      if (mounted) setState(() => _chiffre = true);
+      final sans = r.bilan?.sansAppareil.length ?? 0;
+      _dire(sans == 0
+          ? 'Groupe chiffré de bout en bout.'
+          : 'Groupe chiffré. $sans membre(s) sans appareil à jour ne lisent pas encore.');
+    } on ApiException catch (e) {
+      _dire(e.message);
+    } catch (_) {
+      _dire("Le chiffrement n'a pas pu être activé.");
+    } finally {
+      if (mounted) setState(() => _chiffrementEnCours = false);
+    }
+  }
+
+  /// CHANGER LA CLÉ : une nouvelle version, envoyée aux membres actuels — pour
+  /// une clé qu'on soupçonne volée, ou une distribution manquée.
+  Future<void> _changerCle() async {
+    final pile = context.e2ee;
+    if (pile == null || _chiffrementEnCours) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Changer la clé du groupe'),
+        content: const Text(
+            'Une nouvelle clé est créée et envoyée aux membres actuels. '
+            'Les anciens messages restent lisibles.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr(context, 'cancel'))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Changer')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => _chiffrementEnCours = true);
+    try {
+      await pile.fil.groupe.changerCle(widget.convId, 'MANUEL');
+      _dire('Clé du groupe changée.');
+    } catch (_) {
+      _dire("La clé n'a pas pu être changée.");
+    } finally {
+      if (mounted) setState(() => _chiffrementEnCours = false);
+    }
   }
 
   String get _myId => context.read<AuthController>().user?.id ?? '';
@@ -75,7 +210,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   Future<void> _editName() async {
     if (!_amAdmin) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Seul un admin peut modifier le nom du groupe")),
+        SnackBar(content: Text(tr(context, 'grp_admin_only_name'))),
       );
       return;
     }
@@ -83,17 +218,17 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     final newName = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("Nom du groupe"),
+        title: Text(tr(ctx, 'grp_name_label')),
         content: TextField(
           controller: ctrl,
-          decoration: const InputDecoration(hintText: "Entrez le nom du groupe"),
+          decoration: InputDecoration(hintText: tr(ctx, 'grp_name_hint')),
           autofocus: true,
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Annuler")),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr(context, 'cancel'))),
           TextButton(
               onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-              child: const Text("Enregistrer")),
+              child: Text(tr(ctx, 'save'))),
         ],
       ),
     );
@@ -103,13 +238,13 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
         setState(() => _title = newName);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Nom du groupe mis à jour")),
+            SnackBar(content: Text(tr(context, 'grp_name_updated'))),
           );
         }
       } catch (_) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Erreur lors de la mise à jour")),
+            SnackBar(content: Text(tr(context, 'grp_update_failed'))),
           );
         }
       }
@@ -121,7 +256,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   Future<void> _editAvatar() async {
     if (!_amAdmin) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Seul un admin peut modifier l'avatar du groupe")),
+        SnackBar(content: Text(tr(context, 'grp_admin_only_avatar'))),
       );
       return;
     }
@@ -135,7 +270,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Impossible d'ouvrir la galerie")),
+          SnackBar(content: Text(tr(context, 'gallery_open_failed'))),
         );
       }
       return;
@@ -149,7 +284,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     if (bytes.length > 5 * 1024 * 1024) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Image trop lourde (max 5 Mo)")),
+          SnackBar(content: Text(tr(context, 'image_too_large'))),
         );
       }
       return;
@@ -164,13 +299,13 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
       setState(() => _avatarUrl = uploaded.url);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Photo du groupe mise à jour")),
+          SnackBar(content: Text(tr(context, 'grp_avatar_updated'))),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Erreur lors de la mise à jour de l'avatar: $e")),
+          SnackBar(content: Text(tr(context, 'grp_avatar_failed'))),
         );
       }
     }
@@ -197,7 +332,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   Future<void> _addMembers() async {
     if (!_amAdmin) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Seul un admin peut ajouter des membres")),
+        SnackBar(content: Text(tr(context, 'grp_admin_only_add'))),
       );
       return;
     }
@@ -207,22 +342,35 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
         .toList();
     final result = await ContactPickerSheet.show(
       context,
-      title: "Ajouter des membres",
-      confirmLabel: "Ajouter",
+      title: tr(context, 'grp_add_members'),
+      confirmLabel: tr(context, 'add'),
       excludeNumbers: existingNumbers,
     );
     if (result != null && result.isNotEmpty) {
       try {
+        final pile = context.e2ee;
         await context.read<ChatRepository>().addMembersToGroup(widget.convId, result);
+        /*
+         * 🔴 GROUPE CHIFFRÉ : sans le trousseau, le nouveau membre verrait un
+         * groupe muet. L'ajout est fait quoi qu'il arrive ensuite ; un échec du
+         * partage est dit, et « Clé » le rattrape.
+         */
+        if (_chiffre == true && pile != null) {
+          try {
+            await pile.fil.groupe.partagerApresAjout(widget.convId, result);
+          } catch (_) {
+            _dire("Membre ajouté, mais la clé du groupe n'a pas pu lui être envoyée.");
+          }
+        }
         await _refreshMembers();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("${result.length} membre(s) ajouté(s)")),
+            SnackBar(content: Text(trN(context, 'grp_members_added', result.length))),
           );
         }
       } catch (e) {
         if (mounted) {
-          final msg = (e is ApiException) ? e.message : "Erreur lors de l'ajout";
+          final msg = (e is ApiException) ? e.message : tr(context, 'grp_add_failed');
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
         }
       }
@@ -232,30 +380,43 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   // ===================== RETIRER UN MEMBRE =====================
 
   Future<void> _removeMember(Map<String, dynamic> member) async {
-    final name = member['pseudo'] ?? member['publicNumber'] ?? 'Membre';
+    final name = member['pseudo'] ?? member['publicNumber'] ?? tr(context, 'grp_member');
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text("Retirer $name ?"),
-        content: Text("$name sera retiré du groupe."),
+        title: Text(tr(context, 'grp_remove_q', {'nom': name})),
+        content: Text(tr(context, 'grp_remove_body', {'nom': name})),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Annuler")),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr(context, 'cancel'))),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: Text("Retirer", style: TextStyle(color: dangerOf(context)))),
+              child: Text(tr(context, 'remove'), style: TextStyle(color: dangerOf(context)))),
         ],
       ),
     );
     if (ok == true) {
       try {
+        final pile = context.e2ee;
         await context.read<ChatRepository>().removeMemberFromGroup(
               widget.convId,
               member['id'] as String,
             );
+        /*
+         * 🔴 EXCLUSION D'UN GROUPE CHIFFRÉ (décision du user) : l'exclu connaît
+         * la clé actuelle. Une nouvelle version, envoyée aux membres restants,
+         * rend illisible ce qui s'écrira ensuite.
+         */
+        if (_chiffre == true && pile != null) {
+          try {
+            await pile.fil.groupe.changerCle(widget.convId, 'EXCLUSION');
+          } catch (_) {
+            _dire("Membre retiré, mais la clé n'a pas pu être changée : utilisez « Clé ».");
+          }
+        }
         await _refreshMembers();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("$name retiré du groupe")),
+            SnackBar(content: Text(tr(context, 'grp_member_removed', {'nom': name}))),
           );
         }
       } catch (e) {
@@ -268,7 +429,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   }
 
   Future<void> _changeMemberRole(Map<String, dynamic> member, String role) async {
-    final name = member['pseudo'] ?? member['publicNumber'] ?? 'Membre';
+    final name = member['pseudo'] ?? member['publicNumber'] ?? tr(context, 'grp_member');
     try {
       await context
           .read<ChatRepository>()
@@ -298,14 +459,14 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text("Quitter le groupe ?"),
-        content: const Text(
-            "Vous ne recevrez plus de messages de ce groupe. Vous pouvez être réinvité plus tard."),
+        title: Text(tr(context, 'grp_leave_q')),
+        content: Text(
+            tr(context, 'grp_leave_body')),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Annuler")),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr(context, 'cancel'))),
           TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: Text("Quitter", style: TextStyle(color: dangerOf(context)))),
+              child: Text(tr(context, 'leave_action'), style: TextStyle(color: dangerOf(context)))),
         ],
       ),
     );
@@ -315,13 +476,13 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
         if (mounted) {
           Navigator.of(context).pop(); // retour à la liste
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Vous avez quitté le groupe")),
+            SnackBar(content: Text(tr(context, 'grp_left'))),
           );
         }
       } catch (_) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Erreur lors de la sortie")),
+            SnackBar(content: Text(tr(context, 'grp_leave_failed'))),
           );
         }
       }
@@ -332,7 +493,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
 
   Future<void> _sendMessageTo(Map<String, dynamic> member) async {
     final targetId = member['id'] as String;
-    final name = member['pseudo'] ?? member['publicNumber'] ?? 'Membre';
+    final name = member['pseudo'] ?? member['publicNumber'] ?? tr(context, 'grp_member');
     final avatarUrl = member['avatarUrl'] as String?;
 
     try {
@@ -353,185 +514,340 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Impossible d'ouvrir la conversation")),
+          SnackBar(content: Text(tr(context, 'chat_open_failed'))),
         );
       }
     }
   }
 
   // ===================== BUILD =====================
+  //
+  // Des cartes arrondies sur fond uni, dans l'ordre de l'écran de Chris
+  // (demande du user, 10/10/2026) : en-tête, médias, membres, chiffrement,
+  // quitter.
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Scaffold(
+      backgroundColor:
+          themed(context, light: AlanyaColors.grey100, dark: surfacesOf(context).fond),
       appBar: backAppBar(context, "Infos du groupe"),
       body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
         children: [
-          // ====== EN-TÊTE : AVATAR + NOM ======
-          Container(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              children: [
-                GestureDetector(
-                  onTap: _amAdmin ? _editAvatar : null,
-                  child: Stack(
-                    children: [
-                      AvatarCircle(
-                        name: _title,
-                        avatarUrl: _avatarUrl,
-                        radius: 40,
-                        backgroundColor: positiveOf(context),
-                      ),
-                      if (_amAdmin)
-                        Positioned(
-                          bottom: 0,
-                          right: 0,
-                          child: Container(
-                            padding: const EdgeInsets.all(6),
-                            decoration: BoxDecoration(
-                              color: accentOf(context),
-                              shape: BoxShape.circle,
-                              border: Border.all(color: themed(context, light: Colors.white, dark: surfacesOf(context).fond), width: 2),
-                            ),
-                            child: const Icon(Icons.camera_alt, size: 16, color: Colors.white),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Flexible(
-                      child: Text(_title,
-                          style: const TextStyle(
-                              fontSize: 22, fontWeight: FontWeight.bold)),
-                    ),
-                    if (_amAdmin)
-                      IconButton(
-                        icon: Icon(Icons.edit, size: 20, color: mutedOf(context, AlanyaColors.grey500)),
-                        onPressed: _editName,
-                      ),
-                  ],
-                ),
-                Text("${_members.length} membres",
-                    style: TextStyle(color: mutedOf(context, AlanyaColors.grey500))),
-              ],
+          _carteEnTete(cs),
+          const SizedBox(height: 14),
+          _carteMedias(cs),
+          const SizedBox(height: 14),
+          _carteMembres(cs),
+          if (_chiffre != null) ...[
+            const SizedBox(height: 14),
+            _carteChiffrement(cs),
+          ],
+          const SizedBox(height: 14),
+          GlassCard(
+            radius: 22,
+            child: ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
+              leading: Icon(Icons.logout_rounded, color: dangerOf(context)),
+              title: Text(tr(context, 'grp_leave_action'),
+                  style: TextStyle(
+                      color: dangerOf(context), fontWeight: FontWeight.w600, fontSize: 16)),
+              onTap: _leaveGroup,
             ),
           ),
-
-          // ====== ACTIONS ======
-          Container(
-            margin: const EdgeInsets.symmetric(horizontal: 16),
-            decoration: BoxDecoration(
-              color: themed(context, light: Colors.white, dark: surfacesOf(context).surface),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: themed(context, light: AlanyaColors.grey200, dark: AlanyaColors.ligne), width: 0.5),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                _actionButton(Icons.person_add, "Ajouter", _addMembers),
-                _actionButton(Icons.exit_to_app, "Quitter", _leaveGroup,
-                    color: dangerOf(context)),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // ====== LISTE DES MEMBRES ======
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text("Membres",
-                style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: mutedOf(context, AlanyaColors.grey500))),
-          ),
-          const SizedBox(height: 8),
-
-          ..._members.map((m) {
-            final isMe = m['id'] == _myId;
-            final name = m['pseudo'] ?? m['publicNumber'] ?? 'Membre';
-            final online = (m['isOnline'] as int?) == 1;
-            final isAdmin = (m['role'] as String?) == 'ADMIN';
-
-            return ListTile(
-              leading: AvatarCircle(
-                name: name,
-                avatarUrl: m['avatarUrl'] as String?,
-                radius: 20,
-                backgroundColor: isMe ? accentOf(context) : AlanyaColors.gold,
-              ),
-              title: Row(
-                children: [
-                  Expanded(
-                    child: Text(name,
-                        style: const TextStyle(fontWeight: FontWeight.w500)),
-                  ),
-                  if (isAdmin)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: accentOf(context).withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text("Admin",
-                          style: TextStyle(
-                              fontSize: 10,
-                              color: accentOf(context),
-                              fontWeight: FontWeight.w600)),
-                    ),
-                ],
-              ),
-              subtitle: Text(
-                online
-                    ? "en ligne"
-                    : (m['publicNumber'] as String? ?? ''),
-                style: TextStyle(
-                    fontSize: 12,
-                    color: online ? positiveOf(context) : mutedOf(context, AlanyaColors.grey500)),
-              ),
-              trailing: (!isMe)
-                  ? IconButton(
-                      icon: const Icon(Icons.more_vert, size: 20),
-                      onPressed: () => _showMemberOptions(m),
-                    )
-                  : null,
-            );
-          }),
-          const SizedBox(height: 32),
         ],
       ),
     );
   }
 
-  Widget _actionButton(IconData icon, String label, VoidCallback onTap,
-      {Color? color}) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        child: Column(
-          children: [
-            Icon(icon, color: color ?? positiveOf(context), size: 24),
-            const SizedBox(height: 4),
-            Text(label,
-                style: TextStyle(
-                    fontSize: 12,
-                    color: color ?? positiveOf(context),
-                    fontWeight: FontWeight.w500)),
+  /// Avatar (appareil photo pour l'admin), nom (crayon pour l'admin), compte.
+  Widget _carteEnTete(ColorScheme cs) {
+    return GlassCard(
+      radius: 22,
+      padding: const EdgeInsets.fromLTRB(16, 26, 16, 22),
+      child: Column(
+        children: [
+          GestureDetector(
+            onTap: _amAdmin ? _editAvatar : null,
+            child: Stack(
+              children: [
+                AvatarCircle(
+                  name: _title,
+                  avatarUrl: _avatarUrl,
+                  radius: 56,
+                  backgroundColor: positiveOf(context),
+                ),
+                if (_amAdmin)
+                  Positioned(
+                    bottom: 0,
+                    right: 0,
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: accentOf(context),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: cs.surface, width: 3),
+                      ),
+                      child: const Icon(Icons.camera_alt, size: 18, color: Colors.white),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Flexible(
+                child: Text(_title,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                        fontSize: 23, fontWeight: FontWeight.w700, color: cs.onSurface)),
+              ),
+              if (_amAdmin)
+                IconButton(
+                  icon: Icon(Icons.edit_outlined, size: 22, color: accentOf(context)),
+                  onPressed: _editName,
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text('Groupe • ${trN(context, 'grp_members', _members.length)}',
+              style: TextStyle(fontSize: 14, color: cs.onSurfaceVariant)),
+          if (_chiffre == true) ...[
+            const SizedBox(height: 10),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.lock_rounded, size: 14, color: positiveOf(context)),
+                const SizedBox(width: 5),
+                Text('Chiffré de bout en bout',
+                    style: TextStyle(
+                        fontSize: 12.5,
+                        color: positiveOf(context),
+                        fontWeight: FontWeight.w500)),
+              ],
+            ),
           ],
-        ),
+        ],
+      ),
+    );
+  }
+
+  Widget _carteMedias(ColorScheme cs) {
+    final recents = (_medias ?? const <ConvMediaItem>[]).take(8).toList();
+    void voirTout() => Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => SharedContentScreen(convId: widget.convId, title: _title)));
+    return GlassCard(
+      radius: 22,
+      padding: const EdgeInsets.fromLTRB(18, 10, 6, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text('Médias, liens et docs',
+                    style: TextStyle(
+                        fontWeight: FontWeight.w600, fontSize: 16, color: cs.onSurface)),
+              ),
+              TextButton(
+                onPressed: voirTout,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(tr(context, 'view_all'),
+                        style: TextStyle(
+                            color: accentOf(context), fontWeight: FontWeight.w600)),
+                    Icon(Icons.chevron_right_rounded, size: 20, color: accentOf(context)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (_medias == null)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 18),
+              child: Center(
+                  child: SizedBox(
+                      width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
+            )
+          else if (recents.isEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(0, 14, 12, 10),
+              child: Center(
+                child: Text(tr(context, 'no_shared_media'),
+                    style: TextStyle(color: cs.onSurfaceVariant, fontSize: 14)),
+              ),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.only(top: 6, right: 12),
+              child: SizedBox(
+                height: 76,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: recents.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                  itemBuilder: (_, i) {
+                    final it = recents[i];
+                    final d = it.chiffre;
+                    void ouvrir() => Navigator.of(context).push(MaterialPageRoute(
+                        builder: (_) => MediaGalleryViewer(items: _medias!, initialIndex: i)));
+                    return ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: SizedBox(
+                        width: 76,
+                        height: 76,
+                        child: d != null
+                            ? TuileMediaChiffre(
+                                descripteur: d, baseUrl: _baseUrl, token: _token, onOuvrir: ouvrir)
+                            : GestureDetector(
+                                onTap: ouvrir,
+                                child: it.isVideo
+                                    ? const ColoredBox(
+                                        color: Color(0xFF1A1A2E),
+                                        child: Icon(Icons.play_circle_fill_rounded,
+                                            color: Colors.white70, size: 30),
+                                      )
+                                    : CachedMedia(
+                                        url: it.url, width: 76, height: 76, fit: BoxFit.cover),
+                              ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Les membres : les administrateurs d'abord, puis l'ordre alphabétique ;
+  /// « Vous » à sa place. Toucher un membre ouvre ses actions.
+  Widget _carteMembres(ColorScheme cs) {
+    String nomDe(Map<String, dynamic> m) =>
+        '${m['pseudo'] ?? m['publicNumber'] ?? tr(context, 'grp_member')}';
+    final tries = [..._members]..sort((a, b) {
+        final adminA = (a['role'] as String?) == 'ADMIN' ? 0 : 1;
+        final adminB = (b['role'] as String?) == 'ADMIN' ? 0 : 1;
+        if (adminA != adminB) return adminA - adminB;
+        return nomDe(a).toLowerCase().compareTo(nomDe(b).toLowerCase());
+      });
+    return GlassCard(
+      radius: 22,
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 6, 18, 6),
+            child: Text(trN(context, 'grp_members', _members.length),
+                style: TextStyle(
+                    fontWeight: FontWeight.w600, fontSize: 16, color: cs.onSurface)),
+          ),
+          if (_amAdmin)
+            ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 18),
+              leading: CircleAvatar(
+                radius: 22,
+                backgroundColor: accentOf(context).withValues(alpha: 0.12),
+                child: Icon(Icons.person_add_alt_1_rounded, color: accentOf(context)),
+              ),
+              title: Text('Ajouter des participants',
+                  style: TextStyle(
+                      color: accentOf(context), fontWeight: FontWeight.w600, fontSize: 15.5)),
+              onTap: _addMembers,
+            ),
+          ...tries.map((m) => _ligneMembre(m, nomDe(m), cs)),
+        ],
+      ),
+    );
+  }
+
+  Widget _ligneMembre(Map<String, dynamic> m, String name, ColorScheme cs) {
+    final isMe = m['id'] == _myId;
+    final online = (m['isOnline'] as int?) == 1;
+    final isAdmin = (m['role'] as String?) == 'ADMIN';
+    final numero = (m['publicNumber'] as String?) ?? '';
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 18),
+      leading: AvatarCircle(
+        name: name,
+        avatarUrl: m['avatarUrl'] as String?,
+        radius: 22,
+        backgroundColor: isMe ? accentOf(context) : AlanyaColors.gold,
+      ),
+      title: Row(
+        children: [
+          Flexible(
+            child: Text(isMe ? 'Vous' : name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontWeight: FontWeight.w500, color: cs.onSurface)),
+          ),
+          if (isAdmin) ...[
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+              decoration: BoxDecoration(
+                color: accentOf(context).withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(tr(context, 'grp_admin'),
+                  style: TextStyle(
+                      fontSize: 11, color: accentOf(context), fontWeight: FontWeight.w600)),
+            ),
+          ],
+        ],
+      ),
+      subtitle: online
+          ? Text("en ligne", style: TextStyle(fontSize: 12, color: positiveOf(context)))
+          : (numero.isEmpty
+              ? null
+              : Text('Alanya ID : ${formatAlanyaId(numero)}',
+                  style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant))),
+      trailing: Icon(Icons.chevron_right_rounded, color: cs.onSurfaceVariant),
+      onTap: () => _showMemberOptions(m),
+    );
+  }
+
+  /// Le chiffrement : l'état pour tous, l'action pour l'administrateur
+  /// (chiffrer, puis changer la clé).
+  Widget _carteChiffrement(ColorScheme cs) {
+    final chiffre = _chiffre == true;
+    final String detail;
+    if (chiffre) {
+      detail = _amAdmin
+          ? 'Toucher pour changer la clé du groupe'
+          : 'Les messages sont chiffrés pour les seuls membres';
+    } else {
+      detail = _amAdmin
+          ? 'Toucher pour chiffrer ce groupe'
+          : 'Seul un administrateur peut l’activer';
+    }
+    return GlassCard(
+      radius: 22,
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
+        leading: Icon(chiffre ? Icons.lock_rounded : Icons.lock_open_rounded,
+            color: chiffre ? positiveOf(context) : accentOf(context)),
+        title: Text(chiffre ? 'Chiffré de bout en bout' : 'Chiffrement de bout en bout',
+            style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w500, color: cs.onSurface)),
+        subtitle: Text(detail, style: TextStyle(fontSize: 12.5, color: cs.onSurfaceVariant)),
+        trailing: _chiffrementEnCours
+            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+            : (_amAdmin ? Icon(Icons.chevron_right_rounded, color: cs.onSurfaceVariant) : null),
+        onTap: !_amAdmin ? null : (chiffre ? _changerCle : _activerChiffrement),
       ),
     );
   }
 
   void _showMemberOptions(Map<String, dynamic> member) {
-    final name = member['pseudo'] ?? member['publicNumber'] ?? 'Membre';
+    final name = member['pseudo'] ?? member['publicNumber'] ?? tr(context, 'grp_member');
     final isMe = member['id'] == _myId;
 
     showModalBottomSheet(
@@ -553,18 +869,33 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
             if (!isMe) ...[
               ListTile(
                 leading: Icon(Icons.message, color: positiveOf(context)),
-                title: const Text("Envoyer un message"),
+                title: Text(tr(context, 'send_message_action')),
                 onTap: () {
                   Navigator.pop(ctx);
                   _sendMessageTo(member);
                 },
               ),
+              /*
+               * VÉRIFIER UN MEMBRE D'UN GROUPE CHIFFRÉ (lot 7) : le même écran
+               * qu'en tête-à-tête. C'est la parade contre un appareil glissé
+               * par le serveur dans le compte d'un membre (chapitre 31).
+               */
+              if (_chiffre == true)
+                ListTile(
+                  leading: Icon(Icons.verified_user_outlined, color: positiveOf(context)),
+                  title: Text(tr(context, 'e2ee_verifier_membre')),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    ouvrirVerificationCle(context,
+                        pairId: member['id'] as String, nomPair: '$name');
+                  },
+                ),
               if (_amAdmin) ...[
                 if ((member['role'] as String?) == 'ADMIN')
                   ListTile(
                     leading: Icon(Icons.remove_moderator_outlined,
                         color: themed(context, light: AlanyaColors.chocolate, dark: AlanyaColors.craie2)),
-                    title: const Text("Retirer le rôle admin"),
+                    title: Text(tr(context, 'remove_admin')),
                     onTap: () {
                       Navigator.pop(ctx);
                       _changeMemberRole(member, 'MEMBER');
@@ -574,7 +905,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                   ListTile(
                     leading: Icon(Icons.shield_outlined,
                         color: positiveOf(context)),
-                    title: const Text("Nommer administrateur"),
+                    title: Text(tr(context, 'make_admin')),
                     onTap: () {
                       Navigator.pop(ctx);
                       _changeMemberRole(member, 'ADMIN');
@@ -582,7 +913,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                   ),
                 ListTile(
                   leading: Icon(Icons.remove_circle_outline, color: dangerOf(context)),
-                  title: Text("Retirer du groupe",
+                  title: Text(tr(context, 'remove_from_group'),
                       style: TextStyle(color: dangerOf(context))),
                   onTap: () {
                     Navigator.pop(ctx);
@@ -594,7 +925,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
             if (isMe)
               ListTile(
                 leading: Icon(Icons.exit_to_app, color: dangerOf(context)),
-                title: Text("Quitter le groupe",
+                title: Text(tr(context, 'grp_leave_action'),
                     style: TextStyle(color: dangerOf(context))),
                 onTap: () {
                   Navigator.pop(ctx);

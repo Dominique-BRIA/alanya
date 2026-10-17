@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'restauration_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../l10n/app_localizations.dart';
@@ -10,6 +12,7 @@ import '../auth_repository.dart';
 import 'forgot_password_screen.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../core/alanya_id_formatter.dart';
+import '../../../core/erreur_lisible.dart';
 
 /// Connexion par email OU numéro public (6 ou 8 chiffres) + mot de passe.
 class LoginScreen extends StatefulWidget {
@@ -49,12 +52,34 @@ class _LoginScreenState extends State<LoginScreen> {
           );
       if (!mounted) return;
       await context.read<AuthController>().completeLogin(session);
+
+      /*
+       * 🔴 LE MOT DE PASSE EST DÉJÀ LÀ — l utilisateur vient de le taper. C est
+       * le seul moment du cycle de vie où ce secret existe sans qu on ait à le
+       * redemander, et c est ce qui permet d ouvrir la sauvegarde sans rien
+       * demander de plus.
+       *
+       * ⚠️ IL N EST GARDÉ NULLE PART : il traverse l écran de restauration et
+       * en sort.
+       *
+       * 🐛 LA RESTAURATION TOURNAIT EN FOND, SANS RIEN MONTRER, et ses échecs
+       * étaient avalés (user, 28/09/2026 : « un nouvel appareil ne charge pas
+       * l archive »). Elle passe désormais par un écran qui montre sa
+       * progression et dit ce qui ne va pas — avec « Continuer en
+       * arrière-plan », pour ne jamais bloquer l entrée.
+       */
       if (!mounted) return;
-      Navigator.of(context).popUntil((r) => r.isFirst);
+      // ⚠️ SANS ATTENDRE : ce futur ne se termine qu'à la fermeture de l'écran
+      // de restauration, bien après celle-ci.
+      unawaited(Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => RestaurationScreen(motDePasse: _passwordCtrl.text),
+        ),
+      ));
     } on ApiException catch (e) {
       showAppSnackBar(e.message);
-    } catch (_) {
-      showAppSnackBar(tr(context, 'server_unreachable'));
+    } catch (e) {
+      showAppSnackBar(messageDErreur(context, e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -176,7 +201,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       );
                     },
                     child: Text(
-                      "Mot de passe oublié ?",
+                      tr(context, 'forgot_password'),
                       style: TextStyle(color: accentOf(context)),
                     ),
                   ),

@@ -29,6 +29,15 @@ class LocaleController extends ChangeNotifier {
 
   static List<String> get supportedLocales => supported.map((e) => e.code).toList();
 
+  /// La langue choisie, lisible sans `BuildContext`.
+  ///
+  /// Le client HTTP la pose dans `Accept-Language` sur chaque requête : le
+  /// serveur écrit les courriels (code d'inscription, mot de passe oublié,
+  /// nouvelle adresse) dans cette langue. Le contrôleur est un `Provider`, que
+  /// `ApiClient` ne peut pas lire — d'où ce reflet, tenu à jour par [load] et
+  /// [setLocale].
+  static String codeCourant = 'fr';
+
   Locale _locale = const Locale('fr');
   Locale get locale => _locale;
   String get languageCode => _locale.languageCode;
@@ -38,6 +47,7 @@ class LocaleController extends ChangeNotifier {
     final code = prefs.getString(_prefsKey) ?? 'fr';
     if (supportedLocales.contains(code)) {
       _locale = Locale(code);
+      codeCourant = code;
       notifyListeners();
     }
   }
@@ -46,6 +56,7 @@ class LocaleController extends ChangeNotifier {
     if (!supportedLocales.contains(code)) return;
     if (_locale.languageCode == code) return;
     _locale = Locale(code);
+    codeCourant = code;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefsKey, code);

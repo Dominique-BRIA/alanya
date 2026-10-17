@@ -4,6 +4,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
 import '../models/conversation.dart';
+import '../models/badge_compte.dart';
 
 /// Cache local des conversations (offline-first).
 ///
@@ -115,5 +116,58 @@ class ConversationCache {
         'lastCall': c.lastCall?.toJson(),
         'unread': c.unread,
         'updatedAt': c.updatedAt.toIso8601String(),
+        /*
+         * ⚠️ CES TROIS DRAPEAUX MANQUAIENT, et ils portent tous un choix de
+         * l'utilisateur. Sans eux, l'affichage depuis le cache — le premier,
+         * celui qu'on voit au lancement — montrait une conversation épinglée
+         * en bas de liste et une sourdine éteinte, jusqu'à la réponse du
+         * serveur. Un réglage qui clignote se lit comme un réglage perdu.
+         */
+        'isPinned': c.isPinned,
+        'isArchived': c.isArchived,
+        'sourdine': c.sourdine,
+        // L’état chiffré : sans lui, l’affichage depuis le cache ne saurait pas
+        // qu’il faut chercher le dernier texte en local (fil chiffré).
+        'e2eeActif': c.e2eeActif,
+        // Fil avec le compte officiel : sans lui, l'écran ouvert depuis le
+        // cache proposerait une saisie que le serveur refuse.
+        'officiel': c.officiel,
+        // Le badge du serveur : sans lui, l'en-tête ouvert depuis le cache
+        // n'aurait pas de badge.
+        'badge': c.badge?.toJson(),
       };
+
+  /// Ce fil est-il avec le compte officiel « Alanya Work » ?
+  ///
+  /// Lu à l'ouverture de la discussion, qui s'ouvre par une vingtaine de
+  /// chemins (liste, appels, contacts, notification…) sans recevoir l'objet
+  /// `Conversation`. Un fil absent du cache rend `false` : le premier refus du
+  /// serveur (`COMPTE_OFFICIEL`) corrige alors l'écran.
+  static Future<bool> estOfficielle(String convId) async {
+    try {
+      final db = await _database();
+      final rows = await db.query('conversations',
+          columns: ['payload'], where: 'id = ?', whereArgs: [convId], limit: 1);
+      if (rows.isEmpty) return false;
+      final j = jsonDecode(rows.first['payload'] as String) as Map<String, dynamic>;
+      return (j['officiel'] as bool?) ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Le badge (décidé par le serveur) de l'interlocuteur de ce fil, s'il en a.
+  /// Lu à l'ouverture de la discussion, comme `estOfficielle`.
+  static Future<BadgeCompte?> badgeDe(String convId) async {
+    try {
+      final db = await _database();
+      final rows = await db.query('conversations',
+          columns: ['payload'], where: 'id = ?', whereArgs: [convId], limit: 1);
+      if (rows.isEmpty) return null;
+      final j = jsonDecode(rows.first['payload'] as String) as Map<String, dynamic>;
+      return BadgeCompte.fromJson(j['badge']);
+    } catch (_) {
+      return null;
+    }
+  }
 }

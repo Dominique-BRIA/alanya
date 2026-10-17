@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/downloader.dart';
+import '../../../core/telechargement_suivi.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../../widgets/media/bouton_telecharger.dart';
 import '../../../widgets/media/cached_media.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Visionneuse plein écran pour une image (style WhatsApp).
 /// - Pinch-to-zoom pour zoomer/dézoomer
@@ -37,16 +40,18 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
 
   Future<void> _download() async {
     setState(() => _downloading = true);
-    final path = await downloadOnly(widget.downloadUrl, widget.filename);
+    final path = await telechargerEnSuivant(
+        widget.downloadUrl, widget.filename,
+        idTransfert: "dl-image-${widget.filename}");
     setState(() => _downloading = false);
     if (!mounted) return;
     if (path != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Enregistré dans Alanya/ : ${widget.filename}'),
+          content: Text(tr(context, 'saved_to_alanya', {'nom': widget.filename})),
           backgroundColor: AlanyaColors.forest,
           action: SnackBarAction(
-            label: 'Ouvrir',
+            label: tr(context, 'open'),
             textColor: Colors.white,
             onPressed: () => openLocalFile(path),
           ),
@@ -54,8 +59,8 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Échec du téléchargement'),
+        SnackBar(
+          content: Text(tr(context, 'download_failed')),
           backgroundColor: Colors.red,
         ),
       );
@@ -73,14 +78,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
               foregroundColor: Colors.white,
               title: Text(widget.filename, style: const TextStyle(fontSize: 14)),
               actions: [
-                IconButton(
-                  icon: _downloading
-                      ? const SizedBox(
-                          width: 20, height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                      : const Icon(Icons.download),
-                  onPressed: _downloading ? null : _download,
-                ),
+                BoutonTelecharger(enCours: _downloading, onPressed: _download),
               ],
             )
           : null,
@@ -97,12 +95,12 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
               placeholder: const Center(
                 child: CircularProgressIndicator(color: Colors.white),
               ),
-              errorWidget: const Column(
+              errorWidget: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.broken_image, size: 64, color: Colors.white38),
-                  SizedBox(height: 12),
-                  Text('Image indisponible', style: TextStyle(color: Colors.white54)),
+                  const Icon(Icons.broken_image, size: 64, color: Colors.white38),
+                  const SizedBox(height: 12),
+                  Text(tr(context, 'image_unavailable'), style: const TextStyle(color: Colors.white54)),
                 ],
               ),
             ),
