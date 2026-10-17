@@ -57,13 +57,22 @@ import 'compression_image.dart' show NiveauQualite;
 /// demandé. C'est l'écart n° 2 ci-dessus.
 const int videoBordCourtMax = 720;
 
-/// Petit côté visé au niveau haut : du 1080p (web : `VIDEO_BORD_COURT_HAUTE`).
+/// Bord court visé au niveau haut : du 720p, et c'est aussi le plafond absolu.
 ///
-/// 🔴 POURQUOI 1080p ET NON « 720p AVEC PLUS DE DÉBIT ». À 720p, les pixels
-/// perdus sont perdus : aucun débit ne les ramène. Or la demande vient d'une
-/// vidéo de COURS — un tableau, des diapositives. Là, c'est la définition qui
-/// rend le texte lisible, pas le débit.
-const int videoBordCourtHaute = 1080;
+/// 🔴 IL VALAIT 1080 JUSQU'AU 17/10/2026. Le user l'a ramené à 720 (« le 1080 ne
+/// doit pas être là, on doit descendre à 720, que ce soit sur le web ou sur le
+/// mobile »), dans le sens de ce que demande le professeur : des fichiers plus
+/// légers. Plus aucune vidéo ne sort d'ici au-dessus de 720p.
+///
+/// ⚠️ CE CHANGEMENT A SUPPRIMÉ LA SEULE DIVERGENCE WEB/MOBILE QUI RESTAIT. Le
+/// niveau haut ré-encodait une source déjà en 1080p pour en baisser le débit ;
+/// `com.otaliastudios:transcoder`, lui, laisse la piste PASSER TELLE QUELLE
+/// quand la définition visée égale celle de la source — il ne produit alors
+/// aucun fichier, et la vidéo partait entière. Les deux clients rendaient donc
+/// des poids différents pour le même geste. Avec un plafond à 720, le cas
+/// n'existe plus : au-dessus on réduit pour de bon, en dessous on ne touche à
+/// rien.
+const int videoBordCourtHaute = 720;
 
 /// Le petit côté visé pour un niveau donné.
 int bordCourtVise(NiveauQualite niveau) =>
@@ -126,19 +135,11 @@ final int seuilDebit = debitPalier[720]! + margeSon;
 /// Ce fichier est-il déjà assez léger pour qu'on n'y touche pas ?
 bool dejaAssezLegere(double debit) => debit <= seuilDebit;
 
-/// Débit visé pour du 720p, en bits par seconde (web : `DEBIT_720P`).
-///
-/// 🔴 C'EST UN DÉBIT DE RÉFÉRENCE, PAS UN PLAFOND FIXE. Il vaut pour du 720p
-/// plein ; une image plus petite reçoit sa part, au prorata de sa surface (voir
-/// [debitPour]).
-///
-/// ⚠️ C'EST LE MÊME NOMBRE QUE `debitPalier[720]`, et il doit le rester : le
-/// banc `compression_video_test.dart` le vérifie. Dart ne sait pas lire une
-/// `const Map` dans un contexte constant, d'où la duplication.
-const int debit720p = 1200000;
-
-/// Plancher de débit : en dessous, l'image devient méconnaissable.
-const int debitPlancher = 400000;
+/* ⚠️ `debit720p`, `debitPlancher` ET `debitPour` ONT DISPARU (17/10/2026), comme
+ * `DEBIT_720P` côté web. Ils servaient au PRORATA DE SURFACE du niveau haut, qui
+ * n'a plus d'objet : ce niveau ne vise plus qu'une seule définition, 720p, donc
+ * un seul débit — celui de son palier. Un débit calculé au prorata n'avait de
+ * sens que face à un plafond variable. */
 
 /* ⚠️ DEUX RÈGLES ONT VÉCU ICI AVANT `seuilDebit` :
  *   · `debitDejaLeger` (jusqu'au 13/10/2026) — un seuil unique qui épargnait
@@ -235,15 +236,6 @@ int definitionAutreNiveauVideo(int court, NiveauQualite niveau) =>
         ? (palierVideo(court) ?? court)
         : math.min(court, videoBordCourtHaute);
 
-/// Le débit d'une image de [largeur] × [hauteur], au prorata du 720p.
-///
-/// Copie de la ligne du web : une vidéo plus petite que du 720p n'a pas besoin
-/// du débit d'un 720p.
-int debitPour(int largeur, int hauteur) {
-  final part = (debit720p * largeur * hauteur) / (1280 * 720);
-  return math.max(debitPlancher, part.round());
-}
-
 /// H.264 veut des dimensions paires.
 int _pair(num n) => math.max(2, 2 * (n / 2).round());
 
@@ -276,7 +268,22 @@ ConsigneVideo consignePour({
    */
   final int vise;
   if (niveau == NiveauQualite.haute) {
-    vise = math.min(court, videoBordCourtHaute);
+    /*
+     * ══════ LE NIVEAU HAUT : 720p AU PLUS, ET PAS D'ESCALIER ══════
+     *
+     * 🔴 RÈGLE DU USER, 17/10/2026, mot pour mot : « on doit descendre à 720 ;
+     * et si la vidéo est inférieure à 720 et qu'on clique sur meilleure
+     * qualité, alors ça ne compresse plus ».
+     *
+     * Le bouton ne promet donc pas « mieux que l'original » — on n'agrandit
+     * jamais — mais « mieux que la marche que l'escalier allait prendre ». Une
+     * vidéo filmée en 720p part en 360p au niveau normal ; ici elle part
+     * entière. Une vidéo de 1080p ou plus descend à 720p, et pas davantage.
+     */
+    if (court <= videoBordCourtHaute) {
+      return const ConsigneVideo.saut(RaisonSautVideo.dejaPetite);
+    }
+    vise = videoBordCourtHaute;
   } else {
     /*
      * ⚠️ LE DÉCLENCHEUR PASSE AVANT L'ESCALIER — voir [seuilDebit]. Un fichier
@@ -298,9 +305,13 @@ ConsigneVideo consignePour({
   final facteur = math.min(1.0, vise / court);
   final cibleLargeur = _pair(largeur * facteur);
   final cibleHauteur = _pair(hauteur * facteur);
-  final debitVise = niveau == NiveauQualite.haute
-      ? debitPour(cibleLargeur, cibleHauteur)
-      : debitPalier[vise]!;
+  /*
+   * ⚠️ UN SEUL DÉBIT POUR LES DEUX NIVEAUX, depuis que le niveau haut vise 720p
+   * lui aussi. Le prorata de surface qui vivait ici n'avait de sens que pour un
+   * plafond à 1080 : le niveau haut ne connaît plus qu'une seule définition,
+   * donc un seul débit, celui de son palier.
+   */
+  final debitVise = debitPalier[vise]!;
 
   /*
    * ⚠️ RIEN À GAGNER : ON S'ABSTIENT PLUTÔT QUE DE TRANSCODER POUR RIEN. Au

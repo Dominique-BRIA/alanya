@@ -131,9 +131,15 @@ void main() {
     expect(r.mimeType, 'video/mp4');
 
     // 3. Ce que l'écran d'envoi recevra.
-    expect(r.niveauSuperieurPossible, isTrue,
-        reason: 'le normal donne 720p, le haut rendrait 1080p');
-    expect(r.definitionAutreNiveau, 1080,
+    /*
+     * ⚠️ PAS DE BOUTON POUR UNE SOURCE AU-DESSUS DE 720p, depuis que le niveau
+     * haut plafonne lui aussi à 720 (17/10/2026) : les deux niveaux rendent
+     * exactement la même chose, et un bouton qui ne change rien ne doit pas
+     * paraître.
+     */
+    expect(r.niveauSuperieurPossible, isFalse,
+        reason: 'les deux niveaux donnent 720p : rien à proposer');
+    expect(r.definitionAutreNiveau, 720,
         reason: '🐛 ce champ ne voyageait que par les chemins de refus');
   });
 

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:alanya/core/compression_image.dart';
@@ -147,22 +149,10 @@ void main() {
     });
   });
 
-  group('debitPour — la part de chaque surface', () {
-    test('un 720p plein reçoit le débit de référence', () {
-      expect(debitPour(1280, 720), debit720p);
-    });
-
-    test('la moitié de la surface reçoit la moitié du débit', () {
-      expect(debitPour(905, 509), closeTo(debit720p / 2, debit720p * 0.01));
-    });
-
-    test('une toute petite image ne descend pas sous le plancher', () {
-      expect(debitPour(160, 120), debitPlancher);
-    });
-  });
-
   group('le niveau haut — 1080p au lieu de l\'original', () {
-    test('du 4K descend à 1080p, pas à 720p', () {
+    test('du 4K descend à 720p, et pas plus bas (17/10/2026)', () {
+      // 🔴 Le plafond du niveau haut est passé de 1080 à 720 : plus aucune
+      // vidéo ne sort d'ici au-dessus de 720p.
       final c = consignePour(
         largeur: 3840,
         hauteur: 2160,
@@ -170,14 +160,18 @@ void main() {
         dureeMs: 10000,
         niveau: NiveauQualite.haute,
       );
-      expect([c.bordLong, c.bordCourt], [1920, 1080]);
-      // Même formule que le normal : le débit suit la surface.
-      expect(c.debit, debitPour(1920, 1080));
-      expect(c.debit, greaterThan(debit720p),
-          reason: 'le niveau haut ne doit jamais rendre MOINS de débit');
+      expect([c.bordLong, c.bordCourt], [1280, 720]);
+      expect(c.debit, debitPalier[720],
+          reason: 'un seul débit : le niveau haut ne vise qu\'une définition');
     });
 
-    test('une vidéo filmée en 720p n\'est PAS agrandie', () {
+    test('une vidéo filmée en 720p PART ENTIÈRE au niveau haut', () {
+      /*
+       * 🔴 RÈGLE DU USER, 17/10/2026 : « si la vidéo est inférieure à 720 et
+       * qu'on clique sur meilleure qualité, alors ça ne compresse plus ». Le
+       * bouton ne promet pas mieux que l'original — on n'agrandit jamais — mais
+       * mieux que la marche que l'escalier allait prendre.
+       */
       final c = consignePour(
         largeur: 1280,
         hauteur: 720,
@@ -185,7 +179,8 @@ void main() {
         dureeMs: 30000,
         niveau: NiveauQualite.haute,
       );
-      expect([c.bordCourt, c.bordLong], [720, 1280]);
+      expect(c.transcode, isFalse);
+      expect(c.raison, RaisonSautVideo.dejaPetite);
       /*
        * 🐛 CE BANC DISAIT L'INVERSE, ET IL AVAIT TORT DEPUIS L'ESCALIER. Au
        * niveau normal, une vidéo filmée en 720p part en 360p : le niveau haut
@@ -194,12 +189,15 @@ void main() {
        * envoyer à meilleure qualité comme ça se fait sur les photos ».
        */
       expect(hautePlusFine(720), isTrue,
-          reason: 'le niveau normal donne 360p : le bouton rend du 720p');
+          reason: 'le niveau normal donne 360p : le bouton rend du 720p entier');
       expect(hautePlusFine(240), isFalse,
           reason: 'sous le plancher, rien à surclasser');
+      expect(hautePlusFine(1080), isFalse,
+          reason: 'au-dessus de 720, les DEUX niveaux donnent 720p : un bouton '
+              'qui ne change rien ne doit pas paraître');
     });
 
-    test('une vidéo entre 720p et 1080p garde sa définition', () {
+    test('une vidéo entre 720p et 1080p descend à 720p elle aussi', () {
       final c = consignePour(
         largeur: 1600,
         hauteur: 900,
@@ -207,17 +205,21 @@ void main() {
         dureeMs: 20000,
         niveau: NiveauQualite.haute,
       );
-      expect([c.bordCourt, c.bordLong], [900, 1600]);
-      expect(hautePlusFine(900), isTrue);
+      expect([c.bordCourt, c.bordLong], [720, 1280]);
+      expect(hautePlusFine(900), isFalse,
+          reason: 'le niveau normal donne 720p lui aussi : rien à proposer');
     });
 
     test('rien à gagner : une 1080p légère n\'est pas retranscodée', () {
-      // 1080p à 2 Mbit/s : le débit visé (3,6) est SUPÉRIEUR, recompresser
-      // l'alourdirait. On s'abstient avant de faire tourner l'encodeur.
+      // 🔴 LE CAS A CHANGÉ AVEC LE PLAFOND À 720 : à 2 Mbit/s, une 1080p a
+      // maintenant quelque chose à gagner (1,2 Mbit/s visé), et elle descend.
+      // Il reste une vidéo qui n'a rien à gagner : celle qui est DÉJÀ plus
+      // légère que le débit visé. On s'abstient avant de faire tourner
+      // l'encodeur, plutôt que de l'alourdir.
       final c = consignePour(
         largeur: 1920,
         hauteur: 1080,
-        tailleOctets: poids(30, 2000000),
+        tailleOctets: poids(30, 1000000),
         dureeMs: 30000,
         niveau: NiveauQualite.haute,
       );
@@ -251,10 +253,17 @@ void main() {
           dureeMs: 10000,
           niveau: NiveauQualite.haute,
         );
-        expect(haut.bordCourt, greaterThanOrEqualTo(normal.bordCourt),
+        /*
+         * ⚠️ « NE PAS TRANSCODER » EST LE PLUS FIN DES DEUX, et c'est ce que
+         * fait le niveau haut sous 720p : la vidéo part entière. On compare
+         * donc la définition QUI SORT, en prenant celle de la source quand
+         * rien n'est fait.
+         */
+        final courtSource = math.min(taille[0], taille[1]);
+        final hautCourt = haut.transcode ? haut.bordCourt : courtSource;
+        final normalCourt = normal.transcode ? normal.bordCourt : courtSource;
+        expect(hautCourt, greaterThanOrEqualTo(normalCourt),
             reason: '${taille[0]}x${taille[1]} : définition');
-        expect(haut.debit, greaterThanOrEqualTo(normal.debit),
-            reason: '${taille[0]}x${taille[1]} : débit');
       }
     });
   });
@@ -346,15 +355,16 @@ void main() {
   });
 
   group('l\'étiquette du bouton dit ce qu\'elle va faire', () {
-    test('la définition de l\'autre niveau, et non un 1080p de principe', () {
+    test('la définition de l\'autre niveau, et non un nombre de principe', () {
       // 🐛 Le bouton annonçait « Envoyer en 1080p » même pour une source qui
-      // ne pouvait pas le rendre : on n'agrandit jamais.
-      expect(definitionAutreNiveauVideo(1080, NiveauQualite.normal), 1080);
+      // ne pouvait pas le rendre : on n'agrandit jamais. Et depuis le 17/10, le
+      // plafond du niveau haut est 720 : il n'annonce plus jamais 1080p.
       expect(definitionAutreNiveauVideo(720, NiveauQualite.normal), 720,
-          reason: 'une vidéo filmée en 720p remonte à 720p, pas à 1080p');
+          reason: 'une vidéo filmée en 720p part entière au niveau haut');
       expect(definitionAutreNiveauVideo(360, NiveauQualite.normal), 360);
-      expect(definitionAutreNiveauVideo(4000, NiveauQualite.normal), 1080,
+      expect(definitionAutreNiveauVideo(1080, NiveauQualite.normal), 720,
           reason: 'le plafond du niveau haut');
+      expect(definitionAutreNiveauVideo(4000, NiveauQualite.normal), 720);
       // Depuis le niveau haut, le retour annonce la marche de l'escalier.
       expect(definitionAutreNiveauVideo(720, NiveauQualite.haute), 360);
       expect(definitionAutreNiveauVideo(1080, NiveauQualite.haute), 720);
@@ -364,10 +374,6 @@ void main() {
   group('les nombres sont bien ceux du web', () {
     test('les paliers et leurs débits, à l\'identique', () {
       expect(videoBordCourtMax, 720, reason: 'VIDEO_BORD_COURT');
-      expect(debit720p, 1200000, reason: 'DEBIT_720P');
-      expect(debit720p, debitPalier[720],
-          reason: 'Dart ne lit pas une const Map dans un contexte constant : '
-              'les deux nombres sont écrits deux fois et doivent concorder');
       expect(seuilDebit, 1450000, reason: 'SEUIL_DEBIT');
       expect(margeSon, 250000, reason: 'MARGE_SON');
       expect(paliersVideo, [720, 360, 240], reason: 'PALIERS_VIDEO');
@@ -375,7 +381,9 @@ void main() {
           reason: 'DEBIT_PALIER');
       expect(paliersImage, [1600, 1000, 640], reason: 'PALIERS_IMAGE');
       expect(gainMinimumVideo, 0.9, reason: 'GAIN_MINIMUM');
-      expect(videoBordCourtHaute, 1080, reason: 'VIDEO_BORD_COURT_HAUTE');
+      expect(videoBordCourtHaute, 720,
+          reason: 'VIDEO_BORD_COURT_HAUTE — plafond ramené de 1080 à 720 le '
+              '17/10/2026, et plus aucune vidéo ne sort d\'ici au-dessus');
       expect(imageBordMax, 1600, reason: 'IMAGE_BORD_MAX');
       expect(imageBordMaxHaute, 2560, reason: 'IMAGE_BORD_MAX_HAUTE');
       expect(imageQualite, 82, reason: 'IMAGE_QUALITE (0,82 côté web)');
