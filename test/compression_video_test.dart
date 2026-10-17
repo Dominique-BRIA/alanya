@@ -149,7 +149,7 @@ void main() {
     });
   });
 
-  group('le niveau haut — 1080p au lieu de l\'original', () {
+  group('le niveau haut — 720p au plus, ou l\'original intact', () {
     test('du 4K descend à 720p, et pas plus bas (17/10/2026)', () {
       // 🔴 Le plafond du niveau haut est passé de 1080 à 720 : plus aucune
       // vidéo ne sort d'ici au-dessus de 720p.
@@ -161,8 +161,9 @@ void main() {
         niveau: NiveauQualite.haute,
       );
       expect([c.bordLong, c.bordCourt], [1280, 720]);
-      expect(c.debit, debitPalier[720],
-          reason: 'un seul débit : le niveau haut ne vise qu\'une définition');
+      expect(c.debit, debitHaute720,
+          reason: 'c\'est le DÉBIT qui distingue les deux niveaux à 720p : le '
+              'normal met 1,2 Mbit/s, le haut 2,5');
     });
 
     test('une vidéo filmée en 720p PART ENTIÈRE au niveau haut', () {
@@ -192,9 +193,34 @@ void main() {
           reason: 'le niveau normal donne 360p : le bouton rend du 720p entier');
       expect(hautePlusFine(240), isFalse,
           reason: 'sous le plancher, rien à surclasser');
-      expect(hautePlusFine(1080), isFalse,
-          reason: 'au-dessus de 720, les DEUX niveaux donnent 720p : un bouton '
-              'qui ne change rien ne doit pas paraître');
+      expect(hautePlusFine(1080), isTrue,
+          reason: 'au-dessus de 720 les deux niveaux donnent du 720p, mais pas '
+              'au même débit — le bouton reste utile (règle du user, 17/10)');
+    });
+
+    test('UNE VIDÉO SOUS 720p N\'EST JAMAIS AGRANDIE PAR LE NIVEAU HAUT', () {
+      /*
+       * 🔴 LA CRAINTE EXPLICITE DU USER (17/10/2026) : « comme on ne veut pas
+       * que ça agrandisse l'image pour envoyer à 720p, on envoie juste la
+       * taille originale ». Une 480p lourde part donc ENTIÈRE au niveau haut —
+       * ni remontée à 720p, ni descendue à 360p comme le ferait l'escalier.
+       */
+      for (final taille in [
+        [854, 480],
+        [640, 360],
+        [426, 240],
+      ]) {
+        final c = consignePour(
+          largeur: taille[0],
+          hauteur: taille[1],
+          tailleOctets: poids(20, 9000000),
+          dureeMs: 20000,
+          niveau: NiveauQualite.haute,
+        );
+        expect(c.transcode, isFalse,
+            reason: '${taille[0]}x${taille[1]} : rien ne doit être produit');
+        expect(c.raison, RaisonSautVideo.dejaPetite);
+      }
     });
 
     test('une vidéo entre 720p et 1080p descend à 720p elle aussi', () {
@@ -206,8 +232,10 @@ void main() {
         niveau: NiveauQualite.haute,
       );
       expect([c.bordCourt, c.bordLong], [720, 1280]);
-      expect(hautePlusFine(900), isFalse,
-          reason: 'le niveau normal donne 720p lui aussi : rien à proposer');
+      expect(c.debit, debitHaute720);
+      expect(hautePlusFine(900), isTrue,
+          reason: 'même définition que le normal, mais deux fois le débit : le '
+              'bouton a quelque chose à offrir');
     });
 
     test('rien à gagner : une 1080p légère n\'est pas retranscodée', () {

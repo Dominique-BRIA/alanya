@@ -132,13 +132,13 @@ void main() {
 
     // 3. Ce que l'écran d'envoi recevra.
     /*
-     * ⚠️ PAS DE BOUTON POUR UNE SOURCE AU-DESSUS DE 720p, depuis que le niveau
-     * haut plafonne lui aussi à 720 (17/10/2026) : les deux niveaux rendent
-     * exactement la même chose, et un bouton qui ne change rien ne doit pas
-     * paraître.
+     * 🔴 LE BOUTON EST LÀ, MÊME AU-DESSUS DE 720p (règle du user, 17/10/2026 :
+     * « les deux boutons doivent être toujours là »). Les deux niveaux rendent
+     * du 720p, mais pas au même débit : 1,2 Mbit/s pour le normal, 2,5 pour le
+     * haut. C'est le débit qui les distingue, et non la définition.
      */
-    expect(r.niveauSuperieurPossible, isFalse,
-        reason: 'les deux niveaux donnent 720p : rien à proposer');
+    expect(r.niveauSuperieurPossible, isTrue,
+        reason: 'le niveau haut offre le même 720p à deux fois le débit');
     expect(r.definitionAutreNiveau, 720,
         reason: '🐛 ce champ ne voyageait que par les chemins de refus');
   });
