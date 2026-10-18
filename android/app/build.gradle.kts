@@ -30,6 +30,11 @@ val proprietesCle = Properties().apply {
 val signatureDisponible = proprietesCle.getProperty("storeFile") != null
 
 android {
+    // Le modèle de visage des effets d'appel (MediaPipe) se lit tel quel dans
+    // l'APK : compressé, il ne pourrait pas être projeté en mémoire.
+    androidResources {
+        noCompress += "task"
+    }
     namespace = "com.alanya237.work"
     compileSdk = 36
     ndkVersion = "28.2.13676358"
@@ -115,6 +120,10 @@ flutter {
 dependencies {
     // Requis par flutter_local_notifications (core library desugaring)
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+
+    // Effets de visage en appel vidéo (18/10/2026) : MediaPipe Face Landmarker,
+    // gratuit (Apache 2.0), sur le téléphone. Modèle : assets/face_landmarker.task.
+    implementation("com.google.mediapipe:tasks-vision:0.10.35")
 
     // ⚠️ MÊME ARTEFACT ET MÊME VERSION que ceux de `flutter_webrtc`
     // (android/build.gradle : io.github.webrtc-sdk:android:125.6422.03).

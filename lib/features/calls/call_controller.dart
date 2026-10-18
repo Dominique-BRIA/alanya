@@ -10,6 +10,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import '../../core/alanya_id_formatter.dart';
 import '../../core/api_client.dart';
 import '../../core/noms_donnes.dart';
+import 'effets_video.dart';
 import '../../core/call_permissions.dart';
 import '../../core/debug_overlay.dart';
 import '../../core/call_foreground_service.dart';
@@ -1902,6 +1903,8 @@ class CallController extends ChangeNotifier {
   }
 
   Future<void> _stopMesh() async {
+    // L'effet de visage meurt avec l'appel : le suivant repart sans.
+    unawaited(EffetsVideo.retirer());
     await _mesh?.close();
     _mesh = null;
     _iceServers = null; // FIX: clear le cache ICE pour le prochain appel
