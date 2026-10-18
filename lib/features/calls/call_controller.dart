@@ -9,6 +9,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import '../../core/alanya_id_formatter.dart';
 import '../../core/api_client.dart';
+import '../../core/noms_donnes.dart';
 import '../../core/call_permissions.dart';
 import '../../core/debug_overlay.dart';
 import '../../core/call_foreground_service.dart';
@@ -1923,7 +1924,9 @@ class CallController extends ChangeNotifier {
         convId: e["convId"] as String?,
         callType: e["callType"] as String? ?? "AUDIO",
         callerId: e["callerId"] as String,
-        callerName: e["callerName"] as String? ?? _trAppel('call_word', "Appel"),
+        // Le nom que J'AI donné à l'appelant, s'il y en a un (18/10/2026).
+        callerName: NomsDonnes.nomPour(e["callerId"] as String?,
+            e["callerName"] as String? ?? _trAppel('call_word', "Appel")),
         callerAvatarUrl: e["callerAvatarUrl"] as String?,
         isGroup: (e["isGroup"] as bool?) ?? false,
         groupName: e["groupName"] as String?,

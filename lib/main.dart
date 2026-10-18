@@ -8,6 +8,7 @@ import 'package:media_store_plus/media_store_plus.dart';
 import 'package:provider/provider.dart';
 
 import 'core/api_client.dart';
+import 'core/noms_donnes.dart';
 import 'core/centre_transferts.dart';
 import 'core/authed_api.dart';
 import 'core/connectivity_service.dart';
@@ -140,6 +141,8 @@ void main() async {
   await DataSaverService.instance.load();
   await NotificationSettings.instance.load();
   await TraductionAuto.instance.load();
+  // Les noms donnés aux contacts, avant le premier écran (voir `NomsDonnes`).
+  await NomsDonnes.charger();
   // Liens Alanya (QR, lien partagé) : abonnement AVANT tout écran, sans quoi
   // le lien qui a lancé l'application serait perdu. Voir `LiensEntrants`.
   LiensEntrants.instance.demarrer();

@@ -1,4 +1,5 @@
 import 'badge_compte.dart';
+import '../core/noms_donnes.dart';
 import '../core/alanya_id_formatter.dart';
 import 'call_record.dart';
 
@@ -226,9 +227,21 @@ class Conversation {
   BadgeCompte? get badgeAffiche =>
       badge ?? (officiel && !isGroup ? BadgeCompte.officielParDefaut : null);
 
+  /// Les noms des membres, tels que JE les vois : le nom que je leur ai
+  /// donné, sinon celui de leur profil (`NomsDonnes`).
   Map<String, String> get memberNames => {
-        for (final m in members) m.id: m.displayName,
+        for (final m in members) m.id: NomsDonnes.nomPour(m.id, m.displayName),
       };
+
+  /// Le titre à afficher : en tête-à-tête, le nom que J'AI donné à l'autre ;
+  /// un groupe garde son nom.
+  String? titreAffiche(String? moi) {
+    if (isGroup) return title;
+    final autres = members.where((m) => m.id != moi);
+    if (autres.isEmpty) return title;
+    final autre = autres.first;
+    return NomsDonnes.nomPour(autre.id, title ?? autre.displayName);
+  }
 
   factory Conversation.fromJson(Map<String, dynamic> j) => Conversation(
         id: j["id"] as String,

@@ -78,6 +78,7 @@ class ContactCache {
   static Map<String, dynamic> _toJson(Contact c) => {
         'id': c.id,
         'alias': c.alias,
+        'nomVerrouille': c.nomVerrouille,
         'isBlocked': c.isBlocked,
         'user': {
           'id': c.userId,

@@ -1,4 +1,5 @@
 import '../core/alanya_id_formatter.dart';
+import '../core/noms_donnes.dart';
 
 class StatusItem {
   final String id;
@@ -54,7 +55,10 @@ class StatusGroup {
   });
 
   /// Repli FORMATE — voir la note detaillee sur `Contact.displayName`.
-  String get displayName => pseudo ?? formatAlanyaId(publicNumber);
+  ///
+  /// Le nom que J'AI donné à cette personne passe devant (`NomsDonnes`).
+  String get displayName =>
+      NomsDonnes.nomPour(userId, pseudo ?? formatAlanyaId(publicNumber));
 
   factory StatusGroup.fromJson(Map<String, dynamic> j) => StatusGroup(
         userId: j["userId"] as String,

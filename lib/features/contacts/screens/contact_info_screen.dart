@@ -8,6 +8,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/api_client.dart';
 import '../../../core/alanya_id_formatter.dart';
 import '../../../core/app_snackbar.dart';
+import '../../../core/contact_cache.dart';
+import '../../../core/noms_donnes.dart';
+import '../../../models/contact.dart';
 import '../../../core/memoire_langues.dart';
 import '../../../core/traduction_appareil.dart';
 import '../../../theme/alanya_theme.dart';
@@ -107,6 +110,147 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
     _loadMuted();
     _loadLangue();
     _loadSharedMedia();
+    _chargerFiche();
+  }
+
+  // ── Le nom que JE donne à ce contact (18/10/2026) ───────────────────────
+  //
+  // 🔴 DEMANDE DU PATRON : « le nom que je lui donne, c'est celui-là qui doit
+  // s'afficher partout chez moi ». Comme Talky, la fiche montre les deux : le
+  // nom donné (modifiable, privé) et le nom du profil (celui de la personne).
+
+  /// Sa fiche dans mon répertoire, s'il y est : nom donné, nom du profil,
+  /// et s'il refuse d'être renommé.
+  Contact? _fiche;
+
+  Future<void> _chargerFiche() async {
+    final repo = context.read<ContactsRepository>();
+    // La copie du téléphone d'abord, puis le serveur.
+    try {
+      final copie = (await ContactCache.getAll())
+          .where((c) => c.userId == widget.userId);
+      if (copie.isNotEmpty && mounted) setState(() => _fiche = copie.first);
+    } catch (_) {}
+    try {
+      final liste = await repo.list();
+      final trouve = liste.where((c) => c.userId == widget.userId);
+      if (mounted) setState(() => _fiche = trouve.isEmpty ? null : trouve.first);
+    } catch (_) {}
+  }
+
+  String? get _nomDonne => NomsDonnes.de(widget.userId);
+
+  /// Le nom de la personne, tel qu'ELLE l'a choisi.
+  String get _nomProfil {
+    final p = _fiche?.pseudo;
+    if (p != null && p.isNotEmpty) return p;
+    // Ouvert depuis une discussion, [widget.name] peut être mon nom donné.
+    if (widget.name == _nomDonne && widget.publicNumber.isNotEmpty) {
+      return formatAlanyaId(widget.publicNumber);
+    }
+    return widget.name;
+  }
+
+  /// Le nom en tête de fiche : le mien s'il y en a un, sinon le sien.
+  String get _nomEnTete => _nomDonne ?? _nomProfil;
+
+  Future<void> _renommer() async {
+    if (_fiche?.nomVerrouille == true) {
+      showAppSnackBar(tr(context, 'ci_name_locked', {'nom': _nomProfil}));
+      return;
+    }
+    final ctrl = TextEditingController(text: _nomDonne ?? '');
+    final nouveau = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(tr(context, 'ci_rename_title')),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(tr(context, 'ci_rename_hint', {'profil': _nomProfil}),
+              style: const TextStyle(fontSize: 13)),
+          const SizedBox(height: 12),
+          TextField(
+            controller: ctrl,
+            autofocus: true,
+            maxLength: 100,
+            textCapitalization: TextCapitalization.words,
+            decoration: InputDecoration(hintText: _nomProfil),
+            onSubmitted: (v) => Navigator.pop(ctx, v),
+          ),
+        ]),
+        actions: [
+          if (_nomDonne != null)
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, ''),
+              child: Text(tr(context, 'ci_rename_clear')),
+            ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(tr(context, 'cancel')),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text),
+            child: Text(tr(context, 'save')),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (nouveau == null || !mounted) return;
+    final nom = nouveau.trim();
+    final repo = context.read<ContactsRepository>();
+    try {
+      final fiche = _fiche;
+      if (fiche != null) {
+        await repo.setAlias(fiche.id, nom);
+      } else {
+        // Pas encore dans mon répertoire : le nommer l'y ajoute.
+        if (nom.isEmpty) return;
+        if (widget.publicNumber.isEmpty) {
+          showAppSnackBar(tr(context, 'ci_rename_no_number'));
+          return;
+        }
+        final ajoute = await repo.add(widget.publicNumber, alias: nom);
+        if (mounted) setState(() => _fiche = ajoute);
+      }
+      await NomsDonnes.poser(widget.userId, nom);
+      if (!mounted) return;
+      setState(() {});
+      showAppSnackBar(tr(context, 'ci_rename_saved'));
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      showAppSnackBar(e.code == 'NOM_VERROUILLE'
+          ? tr(context, 'ci_name_locked', {'nom': _nomProfil})
+          : e.message);
+    } catch (_) {
+      if (mounted) showAppSnackBar(tr(context, 'home_server_unreachable'));
+    }
+  }
+
+  /// La carte « Votre nom pour ce contact », et le nom du profil dessous.
+  Widget _carteNomDonne() {
+    final verrouille = _fiche?.nomVerrouille == true;
+    final donne = _nomDonne;
+    return GlassCard(
+      radius: 22,
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+      child: Column(children: [
+        _infoRow(
+          icon: Icons.drive_file_rename_outline_rounded,
+          label: tr(context, 'ci_given_name'),
+          value: verrouille
+              ? tr(context, 'ci_name_locked', {'nom': _nomProfil})
+              : (donne ?? tr(context, 'ci_given_name_empty')),
+          onTap: verrouille ? null : _renommer,
+          trailing: verrouille ? Icons.lock_outline_rounded : Icons.edit_outlined,
+        ),
+        _divider(),
+        _infoRow(
+          icon: Icons.person_outline_rounded,
+          label: tr(context, 'ci_profile_name'),
+          value: _nomProfil,
+        ),
+      ]),
+    );
   }
 
   Future<void> _loadLangue() async {
@@ -271,6 +415,8 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
                 children: [
                   _actionsRow(),
                   const SizedBox(height: 18),
+                  _carteNomDonne(),
+                  const SizedBox(height: 16),
                   _infoCard(),
                   const SizedBox(height: 16),
                   _sharedMediaCard(),
@@ -344,7 +490,7 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
                     alignment: Alignment.centerLeft,
                     child: Row(mainAxisSize: MainAxisSize.min, children: [
                     Flexible(child: Text(
-                      widget.name,
+                      _nomEnTete,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -402,7 +548,7 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
                           children: [
                             Flexible(
                               child: Text(
-                                widget.name,
+                                _nomEnTete,
                                 textAlign: TextAlign.center,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,

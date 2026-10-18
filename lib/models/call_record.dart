@@ -1,3 +1,5 @@
+import '../core/noms_donnes.dart';
+
 class CallRecord {
   final String id;
   final String? convId;
@@ -8,6 +10,10 @@ class CallRecord {
   final String peerName;
   final String? peerNumber;
   final String? peerAvatarUrl;
+
+  /// Le compte de l'interlocuteur (tête-à-tête), pour le nom que je lui ai
+  /// donné. Facultatif : un serveur plus ancien ne l'envoie pas.
+  final String? peerId;
   final int participantCount;
   final DateTime startedAt;
   final DateTime? answeredAt;
@@ -46,6 +52,7 @@ class CallRecord {
     required this.endedAt,
     required this.durationSec,
     this.callerId,
+    this.peerId,
     this.preciseStatus,
     this.detail,
     this.isFailed,
@@ -72,6 +79,7 @@ class CallRecord {
             : DateTime.parse(j["endedAt"] as String),
         durationSec: (j["durationSec"] as num?)?.toInt(),
         callerId: j["callerId"] as String?,
+        peerId: j["peerId"] as String?,
         preciseStatus: j["preciseStatus"] as String?,
         detail: j["detail"] as String?,
         isFailed: j["isFailed"] as bool?,
@@ -99,11 +107,21 @@ class CallRecord {
         "endedAt": endedAt?.toIso8601String(),
         "durationSec": durationSec,
         "callerId": callerId,
+        "peerId": peerId,
         "preciseStatus": preciseStatus,
         "detail": detail,
         "isFailed": isFailed,
         "colorHint": colorHint,
       };
+
+  /// Le nom à afficher : celui que J'AI donné à l'interlocuteur, sinon celui
+  /// du serveur. Sans `peerId` (serveur plus ancien), un appel reçu se
+  /// rattache encore à son appelant.
+  String get nomAffiche {
+    if (isGroup) return peerName;
+    final autre = peerId ?? (isOutgoing ? null : callerId);
+    return NomsDonnes.nomPour(autre, peerName);
+  }
 
   /// De quel côté afficher la bulle dans le fil.
   ///
@@ -134,7 +152,9 @@ class CallParticipantInfo {
   factory CallParticipantInfo.fromJson(Map<String, dynamic> j) =>
       CallParticipantInfo(
         userId: j["userId"] as String,
-        displayName: j["displayName"] as String? ?? "Membre",
+        // Participants d'un appel de groupe : le nom que je leur ai donné.
+        displayName: NomsDonnes.nomPour(
+            j["userId"] as String?, j["displayName"] as String? ?? "Membre"),
         avatarUrl: j["avatarUrl"] as String?,
       );
 }

@@ -1,5 +1,6 @@
 import '../../core/api_client.dart';
 import '../../core/authed_api.dart';
+import '../../core/noms_donnes.dart';
 import '../../models/contact.dart';
 import '../../models/invitation_qr.dart';
 
@@ -30,9 +31,12 @@ class ContactsRepository {
     final data = await _api.get("/api/contacts");
     final raw = data["contacts"];
     if (raw == null) return [];
-    return (raw as List)
+    final contacts = (raw as List)
         .map((c) => Contact.fromJson(c as Map<String, dynamic>))
         .toList();
+    // La liste du serveur fait foi pour les noms donnés, appliqués partout.
+    await NomsDonnes.depuisContacts(contacts);
+    return contacts;
   }
 
   /// Ajoute un contact via son Alanya ID.

@@ -23,6 +23,9 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
 
   /// Le chiffrement de bout en bout, pour TOUT le compte. Actif par défaut.
   bool _chiffrementActif = true;
+
+  /// « Interdire qu'on me renomme » (18/10/2026).
+  bool _nomVerrouille = false;
   int _lastSeenVisibility = 2;
   bool _loading = true;
 
@@ -51,6 +54,7 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
           _readReceipts = p["readReceipts"] ?? 1;
           _lastSeenVisibility = p["lastSeenVisibility"] ?? 2;
           _chiffrementActif = (p["chiffrementActif"] ?? 1) == 1;
+          _nomVerrouille = (p["nomVerrouille"] ?? 0) == 1;
           _loading = false;
         });
     // Cache d'abord : les réglages gardés s'affichent aussitôt (18/10/2026).
@@ -76,12 +80,14 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
     int? readReceipts,
     int? lastSeenVisibility,
     bool? chiffrementActif,
+    bool? nomVerrouille,
   }) async {
     try {
       await context.read<AccountRepository>().setPrivacy(
             readReceipts: readReceipts,
             lastSeenVisibility: lastSeenVisibility,
             chiffrementActif: chiffrementActif,
+            nomVerrouille: nomVerrouille,
           );
     } catch (_) {
       if (mounted) showAppSnackBar(tr(context, 'priv_save_failed'));
@@ -156,6 +162,22 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
                   onChanged: (v) {
                     setState(() => _chiffrementActif = v);
                     _save(chiffrementActif: v);
+                  },
+                ),
+                const Divider(height: 1),
+                // Demande du patron (18/10/2026) : ceux qui m'enregistrent
+                // gardent le nom de mon profil, sans pouvoir en mettre un autre.
+                SwitchListTile(
+                  secondary: Icon(Icons.badge_outlined,
+                      color: themed(context,
+                          light: AlanyaColors.forest,
+                          dark: AlanyaColors.indigoLight)),
+                  title: Text(tr(context, 'priv_name_lock')),
+                  subtitle: Text(tr(context, 'priv_name_lock_sub')),
+                  value: _nomVerrouille,
+                  onChanged: (v) {
+                    setState(() => _nomVerrouille = v);
+                    _save(nomVerrouille: v);
                   },
                 ),
                 const Divider(height: 1),

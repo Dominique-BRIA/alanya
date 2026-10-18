@@ -65,6 +65,7 @@ import '../../../widgets/auth_network_image.dart';
 import '../../../widgets/avatar_circle.dart';
 import '../../../widgets/badge_compte.dart';
 import '../../../widgets/chargement.dart';
+import '../../../core/noms_donnes.dart';
 import '../../../models/badge_compte.dart';
 import '../../../widgets/choix_langue_interlocuteur.dart';
 import '../../../widgets/contact_share_sheet.dart';
@@ -301,13 +302,25 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
+  /// Les noms de PROFIL des membres, sans les noms que je leur ai donnés : une
+  /// mention part dans le texte du message, chez tout le groupe — elle ne doit
+  /// jamais révéler un nom privé (même règle que Talky).
+  Map<String, String> _nomsProfil = {};
+
   void _appliqueMembres(List<Map<String, dynamic>> membres) {
+    _nomsProfil = {
+      for (final m in membres)
+        if (m["id"] is String)
+          m["id"] as String:
+              (m["pseudo"] as String?) ?? (m["publicNumber"] as String? ?? ""),
+    };
     setState(() {
       _membresCharges = {
         for (final m in membres)
           if (m["id"] is String)
-            m["id"] as String:
-                (m["pseudo"] as String?) ?? (m["publicNumber"] as String? ?? ""),
+            // Le nom que J'AI donné à ce membre passe devant (`NomsDonnes`).
+            m["id"] as String: NomsDonnes.nomPour(m["id"] as String,
+                (m["pseudo"] as String?) ?? (m["publicNumber"] as String? ?? "")),
       };
       // Suis-je ADMINISTRATEUR de ce groupe ? Seul lui peut écrire
       // « @tout le monde » — la route des membres rend déjà le rôle.
@@ -699,7 +712,10 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   /// Remplace le `@requête` en cours par `@Nom `, et retient le compte visé.
-  void _insereMention(String userId, String nom) {
+  void _insereMention(String userId, String nomAffiche) {
+    // Le nom du PROFIL dans le texte, jamais le nom que je lui ai donné.
+    final nomProfil = _nomsProfil[userId];
+    final nom = (nomProfil != null && nomProfil.isNotEmpty) ? nomProfil : nomAffiche;
     final texte = _inputCtrl.text;
     final sel = _inputCtrl.selection;
     final fin = sel.isValid ? sel.start : texte.length;

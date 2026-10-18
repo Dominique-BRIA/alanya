@@ -105,6 +105,8 @@ class AccountRepository {
       "lastSeenVisibility": (data["lastSeenVisibility"] as num?)?.toInt() ?? 2,
       // ⚠️ ABSENT D'UN SERVEUR PLUS ANCIEN : chiffré. Le défaut protège.
       "chiffrementActif": data["chiffrementActif"] == false ? 0 : 1,
+      // « Interdire qu'on me renomme » — absent d'un serveur plus ancien : non.
+      "nomVerrouille": data["nomVerrouille"] == true ? 1 : 0,
     };
   }
 
@@ -112,8 +114,10 @@ class AccountRepository {
     int? readReceipts,
     int? lastSeenVisibility,
     bool? chiffrementActif,
+    bool? nomVerrouille,
   }) async {
     final body = <String, dynamic>{};
+    if (nomVerrouille != null) body["nomVerrouille"] = nomVerrouille;
     if (readReceipts != null) body["readReceipts"] = readReceipts;
     if (lastSeenVisibility != null) body["lastSeenVisibility"] = lastSeenVisibility;
     if (chiffrementActif != null) body["chiffrementActif"] = chiffrementActif;

@@ -40,6 +40,10 @@ class Contact {
   final int isOnline;
   final DateTime? lastSeen;
 
+  /// Ce compte refuse d'être renommé (18/10/2026) : la fiche ne propose pas
+  /// de lui donner un nom, et le serveur n'en renvoie jamais.
+  final bool nomVerrouille;
+
   Contact({
     required this.id,
     required this.alias,
@@ -50,6 +54,7 @@ class Contact {
     required this.avatarUrl,
     this.isOnline = 0,
     this.lastSeen,
+    this.nomVerrouille = false,
   });
 
   /// Ce qu'on montre pour désigner ce contact.
@@ -92,6 +97,8 @@ class Contact {
       lastSeen: user["lastSeen"] != null
           ? DateTime.tryParse(user["lastSeen"] as String)
           : null,
+      // Facultatif : un serveur plus ancien ne l'envoie pas.
+      nomVerrouille: (j["nomVerrouille"] as bool?) ?? false,
     );
   }
 }

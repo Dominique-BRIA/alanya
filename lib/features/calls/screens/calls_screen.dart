@@ -273,7 +273,7 @@ class _CallsScreenState extends State<CallsScreen>
                       color: Colors.white, size: 20),
                 )
               : AvatarCircle(
-                  name: c.peerName,
+                  name: c.nomAffiche,
                   avatarUrl: c.peerAvatarUrl,
                   radius: 22,
                   backgroundColor: AlanyaColors.gold,
@@ -281,7 +281,7 @@ class _CallsScreenState extends State<CallsScreen>
       title: Row(
         children: [
           Expanded(
-            child: Text(c.peerName,
+            child: Text(c.nomAffiche,
                 style: const TextStyle(fontWeight: FontWeight.w600)),
           ),
           if (c.type == "VIDEO")
@@ -337,7 +337,7 @@ class _CallsScreenState extends State<CallsScreen>
                 MaterialPageRoute(
                   builder: (_) => ChatScreen(
                     convId: c.convId!,
-                    title: c.peerName,
+                    title: c.nomAffiche,
                     isGroup: c.isGroup,
                   ),
                 ),

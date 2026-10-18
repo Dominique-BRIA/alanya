@@ -7,10 +7,12 @@ import 'package:provider/provider.dart';
 import '../features/auth/auth_controller.dart';
 import '../features/calls/calls_repository.dart';
 import '../features/collegues/collegues_repository.dart';
+import '../features/contacts/contacts_repository.dart';
 import '../features/entreprises/entreprises_repository.dart';
 import '../features/meetings/meetings_repository.dart';
 import '../features/status/status_repository.dart';
 import 'call_cache.dart';
+import 'contact_cache.dart';
 import 'connectivity_service.dart';
 import 'conversation_cache.dart';
 import 'images_badges.dart';
@@ -49,6 +51,7 @@ class PrechargementEcrans {
     // Le type de compte est relu À L'ÉTAPE : juste après une connexion, le
     // profil complet n'est pas encore arrivé et il vaut 0 pour tout le monde.
     final auth = context.read<AuthController>();
+    final contacts = context.read<ContactsRepository>();
     final statuts = context.read<StatusRepository>();
     final appels = context.read<CallsRepository>();
     final reunions = context.read<MeetingsRepository>();
@@ -56,6 +59,11 @@ class PrechargementEcrans {
     final entreprises = context.read<EntreprisesRepository>();
 
     final p = PrechargementEcrans._([
+      // En premier : les noms donnés aux contacts s'appliquent partout.
+      ('contacts', () async {
+        final liste = await contacts.list();
+        await ContactCache.putAll(liste);
+      }),
       ('statuts', () => statuts.feed()),
       ('appels', () async => CallCache.putAll(await appels.history())),
       ('reunions', () => reunions.fetchMeetings()),

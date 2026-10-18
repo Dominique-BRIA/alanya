@@ -898,7 +898,9 @@ class _ConversationsTabState extends State<_ConversationsTab>
      * regarde.
      */
     if (conv?.sourdine == true) return;
-    final title = conv?.title ?? tr(context, 'notif_new_message');
+    // Tête-à-tête : le nom que J'AI donné à l'expéditeur (`NomsDonnes`).
+    final title = conv?.titreAffiche(context.read<AuthController>().user?.id) ??
+        tr(context, 'notif_new_message');
 
     // Aperçu du message selon le type — on retire les marqueurs pour les
     // notifications système, qui ne peuvent pas afficher de rich text.
@@ -1652,10 +1654,12 @@ class _ConversationsTabState extends State<_ConversationsTab>
     }
 
     // Filtre les conversations selon la recherche (WhatsApp-like)
+    final moi = context.read<AuthController>().user?.id;
     final convs = _searchQuery.isEmpty
         ? baseConvs
         : baseConvs.where((c) {
-            final title = (c.title ?? '').toLowerCase();
+            // Le nom donné se cherche aussi : c'est celui qu'on a en tête.
+            final title = (c.titreAffiche(moi) ?? '').toLowerCase();
             if (title.contains(_searchQuery)) return true;
             // Cherche dans les numéros des membres
             for (final m in c.members) {
@@ -1968,8 +1972,9 @@ class _ConversationsTabState extends State<_ConversationsTab>
       );
     }
 
-    final title = c.title ?? tr(context, 'chat_untitled');
     final myId = context.read<AuthController>().user?.id;
+    // En tête-à-tête, le nom que J'AI donné à l'autre (`NomsDonnes`).
+    final title = c.titreAffiche(myId) ?? tr(context, 'chat_untitled');
     final other = c.isGroup
         ? null
         : c.members.firstWhere(
@@ -2153,7 +2158,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
           children: [
             Padding(
               padding: const EdgeInsets.all(16),
-              child: Text(c.title ?? tr(context, 'chat_untitled'),
+              child: Text(c.titreAffiche(context.read<AuthController>().user?.id) ?? tr(context, 'chat_untitled'),
                   style: const TextStyle(
                       fontSize: 18, fontWeight: FontWeight.bold)),
             ),
