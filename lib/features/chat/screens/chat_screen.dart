@@ -3903,6 +3903,15 @@ class _ChatScreenState extends State<ChatScreen>
      */
     final files = result as List<MediaPickResult>;
     if (files.isEmpty) return;
+    /*
+     * 🔴 UN DOCUMENT SENSIBLE NE PART QUE DANS UN FIL CHIFFRÉ (18/10/2026) : son
+     * caractère « sensible » voyage dans l'enveloppe chiffrée, et en clair le
+     * serveur pourrait le lire.
+     */
+    if (files.any((f) => f.sensible) && !_filChiffre) {
+      showAppSnackBar(tr(context, 'sens_chiffre_requis'));
+      return;
+    }
 
     // Aperçu : balayage entre les médias, retrait de l'un d'eux, légende.
     // ⚠️ On envoie la liste RENDUE par l'aperçu, pas celle de la sélection : un
@@ -5209,7 +5218,14 @@ class _ChatScreenState extends State<ChatScreen>
             ])));
   }
 
+  /// Un document SENSIBLE : ni transfert, ni partage, ni enregistrement.
+  bool _estSensible(Message m) => m.mediaChiffre?.sensible == true;
+
   Future<void> _forwardMessage(Message m) async {
+    if (_estSensible(m)) {
+      showAppSnackBar(tr(context, 'sens_pas_partage'));
+      return;
+    }
     final conversations =
         await context.read<ChatRepository>().listConversations();
     if (!mounted) return;
@@ -5300,6 +5316,10 @@ class _ChatScreenState extends State<ChatScreen>
   /// C'est le geste demandé — l'utilisateur choisit de faire sortir ce message
   /// du chiffrement de bout en bout, comme une capture d'écran.
   Future<void> _partagerMessage(Message m) async {
+    if (_estSensible(m)) {
+      showAppSnackBar(tr(context, 'sens_pas_partage'));
+      return;
+    }
     final erreur = tr(context, 'send_failed');
     try {
       final aUnMedia = m.mediaChiffre != null || m.media.isNotEmpty;
@@ -6139,7 +6159,11 @@ class _ChatScreenState extends State<ChatScreen>
             } else if (v == 'info') {
               _showMessageInfo(m);
             } else if (v == 'download' && m.media.isNotEmpty) {
-              _download(m.media.first);
+              if (_estSensible(m)) {
+                showAppSnackBar(tr(context, 'sens_pas_partage'));
+              } else {
+                _download(m.media.first);
+              }
             }
           },
           itemBuilder: (_) => [

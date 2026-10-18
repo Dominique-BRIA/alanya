@@ -43,6 +43,7 @@ class MainActivity : FlutterFragmentActivity() {
         const val CANAL = "alanya/ecran_verrouille"
         const val CANAL_ENREGISTREMENT = "alanya/enregistrement"
         const val CANAL_ECRAN_PROTEGE = "alanya/ecran_protege"
+        const val CANAL_APPAREIL = "alanya/appareil"
         const val CANAL_COMPRESSION_VIDEO = "alanya/compression_video"
         const val TAG_PROX = "AlanyaProximite"
     }
@@ -203,6 +204,17 @@ class MainActivity : FlutterFragmentActivity() {
                         window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
                         resultat.success(true)
                     }
+                    else -> resultat.notImplemented()
+                }
+            }
+
+        // Marque et modèle exacts de l'appareil (« samsung SM-A515F ») : le
+        // filigrane d'un document sensible les porte (18/10/2026). L'empreinte
+        // de build que lit Dart n'en donne qu'une approximation.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CANAL_APPAREIL)
+            .setMethodCallHandler { appel, resultat ->
+                when (appel.method) {
+                    "marqueModele" -> resultat.success("${Build.MANUFACTURER} ${Build.MODEL}")
                     else -> resultat.notImplemented()
                 }
             }

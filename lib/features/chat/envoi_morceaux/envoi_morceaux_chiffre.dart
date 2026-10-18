@@ -193,6 +193,7 @@ class SuiviEnvoisMorceaux {
         dureeMs: a.dureeMs,
         pages: a.pages,
         apercu: a.apercu,
+        sensible: fichier.sensible,
       );
 
       // 5. Préparation (le cliquet avance ICI) et programmation.

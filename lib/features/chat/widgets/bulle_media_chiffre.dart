@@ -14,6 +14,7 @@ import '../../../core/authed_api.dart';
 import '../../../core/media_helper.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/media/bulle_vocale.dart';
+import '../screens/visionneuse_document_sensible.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../services/e2ee/e2ee_media.dart';
 import '../../../services/e2ee/e2ee_media_ouverture.dart';
@@ -287,7 +288,16 @@ class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
       onLongPress: widget.onLongPress,
       onTap: () async {
         final f = _fichier ?? await _charger();
-        if (f != null) await OpenFilex.open(f.path);
+        if (f == null || !context.mounted) return;
+        // Un document SENSIBLE ne sort jamais vers une autre application :
+        // visionneuse interne, filigrane, écran protégé (18/10/2026).
+        if (d.sensible) {
+          await Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => VisionneuseDocumentSensible(fichier: f, descripteur: d),
+          ));
+          return;
+        }
+        await OpenFilex.open(f.path);
       },
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 240),
@@ -295,6 +305,20 @@ class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (d.sensible)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.verified_user_outlined,
+                      size: 15, color: Color(0xFFE53935)),
+                  const SizedBox(width: 4),
+                  Text(tr(context, 'sens_titre'),
+                      style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFFE53935))),
+                ]),
+              ),
             if (apercu != null) ...[
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),

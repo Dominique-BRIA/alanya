@@ -83,6 +83,7 @@ class EnvoiMediaChiffre {
       dureeMs: apercu.dureeMs,
       pages: apercu.pages,
       apercu: apercu.apercu,
+      sensible: fichier.sensible,
     );
 
     // 4. Ligne du message et enveloppes.

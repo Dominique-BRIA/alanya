@@ -85,7 +85,11 @@ class MediaPickResult {
     this.definitionAutreNiveau,
     this.niveau = NiveauQualite.normal,
     this.asset,
+    this.sensible = false,
   });
+
+  /// Document SENSIBLE (18/10/2026) : voir `DescripteurMedia.sensible`.
+  final bool sensible;
 
   MediaPickResult copieAvec({
     Uint8List? bytes,
@@ -111,6 +115,7 @@ class MediaPickResult {
         definitionAutreNiveau:
             definitionAutreNiveau ?? this.definitionAutreNiveau,
         niveau: niveau ?? this.niveau,
+        sensible: sensible,
       );
 
   bool get estImage => mimeType.startsWith('image/');
@@ -422,7 +427,9 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
   // n'importe quoi d'autre — alors que le serveur les accepte : tout type
   // inconnu part en `application/octet-stream`, qui est dans SA liste blanche
   // (`storage.ts`). C'est le client qui refusait, pas le serveur.
-  Future<void> _pickDocuments() async {
+  /// [sensible] : document SENSIBLE (18/10/2026) — filigrane et visionneuse
+  /// protégée chez le destinataire, ni transfert ni partage.
+  Future<void> _pickDocuments({bool sensible = false}) async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.any,
       allowMultiple: true,
@@ -445,6 +452,7 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
         fileName: file.name,
         mimeType: _guessMime(file.name),
         path: file.path,
+        sensible: sensible,
       ));
     }
     if (!mounted) return;
@@ -552,11 +560,14 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
             ),
           ),
 
-          // 4 options (style WhatsApp)
+          // Les options (style WhatsApp). Un `Wrap` : avec « Sensible », six
+          // boutons ne tiennent plus sur une ligne d'un petit écran.
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            child: Wrap(
+              alignment: WrapAlignment.spaceAround,
+              spacing: 12,
+              runSpacing: 14,
               children: [
                 _optionButton(
                   icon: Icons.photo_library,
@@ -575,6 +586,12 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
                   label: tr(context, 'document'),
                   color: const Color(0xFF7B1FA2),
                   onTap: _pickDocuments,
+                ),
+                _optionButton(
+                  icon: Icons.verified_user_outlined,
+                  label: tr(context, 'sens_option'),
+                  color: const Color(0xFFE53935),
+                  onTap: () => _pickDocuments(sensible: true),
                 ),
                 _optionButton(
                   icon: Icons.person,

@@ -38,6 +38,7 @@ class DescripteurMedia {
     this.dureeMs,
     this.pages,
     this.apercu,
+    this.sensible = false,
   });
 
   /// Identifiant du média sur le serveur.
@@ -63,6 +64,12 @@ class DescripteurMedia {
   /// Aperçu JPEG en base64.
   final String? apercu;
 
+  /// DOCUMENT SENSIBLE (18/10/2026) : il s'ouvre seulement dans l'application,
+  /// avec un filigrane (numéro Alanya, appareil, date et heure), écran protégé,
+  /// et ne se transfère ni ne se partage. Écrit SEULEMENT s'il est vrai : un
+  /// descripteur ordinaire ne change pas d'un octet (vecteur partagé avec le web).
+  final bool sensible;
+
   Map<String, dynamic> toJson() => {
     'id': id,
     'cle': cle,
@@ -75,6 +82,7 @@ class DescripteurMedia {
     if (dureeMs != null) 'dureeMs': dureeMs,
     if (pages != null) 'pages': pages,
     if (apercu != null) 'apercu': apercu,
+    if (sensible) 'sensible': true,
   };
 
   /// Lit un descripteur, et le REFUSE s'il est mal formé — jamais de valeur
@@ -114,6 +122,7 @@ class DescripteurMedia {
       dureeMs: entier('dureeMs'),
       pages: entier('pages'),
       apercu: brut['apercu'] is String ? brut['apercu'] as String : null,
+      sensible: brut['sensible'] == true,
     );
     if (_b64(d.cle)?.length != 32)
       throw const ChargeInvalide('clé de média invalide');
