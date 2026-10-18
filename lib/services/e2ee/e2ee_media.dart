@@ -17,6 +17,8 @@ import 'dart:typed_data';
 
 import 'package:pointycastle/export.dart';
 
+import 'agb1_natif.dart';
+
 // ════════════════════════════════════════════════════════════════════════════
 // 1. LA CHARGE DE L'ENVELOPPE
 // ════════════════════════════════════════════════════════════════════════════
@@ -398,17 +400,30 @@ Uint8List dechiffrerFichier(
 Future<FichierChiffre> chiffrerHorsDuFil(Uint8List clair) =>
     Isolate.run(() => chiffrerFichier(clair));
 
-/// [dechiffrerFichier] dans un isolat. Lève [FichierInvalide].
+/// [dechiffrerFichier] — par le processeur sur Android (`Agb1Natif`, mêmes
+/// vérifications), dans un isolat sinon. Lève [FichierInvalide].
 Future<Uint8List> dechiffrerHorsDuFil(
   Uint8List chiffre, {
   required String cle,
   required String empreinte,
   required int taille,
-}) => Isolate.run(
-  () => dechiffrerFichier(
-    chiffre,
-    cle: cle,
-    empreinte: empreinte,
-    taille: taille,
-  ),
-);
+}) async {
+  final k = _b64(cle);
+  if (k != null && k.length == 32) {
+    try {
+      final clair = await Agb1Natif.dechiffrer(chiffre,
+          cle: k, empreinte: empreinte, taille: taille);
+      if (clair != null) return clair;
+    } on StateError catch (e) {
+      throw FichierInvalide(e.message);
+    }
+  }
+  return Isolate.run(
+    () => dechiffrerFichier(
+      chiffre,
+      cle: cle,
+      empreinte: empreinte,
+      taille: taille,
+    ),
+  );
+}

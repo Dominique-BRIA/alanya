@@ -7,6 +7,7 @@ import 'dart:typed_data';
 
 import 'package:pointycastle/export.dart';
 
+import 'agb1_natif.dart';
 import 'e2ee_media.dart';
 
 /// CHIFFRER UN MÉDIA DE FICHIER À FICHIER — envoi en morceaux, lot 2 (cours,
@@ -153,6 +154,26 @@ Future<FichierChiffreSurDisque> chiffrerVersFichierHorsDuFil({
   Uint8List? octets,
   void Function(double fraction)? onProgression,
 }) async {
+  // 🔴 LE PROCESSEUR D'ABORD (Android, 18/10/2026) : mêmes octets, bien plus
+  // vite que l'AES-GCM en Dart pur. Voir `Agb1Natif`. Indisponible : l'isolat.
+  final cle = Uint8List.fromList(
+      List<int>.generate(32, (_) => Random.secure().nextInt(256)));
+  final natif = await Agb1Natif.chiffrerFichier(
+    destination: destination,
+    cle: cle,
+    source: source,
+    octets: octets,
+    onProgression: onProgression,
+  );
+  if (natif != null) {
+    return FichierChiffreSurDisque(
+      chemin: destination,
+      taille: natif.taille,
+      tailleClair: natif.tailleClair,
+      cle: base64Encode(cle),
+      empreinte: natif.empreinte,
+    );
+  }
   if (onProgression == null) {
     return Isolate.run(
       () => chiffrerVersFichier(destination: destination, source: source, octets: octets),

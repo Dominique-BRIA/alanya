@@ -44,6 +44,7 @@ class MainActivity : FlutterFragmentActivity() {
         const val CANAL_ENREGISTREMENT = "alanya/enregistrement"
         const val CANAL_ECRAN_PROTEGE = "alanya/ecran_protege"
         const val CANAL_APPAREIL = "alanya/appareil"
+        const val CANAL_CHIFFREMENT = "alanya/chiffrement"
         const val CANAL_COMPRESSION_VIDEO = "alanya/compression_video"
         const val TAG_PROX = "AlanyaProximite"
     }
@@ -207,6 +208,13 @@ class MainActivity : FlutterFragmentActivity() {
                     else -> resultat.notImplemented()
                 }
             }
+
+        // Le chiffrement des médias (format AGB1) par le processeur : voir
+        // ChiffrementAgb1 — même sortie, beaucoup plus vite (18/10/2026).
+        val canalChiffrement =
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CANAL_CHIFFREMENT)
+        val chiffrement = ChiffrementAgb1(canalChiffrement)
+        canalChiffrement.setMethodCallHandler { appel, resultat -> chiffrement.traiter(appel, resultat) }
 
         // Marque et modèle exacts de l'appareil (« samsung SM-A515F ») : le
         // filigrane d'un document sensible les porte (18/10/2026). L'empreinte
