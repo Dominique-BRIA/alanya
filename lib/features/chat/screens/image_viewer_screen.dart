@@ -50,6 +50,9 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
         SnackBar(
           content: Text(tr(context, 'saved_to_alanya', {'nom': widget.filename})),
           backgroundColor: AlanyaColors.forest,
+          // Part seule : depuis Flutter 3.32, un SnackBar avec un bouton reste
+          // affiché tant qu'on ne le ferme pas (`persist` vaut alors vrai).
+          persist: false,
           action: SnackBarAction(
             label: tr(context, 'open'),
             textColor: Colors.white,

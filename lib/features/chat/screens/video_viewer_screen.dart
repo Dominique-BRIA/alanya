@@ -106,6 +106,9 @@ class _VideoViewerScreenState extends State<VideoViewerScreen> {
         SnackBar(
           content: Text(tr(context, 'video_saved')),
           backgroundColor: AlanyaColors.forest,
+          // Part seule : depuis Flutter 3.32, un SnackBar avec un bouton reste
+          // affiché tant qu'on ne le ferme pas (`persist` vaut alors vrai).
+          persist: false,
           action: SnackBarAction(
             label: tr(context, 'open'),
             textColor: Colors.white,

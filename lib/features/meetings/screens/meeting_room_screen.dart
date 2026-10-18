@@ -289,6 +289,9 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       SnackBar(
         content: Text(texte),
         duration: const Duration(seconds: 10),
+        // Part seule : depuis Flutter 3.32, un SnackBar avec un bouton reste
+        // affiché tant qu'on ne le ferme pas (`persist` vaut alors vrai).
+        persist: false,
         backgroundColor:
             a == MeetingAlerte.depassement ? AlanyaColors.terracotta : null,
         action: organisateur

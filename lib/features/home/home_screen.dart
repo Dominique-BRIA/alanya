@@ -2342,6 +2342,10 @@ class _ConversationsTabState extends State<_ConversationsTab>
     messager.showSnackBar(SnackBar(
       content: Text(texteFait),
       duration: const Duration(seconds: 4),
+      // 🐛 « ANNULER » NE PARTAIT PAS SEUL (user, 18/10/2026) : depuis
+      // Flutter 3.32, un SnackBar avec un bouton reste affiché tant qu'on ne
+      // le ferme pas (`persist` vaut vrai dès qu'il y a une action).
+      persist: false,
       action: SnackBarAction(
         label: texteAnnuler,
         onPressed: () => _archiver(c.copieArchivee(archiver), !archiver),
@@ -3346,6 +3350,9 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(tr(context, 'ai_message_deleted')),
+        // Part seule : depuis Flutter 3.32, un SnackBar avec un bouton reste
+        // affiché tant qu'on ne le ferme pas (`persist` vaut alors vrai).
+        persist: false,
         action: SnackBarAction(
           label: tr(context, 'cancel'),
           textColor: Colors.white,
