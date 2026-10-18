@@ -89,17 +89,51 @@ class EffetsVisage(private val contexte: Context) : LocalVideoTrack.ExternalVide
     private var pixels: IntArray? = null
     private var tamponRgba: ByteBuffer? = null
 
+    // ── Diagnostic (lu par Dart via `etat`) ───────────────────────────────────
+    // 🔴 UN EFFET QUI NE S'AFFICHE PAS NE DIT RIEN : détecteur qui ne s'ouvre
+    // pas, visage jamais trouvé, exception à chaque image — tout se termine par
+    // « l'image d'origine passe ». Sans ces compteurs, « rien ne change à
+    // l'image » (constaté le 18/10/2026) était impossible à départager.
+    @Volatile private var imagesRecues = 0L
+    @Volatile private var visagesVus = 0L
+    @Volatile private var derniereErreur: String? = null
+    @Volatile private var raisonDetecteur: String? = null
+
+    /**
+     * Décalage d'orientation appliqué à `frame.rotation`. Si le visage reste
+     * introuvable, on essaie les autres sens : une image couchée (rotation mal
+     * annoncée par certains téléphones) suffit à rendre un visage invisible.
+     */
+    private var decalage = 0
+    private var rates = 0
+
+    fun etat(): Map<String, Any?> = mapOf(
+        "effet" to effet,
+        "images" to imagesRecues,
+        "visages" to visagesVus,
+        "erreur" to derniereErreur,
+        "detecteur" to raisonDetecteur,
+        "decalage" to decalage,
+    )
+
+    fun remettreDiagnostic() {
+        imagesRecues = 0; visagesVus = 0; derniereErreur = null
+    }
+
     override fun onFrame(frame: VideoFrame): VideoFrame = synchronized(verrou) {
         precedente?.release()
         precedente = null
         val e = effet
-        if (e == "aucun" || detecteurImpossible) return frame
+        if (e == "aucun") return frame
+        imagesRecues++
+        if (detecteurImpossible) return frame
         try {
             val traitee = traiter(frame, e) ?: return frame
             precedente = traitee
             traitee
         } catch (t: Throwable) {
-            Log.e(TAG, "effet « $e » abandonné pour cette image", t)
+            if (derniereErreur == null) Log.e(TAG, "effet « $e » abandonné pour cette image", t)
+            derniereErreur = "${t.javaClass.simpleName}: ${t.message}".take(160)
             frame
         }
     }
@@ -126,14 +160,18 @@ class EffetsVisage(private val contexte: Context) : LocalVideoTrack.ExternalVide
                 .setBaseOptions(BaseOptions.builder().setModelAssetPath("face_landmarker.task").build())
                 .setRunningMode(RunningMode.VIDEO)
                 .setNumFaces(1)
-                .setMinFaceDetectionConfidence(0.5f)
-                .setMinFacePresenceConfidence(0.5f)
-                .setMinTrackingConfidence(0.5f)
+                .setMinFaceDetectionConfidence(0.3f)
+                .setMinFacePresenceConfidence(0.3f)
+                .setMinTrackingConfidence(0.3f)
                 .build()
-            FaceLandmarker.createFromOptions(contexte, options).also { detecteur = it }
+            FaceLandmarker.createFromOptions(contexte, options).also {
+                detecteur = it
+                Log.i(TAG, "détecteur de visage prêt")
+            }
         } catch (t: Throwable) {
             Log.e(TAG, "détecteur de visage indisponible : la caméra passe telle quelle", t)
             detecteurImpossible = true
+            raisonDetecteur = "${t.javaClass.simpleName}: ${t.message}".take(160)
             null
         }
     }
@@ -158,7 +196,7 @@ class EffetsVisage(private val contexte: Context) : LocalVideoTrack.ExternalVide
             i420.release()
         }
 
-        val rot = ((frame.rotation % 360) + 360) % 360
+        val rot = (((frame.rotation + decalage) % 360) + 360) % 360
         if (compteur++ % 2L == 0L || points == null) detecter(src, w, h, rot, frame.timestampNs)
 
         val dst = sortie!!
@@ -249,8 +287,15 @@ class EffetsVisage(private val contexte: Context) : LocalVideoTrack.ExternalVide
             val visages = r.faceLandmarks()
             if (visages.isEmpty()) {
                 points = null
+                // Une seconde environ sans visage : on essaie le sens suivant.
+                if (++rates >= 8) {
+                    rates = 0
+                    decalage = (decalage + 90) % 360
+                }
                 return
             }
+            rates = 0
+            visagesVus++
             val v = visages[0]
             val nouveaux = FloatArray(v.size * 2)
             for (k in v.indices) {

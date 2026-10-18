@@ -52,6 +52,24 @@ void main() {
     expect(appels.last.method, 'retirer');
   });
 
+  test("le diagnostic dit pourquoi l'effet ne se voit pas", () {
+    Map<String, dynamic> e(Map<String, dynamic> m) =>
+        {'effet': 'barbe', 'images': 40, 'visages': 0, ...m};
+    expect(EffetsVideo.diagnostic(null), isNull);
+    expect(EffetsVideo.diagnostic({'effet': 'aucun'}), isNull);
+    expect(EffetsVideo.diagnostic(e({'visages': 12})), isNull);
+    expect(EffetsVideo.diagnostic(e({'detecteur': 'UnsatisfiedLinkError'})),
+        'fx_diag_detecteur');
+    expect(EffetsVideo.diagnostic(e({'images': 0})), 'fx_diag_images');
+    expect(EffetsVideo.diagnostic(e({'erreur': 'IllegalStateException'})),
+        'fx_diag_erreur');
+    expect(EffetsVideo.diagnostic(e({})), 'fx_diag_visage');
+    final catalogue = File("lib/l10n/app_localizations.dart").readAsStringSync();
+    for (final k in ['fx_diag_detecteur', 'fx_diag_images', 'fx_diag_erreur', 'fx_diag_visage']) {
+      expect(catalogue.contains("'$k':"), isTrue, reason: "$k manque");
+    }
+  });
+
   test("un refus du natif ne change pas l'effet affiché", () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(canal, (_) async => false);

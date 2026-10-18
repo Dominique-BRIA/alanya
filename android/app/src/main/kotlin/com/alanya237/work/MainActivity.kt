@@ -232,6 +232,9 @@ class MainActivity : FlutterFragmentActivity() {
                         runCatching { retirerEffet() }
                         resultat.success(true)
                     }
+                    "etat" -> resultat.success(
+                        effets?.etat()?.plus("branche" to (pisteEffets != null))
+                    )
                     else -> resultat.notImplemented()
                 }
             }
@@ -416,6 +419,7 @@ class MainActivity : FlutterFragmentActivity() {
             piste.addProcessor(moteur)
             pisteEffets = piste
         }
+        moteur.remettreDiagnostic()
         moteur.effet = effet
         if (effet == "aucun") retirerEffet()
         return true

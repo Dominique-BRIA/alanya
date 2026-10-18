@@ -1603,6 +1603,24 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
           SnackBar(content: Text(tr(context, 'fx_indispo'))));
     }
     setState(() {});
+    if (ok && choisi != 'aucun') unawaited(_verifierEffet(choisi));
+  }
+
+  /// Deux secondes et demie après le choix : l'effet se voit-il vraiment ?
+  /// Sinon, un message dit pourquoi (détecteur, caméra, visage non trouvé).
+  Future<void> _verifierEffet(String effet) async {
+    await Future<void>.delayed(const Duration(milliseconds: 2500));
+    if (!mounted || EffetsVideo.actuel.value != effet) return;
+    final etat = await EffetsVideo.etat();
+    final cle = EffetsVideo.diagnostic(etat);
+    if (cle == null || !mounted) return;
+    final detail = (etat?['detecteur'] ?? etat?['erreur']) as String?;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      duration: const Duration(seconds: 8),
+      content: Text(detail == null
+          ? tr(context, cle)
+          : '${tr(context, cle)}\n$detail'),
+    ));
   }
 
   Widget _controlBtn({
