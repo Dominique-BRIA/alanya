@@ -72,7 +72,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _snack(tr(context, 'set_biometric_unavailable'));
         return;
       }
-      // Active directement sans vérifier (comme WhatsApp)
+      /*
+       * 🐛 ON ACTIVAIT SANS RIEN VÉRIFIER : un verrou qui ne pouvait pas
+       * s'ouvrir s'activait quand même, et l'on restait bloqué au lancement
+       * suivant. Comme Talky : une empreinte (ou le code de l'appareil)
+       * RÉUSSIE d'abord — elle prouve que le déverrouillage fonctionnera.
+       */
+      final ok = await BiometricService.authenticateWithFallback();
+      if (!mounted) return;
+      if (!ok) {
+        _snack(tr(context, 'set_biometric_refused'));
+        return;
+      }
       await BiometricService.setEnabled(true);
       // ⚠️ `tr()` LIT LE CONTEXTE, ce qu'un libellé en dur ne faisait pas :
       // après un `await`, l'écran a pu être quitté, et lire le contexte d'un

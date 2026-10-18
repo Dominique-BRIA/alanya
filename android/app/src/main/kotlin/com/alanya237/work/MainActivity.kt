@@ -10,7 +10,7 @@ import android.util.Log
 import android.view.WindowManager
 import com.alanya.telecom.CallRegistry
 import com.cloudwebrtc.webrtc.FlutterWebRTCPlugin
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
@@ -27,8 +27,17 @@ import io.flutter.plugin.common.MethodChannel
  * les conversations, les médias et les réglages. Ici Flutter n'allume le
  * comportement que le temps d'un appel entrant et l'éteint juste après, si bien
  * que le verrouillage protège l'application le reste du temps.
+ *
+ * 🔴 `FlutterFragmentActivity`, ET NON `FlutterActivity` : le verrou par
+ * empreinte (`local_auth`) passe par `BiometricPrompt`, qui exige une
+ * `FragmentActivity`. Avec `FlutterActivity`, chaque demande échouait aussitôt
+ * (`no_fragment_activity`), lue comme un refus : la fenêtre d'empreinte ne
+ * s'ouvrait JAMAIS (« le verrouillage biométrique ne marche pas du tout »,
+ * user, 18/10/2026). La bonne classe avait été posée le 18/07 dans un
+ * `MainActivity` voisin, supprimé le 29/07 comme orphelin — c'est celui-ci
+ * qui servait. Même choix que l'application Talky de l'équipe.
  */
-class MainActivity : FlutterActivity() {
+class MainActivity : FlutterFragmentActivity() {
 
     private companion object {
         const val CANAL = "alanya/ecran_verrouille"
