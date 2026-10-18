@@ -172,6 +172,27 @@ class Conversation {
         badge: badge,
       );
 
+  /// Copie avec l'état d'archive changé — le reste est intact. Sert à
+  /// déplacer la ligne AUSSITÔT, sans attendre la réponse du serveur.
+  Conversation copieArchivee(bool valeur) => Conversation(
+        id: id,
+        isGroup: isGroup,
+        title: title,
+        avatarUrl: avatarUrl,
+        members: members,
+        lastMessage: lastMessage,
+        unread: unread,
+        updatedAt: updatedAt,
+        lastCall: lastCall,
+        lastCallFourni: lastCallFourni,
+        isPinned: isPinned,
+        isArchived: valeur,
+        sourdine: sourdine,
+        e2eeActif: e2eeActif,
+        officiel: officiel,
+        badge: badge,
+      );
+
   /// Copie avec un autre dernier message — le reste est intact.
   ///
   /// ⚠️ SERT AUX FILS CHIFFRÉS : le serveur n’a pas leur texte et rend
@@ -195,6 +216,15 @@ class Conversation {
         officiel: officiel,
         badge: badge,
       );
+
+  /// Le badge À DESSINER : celui du serveur, ou celui du compte officiel si
+  /// le serveur marque le fil `officiel` sans en envoyer.
+  ///
+  /// ⚠️ C'EST TOUJOURS LE SERVEUR QUI DÉCIDE QUI EST OFFICIEL (`officiel`) :
+  /// l'application ne fait que tenir l'affichage, pour que le badge ne
+  /// disparaisse pas d'une réponse à l'autre.
+  BadgeCompte? get badgeAffiche =>
+      badge ?? (officiel && !isGroup ? BadgeCompte.officielParDefaut : null);
 
   Map<String, String> get memberNames => {
         for (final m in members) m.id: m.displayName,

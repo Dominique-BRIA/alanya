@@ -2127,6 +2127,11 @@ class _ChatScreenState extends State<ChatScreen>
   /// Le badge de l'interlocuteur, décidé par le serveur (lu dans le cache).
   BadgeCompte? _badge;
 
+  /// Le badge à dessiner : celui du serveur, ou celui du compte officiel —
+  /// même règle que `Conversation.badgeAffiche`.
+  BadgeCompte? get _badgeAffiche =>
+      _badge ?? (_officiel && !widget.isGroup ? BadgeCompte.officielParDefaut : null);
+
   Future<void> _lireOfficiel() async {
     final officiel = await ConversationCache.estOfficielle(widget.convId);
     if (officiel && mounted && !_officiel) setState(() => _officiel = true);
@@ -5874,7 +5879,8 @@ class _ChatScreenState extends State<ChatScreen>
                         style: const TextStyle(
                             fontSize: 16, fontWeight: FontWeight.w600)),
                   ),
-                  if (_badge != null) BadgeCompteWidget(_badge!, taille: 17),
+                  if (_badgeAffiche != null)
+                    BadgeCompteWidget(_badgeAffiche!, taille: 17),
                 ]),
                 if (widget.isGroup)
                   Text(trN(context, 'grp_members', widget.memberNames.length),
@@ -6222,6 +6228,7 @@ class _ChatScreenState extends State<ChatScreen>
         builder: (_) => ContactInfoScreen(
             userId: otherId,
             name: widget.title,
+            badge: _badgeAffiche,
             publicNumber: widget.otherPublicNumber ?? "",
             avatarUrl: widget.avatarUrl,
             statusMsg: widget.otherStatusMsg,

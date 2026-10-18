@@ -3,6 +3,8 @@ import '../../../l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 
 import '../../../theme/alanya_theme.dart';
+import '../../../widgets/chargement.dart';
+import '../../../core/api_client.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../../account/account_repository.dart';
 
@@ -30,13 +32,23 @@ class _LoginHistoryScreenState extends State<LoginHistoryScreen> {
   }
 
   Future<void> _charger() async {
+    final repo = context.read<AccountRepository>();
     setState(() => _erreur = null);
+    // Cache d'abord : l'historique gardé s'affiche aussitôt (18/10/2026).
+    if (_acces == null) {
+      try {
+        final copie = await ApiClient.copieSeulement(() => repo.loginHistory());
+        if (mounted && _acces == null) setState(() => _acces = copie);
+      } catch (_) {}
+    }
     try {
-      final liste = await context.read<AccountRepository>().loginHistory();
+      final liste = await repo.loginHistory();
       if (!mounted) return;
       setState(() => _acces = liste);
     } catch (_) {
       if (!mounted) return;
+      // Une copie est affichée : on la garde, sans erreur par-dessus.
+      if (_acces != null && _acces!.isNotEmpty) return;
       setState(() {
         _erreur = tr(context, 'hist_load_error');
         _acces = [];
@@ -93,10 +105,11 @@ class _LoginHistoryScreenState extends State<LoginHistoryScreen> {
             ),
             const SizedBox(height: 20),
             if (acces == null)
-              const Center(
+              const SizedBox(
+                height: 420,
                 child: Padding(
-                  padding: EdgeInsets.only(top: 40),
-                  child: CircularProgressIndicator(),
+                  padding: EdgeInsets.zero,
+                  child: SqueletteListe(lignes: 5),
                 ),
               )
             else if (_erreur != null)

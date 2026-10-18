@@ -168,7 +168,9 @@ class DeviceRegistry {
   /// qui l'appelle doit pouvoir afficher une erreur.
   Future<List<AppareilInfo>> list() async {
     final api = _api!, storage = _storage!;
-    final token = await storage.accessToken;
+    // Lecture de la copie (`ApiClient.copieSeulement`) : pas de jeton à lire.
+    final token =
+        ApiClient.enCopieSeule ? null : await storage.accessToken;
     final data = await api.get('/api/appareils', bearer: token);
     final brut = (data['appareils'] as List?) ?? const [];
     return brut

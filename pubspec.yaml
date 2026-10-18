@@ -184,6 +184,9 @@ flutter:
   uses-material-design: true
   assets:
     - assets/images/
+    # Les images des badges, embarquées : le badge s'affiche tout de suite et
+    # ne disparaît jamais, même si celle du serveur n'arrive pas.
+    - assets/images/badges/
     - assets/sounds/
 
   # Police du style « manuscrit » du formatage de texte (marqueur `).

@@ -27,4 +27,21 @@ class BadgeCompte {
   }
 
   Map<String, dynamic> toJson() => {'type': type, 'image': image, 'libelle': libelle};
+
+  /// Le badge du compte officiel quand le serveur dit `officiel` sans envoyer
+  /// de badge. Sans adresse : seule l'image embarquée s'affiche.
+  static const officielParDefaut =
+      BadgeCompte(type: 'officiel', image: '', libelle: 'Compte officiel');
+
+  /// L'image embarquée dans l'application pour ce type, s'il y en a une — la
+  /// même que celle du serveur (`public/badges/`), copiée le 18/10/2026.
+  ///
+  /// 🐛 « LE BADGE DISPARAÎT TOUJOURS » (user, 18/10/2026) : tant que l'image
+  /// du serveur n'était pas là — premier affichage, réseau lent, image
+  /// illisible — le badge n'avait rien à montrer. L'image embarquée tient la
+  /// place, puis celle du serveur la remplace si elle arrive.
+  String? get imageEmbarquee => const {
+        'officiel': 'assets/images/badges/officiel.png',
+        'verifie': 'assets/images/badges/verifie.png',
+      }[type];
 }

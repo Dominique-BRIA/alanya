@@ -154,11 +154,31 @@ class ChatRepository {
   /// F9 : Liste les conversations archivées.
   Future<List<Conversation>> listArchived() async {
     final data = await _api.get("/api/conversations?archived=true");
-    return ((data["conversations"] as List?) ?? [])
-        .map((c) => Conversation.fromJson(c as Map<String, dynamic>))
-        .where((c) => c.isArchived)
-        .toList();
+    final brut = (data["conversations"] as List?) ?? [];
+    // Gardées pour la prochaine ouverture : la ligne « Archivées » et son
+    // écran s'affichent sans attendre le réseau.
+    await CacheEcrans.ecrire('conversations_archivees', [
+      for (final c in brut)
+        if (c is Map && c["isArchived"] == true) c,
+    ]);
+    return _archivees(brut);
   }
+
+  /// Les dernières archivées reçues, sans réseau — `null` si aucune.
+  Future<List<Conversation>?> listArchivedEnCache() async {
+    final brut = await CacheEcrans.lire('conversations_archivees');
+    if (brut is! List) return null;
+    try {
+      return _archivees(brut);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  List<Conversation> _archivees(List brut) => brut
+      .map((c) => Conversation.fromJson(c as Map<String, dynamic>))
+      .where((c) => c.isArchived)
+      .toList();
 
   /// Supprime un message : scope "me" (masque pour moi) ou "everyone" (efface pour tous).
   Future<void> deleteMessage(String convId, String messageId, {String scope = "me"}) async {

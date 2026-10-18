@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 
 import '../../../core/app_snackbar.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../../widgets/chargement.dart';
+import '../../../core/api_client.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../../account/account_repository.dart';
 import '../../status/screens/audience_statuts_screen.dart';
@@ -44,19 +46,31 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
   }
 
   Future<void> _load() async {
+    final repo = context.read<AccountRepository>();
+    void appliquer(Map p) => setState(() {
+          _readReceipts = p["readReceipts"] ?? 1;
+          _lastSeenVisibility = p["lastSeenVisibility"] ?? 2;
+          _chiffrementActif = (p["chiffrementActif"] ?? 1) == 1;
+          _loading = false;
+        });
+    // Cache d'abord : les réglages gardés s'affichent aussitôt (18/10/2026).
     try {
-      final p = await context.read<AccountRepository>().getPrivacy();
+      final copie = await ApiClient.copieSeulement(() => repo.getPrivacy());
+      if (mounted && _loading) appliquer(copie);
+    } catch (_) {}
+    if (mounted) setState(() => _miseAJour = true);
+    try {
+      final p = await repo.getPrivacy();
       if (!mounted) return;
-      setState(() {
-        _readReceipts = p["readReceipts"] ?? 1;
-        _lastSeenVisibility = p["lastSeenVisibility"] ?? 2;
-        _chiffrementActif = (p["chiffrementActif"] ?? 1) == 1;
-        _loading = false;
-      });
+      appliquer(p);
     } catch (_) {
       if (mounted) setState(() => _loading = false);
+    } finally {
+      if (mounted) setState(() => _miseAJour = false);
     }
   }
+
+  bool _miseAJour = false;
 
   Future<void> _save({
     int? readReceipts,
@@ -110,9 +124,10 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
     return Scaffold(
       appBar: backAppBar(context, tr(context, 'set_privacy')),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const SqueletteListe(lignes: 5, avatar: false)
           : ListView(
               children: [
+                BarreMiseAJour(visible: _miseAJour),
                 /*
                  * ══════ LE SEUL ENDROIT OÙ L'ON PARLE DU CHIFFREMENT ══════
                  *

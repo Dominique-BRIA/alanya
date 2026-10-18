@@ -11,6 +11,7 @@ import '../../../core/token_storage.dart';
 import '../../../core/texte_recherche.dart';
 import '../../../models/sonnerie.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../../widgets/chargement.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../ringtones_repository.dart';
 
@@ -56,6 +57,13 @@ class _RingtonesScreenState extends State<RingtonesScreen> {
       _erreur = null;
     });
     final depot = context.read<RingtonesRepository>();
+    // Cache d'abord : la liste gardée s'affiche aussitôt (18/10/2026).
+    if (_sonneries == null) {
+      try {
+        final copie = await ApiClient.copieSeulement(() => depot.list());
+        if (mounted && _sonneries == null) setState(() => _sonneries = copie);
+      } catch (_) {}
+    }
     try {
       final l = await depot.list();
       if (!mounted) return;
@@ -274,9 +282,10 @@ class _RingtonesScreenState extends State<RingtonesScreen> {
 
   Widget _corps() {
     if (_sonneries == null && _chargement) {
-      return Center(child: CircularProgressIndicator(color: accentOf(context)));
+      return const SqueletteListe(lignes: 6, avatar: false);
     }
-    if (_erreur != null) {
+    // Une copie est affichée : l'erreur du réseau ne la remplace pas.
+    if (_erreur != null && _sonneries == null) {
       return ListView(children: [
         const SizedBox(height: 80),
         Center(

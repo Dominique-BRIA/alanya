@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../../core/api_client.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../../widgets/chargement.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../../../widgets/avatar_circle.dart';
 import '../../../models/blocked_user.dart';
@@ -31,15 +32,24 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
   }
 
   Future<void> _load() async {
+    final repo = context.read<BlockedRepository>();
+    // Cache d'abord : la liste gardée s'affiche aussitôt (18/10/2026).
+    if (_blocked == null) {
+      try {
+        final copie = await ApiClient.copieSeulement(() => repo.fetchBlocked());
+        if (mounted && _blocked == null) setState(() => _blocked = copie);
+      } catch (_) {}
+    }
     try {
-      final list = await context.read<BlockedRepository>().fetchBlocked();
+      final list = await repo.fetchBlocked();
       if (!mounted) return;
       setState(() {
         _blocked = list;
         _error = false;
       });
     } catch (_) {
-      if (mounted) setState(() => _error = true);
+      // Une copie est affichée : on la garde, sans erreur par-dessus.
+      if (mounted) setState(() => _error = _blocked == null);
     }
   }
 
@@ -99,11 +109,7 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
   }
 
   Widget _buildList() {
-    if (_blocked == null && !_error) {
-      return const Center(
-        child: CircularProgressIndicator(color: AlanyaColors.terracotta),
-      );
-    }
+    if (_blocked == null && !_error) return const SqueletteListe(lignes: 4);
     if (_error) {
       return ListView(children: [
         const SizedBox(height: 80),

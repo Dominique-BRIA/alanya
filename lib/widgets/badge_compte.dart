@@ -11,11 +11,13 @@ import '../models/badge_compte.dart';
 /// L'image et le libellé viennent de la charge (`badge`) : les changer se fait
 /// depuis la console, sans nouvelle version de l'application.
 ///
-/// 🔴 L'IMAGE VIENT DU TÉLÉPHONE D'ABORD (`ImagesBadges`) : le badge ne
-/// disparaît plus hors ligne, et ne surgit plus au milieu de la ligne une
-/// seconde après le nom. Sa place est réservée pendant la toute première
-/// lecture. Image introuvable partout : rien ne s'affiche, le nom reste
-/// lisible.
+/// 🔴 LE BADGE NE DISPARAÎT JAMAIS (user, 18/10/2026) :
+/// 1. l'image du TÉLÉPHONE d'abord (`ImagesBadges`) — ou, tant qu'elle n'y est
+///    pas, l'image EMBARQUÉE du type (`BadgeCompte.imageEmbarquee`) ;
+/// 2. l'image du serveur la remplace dès qu'elle est là ;
+/// 3. image du serveur introuvable ou illisible : on revient à l'embarquée.
+/// Seul un type inconnu de l'application, sans image du serveur, ne montre
+/// rien — le nom reste lisible.
 class BadgeCompteWidget extends StatefulWidget {
   const BadgeCompteWidget(this.badge, {super.key, this.taille = 16});
 
@@ -44,8 +46,14 @@ class _BadgeCompteWidgetState extends State<BadgeCompteWidget> {
 
   void _charger() {
     final url = widget.badge.image;
-    _octets = ImagesBadges.enMemoire(url);
     _introuvable = false;
+    if (url.isEmpty) {
+      // Badge par défaut (fil officiel sans badge du serveur) : l'embarquée.
+      _octets = null;
+      _introuvable = true;
+      return;
+    }
+    _octets = ImagesBadges.enMemoire(url);
     if (_octets != null) {
       // Déjà là : on profite de la lecture pour la revérification de session.
       ImagesBadges.lire(url);
@@ -66,23 +74,32 @@ class _BadgeCompteWidgetState extends State<BadgeCompteWidget> {
   @override
   Widget build(BuildContext context) {
     final t = widget.taille;
-    final rien = SizedBox(width: 0, height: t);
+    final embarquee = widget.badge.imageEmbarquee;
+    // Le repli de toutes les situations : l'image embarquée si le type en a
+    // une, sinon une place vide (le temps de la première lecture) ou rien.
+    Widget repli({required bool enAttente}) => embarquee != null
+        ? Image.asset(embarquee,
+            width: t, height: t, filterQuality: FilterQuality.medium)
+        : SizedBox(width: enAttente ? t : 0, height: t);
+
     final octets = _octets;
     final Widget image;
     if (octets != null) {
       image = _estSvg
-          ? SvgPicture.memory(octets, width: t, height: t)
+          ? SvgPicture.memory(octets,
+              width: t,
+              height: t,
+              placeholderBuilder: (_) => repli(enAttente: false))
           : Image.memory(octets,
               width: t,
               height: t,
               filterQuality: FilterQuality.medium,
               gaplessPlayback: true,
-              errorBuilder: (_, __, ___) => rien);
-    } else if (_introuvable) {
+              errorBuilder: (_, __, ___) => repli(enAttente: false));
+    } else if (_introuvable && embarquee == null) {
       return const SizedBox.shrink();
     } else {
-      // Première lecture en cours : la place est tenue, le nom ne bouge pas.
-      image = SizedBox(width: t, height: t);
+      image = repli(enAttente: !_introuvable);
     }
     return Padding(
       padding: const EdgeInsets.only(left: 4),

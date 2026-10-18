@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart' show MediaType;
 
+import 'cache_ecrans.dart';
 import 'locale_controller.dart';
 import 'server_config.dart';
 
@@ -75,11 +76,57 @@ class ApiClient {
 
   static String get _defaultBaseUrl => ServerConfig.apiBase;
 
+  // ══════════════════════════════════════════════
+  // COPIES LOCALES (cache d'abord) — 18/10/2026
+  // ══════════════════════════════════════════════
+  /*
+   * 🐛 « CERTAINS ÉCRANS METTENT DU TEMPS À OUVRIR » (user, 18/10/2026) : les
+   * sous-écrans des Paramètres attendaient le serveur, roue au milieu, avant
+   * d'afficher quoi que ce soit.
+   *
+   * 🔴 LE MÉCANISME VIT ICI, UNE FOIS — comme sur CETIC (`Api.copieSeulement`) :
+   * la réponse d'un GET des [cheminsGardes] est gardée sur le téléphone ; un
+   * écran relit ensuite cette copie en appelant SA PROPRE fonction de
+   * chargement dans [copieSeulement]. Aucun dépôt n'a de second format à
+   * maintenir.
+   */
+
+  /// Les GET dont la réponse est gardée — des réglages et des listes courtes,
+  /// jamais des messages ni des médias.
+  static const cheminsGardes = <String>[
+    '/api/account/privacy',
+    '/api/user-access',
+    '/api/blocked',
+    '/api/repondeur',
+    '/api/repondeur/plages',
+    '/api/pays',
+    '/api/ringtones',
+    '/api/appareils',
+  ];
+
+  static bool _aGarder(String path) {
+    final sansRequete = path.split('?').first;
+    return cheminsGardes.contains(sansRequete);
+  }
+
+  static const _cleCopieSeule = #alanyaCopieSeule;
+
+  /// Vrai pendant un [copieSeulement] : le réseau est interdit.
+  static bool get enCopieSeule => Zone.current[_cleCopieSeule] == true;
+
+  /// Exécute [lecture] en ne servant QUE les copies gardées sur le téléphone,
+  /// sans aucun appel réseau ni aucune écriture. Échoue s'il manque une copie.
+  static Future<R> copieSeulement<R>(Future<R> Function() lecture) =>
+      runZoned(lecture, zoneValues: {_cleCopieSeule: true});
+
+  static Never _pasDeCopie() => throw ApiException(0, 'Pas de copie locale.');
+
   Future<Map<String, dynamic>> post(
     String path,
     Map<String, dynamic> body, {
     String? bearer,
   }) async {
+    if (enCopieSeule) _pasDeCopie();
     final res = await http.post(
       Uri.parse("$baseUrl$path"),
       headers: _headers(bearer),
@@ -89,10 +136,19 @@ class ApiClient {
   }
 
   Future<Map<String, dynamic>> get(String path, {String? bearer}) async {
+    final cle = 'api$path';
+    if (enCopieSeule) {
+      if (!_aGarder(path)) _pasDeCopie();
+      final copie = await CacheEcrans.lire(cle);
+      if (copie is! Map) _pasDeCopie();
+      return Map<String, dynamic>.from(copie);
+    }
     final res = await http
         .get(Uri.parse("$baseUrl$path"), headers: _headers(bearer))
         .timeout(delaiReponse, onTimeout: _expire);
-    return _decode(res);
+    final data = _decode(res);
+    if (_aGarder(path)) unawaited(CacheEcrans.ecrire(cle, data));
+    return data;
   }
 
   Future<Map<String, dynamic>> patch(
@@ -100,6 +156,7 @@ class ApiClient {
     Map<String, dynamic> body, {
     String? bearer,
   }) async {
+    if (enCopieSeule) _pasDeCopie();
     final res = await http.patch(
       Uri.parse("$baseUrl$path"),
       headers: _headers(bearer),
@@ -118,6 +175,7 @@ class ApiClient {
     Map<String, dynamic> body, {
     String? bearer,
   }) async {
+    if (enCopieSeule) _pasDeCopie();
     final res = await http.put(
       Uri.parse("$baseUrl$path"),
       headers: _headers(bearer),
@@ -128,6 +186,7 @@ class ApiClient {
 
   Future<Map<String, dynamic>> delete(String path,
       {String? bearer, Map<String, dynamic>? body}) async {
+    if (enCopieSeule) _pasDeCopie();
     final res = await http.delete(
       Uri.parse("$baseUrl$path"),
       headers: _headers(bearer),

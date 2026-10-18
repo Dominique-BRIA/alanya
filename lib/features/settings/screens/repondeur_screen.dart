@@ -11,6 +11,7 @@ import '../../../core/token_storage.dart';
 import '../../../core/voice_recorder.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../../widgets/chargement.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../../calls/repondeur_repository.dart';
 import '../../media/media_repository.dart';
@@ -83,6 +84,18 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
 
   Future<void> _charger() async {
     final depot = context.read<RepondeurRepository>();
+    // Cache d'abord : l'état gardé s'affiche aussitôt (18/10/2026).
+    try {
+      final (etat, plages) = await ApiClient.copieSeulement(
+          () => (depot.lire(), depot.listerPlages()).wait);
+      if (mounted && _chargement) {
+        setState(() {
+          _etat = etat;
+          _plages = plages;
+          _chargement = false;
+        });
+      }
+    } catch (_) {}
     try {
       /*
        * ⚠️ LES DEUX LECTURES EN PARALLÈLE, ET NON L'UNE APRÈS L'AUTRE : elles
@@ -98,8 +111,10 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
       });
     } catch (_) {
       if (!mounted) return;
+      // Une copie est affichée : pas d'erreur par-dessus.
+      final avaitUneCopie = !_chargement;
       setState(() => _chargement = false);
-      showAppSnackBar(tr(context, 'lists_load_error'));
+      if (!avaitUneCopie) showAppSnackBar(tr(context, 'lists_load_error'));
     }
   }
 
@@ -316,7 +331,7 @@ class _RepondeurScreenState extends State<RepondeurScreen> {
     return Scaffold(
       appBar: backAppBar(context, tr(context, 'vm_title')),
       body: _chargement
-          ? const Center(child: CircularProgressIndicator())
+          ? const SqueletteListe(lignes: 5, avatar: false)
           : ListView(
             padding: const EdgeInsets.only(bottom: 32),
             children: [

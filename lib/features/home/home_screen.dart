@@ -2,6 +2,7 @@ import 'dart:async';
 import '../../l10n/app_localizations.dart';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../core/alanya_id_formatter.dart';
@@ -72,6 +73,7 @@ import '../meetings/screens/meetings_screen.dart';
 import '../status/horodatage_statut.dart';
 import '../status/statuts_persistes.dart';
 import '../status/publication_statuts.dart';
+import '../status/screens/audience_statuts_screen.dart';
 import '../status/screens/create_status_screen.dart';
 import '../status/screens/status_viewer_screen.dart';
 import '../status/status_repository.dart';
@@ -349,7 +351,17 @@ class _HomeScreenState extends State<HomeScreen> {
       if (estParticulier) const EntreprisesTab(),
     ];
 
-    return Scaffold(
+    /*
+     * 🐛 LE BOUTON RETOUR DU TÉLÉPHONE FERMAIT L'APPLICATION depuis n'importe
+     * quel onglet (user, 18/10/2026). Comme WhatsApp : hors de Discussions, il
+     * y ramène ; depuis Discussions, il sort.
+     */
+    return PopScope(
+      canPop: _tab == 0,
+      onPopInvokedWithResult: (aQuitte, _) {
+        if (!aQuitte) _allerOnglet(0);
+      },
+      child: Scaffold(
       appBar: AppBar(
         // letterSpacing réduit de 4 à 2 : « ALANYA WORK » fait onze
         // caractères, et l'AppBar porte aussi des actions.
@@ -376,7 +388,12 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           PopupMenuButton<String>(
             onSelected: (v) {
-              if (v == "settings") {
+              if (v == "status_privacy") {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                      builder: (_) => const AudienceStatutsScreen()),
+                );
+              } else if (v == "settings") {
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const SettingsScreen()),
                 );
@@ -398,6 +415,17 @@ class _HomeScreenState extends State<HomeScreen> {
               }
             },
             itemBuilder: (_) => [
+              // Onglet Statuts : qui voit mes statuts, en tête du menu — comme
+              // WhatsApp (demande du user, 18/10/2026). L'écran existait déjà,
+              // mais on ne l'atteignait que par Paramètres → Confidentialité.
+              if (_tab == 1)
+                PopupMenuItem(
+                    value: "status_privacy",
+                    child: ListTile(
+                      leading: const Icon(Icons.lock_outline),
+                      title: Text(tr(context, 'status_privacy')),
+                      contentPadding: EdgeInsets.zero,
+                    )),
               PopupMenuItem(
                   value: "devices",
                   child: ListTile(
@@ -564,7 +592,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
         ],
       ),
-    );
+    ));
   }
 }
 
@@ -997,6 +1025,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
       // Met à jour le cache pour la prochaine fois.
       await ConversationCache.putAll(convs);
       unawaited(_eclairerGroupesJamaisOuverts(convs));
+      unawaited(_chargerArchives());
       // Signale à l'app qu'on est bien online.
       if (mounted) context.read<ConnectivityService>().markHttpSucceeded();
 
@@ -1080,10 +1109,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
       if (mounted) context.read<ConnectivityService>().markHttpSucceeded();
 
       // Charge les archivées en arrière-plan
-      try {
-        final archived = await context.read<ChatRepository>().listArchived();
-        if (mounted) setState(() => _archivedConvs = archived);
-      } catch (_) {}
+      await _chargerArchives();
 
       // Rafraîchit les appels pour l'aperçu
       _loadCalls();
@@ -1342,15 +1368,17 @@ class _ConversationsTabState extends State<_ConversationsTab>
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         children: [
+          /*
+           * Toutes · Non lues · Groupes, puis les listes — comme WhatsApp
+           * (demande du user, 18/10/2026). « Discussions » a disparu, et
+           * « Archivés » n'est plus une puce : c'est la ligne « Archivées »
+           * en tête de « Toutes », qui ouvre son propre écran.
+           */
           systeme(0, 'filter_all', Icons.apps_rounded),
-          const SizedBox(width: 8),
-          systeme(1, 'filter_chats', Icons.person_outline_rounded),
-          const SizedBox(width: 8),
-          systeme(2, 'filter_groups', Icons.groups_outlined),
           const SizedBox(width: 8),
           systeme(3, 'filter_unread', Icons.mail_outline_rounded),
           const SizedBox(width: 8),
-          systeme(4, 'filter_archived', Icons.archive_outlined),
+          systeme(2, 'filter_groups', Icons.groups_outlined),
           for (final l in listes) ...[
             const SizedBox(width: 8),
             _puceListe(l, sombre),
@@ -1604,7 +1632,11 @@ class _ConversationsTabState extends State<_ConversationsTab>
     // répondent à des questions différentes et se cumulent naturellement.
     final baseConvs = _appliqueListe(parOnglet);
     if (baseConvs.isEmpty) {
+      final archives = _archivedConvs?.length ?? 0;
       return ListView(children: [
+        // Tout archivé : la ligne reste, sinon les archives seraient
+        // introuvables.
+        if (_ligneArchives(archives)) _tuileArchives(archives, muted2),
         const SizedBox(height: 100),
         Center(
           child: Padding(
@@ -1666,8 +1698,16 @@ class _ConversationsTabState extends State<_ConversationsTab>
         // Bouton tr(context, 'home_archived') style WhatsApp
         // ⚠️ Masquée sous le filtre « Archivés » : proposer d'ouvrir les
         // archivées alors qu'on les a sous les yeux n'aurait rien voulu dire.
-        if (archivedCount > 0 && _searchQuery.isEmpty && _tabFilter != 4)
-          ListTile(
+        if (_ligneArchives(archivedCount)) _tuileArchives(archivedCount, muted2),
+        if (_ligneArchives(archivedCount)) const Divider(height: 1),
+        // Liste des conversations
+        ...convs.map((c) => _tile(c)),
+      ],
+    );
+  }
+
+  /// La ligne « Archivées (N) » en tête de « Toutes ».
+  Widget _tuileArchives(int archivedCount, Color muted2) => ListTile(
             leading: Icon(Icons.archive_outlined, color: muted2, size: 24),
             title: Text(
               tr(context, 'home_archived'),
@@ -1693,14 +1733,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
               ),
             ),
             onTap: _showArchived,
-          ),
-        if (archivedCount > 0 && _searchQuery.isEmpty && _tabFilter != 4)
-          const Divider(height: 1),
-        // Liste des conversations
-        ...convs.map((c) => _tile(c)),
-      ],
-    );
-  }
+          );
 
   /// L'aperçu d'un message, avec ses `@mentions` en gras.
   ///
@@ -2021,7 +2054,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
                 style: const TextStyle(fontWeight: FontWeight.w600)),
           ),
           // Badge décidé par le serveur : l'application le dessine tel quel.
-          if (c.badge != null) BadgeCompteWidget(c.badge!),
+          if (c.badgeAffiche != null) BadgeCompteWidget(c.badgeAffiche!),
           // Étiquette « Groupe », comme le web : à côté du nom, discrète.
           if (c.isGroup)
             Container(
@@ -2197,12 +2230,9 @@ class _ConversationsTabState extends State<_ConversationsTab>
                 color: AlanyaColors.chocolate,
               ),
               title: Text(c.isArchived ? tr(context, 'home_unarchive') : tr(context, 'archive')),
-              onTap: () async {
+              onTap: () {
                 Navigator.pop(ctx);
-                await context
-                    .read<ChatRepository>()
-                    .archiveConversation(c.id, !c.isArchived);
-                _load();
+                _archiver(c, !c.isArchived);
               },
             ),
             ListTile(
@@ -2239,122 +2269,97 @@ class _ConversationsTabState extends State<_ConversationsTab>
     );
   }
 
-  /// Affiche les conversations archivées dans un bottom sheet.
+  /// La ligne « Archivées » : en tête de « Toutes », hors recherche et hors
+  /// liste, dès qu'il y a au moins une archivée.
+  bool _ligneArchives(int nombre) =>
+      nombre > 0 &&
+      _searchQuery.isEmpty &&
+      _tabFilter == 0 &&
+      _listeActive == null;
+
+  /// Les archivées, aussi pour l'écran « Archivées » qui les suit en direct.
+  final ValueNotifier<List<Conversation>> _archivesVues = ValueNotifier(const []);
+
+  void _poserArchives(List<Conversation> archives) {
+    if (!mounted) return;
+    setState(() => _archivedConvs = archives);
+    _archivesVues.value = archives;
+  }
+
+  /// Les archivées : la copie du téléphone d'abord, puis le serveur.
+  Future<void> _chargerArchives() async {
+    final repo = context.read<ChatRepository>();
+    if (_archivedConvs == null) {
+      final copie = await repo.listArchivedEnCache();
+      if (copie != null && _archivedConvs == null) _poserArchives(copie);
+    }
+    try {
+      _poserArchives(await repo.listArchived());
+    } catch (_) {
+      // Hors ligne : la copie reste.
+    }
+  }
+
+  /// Archive (ou désarchive) [c] : la ligne change de place AUSSITÔT, puis un
+  /// message bref permet d'annuler — comme WhatsApp (user, 18/10/2026).
+  ///
+  /// ⚠️ ÉCHEC DU SERVEUR : la ligne revient où elle était, et on le dit.
+  Future<void> _archiver(Conversation c, bool archiver) async {
+    final repo = context.read<ChatRepository>();
+    final messager = ScaffoldMessenger.of(context);
+    final texteFait =
+        tr(context, archiver ? 'conv_archived_toast' : 'conv_unarchived_toast');
+    final texteAnnuler = tr(context, 'undo_action');
+    final texteEchec = tr(context, 'home_server_unreachable');
+
+    void deplacer(bool versArchives) {
+      final actives = List<Conversation>.from(_convs ?? const <Conversation>[])
+        ..removeWhere((x) => x.id == c.id);
+      final archives = List<Conversation>.from(_archivedConvs ?? const <Conversation>[])
+        ..removeWhere((x) => x.id == c.id);
+      if (versArchives) {
+        archives.insert(0, c.copieArchivee(true));
+      } else {
+        actives.insert(0, c.copieArchivee(false));
+        actives.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+      }
+      setState(() => _convs = actives);
+      _poserArchives(archives);
+    }
+
+    deplacer(archiver);
+    messager.hideCurrentSnackBar();
+    messager.showSnackBar(SnackBar(
+      content: Text(texteFait),
+      duration: const Duration(seconds: 4),
+      action: SnackBarAction(
+        label: texteAnnuler,
+        onPressed: () => _archiver(c.copieArchivee(archiver), !archiver),
+      ),
+    ));
+    try {
+      await repo.archiveConversation(c.id, archiver);
+    } catch (_) {
+      if (!mounted) return;
+      deplacer(!archiver);
+      messager.hideCurrentSnackBar();
+      messager.showSnackBar(SnackBar(content: Text(texteEchec)));
+      return;
+    }
+    if (mounted) unawaited(_load());
+  }
+
+  /// Ouvre l'écran des conversations archivées.
   Future<void> _showArchived() async {
     if (_archivedConvs == null || _archivedConvs!.isEmpty) return;
-
-    final repo = context.read<ChatRepository>();
-    final handle =
-        themed(context, light: AlanyaColors.grey300, dark: AlanyaColors.craie2);
-    final muted2 =
-        themed(context, light: AlanyaColors.grey500, dark: AlanyaColors.craie2);
-
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    _archivesVues.value = _archivedConvs!;
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => _EcranArchives(
+        archives: _archivesVues,
+        tuile: (c) => _tile(c),
       ),
-      builder: (ctx) => DraggableScrollableSheet(
-        initialChildSize: 0.6,
-        minChildSize: 0.3,
-        maxChildSize: 0.85,
-        expand: false,
-        builder: (_, scrollCtrl) => Column(
-          children: [
-            Container(
-              margin: const EdgeInsets.only(top: 12, bottom: 8),
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: handle,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Text(tr(context, 'home_archived'),
-                      style:
-                          const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  const Spacer(),
-                  Text("${_archivedConvs!.length}",
-                      style: TextStyle(color: muted2)),
-                ],
-              ),
-            ),
-            const Divider(height: 1),
-            Expanded(
-              child: ListView.builder(
-                controller: scrollCtrl,
-                itemCount: _archivedConvs!.length,
-                itemBuilder: (_, i) {
-                  final c = _archivedConvs![i];
-                  final title = c.title ?? tr(context, 'chat_untitled');
-                  // Aperçu formaté également dans les archivées : on affiche
-                  // le style réel (gras/italique) et plus les marqueurs.
-                  Widget archivedPreview() {
-                    final last = c.lastMessage;
-                    if (last == null || (last.content?.isEmpty ?? true)) {
-                      return Text("—",
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 12, color: muted2));
-                    }
-                    if (last.type != "TEXT") {
-                      return Text(
-                        last.type == "AUDIO"
-                            ? tr(context, 'media_voice')
-                            : last.type == "IMAGE"
-                                ? tr(context, 'media_photo')
-                                : last.type == "VIDEO"
-                                    ? tr(context, 'video')
-                                    : tr(context, 'media_file'),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 12, color: muted2),
-                      );
-                    }
-                    final trimmed = last.content!.length > 100
-                        ? "${last.content!.substring(0, 100)}…"
-                        : last.content!;
-                    return Text.rich(
-                      TextSpan(
-                        style: TextStyle(fontSize: 12, color: muted2),
-                        children: spansWhatsApp(trimmed, tailleBase: 12),
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    );
-                  }
-
-                  return ListTile(
-                    leading: AvatarCircle(
-                      name: title,
-                      avatarUrl: c.avatarUrl,
-                      radius: 20,
-                      backgroundColor: AlanyaColors.gold,
-                    ),
-                    title: Text(title,
-                        style: const TextStyle(fontWeight: FontWeight.w500)),
-                    subtitle: archivedPreview(),
-                    trailing: TextButton(
-                      onPressed: () async {
-                        await repo.archiveConversation(c.id, false);
-                        Navigator.pop(ctx);
-                        _load();
-                      },
-                      child: Text(tr(context, 'home_unarchive')),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    ));
+    if (mounted) unawaited(_load());
   }
 
   Future<void> _deleteSelected() async {
@@ -3407,6 +3412,39 @@ class _Placeholder extends StatelessWidget {
                   color: themed(context,
                       light: Colors.black54, dark: AlanyaColors.craie2))),
         ],
+      ),
+    );
+  }
+}
+
+/// L'écran des conversations archivées — comme WhatsApp : un écran à part,
+/// où chaque discussion s'ouvre et se désarchive (appui long).
+///
+/// 🔴 LES MÊMES LIGNES QUE L'ACCUEIL ([tuile]) : aperçu, badge, non-lus et
+/// menu sont ceux de la liste principale, sans second dessin à maintenir.
+/// [archives] suit les changements en direct : désarchiver fait partir la
+/// ligne aussitôt.
+class _EcranArchives extends StatelessWidget {
+  const _EcranArchives({required this.archives, required this.tuile});
+
+  final ValueListenable<List<Conversation>> archives;
+  final Widget Function(Conversation c) tuile;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(tr(context, 'home_archived'))),
+      body: ValueListenableBuilder<List<Conversation>>(
+        valueListenable: archives,
+        builder: (context, liste, _) => liste.isEmpty
+            ? Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text(tr(context, 'home_no_chats'),
+                      textAlign: TextAlign.center),
+                ),
+              )
+            : ListView(children: [for (final c in liste) tuile(c)]),
       ),
     );
   }

@@ -26,8 +26,11 @@ class AuthedApi {
   int _echecsRenouvellement = 0;
   DateTime? _pasAvant;
 
-  Future<Map<String, dynamic>> get(String path) =>
-      _withAuth((token) => _api.get(path, bearer: token));
+  /// En lecture de copie (`ApiClient.copieSeulement`), ni jeton ni réseau :
+  /// lire le coffre sécurisé ferait attendre l'écran pour rien.
+  Future<Map<String, dynamic>> get(String path) => ApiClient.enCopieSeule
+      ? _api.get(path)
+      : _withAuth((token) => _api.get(path, bearer: token));
 
   Future<Map<String, dynamic>> post(String path, Map<String, dynamic> body) =>
       _withAuth((token) => _api.post(path, body, bearer: token));

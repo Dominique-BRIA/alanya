@@ -6,6 +6,8 @@ import '../../../core/realtime_client.dart';
 
 import '../../../core/device_registry.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../../widgets/chargement.dart';
+import '../../../core/api_client.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../dissocier_telephone.dart';
 
@@ -35,6 +37,20 @@ class _DevicesScreenState extends State<DevicesScreen> {
 
   Future<void> _charger() async {
     setState(() => _erreur = null);
+    // Cache d'abord : la liste gardée s'affiche aussitôt (18/10/2026).
+    if (_appareils == null) {
+      try {
+        final id = await DeviceRegistry.instance.deviceId();
+        final copie =
+            await ApiClient.copieSeulement(() => DeviceRegistry.instance.list());
+        if (mounted && _appareils == null) {
+          setState(() {
+            _idCourant = id;
+            _appareils = copie;
+          });
+        }
+      } catch (_) {}
+    }
     try {
       final id = await DeviceRegistry.instance.deviceId();
       final liste = await DeviceRegistry.instance.list();
@@ -45,6 +61,8 @@ class _DevicesScreenState extends State<DevicesScreen> {
       });
     } catch (_) {
       if (!mounted) return;
+      // Une copie est affichée : on la garde, sans erreur par-dessus.
+      if (_appareils != null && _appareils!.isNotEmpty) return;
       setState(() {
         _erreur = tr(context, 'dev_load_error');
         _appareils = [];
@@ -150,10 +168,11 @@ class _DevicesScreenState extends State<DevicesScreen> {
             const SizedBox(height: 20),
 
             if (appareils == null)
-              const Center(
+              const SizedBox(
+                height: 320,
                 child: Padding(
-                  padding: EdgeInsets.only(top: 40),
-                  child: CircularProgressIndicator(),
+                  padding: EdgeInsets.zero,
+                  child: SqueletteListe(lignes: 3),
                 ),
               )
             else if (_erreur != null)

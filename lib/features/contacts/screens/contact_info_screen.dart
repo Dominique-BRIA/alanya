@@ -11,7 +11,9 @@ import '../../../core/app_snackbar.dart';
 import '../../../core/memoire_langues.dart';
 import '../../../core/traduction_appareil.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../../models/badge_compte.dart';
 import '../../../widgets/avatar_circle.dart';
+import '../../../widgets/badge_compte.dart';
 import '../../../widgets/choix_langue_interlocuteur.dart';
 import '../../../widgets/glass_card.dart';
 import '../../../widgets/media/cached_media.dart';
@@ -54,6 +56,7 @@ class ContactInfoScreen extends StatefulWidget {
     this.isBlocked = false,
     this.isOnline = false,
     this.lastSeen,
+    this.badge,
   });
 
   final String userId;
@@ -67,6 +70,10 @@ class ContactInfoScreen extends StatefulWidget {
   final bool isBlocked;
   final bool isOnline;
   final DateTime? lastSeen;
+
+  /// Le badge à côté du nom (compte officiel, entreprise vérifiée), tel que
+  /// la discussion l'affiche — absent : pas de badge.
+  final BadgeCompte? badge;
 
   @override
   State<ContactInfoScreen> createState() => _ContactInfoScreenState();
@@ -335,7 +342,8 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
                   opacity: (1 - t * 1.6).clamp(0.0, 1.0),
                   child: Align(
                     alignment: Alignment.centerLeft,
-                    child: Text(
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Flexible(child: Text(
                       widget.name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -344,7 +352,10 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
                         fontWeight: FontWeight.w700,
                         fontSize: 18,
                       ),
-                    ),
+                    )),
+                    if (widget.badge != null)
+                      BadgeCompteWidget(widget.badge!, taille: 17),
+                    ]),
                   ),
                 ),
               ),
@@ -386,17 +397,26 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
                       const SizedBox(height: 12),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 24),
-                        child: Text(
-                          widget.name,
-                          textAlign: TextAlign.center,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 23,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
-                            letterSpacing: -0.3,
-                          ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Flexible(
+                              child: Text(
+                                widget.name,
+                                textAlign: TextAlign.center,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 23,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.white,
+                                  letterSpacing: -0.3,
+                                ),
+                              ),
+                            ),
+                            if (widget.badge != null)
+                              BadgeCompteWidget(widget.badge!, taille: 22),
+                          ],
                         ),
                       ),
                       const SizedBox(height: 4),

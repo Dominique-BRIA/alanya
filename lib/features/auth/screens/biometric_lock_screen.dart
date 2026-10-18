@@ -81,21 +81,21 @@ class _BiometricLockScreenState extends State<BiometricLockScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 // Logo
-                Container(
-                  width: 80,
-                  height: 80,
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [AlanyaColors.terracotta, AlanyaColors.terracottaDark],
+                // L'icône de l'application, celle de l'écran d'accueil du
+                // téléphone — pas un « A » dessiné (user, 18/10/2026). Sur sa
+                // plaque blanche, comme l'icône elle-même, pour rester lisible
+                // en thème sombre.
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: Container(
+                    width: 84,
+                    height: 84,
+                    color: Colors.white,
+                    padding: const EdgeInsets.all(6),
+                    child: Image.asset(
+                      'assets/images/app_icon.png',
+                      filterQuality: FilterQuality.medium,
                     ),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: const Center(
-                    child: Text("A",
-                        style: TextStyle(
-                            fontSize: 36,
-                            fontWeight: FontWeight.w800,
-                            color: Colors.white)),
                   ),
                 ),
                 const SizedBox(height: 20),
