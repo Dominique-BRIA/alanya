@@ -26,6 +26,10 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
 
   /// « Interdire qu'on me renomme » (18/10/2026).
   bool _nomVerrouille = false;
+
+  /// Connexion web en deux étapes (18/10/2026) ; imposée : agent d'entreprise.
+  bool _deuxEtapes = false;
+  bool _deuxEtapesImposee = false;
   int _lastSeenVisibility = 2;
   bool _loading = true;
 
@@ -55,6 +59,8 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
           _lastSeenVisibility = p["lastSeenVisibility"] ?? 2;
           _chiffrementActif = (p["chiffrementActif"] ?? 1) == 1;
           _nomVerrouille = (p["nomVerrouille"] ?? 0) == 1;
+          _deuxEtapes = (p["deuxEtapes"] ?? 0) == 1;
+          _deuxEtapesImposee = (p["deuxEtapesImposee"] ?? 0) == 1;
           _loading = false;
         });
     // Cache d'abord : les réglages gardés s'affichent aussitôt (18/10/2026).
@@ -81,6 +87,7 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
     int? lastSeenVisibility,
     bool? chiffrementActif,
     bool? nomVerrouille,
+    bool? deuxEtapes,
   }) async {
     try {
       await context.read<AccountRepository>().setPrivacy(
@@ -88,6 +95,7 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
             lastSeenVisibility: lastSeenVisibility,
             chiffrementActif: chiffrementActif,
             nomVerrouille: nomVerrouille,
+            deuxEtapes: deuxEtapes,
           );
     } catch (_) {
       if (mounted) showAppSnackBar(tr(context, 'priv_save_failed'));
@@ -179,6 +187,26 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
                     setState(() => _nomVerrouille = v);
                     _save(nomVerrouille: v);
                   },
+                ),
+                const Divider(height: 1),
+                // Demande du patron (18/10/2026) : « juste le mot de passe, ce
+                // n'est pas solide ». Grisé pour un compte d'entreprise, pour
+                // qui le serveur l'impose.
+                SwitchListTile(
+                  secondary: Icon(Icons.phonelink_lock_outlined,
+                      color: themed(context,
+                          light: AlanyaColors.forest,
+                          dark: AlanyaColors.indigoLight)),
+                  title: Text(tr(context, 'priv_2fa')),
+                  subtitle: Text(tr(context,
+                      _deuxEtapesImposee ? 'priv_2fa_impose' : 'priv_2fa_sub')),
+                  value: _deuxEtapes || _deuxEtapesImposee,
+                  onChanged: _deuxEtapesImposee
+                      ? null
+                      : (v) {
+                          setState(() => _deuxEtapes = v);
+                          _save(deuxEtapes: v);
+                        },
                 ),
                 const Divider(height: 1),
                 SwitchListTile(

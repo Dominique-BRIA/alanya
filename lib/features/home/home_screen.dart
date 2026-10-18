@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../core/alanya_id_formatter.dart';
 import '../../core/prechargement_ecrans.dart';
+import '../../core/codes_connexion_web.dart';
 import '../../core/whatsapp_text.dart';
 
 import '../../core/connectivity_service.dart';
@@ -18,6 +19,7 @@ import '../geo/screens/geo_disclosure_screen.dart';
 import '../../core/push_service.dart';
 import '../../core/notification_settings.dart';
 import '../../core/realtime_client.dart';
+import '../../core/authed_api.dart';
 import '../../widgets/back_app_bar.dart';
 import '../../widgets/chargement.dart';
 import '../annuaire/annuaire_tab.dart';
@@ -163,6 +165,9 @@ class _HomeScreenState extends State<HomeScreen> {
       // Les écrans du menu, mis en réserve en arrière-plan : chaque onglet
       // s'ouvrira aussitôt avec sa copie (voir `PrechargementEcrans`).
       PrechargementEcrans.lancer(context);
+      // Le code d'une connexion web en deux étapes, où qu'on soit dans l'app.
+      CodesConnexionWeb.instance.demarrer(
+          context.read<RealtimeClient>(), context.read<AuthedApi>());
       final user = context.read<AuthController>().user;
       if (user != null) {
         // 🔴 LE NOM D'ABORD, comme partout ailleurs.

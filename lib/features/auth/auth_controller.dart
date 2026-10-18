@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../../core/api_client.dart';
 import '../../core/cache_ecrans.dart';
 import '../../core/prechargement_ecrans.dart';
+import '../../core/codes_connexion_web.dart';
 import '../../core/noms_donnes.dart';
 import '../../core/call_cache.dart';
 import '../../core/call_ui_native.dart';
@@ -487,6 +488,7 @@ class AuthController extends ChangeNotifier {
     await CallCache.clear();
     await ContactCache.clear();
     PrechargementEcrans.arreter();
+    CodesConnexionWeb.instance.arreter();
     await CacheEcrans.clear();
     await NomsDonnes.vider();
     // Les langues observées chez les correspondants d'un compte ne doivent pas

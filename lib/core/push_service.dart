@@ -22,6 +22,7 @@ import '../core/call_ui_native.dart';
 import '../core/notification_settings.dart' as notif;
 import '../core/server_config.dart';
 import 'sonneries_livrees.dart';
+import 'codes_connexion_web.dart';
 import '../core/token_storage.dart';
 
 /// Service de notifications push complet (FCM + notifications locales).
@@ -545,6 +546,12 @@ class PushService {
     // un : la faire taire parce que l'utilisateur a coupé les notifications de
     // discussion lui ferait manquer une réunion sans qu'il l'ait jamais demandé.
     final type = message.data['type'];
+    // Le code d'une connexion web : la fenêtre de l'application, pas une
+    // notification de message (que le réglage « messages » pourrait taire).
+    if (type == 'connexion_web_code') {
+      CodesConnexionWeb.instance.afficher(Map<String, dynamic>.from(message.data));
+      return;
+    }
     if (type == 'meeting_invitation' || type == 'meeting_reminder') {
       final n = message.notification;
       showReunion(
