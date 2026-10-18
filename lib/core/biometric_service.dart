@@ -27,8 +27,30 @@ class BiometricService {
     await prefs.setBool(_prefKey, enabled);
   }
 
+  /// Vrai pendant qu'une fenêtre d'empreinte ou de code est ouverte.
+  ///
+  /// La fenêtre du code de l'appareil est une autre activité : elle met
+  /// Alanya en pause, et son retour ne doit pas compter comme une absence
+  /// (voir `BiometricGate`).
+  static bool authentificationEnCours = false;
+
+  static Future<bool> _sousGarde(Future<bool> Function() demande) async {
+    authentificationEnCours = true;
+    try {
+      return await demande();
+    } finally {
+      authentificationEnCours = false;
+    }
+  }
+
   /// Empreinte/visage uniquement (biometricOnly: true)
-  static Future<bool> authenticate() async {
+  static Future<bool> authenticate() => _sousGarde(_authenticate);
+
+  /// Avec fallback PIN/pattern (biometricOnly: false)
+  static Future<bool> authenticateWithFallback() =>
+      _sousGarde(_authenticateWithFallback);
+
+  static Future<bool> _authenticate() async {
     try {
       return await _auth.authenticate(
         localizedReason: 'Déverrouiller Alanya',
@@ -44,8 +66,7 @@ class BiometricService {
     }
   }
 
-  /// Avec fallback PIN/pattern (biometricOnly: false)
-  static Future<bool> authenticateWithFallback() async {
+  static Future<bool> _authenticateWithFallback() async {
     try {
       return await _auth.authenticate(
         localizedReason: 'Déverrouiller Alanya',

@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../../core/api_client.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../../widgets/chargement.dart';
 import '../collegues_repository.dart';
 import '../widgets/tuile_collegue.dart';
 import 'service_membres_screen.dart';
@@ -57,17 +58,35 @@ class _ColleguesTabState extends State<ColleguesTab> {
     super.dispose();
   }
 
+  /// Vrai pendant que la version du serveur arrive : la fine barre en haut.
+  bool _miseAJour = false;
+
   Future<void> _charger() async {
+    final repo = context.read<ColleguesRepository>();
     setState(() => _erreur = false);
+    // La copie du téléphone d'abord, seulement si rien n'est encore affiché.
+    if (_services == null) {
+      final copie = await repo.servicesEnCache();
+      if (copie != null && mounted && _services == null) {
+        setState(() {
+          _services = copie.services;
+          _porteeRestreinte = copie.porteeRestreinte;
+        });
+      }
+    }
+    if (mounted) setState(() => _miseAJour = true);
     try {
-      final liste = await context.read<ColleguesRepository>().services();
+      final liste = await repo.services();
       if (!mounted) return;
       setState(() {
         _services = liste.services;
         _porteeRestreinte = liste.porteeRestreinte;
       });
     } catch (_) {
-      if (mounted) setState(() => _erreur = true);
+      // Hors ligne avec une copie : on la garde, sans message d'erreur.
+      if (mounted) setState(() => _erreur = _services == null);
+    } finally {
+      if (mounted) setState(() => _miseAJour = false);
     }
   }
 
@@ -138,6 +157,7 @@ class _ColleguesTabState extends State<ColleguesTab> {
               ),
             ),
           ),
+          BarreMiseAJour(visible: _miseAJour && _services != null),
           Expanded(
             child: RefreshIndicator(
               onRefresh: _charger,
@@ -157,9 +177,8 @@ class _ColleguesTabState extends State<ColleguesTab> {
       return _message(tr(context, 'server_unreachable'), muted, avecReessai: true);
     }
     final services = _services;
-    if (services == null) {
-      return const Center(child: CircularProgressIndicator());
-    }
+    // Rien encore sur ce téléphone : un squelette, pas une roue.
+    if (services == null) return const SqueletteListe(lignes: 6);
     if (services.isEmpty) {
       // Le message dit POURQUOI la liste est vide. « Aucun service n est
       // configure » serait faux quand c est l entreprise qui restreint : des

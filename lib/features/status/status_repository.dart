@@ -1,4 +1,5 @@
 import '../../core/authed_api.dart';
+import '../../core/cache_ecrans.dart';
 import '../../models/status.dart';
 
 class StatusRepository {
@@ -7,7 +8,25 @@ class StatusRepository {
 
   Future<StatusFeed> feed() async {
     final data = await _api.get("/api/statuses");
-    return StatusFeed.fromJson(data);
+    final feed = StatusFeed.fromJson(data);
+    // Gardé pour la prochaine ouverture : l'onglet l'affiche avant le réseau.
+    await CacheEcrans.ecrire('statuts', data);
+    return feed;
+  }
+
+  /// Le dernier fil reçu, sans réseau — `null` si aucun.
+  ///
+  /// ⚠️ UN STATUT EXPIRE (24 h) : on écarte à la lecture ceux dont l'heure est
+  /// passée, plutôt que de montrer une heure un statut que le serveur a déjà
+  /// retiré. Le fil du serveur, qui suit, fait foi.
+  Future<StatusFeed?> feedEnCache() async {
+    final brut = await CacheEcrans.lire('statuts');
+    if (brut is! Map) return null;
+    try {
+      return StatusFeed.fromJson(Map<String, dynamic>.from(brut)).sansExpires();
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Publie un statut texte avec couleur de fond (hex #RRGGBB).

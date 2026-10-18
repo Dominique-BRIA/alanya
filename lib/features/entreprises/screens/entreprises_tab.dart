@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../../../l10n/app_localizations.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../../widgets/chargement.dart';
 import '../../auth/auth_controller.dart';
 import '../entreprises_repository.dart';
 import 'fiche_entreprise_screen.dart';
@@ -162,15 +163,31 @@ class _EntreprisesTabState extends State<EntreprisesTab> {
 
   /// [jeton] est fourni quand l'appel fait partie d'une séquence plus large —
   /// voir `_appliquePays`. Sans lui, l'appel est une intention à lui seul.
+  /// Vrai pendant que la version du serveur arrive : la fine barre en haut.
+  bool _miseAJour = false;
+
   Future<void> _charger({int? jeton}) async {
     final mien = jeton ?? ++_demande;
+    final repo = context.read<EntreprisesRepository>();
+    final pays = _paysChoisi;
     setState(() => _erreur = false);
+    // La copie du téléphone pour CE pays, seulement si rien n'est affiché.
+    if (_types == null) {
+      final copie = await repo.typesEnCache(idPays: pays);
+      if (copie != null && mounted && _demande == mien && _types == null) {
+        setState(() => _types = copie);
+      }
+    }
+    if (mounted) setState(() => _miseAJour = true);
     try {
-      final liste = await context.read<EntreprisesRepository>().types(idPays: _paysChoisi);
+      final liste = await repo.types(idPays: pays);
       if (!mounted || _demande != mien) return;
       setState(() => _types = liste);
     } catch (_) {
-      if (mounted && _demande == mien) setState(() => _erreur = true);
+      // Hors ligne avec une copie : on la garde, sans message d'erreur.
+      if (mounted && _demande == mien) setState(() => _erreur = _types == null);
+    } finally {
+      if (mounted && _demande == mien) setState(() => _miseAJour = false);
     }
   }
 
@@ -180,12 +197,23 @@ class _EntreprisesTabState extends State<EntreprisesTab> {
       _typeOuvert = t;
       _entreprises = null;
     });
+    final repo = context.read<EntreprisesRepository>();
+    final pays = _paysChoisi;
+    final copie = await repo.duTypeEnCache(t.id, idPays: pays);
+    if (copie != null && mounted && _demande == mien && _entreprises == null) {
+      setState(() => _entreprises = copie);
+    }
+    if (mounted && _demande == mien) setState(() => _miseAJour = true);
     try {
-      final liste = await context.read<EntreprisesRepository>().duType(t.id, idPays: _paysChoisi);
+      final liste = await repo.duType(t.id, idPays: pays);
       if (!mounted || _demande != mien) return;
       setState(() => _entreprises = liste);
     } catch (_) {
-      if (mounted && _demande == mien) setState(() => _entreprises = const []);
+      if (mounted && _demande == mien) {
+        setState(() => _entreprises ??= const []);
+      }
+    } finally {
+      if (mounted && _demande == mien) setState(() => _miseAJour = false);
     }
   }
 
@@ -350,6 +378,7 @@ class _EntreprisesTabState extends State<EntreprisesTab> {
               ),
             ),
 
+          BarreMiseAJour(visible: _miseAJour && !enRecherche),
           Expanded(
             child: RefreshIndicator(
               onRefresh: _charger,
@@ -377,7 +406,8 @@ class _EntreprisesTabState extends State<EntreprisesTab> {
   Widget _vueTypes(Color muted) {
     if (_erreur) return _message(tr(context, 'server_unreachable'), muted, true);
     final types = _types;
-    if (types == null) return const Center(child: CircularProgressIndicator());
+    // Rien encore sur ce téléphone : un squelette, pas une roue.
+    if (types == null) return const SqueletteListe(lignes: 6);
     if (types.isEmpty) return _message(tr(context, 'company_no_type'), muted, false);
 
     return ListView.builder(
@@ -419,7 +449,7 @@ class _EntreprisesTabState extends State<EntreprisesTab> {
 
   // ── Les entreprises ─────────────────────────────────────────────────────
   Widget _vueEntreprises(List<Entreprise>? liste, String messageVide, Color muted) {
-    if (liste == null) return const Center(child: CircularProgressIndicator());
+    if (liste == null) return const SqueletteListe(lignes: 6);
     if (liste.isEmpty) return _message(messageVide, muted, false);
 
     return ListView.builder(

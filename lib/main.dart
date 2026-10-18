@@ -379,10 +379,14 @@ class AlanyaApp extends StatelessWidget {
         // niveau de l'arbre, et le `Stack` interne de l'overlay en exige un :
         // l'envelopper par-dessus levait une exception de rendu, et l'écran
         // restait noir.
+        // Le verrou par empreinte couvre TOUTES les pages — voir `BiometricGate`.
+        final verrouille = BiometricGate(child: pile);
         return Directionality(
           textDirection: TextDirection.ltr,
           // DIAGNOSTIC TEMPORAIRE — voir `tracesAppelsVisibles`.
-          child: tracesAppelsVisibles ? DebugOverlay(child: pile) : pile,
+          child: tracesAppelsVisibles
+              ? DebugOverlay(child: verrouille)
+              : verrouille,
         );
       },
       home: const AuthGate(),
@@ -402,10 +406,10 @@ class AuthGate extends StatelessWidget {
           body: Center(child: CircularProgressIndicator()),
         );
       case AuthStatus.authenticated:
+        // Le verrou par empreinte n'est plus ici : posé dans
+        // `MaterialApp.builder`, il recouvre l'accueil au lieu de le remplacer.
         return OfflineBanner(
-          child: BiometricGate(
-            child: CallListener(child: const HomeScreen()),
-          ),
+          child: CallListener(child: const HomeScreen()),
         );
 
       case AuthStatus.unauthenticated:

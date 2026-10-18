@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/motif_background.dart';
+import '../../../widgets/chargement.dart';
 import '../../../widgets/multi_select_mixin.dart';
 import '../../../models/meeting.dart';
 import '../meetings_repository.dart';
@@ -34,7 +35,10 @@ class _MeetingsScreenState extends State<MeetingsScreen>
     WidgetsBinding.instance.addObserver(this);
     _load();
     _pollingPaused = false;
-    _pollTimer = Timer.periodic(const Duration(seconds: 10), (_) => _load());
+    // En silence : une barre toutes les 10 s se lirait comme un écran qui ne
+    // finit jamais de charger.
+    _pollTimer = Timer.periodic(
+        const Duration(seconds: 10), (_) => _load(discret: true));
   }
 
   @override
@@ -74,7 +78,10 @@ class _MeetingsScreenState extends State<MeetingsScreen>
     if (!_pollingPaused) return;
     _pollingPaused = false;
     _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(const Duration(seconds: 10), (_) => _load());
+    // En silence : une barre toutes les 10 s se lirait comme un écran qui ne
+    // finit jamais de charger.
+    _pollTimer = Timer.periodic(
+        const Duration(seconds: 10), (_) => _load(discret: true));
   }
 
   void _stopPolling() {
@@ -83,7 +90,10 @@ class _MeetingsScreenState extends State<MeetingsScreen>
     _pollTimer = null;
   }
 
-  Future<void> _load() async {
+  /// Vrai pendant que la version du serveur arrive : la fine barre en haut.
+  bool _miseAJour = false;
+
+  Future<void> _load({bool discret = false}) async {
     final repo = context.read<MeetingsRepository>();
     // Première ouverture : la dernière liste connue, tout de suite.
     if (_meetings == null) {
@@ -92,6 +102,7 @@ class _MeetingsScreenState extends State<MeetingsScreen>
         setState(() => _meetings = enCache);
       }
     }
+    if (!discret && mounted) setState(() => _miseAJour = true);
     try {
       final list = await repo.fetchMeetings();
       if (!mounted) return;
@@ -100,7 +111,12 @@ class _MeetingsScreenState extends State<MeetingsScreen>
         _error = false;
       });
     } catch (_) {
-      if (mounted) setState(() => _error = true);
+      // 🐛 L'ERREUR REMPLAÇAIT LA COPIE : hors ligne, la liste gardée sur le
+      // téléphone cédait la place à « erreur de chargement » au premier essai
+      // du serveur. Elle ne s'affiche plus que s'il n'y a rien à montrer.
+      if (mounted) setState(() => _error = _meetings == null);
+    } finally {
+      if (mounted && _miseAJour) setState(() => _miseAJour = false);
     }
   }
 
@@ -188,17 +204,22 @@ class _MeetingsScreenState extends State<MeetingsScreen>
               ),
               body: _VisibilityObserver(
                 onVisibilityChanged: _setVisible,
-                child: RefreshIndicator(
-                  onRefresh: _load,
-                  child: TabBarView(
-                    controller: _tabController,
-                    children: [
-                      _buildTabContent("En cours"),
-                      _buildTabContent("À venir"),
-                      _buildTabContent("Terminée"),
-                    ],
+                child: Column(children: [
+                  BarreMiseAJour(visible: _miseAJour && _meetings != null),
+                  Expanded(
+                    child: RefreshIndicator(
+                      onRefresh: _load,
+                      child: TabBarView(
+                        controller: _tabController,
+                        children: [
+                          _buildTabContent("En cours"),
+                          _buildTabContent("À venir"),
+                          _buildTabContent("Terminée"),
+                        ],
+                      ),
+                    ),
                   ),
-                ),
+                ]),
               ),
               floatingActionButton: FloatingActionButton(
                 backgroundColor: accentOf(context),
@@ -210,8 +231,9 @@ class _MeetingsScreenState extends State<MeetingsScreen>
   }
 
   Widget _buildTabContent(String tabName) {
+    // Rien encore sur ce téléphone : un squelette, pas une roue.
     if (_meetings == null && !_error) {
-      return const Center(child: CircularProgressIndicator());
+      return const SqueletteListe(lignes: 5, avatar: false);
     }
     if (_error) {
       return ListView(children: [

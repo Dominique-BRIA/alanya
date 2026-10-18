@@ -73,6 +73,29 @@ class StatusFeed {
   final List<StatusGroup> others;
   StatusFeed({required this.me, required this.others});
 
+  /// Le même fil sans les statuts expirés — pour une copie gardée sur le
+  /// téléphone, que le temps a pu dépasser. Une personne sans statut restant
+  /// disparaît de la liste ; « Mon statut » reste, vide.
+  StatusFeed sansExpires([DateTime? maintenant]) {
+    final t = maintenant ?? DateTime.now();
+    StatusGroup garder(StatusGroup g) => StatusGroup(
+          userId: g.userId,
+          pseudo: g.pseudo,
+          avatarUrl: g.avatarUrl,
+          publicNumber: g.publicNumber,
+          hasUnviewed: g.hasUnviewed,
+          statuses: [for (final s in g.statuses) if (s.expiresAt.isAfter(t)) s],
+        );
+    final moi = me == null ? null : garder(me!);
+    return StatusFeed(
+      me: moi == null || moi.statuses.isEmpty ? null : moi,
+      others: [
+        for (final g in others.map(garder))
+          if (g.statuses.isNotEmpty) g,
+      ],
+    );
+  }
+
   factory StatusFeed.fromJson(Map<String, dynamic> j) => StatusFeed(
         me: j["me"] == null
             ? null

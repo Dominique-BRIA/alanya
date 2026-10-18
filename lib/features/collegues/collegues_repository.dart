@@ -1,4 +1,5 @@
 import '../../core/authed_api.dart';
+import '../../core/cache_ecrans.dart';
 
 /// Un service de l'entreprise, avec son effectif.
 class ServiceCollegues {
@@ -94,6 +95,23 @@ class ColleguesRepository {
   /// Les services de mon entreprise.
   Future<ListeServices> services() async {
     final data = await _api.get("/api/collegues");
+    // Gardé pour la prochaine ouverture : l'onglet l'affiche avant le réseau.
+    await CacheEcrans.ecrire('collegues', data);
+    return _services(data);
+  }
+
+  /// Les derniers services reçus, sans réseau — `null` si aucun.
+  Future<ListeServices?> servicesEnCache() async {
+    final data = await CacheEcrans.lire('collegues');
+    if (data is! Map<String, dynamic>) return null;
+    try {
+      return _services(data);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  ListeServices _services(Map<String, dynamic> data) {
     final brut = data["services"] as List?;
     return ListeServices(
       services: (brut ?? const [])
@@ -108,7 +126,19 @@ class ColleguesRepository {
   Future<List<Collegue>> membres(String service) async {
     final data =
         await _api.get("/api/collegues?service=${Uri.encodeQueryComponent(service)}");
+    await CacheEcrans.ecrire('collegues.service.$service', data);
     return _collegues(data);
+  }
+
+  /// Les derniers membres reçus pour ce service, sans réseau — `null` si aucun.
+  Future<List<Collegue>?> membresEnCache(String service) async {
+    final data = await CacheEcrans.lire('collegues.service.$service');
+    if (data is! Map<String, dynamic>) return null;
+    try {
+      return _collegues(data);
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Recherche parmi TOUS les collègues de l'entreprise.

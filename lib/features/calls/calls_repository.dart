@@ -1,4 +1,5 @@
 import '../../core/authed_api.dart';
+import '../../core/cache_ecrans.dart';
 import '../../models/call_record.dart';
 
 class CallCallee {
@@ -113,10 +114,27 @@ class CallsRepository {
   /// l'utilisateur est actif ailleurs.
   Future<List<CallRecord>> forConversation(String convId) async {
     final data = await _api.get("/api/conversations/$convId/calls");
-    return ((data["calls"] as List?) ?? [])
-        .map((c) => CallRecord.fromJson(c as Map<String, dynamic>))
-        .toList();
+    // Gardés PAR CONVERSATION : le cache global des appels (`CallCache`) ne
+    // tient que les derniers, toutes conversations confondues — les plus
+    // anciens d'un fil n'y figurent pas.
+    await CacheEcrans.ecrire('conv.$convId.appels', data["calls"]);
+    return _appels(data["calls"]);
   }
+
+  /// Les derniers appels reçus pour ce fil, sans réseau — `null` si aucun.
+  Future<List<CallRecord>?> forConversationEnCache(String convId) async {
+    final brut = await CacheEcrans.lire('conv.$convId.appels');
+    if (brut is! List) return null;
+    try {
+      return _appels(brut);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  List<CallRecord> _appels(Object? brut) => ((brut as List?) ?? [])
+      .map((c) => CallRecord.fromJson(c as Map<String, dynamic>))
+      .toList();
 
   Future<StartedCall> start(String convId, String type) async {
     final data = await _api.post("/api/calls", {"convId": convId, "type": type});

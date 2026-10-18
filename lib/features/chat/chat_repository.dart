@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import '../../core/authed_api.dart';
+import '../../core/cache_ecrans.dart';
 import '../../core/device_registry.dart';
 import '../../core/message_cache.dart';
 import '../../models/conversation.dart';
@@ -210,7 +211,15 @@ class ChatRepository {
   /// Réglage courant des messages éphémères (durée en secondes, 0 = désactivé).
   Future<int> getDisappearing(String convId) async {
     final data = await _api.get("/api/conversations/$convId/disappearing");
-    return (data["disappearingSeconds"] as num?)?.toInt() ?? 0;
+    final s = (data["disappearingSeconds"] as num?)?.toInt() ?? 0;
+    await CacheEcrans.ecrire('conv.$convId.ephemere', s);
+    return s;
+  }
+
+  /// Le dernier réglage connu des messages éphémères — `null` si aucun.
+  Future<int?> getDisappearingEnCache(String convId) async {
+    final s = await CacheEcrans.lire('conv.$convId.ephemere');
+    return s is num ? s.toInt() : null;
   }
 
   /// Règle le minuteur des messages éphémères — repli REST.
@@ -222,7 +231,15 @@ class ChatRepository {
   /// Message épinglé courant d'une conversation ({pinnedMessageId, message}).
   Future<Map<String, dynamic>> getPinned(String convId) async {
     final data = await _api.get("/api/conversations/$convId/pinned");
-    return Map<String, dynamic>.from(data as Map);
+    final epingle = Map<String, dynamic>.from(data as Map);
+    await CacheEcrans.ecrire('conv.$convId.epingle', epingle);
+    return epingle;
+  }
+
+  /// Le dernier état connu du message épinglé — `null` si aucun.
+  Future<Map<String, dynamic>?> getPinnedEnCache(String convId) async {
+    final data = await CacheEcrans.lire('conv.$convId.epingle');
+    return data is Map ? Map<String, dynamic>.from(data) : null;
   }
 
   /// Épingle (messageId) ou détache (null) un message — repli REST.
@@ -263,7 +280,16 @@ class ChatRepository {
   /// Récupérer la liste des membres d'un groupe.
   Future<List<Map<String, dynamic>>> getGroupMembers(String convId) async {
     final data = await _api.get("/api/conversations/$convId/members");
-    return (data["members"] as List).map((m) => Map<String, dynamic>.from(m as Map)).toList();
+    final membres = (data["members"] as List).map((m) => Map<String, dynamic>.from(m as Map)).toList();
+    await CacheEcrans.ecrire('conv.$convId.membres', membres);
+    return membres;
+  }
+
+  /// Les derniers membres connus du groupe — `null` si aucun.
+  Future<List<Map<String, dynamic>>?> getGroupMembersEnCache(String convId) async {
+    final data = await CacheEcrans.lire('conv.$convId.membres');
+    if (data is! List) return null;
+    return [for (final m in data) if (m is Map) Map<String, dynamic>.from(m)];
   }
   
 

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../core/alanya_id_formatter.dart';
+import '../../core/prechargement_ecrans.dart';
 import '../../core/whatsapp_text.dart';
 
 import '../../core/connectivity_service.dart';
@@ -17,6 +18,7 @@ import '../../core/push_service.dart';
 import '../../core/notification_settings.dart';
 import '../../core/realtime_client.dart';
 import '../../widgets/back_app_bar.dart';
+import '../../widgets/chargement.dart';
 import '../annuaire/annuaire_tab.dart';
 import '../entreprises/screens/entreprises_tab.dart';
 import '../../core/sonneries_listes.dart';
@@ -156,6 +158,9 @@ class _HomeScreenState extends State<HomeScreen> {
        */
       try {
       context.read<RealtimeClient>().connect();
+      // Les écrans du menu, mis en réserve en arrière-plan : chaque onglet
+      // s'ouvrira aussitôt avec sa copie (voir `PrechargementEcrans`).
+      PrechargementEcrans.lancer(context);
       final user = context.read<AuthController>().user;
       if (user != null) {
         // 🔴 LE NOM D'ABORD, comme partout ailleurs.
@@ -964,6 +969,9 @@ class _ConversationsTabState extends State<_ConversationsTab>
     super.dispose();
   }
 
+  /// Vrai pendant que la version du serveur arrive : la fine barre en haut.
+  bool _miseAJour = false;
+
   Future<void> _load() async {
     // 1) Charge d'abord le cache local (affichage instantané, offline-first).
     // Les fils chiffrés prennent leur dernier texte dans le cache local des
@@ -978,6 +986,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
     }
 
     // 2) Synchronise avec le serveur en arrière-plan.
+    if (mounted) setState(() => _miseAJour = true);
     try {
       final convs = await context.read<ChatRepository>().listConversations();
       if (!mounted) return;
@@ -1007,6 +1016,8 @@ class _ConversationsTabState extends State<_ConversationsTab>
         context.read<ConnectivityService>().markHttpFailed();
         setState(() => _error = _convs == null || _convs!.isEmpty);
       }
+    } finally {
+      if (mounted) setState(() => _miseAJour = false);
     }
     // Chemin d'échec seulement : le cache local n'a pas d'aperçu d'appel plus
     // récent que ce qu'il contient déjà.
@@ -1190,6 +1201,8 @@ class _ConversationsTabState extends State<_ConversationsTab>
             ),
             // --- Une SEULE rangée : Tous / Non lues / Groupes / les listes ---
             _rangeeFiltres(),
+            // La copie du téléphone est affichée, la version à jour arrive.
+            BarreMiseAJour(visible: _miseAJour && _convs != null),
             Expanded(
               child: RefreshIndicator(
                 onRefresh: _refresh,
@@ -1549,15 +1562,8 @@ class _ConversationsTabState extends State<_ConversationsTab>
         themed(context, light: Colors.black54, dark: AlanyaColors.craie2);
     final muted2 =
         themed(context, light: AlanyaColors.grey500, dark: AlanyaColors.craie2);
-    if (_convs == null && !_error) {
-      return Center(
-        child: CircularProgressIndicator(
-          color: themed(context,
-              light: AlanyaColors.terracotta,
-              dark: AlanyaColors.terracottaNuit),
-        ),
-      );
-    }
+    // Rien encore sur ce téléphone : un squelette, pas une roue.
+    if (_convs == null && !_error) return const SqueletteListe();
     if (_error) {
       return ListView(children: [
         const SizedBox(height: 80),
@@ -1835,8 +1841,31 @@ class _ConversationsTabState extends State<_ConversationsTab>
       return apercuMessage(last.type, last.content);
     }
 
+    /*
+     * Groupe : « Awa : » devant l'aperçu, le nom de qui a écrit le dernier
+     * message — « Vous : » si c'est moi.
+     *
+     * 🐛 ON PRÉFIXAIT LE NOMBRE DE MEMBRES (« 12 membres · Ok ») : signalé par
+     * le user le 18/10/2026, le nombre se lit déjà sur la pastille de l'avatar,
+     * et c'est l'auteur qu'on cherche des yeux dans une liste de groupes.
+     *
+     * Rien devant un avis système (« Awa a ajouté Paul » nomme déjà les
+     * siens), ni pour un auteur sorti du groupe dont on n'a plus le nom :
+     * mieux vaut pas de nom qu'un numéro brut.
+     */
+    String prefixeAuteur() {
+      if (!c.isGroup || last == null || estAvisSysteme(last.content)) return '';
+      final moi = context.read<AuthController>().user?.id;
+      final nom = last.senderId == moi
+          ? tr(context, 'you')
+          : c.memberNames[last.senderId];
+      return (nom == null || nom.isEmpty)
+          ? ''
+          : tr(context, 'group_author_prefix', {'nom': nom});
+    }
+
     // Construit l'aperçu formaté : si TEXT on affiche en formaté (sans *),
-    // sinon libellé simple. Pour les groupes on préfixe avec le compteur.
+    // sinon libellé simple. Pour les groupes on préfixe avec l'auteur.
     // Si un appel est plus récent, on affiche le statut d'appel façon WhatsApp.
     Widget buildPreview({required TextStyle? style}) {
       final baseStyle = style ??
@@ -1876,10 +1905,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
       }
       final isText = last.type == "TEXT" && (last.content?.isNotEmpty ?? false);
       if (!isText) {
-        final label = typeLabel();
-        final full = c.isGroup && c.members.isNotEmpty
-            ? tr(context, 'group_members_prefix', {'n': '${c.members.length}'}) + label
-            : label;
+        final full = prefixeAuteur() + typeLabel();
         return Text(full,
             style: baseStyle, maxLines: 1, overflow: TextOverflow.ellipsis);
       }
@@ -1888,8 +1914,8 @@ class _ConversationsTabState extends State<_ConversationsTab>
       // Coupe à 120 char pour ne pas surcharger le ListTile avec un pavé
       final trimmed = raw.length > 120 ? "${raw.substring(0, 120)}…" : raw;
       final spans = _spansApercuAvecMentions(trimmed, baseStyle);
-      if (c.isGroup && c.members.isNotEmpty) {
-        final prefix = tr(context, 'group_members_prefix', {'n': '${c.members.length}'});
+      final prefix = prefixeAuteur();
+      if (prefix.isNotEmpty) {
         return Text.rich(
           TextSpan(
             style: baseStyle,
@@ -2421,16 +2447,31 @@ class _StatusTabState extends State<_StatusTab> {
     super.dispose();
   }
 
+  /// Vrai pendant que la version du serveur arrive : la fine barre en haut.
+  bool _miseAJour = false;
+
   Future<void> _load() async {
+    final repo = context.read<StatusRepository>();
+    // La copie du téléphone d'abord, seulement si rien n'est encore affiché.
+    if (_feed == null) {
+      final copie = await repo.feedEnCache();
+      if (copie != null && mounted && _feed == null) {
+        setState(() => _feed = copie);
+      }
+    }
+    if (mounted) setState(() => _miseAJour = true);
     try {
-      final feed = await context.read<StatusRepository>().feed();
+      final feed = await repo.feed();
       if (!mounted) return;
       setState(() {
         _feed = feed;
         _error = false;
       });
     } catch (_) {
-      if (mounted) setState(() => _error = true);
+      // Hors ligne avec une copie : on la garde, sans message d'erreur.
+      if (mounted) setState(() => _error = _feed == null);
+    } finally {
+      if (mounted) setState(() => _miseAJour = false);
     }
   }
 
@@ -2566,56 +2607,64 @@ class _StatusTabState extends State<_StatusTab> {
       body: MotifBackground(
         overlayOpacity: 0.92,
         plainInDark: true,
-        child: RefreshIndicator(
-          onRefresh: _load,
-          child: ListView(
-            children: [
-              _myStatusTile(me),
-              // Ce qui attend encore le réseau. Absent quand il n'y a rien :
-              // un compteur à zéro n'apprend rien et occupe une ligne.
-              if (_enAttente > 0)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                  child: Row(children: [
-                    Icon(Icons.schedule, size: 15, color: muted),
-                    const SizedBox(width: 6),
-                    Text(
-                      tr(context, 'statut_en_attente_n', {'n': '$_enAttente'}),
-                      style: TextStyle(fontSize: 12.5, color: muted),
-                    ),
-                  ]),
-                ),
-              if (_error)
-                Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Center(
-                      child:
-                          Text(tr(context, 'home_load_error'))),
-                ),
-              if (nonVus.isNotEmpty) ...[
-                _enteteSection(tr(context, 'status_recent'), muted),
-                for (var i = 0; i < nonVus.length; i++)
-                  _statusTile(ordonnes, i),
-              ],
-              if (dejaVus.isNotEmpty) ...[
-                _enteteSection(tr(context, 'status_seen'), muted),
-                for (var i = 0; i < dejaVus.length; i++)
-                  _statusTile(ordonnes, nonVus.length + i),
-              ],
-              if (others.isEmpty && !_error && _feed != null && me == null)
-                Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Center(
-                    child: Text(
-                      tr(context, 'home_no_status'),
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: muted),
+        child: _feed == null && !_error
+            // Rien encore sur ce téléphone : un squelette, pas une liste vide.
+            ? const SqueletteListe(lignes: 6)
+            : Column(children: [
+                BarreMiseAJour(visible: _miseAJour),
+                Expanded(
+                  child: RefreshIndicator(
+                    onRefresh: _load,
+                    child: ListView(
+                      children: [
+                        _myStatusTile(me),
+                        // Ce qui attend encore le réseau. Absent quand il n'y a rien :
+                        // un compteur à zéro n'apprend rien et occupe une ligne.
+                        if (_enAttente > 0)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                            child: Row(children: [
+                              Icon(Icons.schedule, size: 15, color: muted),
+                              const SizedBox(width: 6),
+                              Text(
+                                tr(context, 'statut_en_attente_n', {'n': '$_enAttente'}),
+                                style: TextStyle(fontSize: 12.5, color: muted),
+                              ),
+                            ]),
+                          ),
+                        if (_error)
+                          Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Center(
+                                child:
+                                    Text(tr(context, 'home_load_error'))),
+                          ),
+                        if (nonVus.isNotEmpty) ...[
+                          _enteteSection(tr(context, 'status_recent'), muted),
+                          for (var i = 0; i < nonVus.length; i++)
+                            _statusTile(ordonnes, i),
+                        ],
+                        if (dejaVus.isNotEmpty) ...[
+                          _enteteSection(tr(context, 'status_seen'), muted),
+                          for (var i = 0; i < dejaVus.length; i++)
+                            _statusTile(ordonnes, nonVus.length + i),
+                        ],
+                        if (others.isEmpty && !_error && _feed != null && me == null)
+                          Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Center(
+                              child: Text(
+                                tr(context, 'home_no_status'),
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: muted),
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                 ),
-            ],
-          ),
-        ),
+              ]),
       ),
     );
   }

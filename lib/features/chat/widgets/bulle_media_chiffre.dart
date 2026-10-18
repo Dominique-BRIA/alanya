@@ -705,8 +705,8 @@ class EnvoiChiffreEnCours extends StatelessWidget {
     );
   }
 
-  /// L'anneau, son pourcentage, et l'étape en cours sous lui : « Préparation »
-  /// pendant le chiffrement, « Envoi » pendant le téléversement.
+  /// L'anneau, son pourcentage, et l'étape en cours sous lui : « Chiffrement
+  /// en cours… » pendant le chiffrement, « Envoi » pendant le téléversement.
   ///
   /// ⚠️ SEUL LE TOUT PREMIER INSTANT RESTE SANS CHIFFRE : l'aperçu, avant le
   /// premier bloc chiffré. Une barre figée à 0 % y ressemblerait à un envoi

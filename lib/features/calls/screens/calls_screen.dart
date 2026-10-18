@@ -9,6 +9,7 @@ import '../../../core/realtime_client.dart';
 import '../../../models/call_record.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
+import '../../../widgets/chargement.dart';
 import '../../../widgets/motif_background.dart';
 import '../../../widgets/multi_select_mixin.dart';
 import '../call_controller.dart';
@@ -83,14 +84,22 @@ class _CallsScreenState extends State<CallsScreen>
     _wasBusy = busy;
   }
 
+  /// Vrai pendant que la version du serveur arrive : la fine barre en haut.
+  bool _miseAJour = false;
+
   Future<void> _load() async {
-    final cached = await CallCache.getAll();
-    if (cached.isNotEmpty && mounted) {
-      setState(() {
-        _calls = CallStatusFormalisme.sortAndLimit20(cached);
-        _error = false;
-      });
+    // La copie du téléphone, seulement si rien n'est encore affiché : la
+    // relire à chaque rafraîchissement ferait reculer la liste d'un cran.
+    if (_calls == null) {
+      final cached = await CallCache.getAll();
+      if (cached.isNotEmpty && mounted && _calls == null) {
+        setState(() {
+          _calls = CallStatusFormalisme.sortAndLimit20(cached);
+          _error = false;
+        });
+      }
     }
+    if (mounted) setState(() => _miseAJour = true);
     try {
       final calls = await context.read<CallsRepository>().history();
       if (!mounted) return;
@@ -103,6 +112,8 @@ class _CallsScreenState extends State<CallsScreen>
       if (mounted) {
         setState(() => _error = _calls == null || _calls!.isEmpty);
       }
+    } finally {
+      if (mounted) setState(() => _miseAJour = false);
     }
   }
 
@@ -181,6 +192,12 @@ class _CallsScreenState extends State<CallsScreen>
                     child: _buildBody(),
                   ),
                   Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: BarreMiseAJour(visible: _miseAJour && _calls != null),
+                  ),
+                  Positioned(
                     right: 16,
                     bottom: 16,
                     child: FloatingActionButton(
@@ -198,12 +215,8 @@ class _CallsScreenState extends State<CallsScreen>
   }
 
   Widget _buildBody() {
-    if (_calls == null && !_error) {
-      return ListView(children: [
-        SizedBox(height: 120),
-        Center(child: CircularProgressIndicator(color: accentOf(context))),
-      ]);
-    }
+    // Rien encore sur ce téléphone : un squelette, pas une roue.
+    if (_calls == null && !_error) return const SqueletteListe();
     if (_error) {
       return ListView(children: [
         const SizedBox(height: 80),

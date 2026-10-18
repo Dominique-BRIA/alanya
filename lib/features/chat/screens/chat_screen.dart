@@ -64,6 +64,7 @@ import '../../../theme/alanya_theme.dart';
 import '../../../widgets/auth_network_image.dart';
 import '../../../widgets/avatar_circle.dart';
 import '../../../widgets/badge_compte.dart';
+import '../../../widgets/chargement.dart';
 import '../../../models/badge_compte.dart';
 import '../../../widgets/choix_langue_interlocuteur.dart';
 import '../../../widgets/contact_share_sheet.dart';
@@ -282,44 +283,53 @@ class _ChatScreenState extends State<ChatScreen>
   Future<void> _chargeMembres() async {
     if (_relitLesMembres) return;
     _relitLesMembres = true;
+    final repo = context.read<ChatRepository>();
+    // La copie du téléphone d'abord : noms, rôle d'administrateur et lectures
+    // sont là tout de suite, la version du serveur les corrige ensuite.
+    final copie = await repo.getGroupMembersEnCache(widget.convId);
+    if (copie != null && mounted && _membresCharges.isEmpty) {
+      _appliqueMembres(copie);
+    }
     try {
-      final membres =
-          await context.read<ChatRepository>().getGroupMembers(widget.convId);
+      final membres = await repo.getGroupMembers(widget.convId);
       if (!mounted) return;
-      if (!mounted) return;
-      setState(() {
-        _membresCharges = {
-          for (final m in membres)
-            if (m["id"] is String)
-              m["id"] as String:
-                  (m["pseudo"] as String?) ?? (m["publicNumber"] as String? ?? ""),
-        };
-        // Suis-je ADMINISTRATEUR de ce groupe ? Seul lui peut écrire
-        // « @tout le monde » — la route des membres rend déjà le rôle.
-        _jeSuisAdmin = membres.any((m) =>
-            m["id"] == _myId && (m["role"] as String?)?.toUpperCase() == "ADMIN");
-        /*
-         * SEMENCE DU COMPTEUR DE LECTURES : ce que les membres avaient déjà lu
-         * AVANT qu'on ouvre. Les trames `read` ne racontent que la suite.
-         *
-         * Sans elle, le compteur repartirait de zéro à chaque ouverture du
-         * groupe, et tout ce qui a été lu pendant qu'on regardait ailleurs
-         * serait invisible.
-         */
-        for (final m in membres) {
-          final id = m["id"];
-          final brut = m["lastReadAt"];
-          if (id is! String || brut is! String) continue;
-          final quand = DateTime.tryParse(brut);
-          if (quand == null) continue;
-          _avanceLecture(id, quand.millisecondsSinceEpoch);
-        }
-      });
+      _appliqueMembres(membres);
     } catch (_) {
       // Repli sur `widget.memberNames` : rien à dire à l'utilisateur.
     } finally {
       _relitLesMembres = false;
     }
+  }
+
+  void _appliqueMembres(List<Map<String, dynamic>> membres) {
+    setState(() {
+      _membresCharges = {
+        for (final m in membres)
+          if (m["id"] is String)
+            m["id"] as String:
+                (m["pseudo"] as String?) ?? (m["publicNumber"] as String? ?? ""),
+      };
+      // Suis-je ADMINISTRATEUR de ce groupe ? Seul lui peut écrire
+      // « @tout le monde » — la route des membres rend déjà le rôle.
+      _jeSuisAdmin = membres.any((m) =>
+          m["id"] == _myId && (m["role"] as String?)?.toUpperCase() == "ADMIN");
+      /*
+       * SEMENCE DU COMPTEUR DE LECTURES : ce que les membres avaient déjà lu
+       * AVANT qu'on ouvre. Les trames `read` ne racontent que la suite.
+       *
+       * Sans elle, le compteur repartirait de zéro à chaque ouverture du
+       * groupe, et tout ce qui a été lu pendant qu'on regardait ailleurs
+       * serait invisible.
+       */
+      for (final m in membres) {
+        final id = m["id"];
+        final brut = m["lastReadAt"];
+        if (id is! String || brut is! String) continue;
+        final quand = DateTime.tryParse(brut);
+        if (quand == null) continue;
+        _avanceLecture(id, quand.millisecondsSinceEpoch);
+      }
+    });
   }
 
   /// Nom à afficher pour un expéditeur, dans un groupe.
@@ -956,6 +966,9 @@ class _ChatScreenState extends State<ChatScreen>
 
   void _closeSearch() {
     _searchDebounce?.cancel();
+    // Une recherche encore en vol ne doit pas réécrire l'écran qu'on vient de
+    // quitter.
+    _jetonRecherche++;
     _searchCtrl.clear();
     setState(() {
       _searchMode = false;
@@ -964,10 +977,18 @@ class _ChatScreenState extends State<ChatScreen>
     });
   }
 
+  /// En deçà, presque tout le fil correspond : la recherche ne servirait à
+  /// rien et ferait sauter l'écran à chaque lettre.
+  static const int _rechercheMin = 2;
+
+  /// Chaque recherche prend un numéro ; seule la dernière a le droit d'écrire.
+  int _jetonRecherche = 0;
+
   void _onSearchChanged(String q) {
     _searchDebounce?.cancel();
     final query = q.trim();
-    if (query.isEmpty) {
+    if (query.length < _rechercheMin) {
+      _jetonRecherche++;
       setState(() {
         _searchResultIds = [];
         _searchLoading = false;
@@ -976,7 +997,7 @@ class _ChatScreenState extends State<ChatScreen>
     }
     setState(() => _searchLoading = true);
     _searchDebounce =
-        Timer(const Duration(milliseconds: 350), () => _runSearch(query));
+        Timer(const Duration(milliseconds: 250), () => _runSearch(query));
   }
 
   /// Cherche dans la conversation : d'abord ICI, puis sur le serveur.
@@ -989,7 +1010,17 @@ class _ChatScreenState extends State<ChatScreen>
   /// ⚠️ LE SERVEUR GARDE SON RÔLE pour l'historique en clair qui n'est pas
   /// encore descendu sur l'appareil : ses résultats s'ajoutent après, sans
   /// doublon. Son échec (hors ligne) n'efface pas ce qu'on a trouvé ici.
+  ///
+  /// 🐛 TROIS DÉFAUTS CORRIGÉS (18/10/2026, « la recherche dérange ») :
+  /// * les résultats d'ici ATTENDAIENT le serveur — ils s'affichent maintenant
+  ///   aussitôt (cache d'abord), ceux du serveur s'ajoutent ensuite ;
+  /// * une réponse lente pouvait écraser la recherche suivante — le numéro
+  ///   (`_jetonRecherche`) écarte toute réponse dépassée ;
+  /// * l'arrivée des résultats du serveur remettait au premier résultat et
+  ///   refaisait sauter l'écran, même si l'on avait déjà navigué — on garde
+  ///   désormais sa place.
   Future<void> _runSearch(String query) async {
+    final jeton = ++_jetonRecherche;
     final ici = <String, Message>{for (final m in _messages) m.id: m};
     try {
       final cache = await MessageCache.getConv(widget.convId)
@@ -1003,29 +1034,41 @@ class _ChatScreenState extends State<ChatScreen>
         .toList()
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     final ids = [for (final m in trouves) m.id];
+    if (!mounted || jeton != _jetonRecherche) return;
+    // Ce qu'on a trouvé ICI s'affiche tout de suite.
+    setState(() {
+      _searchResultIds = List.of(ids);
+      _searchIndex = 0;
+    });
+    if (ids.isNotEmpty) unawaited(_scrollToMessage(ids.first));
+
+    final repo = context.read<ChatRepository>();
     try {
-      final results = await context
-          .read<ChatRepository>()
-          .searchMessages(widget.convId, query);
+      final results = await repo.searchMessages(widget.convId, query);
+      if (!mounted || jeton != _jetonRecherche) return;
+      final avaitDesResultats = _searchResultIds.isNotEmpty;
+      final fusion = List.of(_searchResultIds);
       for (final id in results.map((r) => r["id"] as String?).whereType<String>()) {
-        if (!ids.contains(id)) ids.add(id);
+        if (!fusion.contains(id)) fusion.add(id);
       }
-    } catch (_) {}
-    try {
-      if (!mounted) return;
-      setState(() {
-        _searchResultIds = ids;
-        _searchIndex = 0;
-        _searchLoading = false;
-      });
-      if (ids.isNotEmpty) _scrollToMessage(ids.first);
+      setState(() => _searchResultIds = fusion);
+      // On ne saute que si rien n'avait encore été trouvé : sinon le lecteur
+      // est peut-être déjà sur un autre résultat.
+      if (!avaitDesResultats && fusion.isNotEmpty) {
+        unawaited(_scrollToMessage(fusion.first));
+      }
     } catch (_) {
-      if (mounted) setState(() => _searchLoading = false);
+      // Hors ligne : ce qu'on a trouvé ici reste.
+    } finally {
+      if (mounted && jeton == _jetonRecherche) {
+        setState(() => _searchLoading = false);
+      }
     }
   }
 
   void _searchNav(int delta) {
-    if (_searchResultIds.isEmpty) return;
+    // Un saut est déjà en route : un second appui le contrarierait.
+    if (_searchResultIds.isEmpty || _sautEnCours) return;
     final next =
         (_searchIndex + delta).clamp(0, _searchResultIds.length - 1).toInt();
     if (next == _searchIndex) return;
@@ -1119,7 +1162,7 @@ class _ChatScreenState extends State<ChatScreen>
           _sonnerMessageRecu(msg.senderId);
         }
       }
-      _scrollToBottom();
+      _suivreSiEnBas(arrives: msg.senderId != _myId ? 1 : 0);
       /*
        * 🔴 UN MESSAGE CHIFFRÉ ARRIVE VIDE, ET IL FAUT ALLER CHERCHER SON TEXTE.
        *
@@ -1682,12 +1725,15 @@ class _ChatScreenState extends State<ChatScreen>
         if (NotificationSettings.instance.messagesOn) {
           _sonnerMessageRecu(nouveaux.last.senderId);
         }
-        _scrollToBottom();
+        _suivreSiEnBas(arrives: nouveaux.length);
       }
     } catch (_) {
       // Le réseau a bronché : la prochaine ouverture relira tout.
     }
   }
+
+  /// Vrai pendant que la version du serveur arrive : la fine barre en haut.
+  bool _miseAJour = false;
 
   Future<void> _load() async {
     // _myId est désormais un getter (toujours à jour) — plus besoin de le figer ici.
@@ -1743,6 +1789,8 @@ class _ChatScreenState extends State<ChatScreen>
         .accessToken
         .timeout(const Duration(seconds: 5), onTimeout: () => null);
 
+    // La copie est affichée, la version du serveur arrive : la fine barre.
+    if (mounted && !_loading) setState(() => _miseAJour = true);
     try {
       final repo = context.read<ChatRepository>();
       final page = await repo.getMessages(widget.convId);
@@ -1761,7 +1809,9 @@ class _ChatScreenState extends State<ChatScreen>
         _cacheMsg(m);
       }
       _markReadRemote();
-      _scrollToBottom(immediat: true);
+      // Pas de retour en bas si l'on a commencé à remonter pendant que la
+      // version du serveur arrivait : on ne perd pas sa lecture.
+      if (_estEnBasReel) _scrollToBottom(immediat: true);
       _traduitAutomatiquement();
     } catch (_) {
       if (mounted) setState(() => _loading = false);
@@ -1780,7 +1830,12 @@ class _ChatScreenState extends State<ChatScreen>
        * découvert ; le mettre dans le `catch` laisse le cas du `return`
        * anticipé. Seul le `finally` couvre les trois sorties.
        */
-      if (mounted && _loading) setState(() => _loading = false);
+      if (mounted && (_loading || _miseAJour)) {
+        setState(() {
+          _loading = false;
+          _miseAJour = false;
+        });
+      }
     }
     // Les enveloppes chiffrées : leur texte n est pas dans `getMessages`.
     // L'état du chiffrement : il commande la bannière.
@@ -1796,6 +1851,7 @@ class _ChatScreenState extends State<ChatScreen>
   // Scroll infini : proche du haut → charge les messages plus anciens.
   void _onScroll() {
     if (!_scrollCtrl.hasClients) return;
+    _syncEnBas();
     // ⚠️ La liste est INVERSÉE : le plus ancien n'est plus au décalage 0, il est
     // à `maxScrollExtent`. Garder l'ancien test (`pixels <= 240`) déclencherait
     // le chargement de l'historique quand on est en bas, c'est-à-dire sur les
@@ -1884,9 +1940,9 @@ class _ChatScreenState extends State<ChatScreen>
           duServeur, _messages, _envoisChiffres.keys.toSet());
       if (_signature(latest) == _signature(_messages)) return;
       final hadMore = latest.length > _messages.length;
-      final atBottom = !_scrollCtrl.hasClients ||
-          _scrollCtrl.position.pixels >=
-              _scrollCtrl.position.maxScrollExtent - 60;
+      // 🐛 CE TEST VISAIT LE MAUVAIS BORD : depuis l'inversion de la liste,
+      // `maxScrollExtent` est le HAUT du fil (le plus ancien). Le bas est 0.
+      final atBottom = _estEnBasReel;
       setState(() {
         _messages = latest;
         _rebuildCombined();
@@ -1895,7 +1951,7 @@ class _ChatScreenState extends State<ChatScreen>
         _cacheMsg(m);
       }
       if (hadMore) repo.markRead(widget.convId);
-      if (hadMore && atBottom) _scrollToBottom();
+      if (hadMore && atBottom && !_sautEnCours) _scrollToBottom();
     } catch (_) {}
   }
 
@@ -2387,7 +2443,7 @@ class _ChatScreenState extends State<ChatScreen>
 
     if (nouveaux.isNotEmpty) {
       // Mêmes gestes qu'un message arrivé par le temps réel : on le lit, on
-      // sonne si le réglage le veut, on descend en bas du fil.
+      // sonne si le réglage le veut, on descend — si l'on était en bas.
       final dAutrui = nouveaux.where((m) => m.senderId != _myId).toList();
       if (dAutrui.isNotEmpty) {
         _markReadRemote();
@@ -2395,7 +2451,7 @@ class _ChatScreenState extends State<ChatScreen>
           _sonnerMessageRecu(dAutrui.last.senderId);
         }
       }
-      _scrollToBottom();
+      _suivreSiEnBas(arrives: dAutrui.length);
     }
   }
 
@@ -2403,9 +2459,21 @@ class _ChatScreenState extends State<ChatScreen>
     // Dépôt capturé AVANT tout await : le lire après reviendrait à toucher un
     // BuildContext qui peut avoir été démonté entre-temps.
     final repo = context.read<CallsRepository>();
+    /*
+     * 🐛 « BEAUCOUP DE CHOSES NE SONT PAS EN CACHE, COMME LES APPELS » (user,
+     * 18/10/2026). Le fil ne lisait que le cache GLOBAL des appels, qui ne
+     * garde que les derniers toutes conversations confondues : les appels plus
+     * anciens de CE fil n'apparaissaient qu'après le réseau. Il a maintenant sa
+     * copie à lui ; le cache global ne sert plus que de repli.
+     */
     try {
-      final caches = await CallCache.getAll();
-      if (caches.isNotEmpty && mounted) _appliqueCalls(caches);
+      final duFil = await repo.forConversationEnCache(widget.convId);
+      if (duFil != null && mounted) {
+        _appliqueCalls(duFil);
+      } else {
+        final caches = await CallCache.getAll();
+        if (caches.isNotEmpty && mounted) _appliqueCalls(caches);
+      }
     } catch (_) {}
     try {
       // Endpoint dédié à CETTE conversation, au lieu des 50 derniers appels
@@ -3288,7 +3356,38 @@ class _ChatScreenState extends State<ChatScreen>
     return cached ?? serveur;
   }
 
+  /// Fait défiler jusqu'au message [id], en chargeant l'historique s'il le
+  /// faut, puis le surligne.
+  ///
+  /// 🐛 « LE SCROLL, LA RECHERCHE D'UN MESSAGE DÉRANGENT » (user, 18/10/2026).
+  /// La position était estimée AU PRORATA (rang ÷ nombre d'éléments) : avec des
+  /// bulles de hauteurs très différentes — photos, appels, longs textes — on
+  /// tombait souvent loin de la cible, sa bulle n'était jamais construite, et
+  /// le repli ANIMAIT vers la même estimation fausse. Rien n'était surligné.
+  ///
+  /// Désormais, sur le modèle de Talky (branche `coffrefort`, 18/10/2026) :
+  /// 1. l'estimation ADDITIONNE la hauteur probable de chaque élément entre le
+  ///    bas et la cible (`_hauteurEstimee`) ;
+  /// 2. puis, image après image, on regarde quelles bulles sont construites et
+  ///    l'on avance VERS la cible — le pas se réduit de moitié à chaque
+  ///    dépassement, ce qui converge quelle que soit l'erreur de départ ;
+  /// 3. dès que la bulle existe, `ensureVisible` la centre et on la surligne.
+  ///
+  /// ⚠️ UN SEUL SAUT À LA FOIS (`_sautEnCours`) : deux appuis rapides sur les
+  /// flèches de la recherche lançaient deux défilements qui se contrariaient.
+  /// Pendant le saut, l'arrivée d'un message ne ramène pas en bas.
   Future<void> _scrollToMessage(String id) async {
+    if (_sautEnCours) return;
+    _sautEnCours = true;
+    try {
+      await _sauterVers(id);
+    } finally {
+      _sautEnCours = false;
+      _syncEnBas();
+    }
+  }
+
+  Future<void> _sauterVers(String id) async {
     int foundIdx = _messages.indexWhere((m) => m.id == id);
     if (foundIdx < 0) {
       int attempts = 0;
@@ -3302,7 +3401,11 @@ class _ChatScreenState extends State<ChatScreen>
               await repoSaut.getMessages(widget.convId, cursor: cursor));
           if (older.isEmpty) break;
           final newMsgs = older.reversed.toList();
-          setState(() => _messages = [...newMsgs, ..._messages]);
+          if (!mounted) return;
+          setState(() {
+            _messages = [...newMsgs, ..._messages];
+            _rebuildCombined();
+          });
           for (final m in newMsgs) {
             _cacheMsg(m);
           }
@@ -3313,83 +3416,143 @@ class _ChatScreenState extends State<ChatScreen>
         }
       }
     }
+    if (!mounted) return;
     if (foundIdx < 0) {
-      if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(tr(context, 'message_not_found')),
-            duration: const Duration(seconds: 2)));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(tr(context, 'message_not_found')),
+          duration: const Duration(seconds: 2)));
       return;
     }
-    if (!_scrollCtrl.hasClients) return;
 
-    /*
-     * 🐛 **SAUT À L'OPPOSÉ DE LA CIBLE** (signalé sur device le 17/08/2026,
-     * après l'inversion du fil). Deux défauts, corrigés ensemble.
-     *
-     * 1. LE SENS. L'estimation valait `foundIdx / _messages.length`, c'est-à-dire
-     *    « à quelle fraction du DÉBUT se trouve ce message ». Depuis que la
-     *    liste est inversée, le décalage 0 est le message le plus RÉCENT et
-     *    `maxScrollExtent` le plus ancien : ce rapport envoyait donc à l'exact
-     *    opposé. Et comme on atterrissait loin de la cible, sa bulle n'était
-     *    jamais construite — sa clé restait vide, `ensureVisible` ne
-     *    s'exécutait pas, et RIEN n'était surligné. Le second symptôme
-     *    découlait du premier.
-     *
-     * 2. LA LISTE DE RÉFÉRENCE. Le rapport se calculait sur `_messages`, alors
-     *    que ce qui est affiché est `_combined` : il contient aussi les appels,
-     *    et le regroupement des médias fond plusieurs messages en UN élément.
-     *    Deux longueurs différentes donnaient une estimation fausse même avant
-     *    l'inversion — d'autant plus fausse que la conversation contient de
-     *    photos et d'appels.
-     */
-    var indexAffiche = -1;
+    // L'indice CHRONOLOGIQUE de l'élément affiché qui porte la cible — le
+    // message lui-même, ou la grille de médias qui l'a absorbé.
+    final cible = _indiceAffiche(id);
+    if (cible < 0) return;
+
+    await WidgetsBinding.instance.endOfFrame;
+    if (await _reveler(id)) return;
+    if (!mounted || !_scrollCtrl.hasClients) return;
+
+    var position = _decalageEstime(cible)
+        .clamp(0.0, _scrollCtrl.position.maxScrollExtent)
+        .toDouble();
+    _scrollCtrl.jumpTo(position);
+
+    var pas = _scrollCtrl.position.viewportDimension * 0.9;
+    int? sensPrecedent;
+    for (var essai = 0; essai < 40; essai++) {
+      await WidgetsBinding.instance.endOfFrame;
+      if (await _reveler(id)) return;
+      if (!mounted || !_scrollCtrl.hasClients) return;
+      final construits = _indicesConstruits();
+      if (construits == null) break;
+      // La cible est-elle plus ANCIENNE que ce qui est à l'écran ? Alors elle
+      // est vers le haut, c'est-à-dire vers `maxScrollExtent` (liste inversée).
+      final int sens;
+      if (cible < construits.$1) {
+        sens = 1;
+      } else if (cible > construits.$2) {
+        sens = -1;
+      } else {
+        break; // Dans la plage construite, sans clé : rien de mieux à faire.
+      }
+      if (sensPrecedent != null && sens != sensPrecedent) pas /= 2;
+      sensPrecedent = sens;
+      final max = _scrollCtrl.position.maxScrollExtent;
+      final suivante = (position + sens * pas).clamp(0.0, max).toDouble();
+      if (suivante == position) break; // Au bord : plus rien à gagner.
+      position = suivante;
+      _scrollCtrl.jumpTo(position);
+    }
+    if (mounted) _highlightMessage(id);
+  }
+
+  /// Centre la bulle de [id] si elle est construite, et la surligne.
+  Future<bool> _reveler(String id) async {
+    if (!mounted) return false;
+    final ctx = _messageKeys[id]?.currentContext ?? _cleDeGrille(id)?.currentContext;
+    if (ctx == null) return false;
+    _highlightMessage(id);
+    // ⚠️ `alignment` se compte depuis le bord de TÊTE du défilement, qui est
+    // le BAS : 0.5 centre, indifféremment au sens de lecture.
+    await Scrollable.ensureVisible(ctx,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+        alignment: 0.5);
+    return true;
+  }
+
+  /// La clé de la grille de médias qui contient [id], s'il y en a une : toutes
+  /// les bulles d'une grille partagent celle de son premier message.
+  GlobalKey? _cleDeGrille(String id) {
+    for (final item in _combined) {
+      if (item is GroupeMedias && item.messages.any((m) => m.id == id)) {
+        return _messageKeys[item.messages.first.id];
+      }
+    }
+    return null;
+  }
+
+  int _indiceAffiche(String id) {
     for (var i = 0; i < _combined.length; i++) {
       final item = _combined[i];
-      if (item is Message && item.id == id) {
-        indexAffiche = i;
-        break;
-      }
-      // Le message peut avoir été absorbé par une grille : c'est l'élément
-      // GROUPE qu'il faut alors viser, puisque c'est lui qui est à l'écran.
-      if (item is GroupeMedias && item.messages.any((m) => m.id == id)) {
-        indexAffiche = i;
-        break;
-      }
+      if (item is Message && item.id == id) return i;
+      if (item is GroupeMedias && item.messages.any((m) => m.id == id)) return i;
     }
-    if (indexAffiche < 0) return;
+    return -1;
+  }
 
-    final maxScroll = _scrollCtrl.position.maxScrollExtent;
-    // Position DE LECTURE : l'élément 0 de `_combined` est le plus ancien, donc
-    // le dernier affiché — près de `maxScrollExtent`.
-    final rangAffiche = _combined.length - 1 - indexAffiche;
-    final ratio = _combined.isEmpty ? 0.0 : rangAffiche / _combined.length;
-    final estimatedOffset = (ratio * maxScroll).clamp(0.0, maxScroll);
-    _scrollCtrl.jumpTo(estimatedOffset);
-    await Future.delayed(const Duration(milliseconds: 300));
-    if (!mounted) return;
-    var key = _messageKeys[id];
-    var ctx = key?.currentContext;
-    if (ctx == null) {
-      _scrollCtrl.jumpTo((estimatedOffset + 200).clamp(0.0, maxScroll));
-      await Future.delayed(const Duration(milliseconds: 300));
-      if (!mounted) return;
-      key = _messageKeys[id];
-      ctx = key?.currentContext;
+  /// Les indices chronologiques, le plus ancien et le plus récent, des bulles
+  /// actuellement construites — `null` si aucune.
+  (int, int)? _indicesConstruits() {
+    int? bas;
+    int? haut;
+    for (var i = 0; i < _combined.length; i++) {
+      final item = _combined[i];
+      final cle = item is Message
+          ? _messageKeys[item.id]
+          : item is GroupeMedias
+              ? _messageKeys[item.messages.first.id]
+              : null;
+      if (cle?.currentContext == null) continue;
+      bas ??= i;
+      haut = i;
     }
-    if (ctx != null) {
-      // ⚠️ `alignment` se compte depuis le bord de TÊTE du défilement, qui est
-      // désormais le BAS : 0.3 plaçait le message près du bas de l'écran au
-      // lieu du haut. 0.5 le centre, et cette valeur a le mérite d'être
-      // indifférente au sens de lecture.
-      Scrollable.ensureVisible(ctx,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeInOut,
-          alignment: 0.5);
-      _highlightMessage(id);
-    } else {
-      _scrollCtrl.animateTo(estimatedOffset,
-          duration: const Duration(milliseconds: 500), curve: Curves.easeInOut);
-      _highlightMessage(id);
+    return bas == null ? null : (bas, haut!);
+  }
+
+  /// Décalage estimé de l'élément chronologique [cible] depuis le bas du fil :
+  /// la somme des hauteurs probables de tout ce qui est plus récent que lui.
+  double _decalageEstime(int cible) {
+    var total = 12.0; // la marge du fil
+    for (var i = _combined.length - 1; i > cible; i--) {
+      total += _hauteurEstimee(_combined[i]);
+      if (_needsDateSeparatorCombined(i)) total += 40;
+    }
+    return total;
+  }
+
+  double _hauteurEstimee(Object item) {
+    if (item is CallRecord) return 64;
+    if (item is GroupeMedias) return 250;
+    if (item is! Message) return 56;
+    var h = 46.0;
+    if (item.replyToId != null) h += 44;
+    if (widget.isGroup && item.senderId != _myId) h += 18;
+    switch (item.type) {
+      case 'IMAGE':
+      case 'VIDEO':
+        return h + 210;
+      case 'LOCATION':
+        return h + 150;
+      case 'AUDIO':
+        return h + 12;
+      case 'FILE':
+      case 'CONTACT':
+        return h + 30;
+      default:
+        final lignes = ((item.content?.length ?? 0) / 34).ceil().clamp(1, 14);
+        return h + lignes * 19;
     }
   }
 
@@ -4840,13 +5003,113 @@ class _ChatScreenState extends State<ChatScreen>
   void _scrollToBottom({bool immediat = false}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_scrollCtrl.hasClients) return;
-      if (immediat) {
+      // Loin dans l'historique : un saut, pas une animation de milliers de
+      // points (même règle que Talky).
+      if (immediat || _scrollCtrl.position.pixels > 2000) {
         _scrollCtrl.jumpTo(0);
+        _syncEnBas();
       } else {
-        _scrollCtrl.animateTo(0,
-            duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+        _scrollCtrl
+            .animateTo(0,
+                duration: const Duration(milliseconds: 250),
+                curve: Curves.easeOut)
+            .whenComplete(_syncEnBas);
       }
     });
+  }
+
+  /*
+   * 🔴 « LE SCROLL DÉRANGE ENCORE » (user, 18/10/2026).
+   *
+   * 🐛 TOUT MESSAGE D'AUTRUI RAMENAIT EN BAS — reçu en temps réel, par la
+   * relève périodique ou déchiffré après coup — même quand on lisait plus haut,
+   * ou qu'on parcourait les résultats d'une recherche. Comme WhatsApp (et
+   * Talky, branche `coffrefort`) : on ne suit le fil que si l'on est DÉJÀ en
+   * bas ; sinon, le bouton « ↓ » compte ce qui est arrivé.
+   */
+  /// Sous cette distance du bas, on est « au dernier message ».
+  static const double _seuilBas = 150;
+
+  /// Le lecteur est-il en bas ? Lu sur la position RÉELLE au moment de
+  /// décider, jamais sur un état gardé : le clavier qui s'ouvre change la
+  /// géométrie sans événement de défilement.
+  bool get _estEnBasReel =>
+      !_scrollCtrl.hasClients || _scrollCtrl.position.pixels <= _seuilBas;
+
+  /// Ce que montre le bouton « ↓ » (faux = bouton visible).
+  bool _enBas = true;
+
+  /// Messages d'autrui arrivés pendant qu'on lisait plus haut.
+  int _nouveauxEnBas = 0;
+
+  /// Un saut vers un message est en cours : rien ne doit le contrarier.
+  bool _sautEnCours = false;
+
+  void _syncEnBas() {
+    if (!mounted) return;
+    final enBas = _estEnBasReel;
+    if (enBas == _enBas && !(enBas && _nouveauxEnBas > 0)) return;
+    setState(() {
+      _enBas = enBas;
+      if (enBas) _nouveauxEnBas = 0;
+    });
+  }
+
+  /// Des messages viennent d'arriver : on descend si l'on était en bas,
+  /// sinon on les compte sur le bouton « ↓ ».
+  void _suivreSiEnBas({int arrives = 0}) {
+    if (!_sautEnCours && _estEnBasReel) {
+      _scrollToBottom();
+    } else if (arrives > 0 && mounted) {
+      setState(() => _nouveauxEnBas += arrives);
+    }
+  }
+
+  /// Le bouton rond « ↓ », en bas à droite du fil, avec le nombre de
+  /// nouveaux messages.
+  Widget _boutonVersLeBas() {
+    final n = _nouveauxEnBas;
+    return Semantics(
+      button: true,
+      label: tr(context, 'newer'),
+      child: Material(
+        color: surfacesOf(context).surface,
+        shape: const CircleBorder(),
+        elevation: 3,
+        shadowColor: Colors.black26,
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: () => _scrollToBottom(),
+          child: SizedBox(
+            width: 42,
+            height: 42,
+            child: Stack(clipBehavior: Clip.none, alignment: Alignment.center, children: [
+              Icon(Icons.keyboard_arrow_down_rounded, color: _accent, size: 26),
+              if (n > 0)
+                Positioned(
+                  top: -4,
+                  right: -4,
+                  child: Container(
+                    constraints: const BoxConstraints(minWidth: 18),
+                    height: 18,
+                    padding: const EdgeInsets.symmetric(horizontal: 5),
+                    decoration: BoxDecoration(
+                      color: _accent,
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(n > 99 ? '99+' : '$n',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w700)),
+                  ),
+                ),
+            ]),
+          ),
+        ),
+      ),
+    );
   }
 
   void _showError(String m) => showAppSnackBar(m);
@@ -5243,9 +5506,11 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Future<void> _loadDisappearing() async {
+    final repo = context.read<ChatRepository>();
+    final copie = await repo.getDisappearingEnCache(widget.convId);
+    if (copie != null && mounted) setState(() => _disappearingSeconds = copie);
     try {
-      final s =
-          await context.read<ChatRepository>().getDisappearing(widget.convId);
+      final s = await repo.getDisappearing(widget.convId);
       if (mounted) setState(() => _disappearingSeconds = s);
     } catch (_) {}
   }
@@ -5316,9 +5581,13 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Future<void> _loadPinned() async {
+    final repo = context.read<ChatRepository>();
+    final copie = await repo.getPinnedEnCache(widget.convId);
+    if (copie != null && mounted) {
+      setState(() => _pinnedMessageId = copie["pinnedMessageId"] as String?);
+    }
     try {
-      final data =
-          await context.read<ChatRepository>().getPinned(widget.convId);
+      final data = await repo.getPinned(widget.convId);
       if (!mounted) return;
       setState(() => _pinnedMessageId = data["pinnedMessageId"] as String?);
     } catch (_) {}
@@ -5984,9 +6253,12 @@ class _ChatScreenState extends State<ChatScreen>
         child: Column(children: [
           _pinnedBanner(),
           _bandeauLangueManquante(),
+          BarreMiseAJour(visible: _miseAJour),
           Expanded(
+              child: Stack(children: [
+                Positioned.fill(
               child: _loading
-                  ? Center(child: CircularProgressIndicator(color: _accent))
+                  ? const SqueletteDiscussion()
                   : _combined.isEmpty
                       ? Center(child: Text(tr(context, 'no_messages')))
                       // 🔴 **LISTE ANCRÉE EN BAS** (`reverse: true`), corrigé le
@@ -6053,6 +6325,9 @@ class _ChatScreenState extends State<ChatScreen>
                             }
                             return Column(children: widgets);
                           })),
+                if (!_enBas && !_loading)
+                  Positioned(right: 12, bottom: 12, child: _boutonVersLeBas()),
+              ])),
           if (!widget.isGroup)
             ActivityIndicatorBar(
                 typing: _peerTyping, recording: _peerRecording),

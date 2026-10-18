@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../../core/api_client.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../../widgets/chargement.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../collegues_repository.dart';
 import '../widgets/tuile_collegue.dart';
@@ -35,17 +36,30 @@ class _ServiceMembresScreenState extends State<ServiceMembresScreen> {
     super.dispose();
   }
 
+  /// Vrai pendant que la version du serveur arrive : la fine barre en haut.
+  bool _miseAJour = false;
+
   Future<void> _charger() async {
+    final repo = context.read<ColleguesRepository>();
     setState(() => _erreur = false);
+    // La copie du téléphone d'abord, seulement si rien n'est encore affiché.
+    if (_membres == null) {
+      final copie = await repo.membresEnCache(widget.service);
+      if (copie != null && mounted && _membres == null) {
+        setState(() => _membres = copie);
+      }
+    }
+    if (mounted) setState(() => _miseAJour = true);
     try {
-      final liste =
-          await context.read<ColleguesRepository>().membres(widget.service);
+      final liste = await repo.membres(widget.service);
       if (!mounted) return;
       setState(() => _membres = liste);
     } on ApiException {
-      if (mounted) setState(() => _erreur = true);
+      if (mounted) setState(() => _erreur = _membres == null);
     } catch (_) {
-      if (mounted) setState(() => _erreur = true);
+      if (mounted) setState(() => _erreur = _membres == null);
+    } finally {
+      if (mounted) setState(() => _miseAJour = false);
     }
   }
 
@@ -90,6 +104,7 @@ class _ServiceMembresScreenState extends State<ServiceMembresScreen> {
                   ),
                 ),
               ),
+            BarreMiseAJour(visible: _miseAJour && membres != null),
             Expanded(
               child: RefreshIndicator(
                 onRefresh: _charger,
@@ -107,7 +122,7 @@ class _ServiceMembresScreenState extends State<ServiceMembresScreen> {
       return _message(tr(context, 'server_unreachable'), muted, avecReessai: true);
     }
     if (membres == null) {
-      return const Center(child: CircularProgressIndicator());
+      return const SqueletteListe(lignes: 6);
     }
     final visibles = _visibles;
     if (visibles.isEmpty) {

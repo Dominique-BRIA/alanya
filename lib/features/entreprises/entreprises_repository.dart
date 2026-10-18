@@ -1,4 +1,5 @@
 import '../../core/authed_api.dart';
+import '../../core/cache_ecrans.dart';
 
 /// Un type d'entreprise, avec le nombre d'entreprises visibles derrière.
 /// Un pays proposé par le filtre de l'annuaire.
@@ -168,6 +169,24 @@ class EntreprisesRepository {
   /// Les types d'entreprise, dans [idPays] — ou dans mon pays si `null`.
   Future<List<TypeEntreprise>> types({int? idPays}) async {
     final data = await _api.get("/api/entreprises${_pays(idPays)}");
+    // Gardé PAR PAYS pour la prochaine ouverture : l'onglet l'affiche avant
+    // le réseau. « defaut » = le pays du compte, que le serveur choisit.
+    await CacheEcrans.ecrire('entreprises.types.${idPays ?? 'defaut'}', data);
+    return _types(data);
+  }
+
+  /// Les derniers types reçus pour ce pays, sans réseau — `null` si aucun.
+  Future<List<TypeEntreprise>?> typesEnCache({int? idPays}) async {
+    final data = await CacheEcrans.lire('entreprises.types.${idPays ?? 'defaut'}');
+    if (data is! Map<String, dynamic>) return null;
+    try {
+      return _types(data);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  List<TypeEntreprise> _types(Map<String, dynamic> data) {
     return ((data["types"] as List?) ?? const [])
         .whereType<Map<String, dynamic>>()
         .map(TypeEntreprise.fromJson)
@@ -178,7 +197,22 @@ class EntreprisesRepository {
   Future<List<Entreprise>> duType(int idType, {int? idPays}) async {
     final data =
         await _api.get("/api/entreprises?type=$idType${_pays(idPays, suite: true)}");
+    await CacheEcrans.ecrire(
+        'entreprises.type.$idType.${idPays ?? 'defaut'}', data);
     return _entreprises(data);
+  }
+
+  /// Les dernières entreprises reçues pour ce type, sans réseau — `null` si
+  /// aucune.
+  Future<List<Entreprise>?> duTypeEnCache(int idType, {int? idPays}) async {
+    final data = await CacheEcrans.lire(
+        'entreprises.type.$idType.${idPays ?? 'defaut'}');
+    if (data is! Map<String, dynamic>) return null;
+    try {
+      return _entreprises(data);
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Recherche, DANS LE PAYS SÉLECTIONNÉ.

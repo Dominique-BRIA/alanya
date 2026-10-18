@@ -5,8 +5,12 @@ import '../../../theme/alanya_theme.dart';
 import '../../../l10n/app_localizations.dart';
 
 class BiometricLockScreen extends StatefulWidget {
-  const BiometricLockScreen({super.key, required this.onUnlocked});
+  const BiometricLockScreen(
+      {super.key, required this.onUnlocked, this.onDisabled});
   final VoidCallback onUnlocked;
+
+  /// Le verrou vient d'être désactivé, après le code de l'appareil.
+  final VoidCallback? onDisabled;
 
   @override
   State<BiometricLockScreen> createState() => _BiometricLockScreenState();
@@ -46,6 +50,23 @@ class _BiometricLockScreenState extends State<BiometricLockScreen> {
     if (ok) {
       widget.onUnlocked();
     }
+  }
+
+  /// Désactive le verrou — APRÈS le code de l'appareil.
+  ///
+  /// 🐛 LE BOUTON DÉSACTIVAIT SANS RIEN DEMANDER (relevé le 18/10/2026) : quiconque
+  /// tenait le téléphone ouvrait l'application d'un appui, sans empreinte ni
+  /// code. Le verrou ne protégeait donc de rien.
+  Future<void> _desactiver() async {
+    if (_authenticating) return;
+    setState(() => _authenticating = true);
+    final ok = await BiometricService.authenticateWithFallback();
+    if (!mounted) return;
+    setState(() => _authenticating = false);
+    if (!ok) return;
+    await BiometricService.setEnabled(false);
+    widget.onDisabled?.call();
+    widget.onUnlocked();
   }
 
   @override
@@ -127,12 +148,7 @@ class _BiometricLockScreenState extends State<BiometricLockScreen> {
 
                 // Désactiver la biométrie
                 TextButton(
-                  onPressed: _authenticating
-                      ? null
-                      : () async {
-                          await BiometricService.setEnabled(false);
-                          widget.onUnlocked();
-                        },
+                  onPressed: _authenticating ? null : _desactiver,
                   child: Text(
                     tr(context, 'disable_lock'),
                     style: TextStyle(
