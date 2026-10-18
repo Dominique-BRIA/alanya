@@ -52,6 +52,9 @@ dependencies:
   # Mobile : enregistrement vocal, lecture audio, téléchargement
   record: ^7.0.0
   audioplayers: ^6.1.0
+  # Forme d'onde RÉELLE des messages vocaux, extraite du fichier (comme Talky,
+  # 18/10/2026). Sans elle, la bulle dessinait le même motif pour tous.
+  audio_waveforms: ^2.0.2
   path_provider: ^2.1.5
   url_launcher: ^6.3.1
   # Lecture vidéo intégrée (mini lecteur in-app)

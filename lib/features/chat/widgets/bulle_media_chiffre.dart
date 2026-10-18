@@ -4,7 +4,6 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' show ImageFilter;
 
-import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -13,6 +12,8 @@ import 'package:video_player/video_player.dart';
 
 import '../../../core/authed_api.dart';
 import '../../../core/media_helper.dart';
+import '../../../theme/alanya_theme.dart';
+import '../../../widgets/media/bulle_vocale.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../services/e2ee/e2ee_media.dart';
 import '../../../services/e2ee/e2ee_media_ouverture.dart';
@@ -61,9 +62,6 @@ enum _Etat { attente, chargement, pret, altere, echec }
 class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
   _Etat _etat = _Etat.attente;
   File? _fichier;
-  AudioPlayer? _audio;
-  bool _audioEnCours = false;
-  StreamSubscription<PlayerState>? _abonnementAudio;
 
   DescripteurMedia get d => widget.descripteur;
   bool get _image => d.mime.startsWith('image/');
@@ -84,13 +82,6 @@ class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
   void initState() {
     super.initState();
     if (_image) unawaited(_charger());
-  }
-
-  @override
-  void dispose() {
-    _abonnementAudio?.cancel();
-    _audio?.dispose();
-    super.dispose();
   }
 
   Future<File?> _charger() async {
@@ -247,58 +238,26 @@ class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
     );
   }
 
+  /// Un vocal chiffré : la même bulle qu'en clair (`BulleVocale`), forme
+  /// d'onde comprise — le fichier est déchiffré pour la lire.
+  ///
+  /// ⚠️ PRÉPARÉ DÈS L'AFFICHAGE s'il est petit (un vocal ordinaire pèse
+  /// quelques dizaines de Ko) : c'est ce qui donne sa vraie forme d'onde. Au-
+  /// delà, on attend le premier toucher, comme pour un document.
   Widget _bulleVocal(BuildContext context) {
-    return InkWell(
+    final sombre = Theme.of(context).brightness == Brightness.dark;
+    final couleur = widget.isMe
+        ? Colors.white
+        : (sombre ? AlanyaColors.terracottaNuitLight : AlanyaColors.terracotta);
+    return BulleVocale(
+      identite: d.id,
+      isMe: widget.isMe,
+      couleur: couleur,
+      couleurDiscrete: widget.couleurDiscrete,
+      duree: d.dureeMs == null ? null : Duration(milliseconds: d.dureeMs!),
+      chargementAuto: d.taille <= 2 * 1024 * 1024,
       onLongPress: widget.onLongPress,
-      onTap: () async {
-        final f = _fichier ?? await _charger();
-        if (f == null) return;
-        if (_audio == null) {
-          final p = AudioPlayer();
-          _audio = p;
-          _abonnementAudio = p.onPlayerStateChanged.listen((s) {
-            if (mounted)
-              setState(() => _audioEnCours = s == PlayerState.playing);
-          });
-          await p.play(DeviceFileSource(f.path));
-        } else if (_audioEnCours) {
-          await _audio!.pause();
-        } else {
-          await _audio!.resume();
-        }
-      },
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _etat == _Etat.chargement
-                ? const SizedBox(
-                    width: 32,
-                    height: 32,
-                    child: Padding(
-                      padding: EdgeInsets.all(6),
-                      child: CircularProgressIndicator(strokeWidth: 2.5),
-                    ),
-                  )
-                : Icon(
-                    _audioEnCours
-                        ? Icons.pause_circle_filled
-                        : Icons.play_circle_fill,
-                    size: 34,
-                  ),
-            const SizedBox(width: 8),
-            Text(tr(context, 'vu_vocal')),
-            if (d.dureeMs != null) ...[
-              const SizedBox(width: 12),
-              Text(
-                _duree(d.dureeMs!),
-                style: TextStyle(fontSize: 12, color: widget.couleurDiscrete),
-              ),
-            ],
-          ],
-        ),
-      ),
+      obtenirSource: () async => (_fichier ?? await _charger())?.path,
     );
   }
 
