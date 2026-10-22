@@ -10,7 +10,6 @@ import android.util.Log
 import android.view.WindowManager
 import com.alanya.telecom.CallRegistry
 import com.cloudwebrtc.webrtc.FlutterWebRTCPlugin
-import com.cloudwebrtc.webrtc.video.LocalVideoTrack
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -46,7 +45,6 @@ class MainActivity : FlutterFragmentActivity() {
         const val CANAL_ECRAN_PROTEGE = "alanya/ecran_protege"
         const val CANAL_APPAREIL = "alanya/appareil"
         const val CANAL_CHIFFREMENT = "alanya/chiffrement"
-        const val CANAL_EFFETS = "alanya/effets_video"
         const val CANAL_COMPRESSION_VIDEO = "alanya/compression_video"
         const val TAG_PROX = "AlanyaProximite"
     }
@@ -218,27 +216,6 @@ class MainActivity : FlutterFragmentActivity() {
         val chiffrement = ChiffrementAgb1(canalChiffrement)
         canalChiffrement.setMethodCallHandler { appel, resultat -> chiffrement.traiter(appel, resultat) }
 
-        // Effets de visage pendant un appel vidéo (barbe, lunettes, grosse
-        // tête…) : MediaPipe, gratuit, sur le téléphone. Voir EffetsVisage.
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CANAL_EFFETS)
-            .setMethodCallHandler { appel, resultat ->
-                when (appel.method) {
-                    "appliquer" -> {
-                        val trackId = appel.argument<String>("trackId")
-                        val effet = appel.argument<String>("effet") ?: "aucun"
-                        resultat.success(runCatching { appliquerEffet(trackId, effet) }.getOrDefault(false))
-                    }
-                    "retirer" -> {
-                        runCatching { retirerEffet() }
-                        resultat.success(true)
-                    }
-                    "etat" -> resultat.success(
-                        effets?.etat()?.plus("branche" to (pisteEffets != null))
-                    )
-                    else -> resultat.notImplemented()
-                }
-            }
-
         // Marque et modèle exacts de l'appareil (« samsung SM-A515F ») : le
         // filigrane d'un document sensible les porte (18/10/2026). L'empreinte
         // de build que lit Dart n'en donne qu'une approximation.
@@ -399,41 +376,7 @@ class MainActivity : FlutterFragmentActivity() {
      * s'éteindre hors de tout appel, sans que rien ne le rallume depuis
      * l'application — celle-ci n'existant plus.
      */
-    // ── Effets de visage (18/10/2026) ─────────────────────────────────────────
-    private var effets: EffetsVisage? = null
-    private var pisteEffets: LocalVideoTrack? = null
-
-    /**
-     * Pose [effet] sur la piste caméra [trackId] de l'appel en cours. La piste
-     * est cherchée chez le plugin WebRTC DU MOTEUR DE L'APPEL — pas le
-     * singleton, qui peut pointer vers un autre moteur (voir AppelEnregistreur).
-     */
-    private fun appliquerEffet(trackId: String?, effet: String): Boolean {
-        if (trackId.isNullOrEmpty()) return false
-        val plugin = moteurFlutter?.plugins?.get(FlutterWebRTCPlugin::class.java) as? FlutterWebRTCPlugin
-            ?: return false
-        val piste = plugin.getLocalTrack(trackId) as? LocalVideoTrack ?: return false
-        val moteur = effets ?: EffetsVisage(applicationContext).also { effets = it }
-        if (pisteEffets !== piste) {
-            pisteEffets?.removeProcessor(moteur)
-            piste.addProcessor(moteur)
-            pisteEffets = piste
-        }
-        moteur.remettreDiagnostic()
-        moteur.effet = effet
-        if (effet == "aucun") retirerEffet()
-        return true
-    }
-
-    private fun retirerEffet() {
-        val moteur = effets ?: return
-        pisteEffets?.removeProcessor(moteur)
-        pisteEffets = null
-        moteur.liberer()
-    }
-
     override fun onDestroy() {
-        runCatching { retirerEffet() }
         runCatching { reglerCapteurProximite(false) }
         super.onDestroy()
     }

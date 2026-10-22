@@ -66,12 +66,3 @@
 # Conserver les stack traces lisibles en release (facilite le débug crash).
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile
-
-# --- MediaPipe (effets de visage en appel vidéo, 18/10/2026) ---------------
-# Les tâches MediaPipe passent par JNI et par des messages protobuf lus par
-# réflexion : sans ces règles, le détecteur échoue en version de production.
--keep class com.google.mediapipe.** { *; }
--keep class com.google.protobuf.** { *; }
--dontwarn com.google.mediapipe.**
--dontwarn com.google.protobuf.**
--dontwarn com.google.auto.value.**

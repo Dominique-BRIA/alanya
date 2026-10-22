@@ -14,7 +14,6 @@ import '../../../widgets/call_rating_sheet.dart';
 import '../../../widgets/contact_picker_sheet.dart';
 import '../../chat/screens/chat_screen.dart';
 import '../call_controller.dart';
-import '../effets_video.dart';
 import '../disposition_vignettes.dart';
 import '../widgets/call_avatar_waves.dart';
 import '../widgets/ivr_panel.dart';
@@ -1429,14 +1428,6 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                 label: tr(context, 'camera_short'),
                 onPressed: () => cc.switchCamera(),
               ),
-            // Effets de visage (18/10/2026) : barbe, lunettes, grosse tête…
-            if (isVideo && EffetsVideo.disponible)
-              _controlBtn(
-                icon: Icons.face_retouching_natural,
-                active: EffetsVideo.actuel.value != 'aucun',
-                label: tr(context, 'fx_effets'),
-                onPressed: () => _choisirEffet(cc),
-              ),
             _controlBtn(
               icon: Icons.chat_bubble_outline,
               active: false,
@@ -1535,94 +1526,6 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
   /// [taille] permet de resserrer les commandes là où la place est comptée —
   /// la rangée du standard, où chaque point repris revient au pavé numérique.
   /// Les autres écrans gardent la taille d'origine par défaut.
-  /// Le sélecteur d'effets de visage, en bas de l'écran d'appel.
-  Future<void> _choisirEffet(CallController cc) async {
-    const pictos = {
-      'aucun': '🚫',
-      'barbe': '🧔',
-      'moustache': '🥸',
-      'lunettes': '🕶️',
-      'grosse_tete': '🤯',
-      'visage_fin': '🙂',
-    };
-    final choisi = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: Colors.black87,
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Text(tr(context, 'fx_effets'),
-                style: const TextStyle(
-                    color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 14),
-            Wrap(
-              alignment: WrapAlignment.center,
-              spacing: 14,
-              runSpacing: 14,
-              children: [
-                for (final e in EffetsVideo.effets)
-                  InkWell(
-                    borderRadius: BorderRadius.circular(16),
-                    onTap: () => Navigator.pop(ctx, e),
-                    child: Container(
-                      width: 84,
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      decoration: BoxDecoration(
-                        color: EffetsVideo.actuel.value == e
-                            ? Colors.white24
-                            : Colors.white10,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                            color: EffetsVideo.actuel.value == e
-                                ? Colors.white
-                                : Colors.transparent),
-                      ),
-                      child: Column(children: [
-                        Text(pictos[e] ?? '✨', style: const TextStyle(fontSize: 30)),
-                        const SizedBox(height: 4),
-                        Text(tr(context, 'fx_$e'),
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(color: Colors.white, fontSize: 12)),
-                      ]),
-                    ),
-                  ),
-              ],
-            ),
-          ]),
-        ),
-      ),
-    );
-    if (choisi == null || !mounted) return;
-    final pistes = cc.localStream?.getVideoTracks() ?? const [];
-    final ok = await EffetsVideo.appliquer(
-        pistes.isEmpty ? null : pistes.first.id, choisi);
-    if (!mounted) return;
-    if (!ok && choisi != 'aucun') {
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(tr(context, 'fx_indispo'))));
-    }
-    setState(() {});
-    if (ok && choisi != 'aucun') unawaited(_verifierEffet(choisi));
-  }
-
-  /// Deux secondes et demie après le choix : l'effet se voit-il vraiment ?
-  /// Sinon, un message dit pourquoi (détecteur, caméra, visage non trouvé).
-  Future<void> _verifierEffet(String effet) async {
-    await Future<void>.delayed(const Duration(milliseconds: 2500));
-    if (!mounted || EffetsVideo.actuel.value != effet) return;
-    final etat = await EffetsVideo.etat();
-    final cle = EffetsVideo.diagnostic(etat);
-    if (cle == null || !mounted) return;
-    final detail = (etat?['detecteur'] ?? etat?['erreur']) as String?;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      duration: const Duration(seconds: 8),
-      content: Text(detail == null
-          ? tr(context, cle)
-          : '${tr(context, cle)}\n$detail'),
-    ));
-  }
-
   Widget _controlBtn({
     required IconData icon,
     required bool active,
