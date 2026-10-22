@@ -145,4 +145,18 @@ dependencies {
     // même transcodeur, et Gradle en choisit une — celle que l'autre n'attend
     // pas. À revérifier à chaque montée de `video_compress`.
     implementation("com.otaliastudios:transcoder:0.10.5")
+
+    // Documents sensibles (22/10/2026) : la copie qui sort est signée aux quatre
+    // bords et dans ses métadonnées (`SignatureDocument.kt`).
+    // - PdfBox-Android (Apache 2.0) : écrire sur les pages d'un PDF existant et
+    //   remplir son dictionnaire Info. Rien n'est envoyé à un service.
+    // - ExifInterface : écrire l'EXIF d'un JPEG, PNG ou WebP.
+    //
+    // BouncyCastle (~8 Mo) n'y sert qu'aux PDF chiffrés PAR CERTIFICAT : exclu.
+    // Un tel PDF sort non signé (l'erreur remonte, la copie part telle quelle),
+    // et l'on évite tout doublon de classes avec un autre greffon.
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0") {
+        exclude(group = "org.bouncycastle")
+    }
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
 }

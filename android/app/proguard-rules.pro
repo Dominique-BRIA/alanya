@@ -46,6 +46,17 @@
 -keep class com.shockwave.** { *; }
 -dontwarn com.shockwave.**
 
+# --- PdfBox-Android (signature des documents sensibles) -------------------
+# Polices, tables d'encodage et filtres sont chargés par leur nom : R8 ne voit
+# pas ces usages. Le décodeur JPEG 2000 et le chiffrement par certificat sont
+# des dépendances facultatives, absentes ici.
+-keep class com.tom_roush.pdfbox.** { *; }
+-keep class com.tom_roush.fontbox.** { *; }
+-keep class com.tom_roush.harmony.** { *; }
+-dontwarn com.gemalto.jp2.**
+-dontwarn org.bouncycastle.**
+-dontwarn org.spongycastle.**
+
 # --- SQLite / sqflite -----------------------------------------------------
 -keep class io.flutter.plugins.sqflite.** { *; }
 

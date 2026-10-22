@@ -46,6 +46,7 @@ class MainActivity : FlutterFragmentActivity() {
         const val CANAL_APPAREIL = "alanya/appareil"
         const val CANAL_CHIFFREMENT = "alanya/chiffrement"
         const val CANAL_COMPRESSION_VIDEO = "alanya/compression_video"
+        const val CANAL_SIGNATURE = "alanya/signature"
         const val TAG_PROX = "AlanyaProximite"
     }
 
@@ -226,6 +227,13 @@ class MainActivity : FlutterFragmentActivity() {
                     else -> resultat.notImplemented()
                 }
             }
+
+        // La copie signée d'un document sensible qui sort de l'application :
+        // texte aux quatre bords et métadonnées (PDF, images). Voir
+        // SignatureDocument (22/10/2026).
+        val signature = SignatureDocument(applicationContext)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CANAL_SIGNATURE)
+            .setMethodCallHandler { appel, resultat -> signature.traiter(appel, resultat) }
 
         // Enregistrement des appels d'agents autorisés. Le détail de la voie
         // (AudioTrackSink sur les pistes locale/distante, et pourquoi pas le
