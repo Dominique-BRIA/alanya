@@ -111,6 +111,9 @@ List<ConvMediaItem> mediasGalerie(
       if (media.chiffre) {
         final d = chiffreDe != null ? chiffreDe(msg) : msg.mediaChiffre;
         if (d == null) continue;
+        // Un document SENSIBLE ne s'ouvre que dans sa visionneuse (signature
+        // aux bords, écran protégé), jamais dans la galerie (22/10/2026).
+        if (d.sensible) continue;
         final video = d.mime.startsWith('video/');
         if (!video && !d.mime.startsWith('image/')) continue;
         items.add(ConvMediaItem(

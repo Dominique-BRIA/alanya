@@ -114,6 +114,8 @@ import '../chat_media_integration.dart';
 import '../../../widgets/media/gps_preview.dart';
 import 'media_gallery_viewer.dart';
 import '../transfert_appareil.dart';
+import '../sortie_document_sensible.dart';
+import '../../../core/signature_document.dart' show GesteSortie;
 import '../../../services/e2ee/e2ee_media_ouverture.dart';
 import 'dart:io' show File;
 import 'package:path_provider/path_provider.dart' show getTemporaryDirectory;
@@ -4098,6 +4100,8 @@ class _ChatScreenState extends State<ChatScreen>
             couleurDiscrete: _muted,
             onLongPress: () => _openMessageActions(m),
             onOuvrir: () => _openGallery(d.id),
+            convId: widget.convId,
+            expediteurId: d.sensible ? _alanyaIdExpediteur(m) : null,
           )
         else
           MediaChiffreIndisponible(couleur: _muted),
@@ -5218,14 +5222,81 @@ class _ChatScreenState extends State<ChatScreen>
             ])));
   }
 
-  /// Un document SENSIBLE : ni transfert, ni partage, ni enregistrement.
+  /// Un document SENSIBLE. Depuis le 22/10/2026, il se transfère, se partage
+  /// et s'enregistre — mais ce qui sort est une copie SIGNÉE à mon nom
+  /// (`SortieDocumentSensible`), et le geste est noté par le serveur.
   bool _estSensible(Message m) => m.mediaChiffre?.sensible == true;
 
-  Future<void> _forwardMessage(Message m) async {
-    if (_estSensible(m)) {
-      showAppSnackBar(tr(context, 'sens_pas_partage'));
-      return;
+  /// L'Alanya ID de qui a envoyé [m], écrit dans une copie signée : le mien,
+  /// ou celui du correspondant d'un tête-à-tête. Inconnu dans un groupe.
+  String? _alanyaIdExpediteur(Message m) {
+    final moi = context.read<AuthController>().user;
+    if (m.senderId == moi?.id) return moi?.publicNumber;
+    if (!widget.isGroup && m.senderId == widget.otherUserId) {
+      return widget.otherPublicNumber;
     }
+    return null;
+  }
+
+  /// Le fichier EN CLAIR d'un média chiffré (cache, ou déchiffré à la volée).
+  Future<File> _clairChiffre(Message m) => OuvertureMediaChiffre.ouvrir(
+        m.mediaChiffre!,
+        baseUrl: _baseUrl,
+        token: _token,
+        jeton: fournisseurJeton(context),
+      );
+
+  /// La copie SIGNÉE d'un document sensible, pour un transfert : un seul
+  /// code de trace, quel que soit le nombre de conversations visées.
+  Future<({Uint8List octets, String nom, String mime, int? dureeMs})>
+      _copieATransferer(Message m, SortieDocumentSensible sortie,
+          String? expediteur, FournisseurJeton? jeton) async {
+    final d = m.mediaChiffre!;
+    final clair = await OuvertureMediaChiffre.ouvrir(d,
+        baseUrl: _baseUrl, token: _token, jeton: jeton);
+    final c = await sortie.copie(
+      clair: clair,
+      d: d,
+      geste: GesteSortie.transfert,
+      convId: widget.convId,
+      expediteurId: expediteur,
+    );
+    return (
+      octets: await c.fichier.readAsBytes(),
+      nom: c.nom,
+      mime: c.mime,
+      dureeMs: d.dureeMs,
+    );
+  }
+
+  /// Enregistre la copie SIGNÉE d'un document sensible (22/10/2026).
+  Future<void> _enregistrerSensible(Message m) async {
+    final sortie = SortieDocumentSensible.de(context);
+    final expediteur = _alanyaIdExpediteur(m);
+    final echec = tr(context, 'download_failed');
+    final nonSignee = tr(context, 'sens_copie_non_signee');
+    try {
+      final clair = await _clairChiffre(m);
+      final r = await sortie.enregistrer(
+        clair: clair,
+        d: m.mediaChiffre!,
+        convId: widget.convId,
+        expediteurId: expediteur,
+      );
+      if (!mounted) return;
+      if (r.chemin == null) {
+        showAppSnackBar(echec);
+      } else if (!r.copie.signee) {
+        showAppSnackBar(nonSignee);
+      } else {
+        showAppSnackBar(tr(context, 'saved_to_alanya', {'nom': r.copie.nom}));
+      }
+    } catch (_) {
+      showAppSnackBar(echec);
+    }
+  }
+
+  Future<void> _forwardMessage(Message m) async {
     final conversations =
         await context.read<ChatRepository>().listConversations();
     if (!mounted) return;
@@ -5266,6 +5337,12 @@ class _ChatScreenState extends State<ChatScreen>
     final moi = _myId ?? '';
     final erreurGenerique = tr(context, 'send_failed');
     final reussi = tr(context, 'forwarded_success');
+    // Un document SENSIBLE part en copie SIGNÉE à mon nom, et le transfert
+    // est noté (22/10/2026).
+    final sortieSensible =
+        _estSensible(m) ? SortieDocumentSensible.de(context) : null;
+    final expediteur = _alanyaIdExpediteur(m);
+    final jeton = fournisseurJeton(context);
     var echecs = 0;
     try {
       if (parLeServeur.isNotEmpty) {
@@ -5294,7 +5371,10 @@ class _ChatScreenState extends State<ChatScreen>
           pile: pile,
           chat: chat,
           medias: medias,
-          octetsDuMedia: () async => fichier ??= await _fichierEnClair(m),
+          octetsDuMedia: () async => fichier ??= sortieSensible == null
+              ? await _fichierEnClair(m)
+              : await _copieATransferer(m, sortieSensible, expediteur, jeton),
+          sensible: sortieSensible != null,
         );
       } catch (_) {
         echecs++;
@@ -5316,11 +5396,27 @@ class _ChatScreenState extends State<ChatScreen>
   /// C'est le geste demandé — l'utilisateur choisit de faire sortir ce message
   /// du chiffrement de bout en bout, comme une capture d'écran.
   Future<void> _partagerMessage(Message m) async {
+    final erreur = tr(context, 'send_failed');
     if (_estSensible(m)) {
-      showAppSnackBar(tr(context, 'sens_pas_partage'));
+      // Une copie signée à mon nom, et le partage noté (22/10/2026).
+      final nonSignee = tr(context, 'sens_copie_non_signee');
+      try {
+        final sortie = SortieDocumentSensible.de(context);
+        final expediteur = _alanyaIdExpediteur(m);
+        final clair = await _clairChiffre(m);
+        final c = await sortie.partager(
+          clair: clair,
+          d: m.mediaChiffre!,
+          convId: widget.convId,
+          expediteurId: expediteur,
+          legende: m.content,
+        );
+        if (!c.signee) showAppSnackBar(nonSignee);
+      } catch (_) {
+        if (mounted) _showError(erreur);
+      }
       return;
     }
-    final erreur = tr(context, 'send_failed');
     try {
       final aUnMedia = m.mediaChiffre != null || m.media.isNotEmpty;
       if (!aUnMedia) {
@@ -5838,6 +5934,15 @@ class _ChatScreenState extends State<ChatScreen>
                       Navigator.pop(ctx);
                       _download(m.media.first);
                     }),
+              // Un document sensible s'enregistre en copie signée (22/10/2026).
+              if (!m.isDeleted && _estSensible(m))
+                ListTile(
+                    leading: Icon(Icons.download_outlined, color: _iconNeutral),
+                    title: Text(tr(context, 'save')),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _enregistrerSensible(m);
+                    }),
               ListTile(
                   leading: Icon(
                       m.isDeleted ? Icons.delete_outline : Icons.delete,
@@ -6158,12 +6263,11 @@ class _ChatScreenState extends State<ChatScreen>
               _togglePin(m);
             } else if (v == 'info') {
               _showMessageInfo(m);
+            } else if (v == 'download' && _estSensible(m)) {
+              // Copie signée à mon nom, et enregistrement noté (22/10/2026).
+              _enregistrerSensible(m);
             } else if (v == 'download' && m.media.isNotEmpty) {
-              if (_estSensible(m)) {
-                showAppSnackBar(tr(context, 'sens_pas_partage'));
-              } else {
-                _download(m.media.first);
-              }
+              _download(m.media.first);
             }
           },
           itemBuilder: (_) => [
@@ -6181,7 +6285,7 @@ class _ChatScreenState extends State<ChatScreen>
             // appelé de nulle part : le destinataire pouvait ouvrir un fichier,
             // jamais le garder. C'est le « téléchargement côté destinataire »
             // demandé pour les fichiers.
-            if (!m.isDeleted && m.media.isNotEmpty)
+            if (!m.isDeleted && (m.media.isNotEmpty || _estSensible(m)))
               PopupMenuItem(
                   value: 'download',
                   child: Row(children: [

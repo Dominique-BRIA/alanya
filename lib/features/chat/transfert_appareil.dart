@@ -52,6 +52,11 @@ String? correspondantDe(Conversation c, String moi) {
 /// [octetsDuMedia] rend le fichier EN CLAIR du message (déchiffré, ou
 /// téléchargé) ; il n'est appelé que si le message porte un média. Lève en
 /// cas d'échec : l'appelant le dit.
+///
+/// [sensible] : un document sensible (22/10/2026). [octetsDuMedia] rend alors
+/// sa copie SIGNÉE ; vers un fil chiffré, elle reste « sensible » chez le
+/// destinataire. Un fil en clair ne porte pas ce caractère (il voyage dans
+/// l'enveloppe chiffrée) : elle y arrive en fichier ordinaire, signé.
 Future<void> transfererDepuisLAppareil({
   required Message m,
   required Conversation cible,
@@ -61,6 +66,7 @@ Future<void> transfererDepuisLAppareil({
   required MediaRepository medias,
   required Future<({Uint8List octets, String nom, String mime, int? dureeMs})> Function()
       octetsDuMedia,
+  bool sensible = false,
 }) async {
   final texte = m.content ?? '';
   final aUnMedia = m.mediaChiffre != null || m.media.isNotEmpty;
@@ -122,7 +128,8 @@ Future<void> transfererDepuisLAppareil({
       convId: cible.id,
       pairId: pair,
       moi: moi,
-      fichier: fichierDepuisOctets(f.octets, f.nom, f.mime, dureeMs: f.dureeMs),
+      fichier: fichierDepuisOctets(f.octets, f.nom, f.mime,
+          dureeMs: f.dureeMs, sensible: sensible),
       legende: texte,
     );
   } else {

@@ -41,6 +41,8 @@ class BulleMediaChiffre extends StatefulWidget {
     required this.couleurDiscrete,
     this.onLongPress,
     this.onOuvrir,
+    this.convId,
+    this.expediteurId,
   });
 
   final DescripteurMedia descripteur;
@@ -53,6 +55,11 @@ class BulleMediaChiffre extends StatefulWidget {
   /// Ouvre la GALERIE de la conversation sur ce média, pour glisser vers les
   /// autres. Sans lui, le toucher ouvre ce seul média en plein écran.
   final VoidCallback? onOuvrir;
+
+  /// Pour un document SENSIBLE : la conversation et l'Alanya ID de
+  /// l'expéditeur, notés dans la trace et dans la copie signée.
+  final String? convId;
+  final String? expediteurId;
 
   @override
   State<BulleMediaChiffre> createState() => _BulleMediaChiffreState();
@@ -142,6 +149,9 @@ class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
         ),
       );
     }
+    // Une image ou une vidéo SENSIBLE n'entre pas dans la galerie ordinaire
+    // (ni signature ni écran protégé) : carte, puis visionneuse (22/10/2026).
+    if (d.sensible) return _document(context);
     if (_image || _video) return _visuel(context);
     if (_vocal) return _bulleVocal(context);
     return _document(context);
@@ -289,11 +299,17 @@ class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
       onTap: () async {
         final f = _fichier ?? await _charger();
         if (f == null || !context.mounted) return;
-        // Un document SENSIBLE ne sort jamais vers une autre application :
-        // visionneuse interne, filigrane, écran protégé (18/10/2026).
+        // Un document SENSIBLE s'ouvre dans la visionneuse interne : signature
+        // aux quatre bords, écran protégé ; ce qui en sort est signé
+        // (18/10/2026, revu le 22/10/2026).
         if (d.sensible) {
           await Navigator.of(context).push(MaterialPageRoute(
-            builder: (_) => VisionneuseDocumentSensible(fichier: f, descripteur: d),
+            builder: (_) => VisionneuseDocumentSensible(
+              fichier: f,
+              descripteur: d,
+              convId: widget.convId,
+              expediteurId: widget.expediteurId,
+            ),
           ));
           return;
         }
