@@ -26,6 +26,7 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.io.FileOutputStream
+import java.text.Normalizer
 import java.util.concurrent.Executors
 import kotlin.math.max
 import kotlin.math.min
@@ -336,13 +337,14 @@ class SignatureDocument(private val contexte: Context) {
     private fun ecrireExif(chemin: String, texte: String, meta: Map<String, String>) {
         try {
             val exif = ExifInterface(chemin)
-            exif.setAttribute(ExifInterface.TAG_SOFTWARE, meta["AlanyaApplication"] ?: "Alanya Work")
-            meta["AlanyaID"]?.let { exif.setAttribute(ExifInterface.TAG_ARTIST, "Alanya $it") }
-            exif.setAttribute(ExifInterface.TAG_IMAGE_DESCRIPTION, texte)
-            exif.setAttribute(ExifInterface.TAG_COPYRIGHT, meta["AlanyaApplication"] ?: "Alanya Work")
+            val application = ascii(meta["AlanyaApplication"] ?: "Alanya Work")
+            exif.setAttribute(ExifInterface.TAG_SOFTWARE, application)
+            meta["AlanyaID"]?.let { exif.setAttribute(ExifInterface.TAG_ARTIST, ascii("Alanya $it")) }
+            exif.setAttribute(ExifInterface.TAG_IMAGE_DESCRIPTION, ascii(texte))
+            exif.setAttribute(ExifInterface.TAG_COPYRIGHT, application)
             exif.setAttribute(
                 ExifInterface.TAG_USER_COMMENT,
-                meta.entries.joinToString("; ") { "${it.key}=${it.value}" },
+                ascii(meta.entries.joinToString("; ") { "${it.key}=${it.value}" }),
             )
             meta["AlanyaTrace"]?.let { exif.setAttribute(ExifInterface.TAG_IMAGE_UNIQUE_ID, it) }
             // Les pixels ont déjà été redressés.
@@ -352,4 +354,14 @@ class SignatureDocument(private val contexte: Context) {
             Log.w(TAG, "EXIF non écrit : ${e.message}")
         }
     }
+
+    /**
+     * Les champs texte de l'EXIF sont de l'ASCII : ExifInterface y remplace
+     * « · » ou un accent par « ? ». Le séparateur devient « | », les accents
+     * tombent, le reste devient « ? » — même règle que le web.
+     */
+    private fun ascii(s: String): String =
+        Normalizer.normalize(s.replace(" · ", " | "), Normalizer.Form.NFD)
+            .replace(Regex("\\p{M}+"), "")
+            .replace(Regex("[^\\x20-\\x7E]"), "?")
 }
