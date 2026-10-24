@@ -159,4 +159,18 @@ dependencies {
         exclude(group = "org.bouncycastle")
     }
     implementation("androidx.exifinterface:exifinterface:1.3.7")
+
+    // Documents sensibles, vidéos (24/10/2026) : la signature incrustée aux
+    // quatre bords (`SignatureVideo.kt`). Media3 Transformer réencode la vidéo
+    // avec un calque (`media3-effect`).
+    //
+    // ⚠️ LA VERSION DOIT RESTER CELLE DE `video_player_android` (son
+    // android/build.gradle : media3-exoplayer 1.9.2) — même raison que le
+    // transcodeur ci-dessus : deux versions de Media3, et Gradle en choisit une
+    // que l'autre n'attend pas. À revérifier à chaque montée de `video_player`.
+    implementation("androidx.media3:media3-transformer:1.9.2")
+    implementation("androidx.media3:media3-effect:1.9.2")
+    // `androidx.annotation.OptIn`, pour déclarer l'usage des API « instables »
+    // de Media3 sans que le contrôle d'Android (lint) refuse la construction.
+    implementation("androidx.annotation:annotation-experimental:1.4.1")
 }

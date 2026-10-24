@@ -86,7 +86,14 @@ class SignatureDocument(private val contexte: Context) {
     @Volatile
     private var pdfboxPret = false
 
+    /** La signature incrustée d'une vidéo : Media3 Transformer (24/10/2026). */
+    private val video by lazy { SignatureVideo(contexte, this) }
+
     fun traiter(appel: MethodCall, resultat: MethodChannel.Result) {
+        if (appel.method == "signerVideo") {
+            video.traiter(appel, resultat)
+            return
+        }
         if (appel.method != "signer") {
             resultat.notImplemented()
             return
@@ -297,7 +304,16 @@ class SignatureDocument(private val contexte: Context) {
         return tournee
     }
 
-    private fun peindreBords(toile: Canvas, l: Float, h: Float, texte: String) {
+    /**
+     * Le texte de la signature le long des quatre bords — images, et chaque
+     * image d'une vidéo (`SignatureVideo`, sur un calque transparent).
+     *
+     * 🐛 LES COINS SE CHEVAUCHAIENT (capture du user, 24/10/2026) : sur une image
+     * presque carrée, chaque ligne occupait tout son bord et mordait sur la
+     * colonne voisine. Chaque ligne laisse maintenant libre, à ses deux bouts,
+     * la bande du texte perpendiculaire. Même règle que le web.
+     */
+    internal fun peindreBords(toile: Canvas, l: Float, h: Float, texte: String) {
         val base = max(12f, min(l, h) / 50f)
         val remplissage = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.argb(225, (ROUGE shr 16) and 0xFF, (ROUGE shr 8) and 0xFF, ROUGE and 0xFF)
@@ -309,8 +325,10 @@ class SignatureDocument(private val contexte: Context) {
             color = Color.argb(200, 255, 255, 255)
         }
         val marge = base * 0.6f
+        // La bande du texte perpendiculaire : sa marge, plus sa hauteur de ligne.
+        val coin = marge + base * 1.3f
         val unite = remplissage.measureText(texte) / base
-        fun taillePour(longueur: Float) = min(base, (longueur - 2 * marge) / unite)
+        fun taillePour(longueur: Float) = min(base, (longueur - 2 * coin) / unite)
 
         fun bord(cx: Float, cy: Float, angle: Float, taille: Float) {
             remplissage.textSize = taille

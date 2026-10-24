@@ -84,7 +84,12 @@ void main() {
     expect(natureSignature('image/svg+xml', 'a.svg'), NatureSignature.aucune);
     expect(natureSignature('video/mp4', 'a.mp4'), NatureSignature.video);
     expect(natureSignature('video/quicktime', 'a.mov'), NatureSignature.video);
-    expect(natureSignature('video/webm', 'a.webm'), NatureSignature.aucune);
+    // Incrustable sur Android (réencodée en MP4), sans métadonnées sinon.
+    expect(natureSignature('video/webm', 'a.webm'), NatureSignature.video);
+    expect(
+      natureSignature('application/octet-stream', 'a.webm'),
+      NatureSignature.aucune,
+    );
     expect(
       natureSignature(
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -143,5 +148,24 @@ void main() {
       expect(copie.signee, isFalse);
       expect(copie.fichier.readAsStringSync(), 'pas une vidéo');
     });
+
+    test(
+      'une WebM sans incrustation sort telle quelle, sous son nom',
+      () async {
+        // Hors Android, pas d'incrustation ; et la WebM n'a pas de métadonnées.
+        final source = File('${dossier.path}/v.webm')
+          ..writeAsStringSync('webm');
+        final copie = await SignatureDocument.signer(
+          source: source,
+          nom: 'v.webm',
+          mime: 'video/webm',
+          signature: signature(),
+          cache: dossier,
+        );
+        expect(copie.signee, isFalse);
+        expect(copie.nom, 'v.webm');
+        expect(copie.fichier.readAsStringSync(), 'webm');
+      },
+    );
   });
 }
