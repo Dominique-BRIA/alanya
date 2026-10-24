@@ -70,12 +70,16 @@ class BoutonChiffrement extends StatelessWidget {
   }
 }
 
-/// La bannière « à partir d'ici, chiffré » — ticket 4.11.
+/// La bannière du chiffrement — ticket 4.11.
 ///
-/// 🔴 ELLE DIT UNE VÉRITÉ QUI SE TAIRAIT AUTREMENT : les messages ANTÉRIEURS
-/// restent lisibles par le serveur. Activer le chiffrement ne protège pas
-/// rétroactivement, et laisser croire le contraire serait un mensonge par
-/// omission — le plus dangereux, parce qu'il rassure.
+/// Posée à l'endroit du fil où le chiffrement commence : sa PLACE dit que les
+/// messages antérieurs restaient lisibles par le serveur.
+///
+/// 24/10/2026 (user) : « À partir d'ici, les messages sont chiffrés de bout en
+/// bout » devient « Les messages et les appels sont chiffrés de bout en bout ».
+/// Exact pour les appels : à deux comme en groupe (maillage), le son et
+/// l'image vont d'appareil à appareil en DTLS-SRTP, sans serveur média qui les
+/// déchiffrerait.
 class BanniereChiffrement extends StatelessWidget {
   const BanniereChiffrement({super.key, this.verifie = false});
 
@@ -101,7 +105,7 @@ class BanniereChiffrement extends StatelessWidget {
           const SizedBox(width: 7),
           const Flexible(
             child: Text(
-              'À partir d’ici, les messages sont chiffrés de bout en bout.',
+              'Les messages et les appels sont chiffrés de bout en bout.',
               style: TextStyle(fontSize: 12.5, color: Color(0xFF7A4A2E)),
             ),
           ),
