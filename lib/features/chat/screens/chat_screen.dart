@@ -23,6 +23,7 @@ import '../../../core/compression_image.dart';
 import '../../../core/connectivity_service.dart';
 import '../../../core/conversation_cache.dart';
 import '../../../core/delais_message.dart';
+import '../../../core/detecteur_copie_signee.dart';
 import '../../../core/memoire_langues.dart';
 import '../../../core/message_cache.dart';
 import '../../../core/texte_recherche.dart';
@@ -3904,8 +3905,47 @@ class _ChatScreenState extends State<ChatScreen>
      * « Prévisualiser » du sélecteur, lui, ne sort jamais du sélecteur et
      * n'arrive donc pas ici.
      */
-    final files = result as List<MediaPickResult>;
+    var files = result as List<MediaPickResult>;
     if (files.isEmpty) return;
+    /*
+     * 🔴 UNE COPIE SIGNÉE NE REPART PAS EN « SENSIBLE » (24/10/2026, user).
+     * Re-signée, elle prendrait l'empreinte du compte qui la renvoie (un faux
+     * compte, par exemple), et la trace du vrai fuiteur serait perdue. Elle
+     * ne part donc qu'en document ordinaire, qui garde ses métadonnées.
+     */
+    final signees = <MediaPickResult>[];
+    for (final f in files) {
+      if (f.sensible && await DetecteurCopieSignee.estCopieSignee(f.bytes)) {
+        signees.add(f);
+      }
+    }
+    if (signees.isNotEmpty) {
+      if (!mounted) return;
+      final ordinaire = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(tr(context, 'sens_copie_titre')),
+          content: Text(tr(context, 'sens_copie_texte', {
+            'nom': signees.map((f) => f.fileName).join(', '),
+          })),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(tr(context, 'cancel')),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(tr(context, 'sens_copie_ordinaire')),
+            ),
+          ],
+        ),
+      );
+      if (ordinaire != true || !mounted) return;
+      files = [
+        for (final f in files)
+          signees.contains(f) ? f.copieAvec(sensible: false) : f,
+      ];
+    }
     /*
      * 🔴 UN DOCUMENT SENSIBLE NE PART QUE DANS UN FIL CHIFFRÉ (18/10/2026) : son
      * caractère « sensible » voyage dans l'enveloppe chiffrée, et en clair le

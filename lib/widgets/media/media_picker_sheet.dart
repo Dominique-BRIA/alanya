@@ -100,6 +100,7 @@ class MediaPickResult {
     bool? niveauSuperieurPossible,
     int? definitionAutreNiveau,
     NiveauQualite? niveau,
+    bool? sensible,
   }) =>
       MediaPickResult(
         bytes: bytes ?? this.bytes,
@@ -115,7 +116,7 @@ class MediaPickResult {
         definitionAutreNiveau:
             definitionAutreNiveau ?? this.definitionAutreNiveau,
         niveau: niveau ?? this.niveau,
-        sensible: sensible,
+        sensible: sensible ?? this.sensible,
       );
 
   bool get estImage => mimeType.startsWith('image/');
