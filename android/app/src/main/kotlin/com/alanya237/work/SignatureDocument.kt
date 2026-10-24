@@ -42,8 +42,9 @@ import com.tom_roush.pdfbox.util.Matrix as MatricePdf
  *
  * * PDF : PdfBox-Android (Apache 2.0) écrit le texte aux quatre bords de
  *   chaque page (par-dessus le contenu, rien n'est effacé) et remplit le
- *   dictionnaire Info (Creator, Producer, Subject, Keywords et des clés
- *   `Alanya…`, visibles dans les propriétés du document).
+ *   dictionnaire Info (Creator, Producer, Subject, Keywords et les champs
+ *   « Application », « Alanya ID », « Appareil », « Date Creation »,
+ *   « Empreinte numerique »…, visibles dans les propriétés du document).
  * * Images : le texte est peint aux quatre bords (contour blanc : lisible sur
  *   fond clair comme sombre), puis l'EXIF reçoit l'auteur, la description, le
  *   logiciel et le code (`ImageUniqueID`, fait pour 32 caractères).
@@ -64,6 +65,11 @@ class SignatureDocument(private val contexte: Context) {
 
         /** Rouge des documents sensibles (#E53935), comme dans l'application. */
         const val ROUGE = 0xE53935
+
+        /** Noms des champs de métadonnées : les mêmes que `CleMeta` en Dart. */
+        const val CLE_APPLICATION = "Application"
+        const val CLE_ALANYA_ID = "Alanya ID"
+        const val CLE_EMPREINTE = "Empreinte numerique"
 
         /** Polices du système essayées quand Helvetica ne sait pas écrire le texte. */
         val POLICES_SYSTEME = listOf(
@@ -133,13 +139,13 @@ class SignatureDocument(private val contexte: Context) {
             for (page in doc.pages) signerPage(doc, page, police, ecrit, transparence)
 
             val info = doc.documentInformation
-            info.creator = meta["AlanyaApplication"] ?: "Alanya Work"
-            info.producer = meta["AlanyaApplication"] ?: "Alanya Work"
+            info.creator = meta[CLE_APPLICATION] ?: "Alanya Work"
+            info.producer = meta[CLE_APPLICATION] ?: "Alanya Work"
             info.subject = texte
             info.keywords = listOfNotNull(
-                meta["AlanyaApplication"],
-                meta["AlanyaID"]?.let { "Alanya $it" },
-                meta["AlanyaTrace"]?.let { "Trace $it" },
+                meta[CLE_APPLICATION],
+                meta[CLE_ALANYA_ID]?.let { "Alanya $it" },
+                meta[CLE_EMPREINTE]?.let { "Trace $it" },
             ).joinToString("; ")
             for ((cle, valeur) in meta) info.setCustomMetadataValue(cle, valeur)
             doc.documentInformation = info
@@ -337,16 +343,16 @@ class SignatureDocument(private val contexte: Context) {
     private fun ecrireExif(chemin: String, texte: String, meta: Map<String, String>) {
         try {
             val exif = ExifInterface(chemin)
-            val application = ascii(meta["AlanyaApplication"] ?: "Alanya Work")
+            val application = ascii(meta[CLE_APPLICATION] ?: "Alanya Work")
             exif.setAttribute(ExifInterface.TAG_SOFTWARE, application)
-            meta["AlanyaID"]?.let { exif.setAttribute(ExifInterface.TAG_ARTIST, ascii("Alanya $it")) }
+            meta[CLE_ALANYA_ID]?.let { exif.setAttribute(ExifInterface.TAG_ARTIST, ascii("Alanya $it")) }
             exif.setAttribute(ExifInterface.TAG_IMAGE_DESCRIPTION, ascii(texte))
             exif.setAttribute(ExifInterface.TAG_COPYRIGHT, application)
             exif.setAttribute(
                 ExifInterface.TAG_USER_COMMENT,
                 ascii(meta.entries.joinToString("; ") { "${it.key}=${it.value}" }),
             )
-            meta["AlanyaTrace"]?.let { exif.setAttribute(ExifInterface.TAG_IMAGE_UNIQUE_ID, it) }
+            meta[CLE_EMPREINTE]?.let { exif.setAttribute(ExifInterface.TAG_IMAGE_UNIQUE_ID, it) }
             // Les pixels ont déjà été redressés.
             exif.setAttribute(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL.toString())
             exif.saveAttributes()

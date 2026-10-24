@@ -131,17 +131,18 @@ class SignatureSortie {
     codeLisible,
   ].join(' · ');
 
-  /// Les métadonnées, sous des clés stables (PDF : clés du dictionnaire Info ;
-  /// images : réparties dans l'EXIF par le code natif).
+  /// Les métadonnées, sous des noms courts et lisibles (24/10/2026, demande
+  /// du user) : clés du dictionnaire Info d'un PDF, commentaire EXIF d'une
+  /// image, éléments libres d'une vidéo. Les mêmes que le web.
   Map<String, String> get metadonnees => {
-    'AlanyaApplication': application,
-    'AlanyaGeste': geste.code,
-    'AlanyaID': alanyaId,
-    'AlanyaAppareil': appareil,
-    'AlanyaDate': dateIso,
-    'AlanyaTrace': code,
-    if (expediteurId != null) 'AlanyaExpediteur': expediteurId!,
-    if (mediaId != null) 'AlanyaDocument': mediaId!,
+    CleMeta.application: application,
+    CleMeta.alanyaId: alanyaId,
+    CleMeta.appareil: appareil,
+    CleMeta.dateCreation: dateIso,
+    CleMeta.empreinte: code,
+    CleMeta.geste: geste.code,
+    if (expediteurId != null) CleMeta.expediteur: expediteurId!,
+    if (mediaId != null) CleMeta.document: mediaId!,
   };
 
   /// Les mêmes informations pour une vidéo (`moov/udta/meta/ilst`).
@@ -152,17 +153,25 @@ class SignatureSortie {
       '©cmt': texteBords,
       '©day': dateIso,
     },
-    libres: {
-      'application': application,
-      'geste': geste.code,
-      'alanya_id': alanyaId,
-      'appareil': appareil,
-      'date': dateIso,
-      'trace': code,
-      if (expediteurId != null) 'expediteur': expediteurId!,
-      if (mediaId != null) 'document': mediaId!,
-    },
+    libres: metadonnees,
   );
+}
+
+/// Les noms des champs de métadonnées. Le code natif (`SignatureDocument.kt`)
+/// et le web (`signature-document.ts`) lisent et écrivent les mêmes.
+class CleMeta {
+  CleMeta._();
+
+  static const application = 'Application';
+  static const alanyaId = 'Alanya ID';
+  static const appareil = 'Appareil';
+  static const dateCreation = 'Date Creation';
+
+  /// Le code de trace, noté aussi par le serveur avec le geste.
+  static const empreinte = 'Empreinte numerique';
+  static const geste = 'Geste';
+  static const expediteur = 'Expediteur';
+  static const document = 'Document';
 }
 
 /// Ce que la signature sait faire d'un fichier.

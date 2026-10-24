@@ -27,25 +27,37 @@ void main() {
     );
   });
 
-  test('les métadonnées portent le geste, le code et l’expéditeur connu', () {
+  // Les noms sont écrits en toutes lettres : ce sont ceux que lit une
+  // personne dans les propriétés du fichier (demande du user, 24/10/2026).
+  test('les métadonnées, sous leurs noms courts', () {
     final m = signature(expediteur: '0000').metadonnees;
-    expect(m['AlanyaApplication'], 'Alanya Work');
-    expect(m['AlanyaGeste'], 'PARTAGE');
-    expect(m['AlanyaID'], '67 64 15 99');
-    expect(m['AlanyaTrace'], '3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f');
-    expect(m['AlanyaExpediteur'], '00 00');
-    expect(m['AlanyaDocument'], 'm-42');
-    expect(m['AlanyaDate'], startsWith('2026-10-22T09:05:07'));
-    expect(m['AlanyaDate'], matches(RegExp(r'[+-]\d\d:\d\d$')));
-    expect(signature().metadonnees.containsKey('AlanyaExpediteur'), isFalse);
+    expect(m.keys, [
+      'Application',
+      'Alanya ID',
+      'Appareil',
+      'Date Creation',
+      'Empreinte numerique',
+      'Geste',
+      'Expediteur',
+      'Document',
+    ]);
+    expect(m['Application'], 'Alanya Work');
+    expect(m['Alanya ID'], '67 64 15 99');
+    expect(m['Appareil'], 'samsung SM-A515F');
+    expect(m['Date Creation'], startsWith('2026-10-22T09:05:07'));
+    expect(m['Date Creation'], matches(RegExp(r'[+-]\d\d:\d\d$')));
+    expect(m['Empreinte numerique'], '3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f');
+    expect(m['Geste'], 'PARTAGE');
+    expect(m['Expediteur'], '00 00');
+    expect(m['Document'], 'm-42');
+    expect(signature().metadonnees.containsKey('Expediteur'), isFalse);
   });
 
-  test('la vidéo reçoit les mêmes informations', () {
+  test('la vidéo reçoit les mêmes informations, sous les mêmes noms', () {
     final e = signature().elementsMp4;
     expect(e.standard['©cmt'], signature().texteBords);
     expect(e.standard['©ART'], 'Alanya 67 64 15 99');
-    expect(e.libres['trace'], '3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f');
-    expect(e.libres['geste'], 'PARTAGE');
+    expect(e.libres, signature().metadonnees);
   });
 
   test('un code neuf : 32 caractères hexadécimaux, jamais le même', () {
