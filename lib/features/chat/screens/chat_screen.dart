@@ -7664,7 +7664,7 @@ class _ChatScreenState extends State<ChatScreen>
          * ⚠️ ET ON RETIRE « TRADUIRE » : proposer de traduire le vide est une
          * promesse qu'on ne peut pas tenir.
          */
-        if (m.type == 'TEXT' && (m.content ?? '').isEmpty)
+        if ((m.type == 'TEXT' || m.type == 'STICKER') && (m.content ?? '').isEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 2),
             child: Text(
