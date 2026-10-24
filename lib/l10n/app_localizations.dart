@@ -631,7 +631,7 @@ class AppLocalizations {
   'sens_pas_partage': "Document sensible : il ne se partage ni ne se transfère. Vous pouvez le télécharger, la copie portera votre empreinte.",
   'emp_titre': "Vérifier une empreinte",
   'emp_sous_titre': "Retrouver qui a fait sortir un document sensible",
-  'emp_aide': "Saisissez les 32 caractères écrits au bord du document ou dans ses propriétés (« Empreinte numerique »).",
+  'emp_aide': "Saisissez les 32 caractères écrits au bord du document ou dans ses propriétés (« Empreinte numerique »).",
   'emp_champ': "Empreinte numérique",
   'emp_coller': "Coller",
   'emp_rechercher': "Rechercher",
