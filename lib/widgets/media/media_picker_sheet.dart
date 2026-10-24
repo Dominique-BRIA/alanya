@@ -10,6 +10,7 @@ import '../../core/galerie.dart';
 import '../../core/plafond_media.dart';
 import '../../theme/alanya_theme.dart';
 import '../../l10n/app_localizations.dart';
+import '../../services/e2ee/e2ee_media.dart' show ProtectionPdf;
 
 /// Résultat de la sélection de médias.
 class MediaPickResult {
@@ -86,10 +87,15 @@ class MediaPickResult {
     this.niveau = NiveauQualite.normal,
     this.asset,
     this.sensible = false,
+    this.protectionPdf,
   });
 
   /// Document SENSIBLE (18/10/2026) : voir `DescripteurMedia.sensible`.
   final bool sensible;
+
+  /// La protection qu'a choisie l'expéditeur pour un PDF sensible
+  /// (24/10/2026) : voir `ProtectionPdf`. Nulle pour tout autre fichier.
+  final ProtectionPdf? protectionPdf;
 
   MediaPickResult copieAvec({
     Uint8List? bytes,
@@ -101,6 +107,8 @@ class MediaPickResult {
     int? definitionAutreNiveau,
     NiveauQualite? niveau,
     bool? sensible,
+    ProtectionPdf? protectionPdf,
+    bool sansProtection = false,
   }) =>
       MediaPickResult(
         bytes: bytes ?? this.bytes,
@@ -117,6 +125,9 @@ class MediaPickResult {
             definitionAutreNiveau ?? this.definitionAutreNiveau,
         niveau: niveau ?? this.niveau,
         sensible: sensible ?? this.sensible,
+        protectionPdf: sansProtection
+            ? null
+            : protectionPdf ?? this.protectionPdf,
       );
 
   bool get estImage => mimeType.startsWith('image/');

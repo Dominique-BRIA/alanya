@@ -175,6 +175,11 @@ dependencies:
   # projet. flutter >= 3.22, minSdk 19 : compatible avec les trois CI.
   share_plus: ^12.0.2
   share_handler: ^0.0.25
+  # PDF sensible protégé (24/10/2026) : mot de passe, impression, numéro au
+  # coin. Syncfusion Flutter PDF, sous la Syncfusion Community License
+  # (https://www.syncfusion.com/products/communitylicense) — voir
+  # docs/2026-10-24-pdf-sensible-protege.md.
+  syncfusion_flutter_pdf: ^33.2.13
 
 
 dev_dependencies:

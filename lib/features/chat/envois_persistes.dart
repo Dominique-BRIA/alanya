@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
+import '../../services/e2ee/e2ee_media.dart' show ProtectionPdf;
 import '../../widgets/media/media_picker_sheet.dart';
 import 'envoi_media.dart';
 import 'envoi_morceaux/envoi_morceaux_api.dart';
@@ -100,6 +101,10 @@ class EnvoisPersistes {
           'mime': f.mimeType,
           'dureeMs': f.durationMs,
           'chemin': chemin,
+          // 🐛 Perdu au redémarrage, un document SENSIBLE repartait en
+          // document ordinaire (24/10/2026) — et sa protection avec lui.
+          if (f.sensible) 'sensible': true,
+          if (f.protectionPdf != null) 'protectionPdf': f.protectionPdf!.toJson(),
         });
       }
 
@@ -181,6 +186,10 @@ class EnvoisPersistes {
               // jamais des octets. Celui d'origine a pu disparaître ; celui-ci
               // est à nous et vivra aussi longtemps que l'envoi.
               path: b['chemin'] as String,
+              sensible: b['sensible'] == true,
+              protectionPdf: b['protectionPdf'] == null
+                  ? null
+                  : ProtectionPdf.depuisJson(b['protectionPdf']),
             ));
           }
           if (!complet || fichiers.isEmpty) {

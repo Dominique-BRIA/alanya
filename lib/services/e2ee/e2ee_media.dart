@@ -41,6 +41,7 @@ class DescripteurMedia {
     this.pages,
     this.apercu,
     this.sensible = false,
+    this.protection,
   });
 
   /// Identifiant du média sur le serveur.
@@ -72,6 +73,10 @@ class DescripteurMedia {
   /// descripteur ordinaire ne change pas d'un octet (vecteur partagé avec le web).
   final bool sensible;
 
+  /// La PROTECTION d'un PDF sensible (24/10/2026) : voir [ProtectionPdf].
+  /// Écrite seulement si elle existe — même raison que [sensible].
+  final ProtectionPdf? protection;
+
   Map<String, dynamic> toJson() => {
     'id': id,
     'cle': cle,
@@ -85,6 +90,7 @@ class DescripteurMedia {
     if (pages != null) 'pages': pages,
     if (apercu != null) 'apercu': apercu,
     if (sensible) 'sensible': true,
+    if (protection != null) 'protection': protection!.toJson(),
   };
 
   /// Lit un descripteur, et le REFUSE s'il est mal formé — jamais de valeur
@@ -125,6 +131,9 @@ class DescripteurMedia {
       pages: entier('pages'),
       apercu: brut['apercu'] is String ? brut['apercu'] as String : null,
       sensible: brut['sensible'] == true,
+      protection: brut['protection'] == null
+          ? null
+          : ProtectionPdf.depuisJson(brut['protection']),
     );
     if (_b64(d.cle)?.length != 32)
       throw const ChargeInvalide('clé de média invalide');
@@ -132,6 +141,78 @@ class DescripteurMedia {
       throw const ChargeInvalide('empreinte de média invalide');
     }
     return d;
+  }
+}
+
+/// LA PROTECTION D'UN PDF SENSIBLE (24/10/2026, demande du user).
+///
+/// L'expéditeur la règle une fois, à l'envoi : autoriser l'impression ou non,
+/// mettre un mot de passe ou non — et s'il en met un, il en saisit DEUX :
+///
+/// * [ouverture] : celui qu'il faut pour ouvrir la copie téléchargée. Montré
+///   en clair à l'expéditeur, en VUE UNIQUE au destinataire ;
+/// * [proprietaire] : celui qui lève les restrictions (l'impression). Montré à
+///   l'expéditeur seulement.
+///
+/// Sans mot de passe mais sans impression, [proprietaire] est tiré au hasard
+/// par l'appareil qui envoie : une restriction de PDF n'existe qu'avec un mot
+/// de passe propriétaire. Personne ne le voit.
+///
+/// 🔴 ELLE VOYAGE DANS L'ENVELOPPE CHIFFRÉE, jamais en clair : le serveur ne
+/// voit pas les mots de passe. Elle s'applique à la COPIE qui sort
+/// d'Alanya (`SignatureDocument`) ; dans l'application, le document reste
+/// lisible dans la visionneuse protégée.
+class ProtectionPdf {
+  const ProtectionPdf({
+    required this.imprimer,
+    required this.proprietaire,
+    this.ouverture,
+  });
+
+  /// La copie peut-elle s'imprimer sans le mot de passe propriétaire ?
+  final bool imprimer;
+
+  /// Le mot de passe d'ouverture, `null` sans mot de passe.
+  final String? ouverture;
+
+  /// Le mot de passe propriétaire, toujours présent.
+  final String proprietaire;
+
+  bool get avecMotDePasse => ouverture != null;
+
+  /// Un mot de passe propriétaire que personne ne saisit : 24 caractères tirés
+  /// par le générateur sûr du système.
+  static String proprietaireAuHasard([Random? hasard]) {
+    const alphabet =
+        'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+    final r = hasard ?? Random.secure();
+    return String.fromCharCodes([
+      for (var i = 0; i < 24; i++) alphabet.codeUnitAt(r.nextInt(alphabet.length)),
+    ]);
+  }
+
+  Map<String, dynamic> toJson() => {
+    'imprimer': imprimer,
+    if (ouverture != null) 'ouverture': ouverture,
+    'proprietaire': proprietaire,
+  };
+
+  static ProtectionPdf depuisJson(Object? brut) {
+    if (brut is! Map) throw const ChargeInvalide('protection mal formée');
+    final imprimer = brut['imprimer'];
+    final ouverture = brut['ouverture'];
+    final proprietaire = brut['proprietaire'];
+    if (imprimer is! bool ||
+        proprietaire is! String ||
+        proprietaire.isEmpty ||
+        (ouverture != null && (ouverture is! String || ouverture.isEmpty))) {
+      throw const ChargeInvalide('protection mal formée');
+    }
+    return ProtectionPdf(
+      imprimer: imprimer,
+      ouverture: ouverture as String?,
+      proprietaire: proprietaire,
+    );
   }
 }
 

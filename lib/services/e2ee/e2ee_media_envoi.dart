@@ -84,6 +84,7 @@ class EnvoiMediaChiffre {
       pages: apercu.pages,
       apercu: apercu.apercu,
       sensible: fichier.sensible,
+      protection: fichier.sensible ? fichier.protectionPdf : null,
     );
 
     // 4. Ligne du message et enveloppes.

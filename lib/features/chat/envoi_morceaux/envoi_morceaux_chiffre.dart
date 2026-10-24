@@ -194,6 +194,7 @@ class SuiviEnvoisMorceaux {
         pages: a.pages,
         apercu: a.apercu,
         sensible: fichier.sensible,
+        protection: fichier.sensible ? fichier.protectionPdf : null,
       );
 
       // 5. Préparation (le cliquet avance ICI) et programmation.

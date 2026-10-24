@@ -24,6 +24,7 @@ import '../../../core/connectivity_service.dart';
 import '../../../core/conversation_cache.dart';
 import '../../../core/delais_message.dart';
 import '../../../core/detecteur_copie_signee.dart';
+import '../../../core/signature_document.dart' show NatureSignature, natureSignature;
 import '../../../core/memoire_langues.dart';
 import '../../../core/message_cache.dart';
 import '../../../core/texte_recherche.dart';
@@ -70,6 +71,7 @@ import '../../../core/noms_donnes.dart';
 import '../../../models/badge_compte.dart';
 import '../../../widgets/choix_langue_interlocuteur.dart';
 import '../../../widgets/contact_share_sheet.dart';
+import '../../../widgets/dialogue_protection_pdf.dart';
 import '../../../widgets/dialogues_traduction.dart';
 import '../../../widgets/motif_background.dart';
 import '../../../widgets/selecteur_emojis.dart';
@@ -3955,6 +3957,30 @@ class _ChatScreenState extends State<ChatScreen>
     if (files.any((f) => f.sensible) && !_filChiffre) {
       showAppSnackBar(tr(context, 'sens_chiffre_requis'));
       return;
+    }
+    /*
+     * 🔴 LES PERMISSIONS D'UN PDF SENSIBLE (24/10/2026, user) : l'expéditeur
+     * les règle UNE FOIS, pour tous les PDF sensibles de l'envoi —
+     * impression, mot de passe d'ouverture et propriétaire. Elles voyagent
+     * dans l'enveloppe chiffrée (`ProtectionPdf`).
+     */
+    bool pdfSensible(MediaPickResult f) =>
+        f.sensible &&
+        natureSignature(f.mimeType, f.fileName) == NatureSignature.pdf;
+    final nbPdfSensibles = files.where(pdfSensible).length;
+    if (nbPdfSensibles > 0) {
+      final choix =
+          await demanderProtectionPdf(context, nombre: nbPdfSensibles);
+      if (choix == null || !mounted) return;
+      files = [
+        for (final f in files)
+          pdfSensible(f)
+              ? f.copieAvec(
+                  protectionPdf: choix.protection,
+                  sansProtection: choix.protection == null,
+                )
+              : f,
+      ];
     }
 
     // Aperçu : balayage entre les médias, retrait de l'un d'eux, légende.

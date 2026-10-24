@@ -15,6 +15,7 @@ import '../../../core/media_helper.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/media/bulle_vocale.dart';
 import '../screens/visionneuse_document_sensible.dart';
+import 'infos_protection_pdf.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../services/e2ee/e2ee_media.dart';
 import '../../../services/e2ee/e2ee_media_ouverture.dart';
@@ -410,6 +411,15 @@ class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
                       color: widget.couleurDiscrete, size: 22),
               ],
             ),
+            // PDF sensible protégé (24/10/2026) : mots de passe en clair chez
+            // l'expéditeur, en vue unique chez le destinataire.
+            if (d.sensible && d.protection != null)
+              InfosProtectionPdf(
+                protection: d.protection!,
+                mediaId: d.id,
+                isMe: widget.isMe,
+                couleurDiscrete: widget.couleurDiscrete,
+              ),
           ],
         ),
       ),

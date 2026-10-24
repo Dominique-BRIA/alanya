@@ -37,6 +37,9 @@ class SortieDocumentSensible {
   /// La copie signée de [clair] (le fichier déchiffré), au nom de qui la fait
   /// sortir. Ne lève pas pour un échec de signature (la copie sort telle
   /// quelle, `signee: false`) ; le geste est noté dans tous les cas.
+  ///
+  /// ⚠️ SAUF un PDF protégé dont la protection échoue : `ProtectionImpossible`
+  /// est levée avant toute trace, puisque rien n'est sorti.
   Future<CopieSignee> copie({
     required File clair,
     required DescripteurMedia d,
@@ -56,6 +59,9 @@ class SortieDocumentSensible {
       nom: nomPourEnregistrer(d),
       mime: d.mime,
       signature: signature,
+      // Un PDF protégé par l'expéditeur (24/10/2026) : mot de passe,
+      // impression. Un échec LÈVE — le téléchargement échoue, rien ne sort.
+      protection: d.protection,
     );
     unawaited(_noter(signature, d, convId));
     return copie;

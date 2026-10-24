@@ -5,8 +5,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../services/e2ee/e2ee_media.dart' show ProtectionPdf;
 import 'alanya_id_formatter.dart';
 import 'mp4_metadonnees.dart';
+import 'protection_pdf_copie.dart';
 
 /// Ce qu'on fait sortir d'Alanya : le geste noté par le serveur.
 enum GesteSortie {
@@ -121,6 +123,10 @@ class SignatureSortie {
         '${_deux(quand.day)}T${_deux(quand.hour)}:${_deux(quand.minute)}:'
         '${_deux(quand.second)}$signe${_deux(a.inHours)}:${_deux(a.inMinutes % 60)}';
   }
+
+  /// Le numéro seul, chiffres sans espaces ni « AlanyaID : » : ce qu'écrit
+  /// une copie PROTÉGÉE en haut à droite (24/10/2026, demande du user).
+  String get numeroSeul => alanyaId.replaceAll(RegExp(r'\D'), '');
 
   /// Le texte écrit aux quatre bords.
   String get texteBords => [
@@ -246,18 +252,28 @@ class SignatureDocument {
   /// Ne lève jamais : un échec rend la copie telle quelle, avec
   /// `signee: false` — le geste a été demandé, il n'est pas refusé.
   /// [cache] : le dossier de travail (par défaut, le cache de l'application).
+  ///
+  /// 🔴 SAUF POUR UN PDF PROTÉGÉ ([protection], 24/10/2026) : là, un échec
+  /// LÈVE [ProtectionImpossible]. Rendre la copie telle quelle ferait sortir
+  /// sans mot de passe ni restriction un document que l'expéditeur a voulu
+  /// protéger — le téléchargement échoue plutôt.
   static Future<CopieSignee> signer({
     required File source,
     required String nom,
     required String mime,
     required SignatureSortie signature,
     Directory? cache,
+    ProtectionPdf? protection,
   }) async {
     final base = cache ?? await getTemporaryDirectory();
     // Un dossier par code : la copie garde son nom d'origine.
     final dossier = Directory('${base.path}/sorties/${signature.code}');
     await dossier.create(recursive: true);
     final cible = '${dossier.path}/$nom';
+    if (protection != null &&
+        natureSignature(mime, nom) == NatureSignature.pdf) {
+      return _signerProtege(source, nom, mime, cible, signature, protection);
+    }
     try {
       switch (natureSignature(mime, nom)) {
         case NatureSignature.pdf:
@@ -303,6 +319,60 @@ class SignatureDocument {
     }
     final copie = await source.copy(cible);
     return CopieSignee(fichier: copie, nom: nom, mime: mime, signee: false);
+  }
+
+  /// La copie PROTÉGÉE d'un PDF (Syncfusion, `protection_pdf_copie.dart`).
+  ///
+  /// * Avec mot de passe : le numéro seul en haut à droite, plus aucun texte
+  ///   aux quatre bords (demande du user), les métadonnées, le chiffrement.
+  /// * Sans mot de passe (impression interdite) : la signature habituelle aux
+  ///   quatre bords par le natif, puis la seule restriction par-dessus.
+  static Future<CopieSignee> _signerProtege(
+    File source,
+    String nom,
+    String mime,
+    String cible,
+    SignatureSortie signature,
+    ProtectionPdf protection,
+  ) async {
+    try {
+      final CopiePdfProtegee travail;
+      if (protection.avecMotDePasse) {
+        travail = CopiePdfProtegee(
+          octets: await source.readAsBytes(),
+          protection: protection,
+          coin: signature.numeroSeul,
+          meta: signature.metadonnees,
+        );
+      } else {
+        final r = await _canal.invokeMapMethod<String, Object?>('signer', {
+          'entree': source.path,
+          'sortie': cible,
+          'mime': mime,
+          'bords': signature.texteBords,
+          'meta': signature.metadonnees,
+        });
+        final chemin = r?['chemin'] as String?;
+        if (chemin == null) throw StateError('Signature sans fichier');
+        travail = CopiePdfProtegee(
+          octets: await File(chemin).readAsBytes(),
+          protection: protection,
+        );
+      }
+      final octets = await compute(protegerPdf, travail);
+      final fichier = await File(cible).writeAsBytes(octets, flush: true);
+      return CopieSignee(
+        fichier: fichier,
+        nom: nom,
+        mime: 'application/pdf',
+        signee: true,
+      );
+    } catch (e) {
+      debugPrint('[Alanya] PDF non protégé ($nom) : $e');
+      final reste = File(cible);
+      if (await reste.exists()) await reste.delete();
+      throw ProtectionImpossible(e);
+    }
   }
 
   /// La signature incrustée aux quatre bords d'une vidéo (Android seulement,
@@ -351,4 +421,13 @@ class SignatureDocument {
       signee: true,
     );
   }
+}
+
+/// La copie protégée d'un PDF n'a pas pu être faite : rien ne sort.
+class ProtectionImpossible implements Exception {
+  const ProtectionImpossible(this.cause);
+  final Object cause;
+
+  @override
+  String toString() => 'ProtectionImpossible($cause)';
 }
