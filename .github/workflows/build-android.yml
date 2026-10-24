@@ -215,6 +215,11 @@ jobs:
             fi
 
             if ! grep -qE "Too Many Requests|Could not GET|Could not resolve all artifacts|Connection reset|Read timed out" journal-build.txt; then
+              # La cause en annotation : les annotations se lisent sans
+              # compte GitHub (API publique), le journal complet non.
+              cause=$(grep -E -A4 "^e: |What went wrong|error:" journal-build.txt | head -40 \
+                | sed -e 's/\r//g' -e 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
+              [ -n "$cause" ] && echo "::error title=Cause de l'échec::$cause"
               echo "::error::Échec de compilation — ce n'est pas un incident réseau, on n'insiste pas."
               exit 1
             fi
