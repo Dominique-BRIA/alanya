@@ -87,6 +87,14 @@ import '../../models/message_payload.dart';
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
+  /// Index d'onglet DEMANDÉ depuis un autre écran (24/10/2026) : le bouton
+  /// « Statuts » d'un message officiel referme la conversation et pose ici
+  /// l'onglet voulu ; l'accueil s'y rend et remet la demande à `null`.
+  static final ValueNotifier<int?> ongletDemande = ValueNotifier<int?>(null);
+
+  /// L'onglet des statuts, dans la liste des onglets ci-dessous.
+  static const int ongletStatuts = 1;
+
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
@@ -101,6 +109,13 @@ class _HomeScreenState extends State<HomeScreen> {
   /// Va à l'onglet [i]. Passe par ici et non par `setState` direct : la
   /// pastille des appels manqués doit tomber quel que soit le geste — appui
   /// sur la barre du bas comme balayage.
+  void _ongletDemande() {
+    final i = HomeScreen.ongletDemande.value;
+    if (i == null || !mounted) return;
+    HomeScreen.ongletDemande.value = null;
+    _allerOnglet(i);
+  }
+
   void _allerOnglet(int i) {
     if (i == _tab) return;
     setState(() => _tab = i);
@@ -140,6 +155,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     MissedCalls.instance.addListener(_onManquesChanges);
+    HomeScreen.ongletDemande.addListener(_ongletDemande);
     // Ouvre la connexion temps réel dès que l'utilisateur est sur l'accueil.
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
@@ -278,6 +294,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     MissedCalls.instance.removeListener(_onManquesChanges);
+    HomeScreen.ongletDemande.removeListener(_ongletDemande);
     LiensEntrants.instance.enAttente.removeListener(_traiterLienEnAttente);
     PartageEntrant.instance.enAttente.removeListener(_traiterPartageEnAttente);
     // FIX: NE PAS déconnecter la WS ici.

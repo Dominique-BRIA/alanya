@@ -166,6 +166,13 @@ class Message {
   /// doit le transmettre, sinon la bande glisse plus bas.
   final bool chiffre;
 
+  /// Les boutons d'action d'un message officiel (bienvenue de la console,
+  /// 24/10/2026), déjà dans ma langue. Vide pour tout autre message.
+  ///
+  /// Le texte du message dit la même chose en clair (« Libellé : lien ») :
+  /// c'est lui qu'affiche une version de l'application qui ignore ce champ.
+  final List<BoutonMessage> boutons;
+
   Message({
     required this.id,
     required this.convId,
@@ -190,6 +197,7 @@ class Message {
     this.vueUniqueEffacee = false,
     this.mediaChiffre,
     this.chiffreGroupe,
+    this.boutons = const [],
   });
 
   /// Le chiffré d'un message de GROUPE chiffré, tel que le serveur le rend :
@@ -230,6 +238,7 @@ class Message {
         vueUniqueOuverte: vueUniqueOuverte,
         vueUniqueEffacee: vueUniqueEffacee,
         mediaChiffre: media ?? mediaChiffre,
+        boutons: boutons,
       );
 
   /// Photo, vidéo ou vocal À VUE UNIQUE (02/10/2026). Le média ne s'affiche
@@ -267,6 +276,7 @@ class Message {
         vueUniqueEffacee: effacee ?? vueUniqueEffacee,
         mediaChiffre: mediaChiffre,
         chiffreGroupe: chiffreGroupe,
+        boutons: boutons,
       );
 
   /// Vrai si le message a été supprimé pour tout le monde.
@@ -299,6 +309,7 @@ class Message {
           vueUniqueEffacee: vueUniqueEffacee,
           mediaChiffre: mediaChiffre,
           chiffreGroupe: chiffreGroupe,
+          boutons: boutons,
         );
 
   factory Message.fromJson(Map<String, dynamic> j) => Message(
@@ -343,6 +354,29 @@ class Message {
             .whereType<Map<String, dynamic>>()
             .map(MentionMessage.fromJson)
             .toList(),
+        boutons: ((j["boutons"] as List?) ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .map(BoutonMessage.fromJson)
+            .where((b) => b.label.isNotEmpty && b.target.isNotEmpty)
+            .toList(),
+      );
+}
+
+/// UN BOUTON D'ACTION sous un message officiel : ouvrir un lien (`url`) ou un
+/// écran de l'application (`route` : `profile`, `statuses`, `help`).
+class BoutonMessage {
+  const BoutonMessage({required this.label, required this.action, required this.target});
+
+  final String label;
+  final String action;
+  final String target;
+
+  bool get estLien => action == "url";
+
+  factory BoutonMessage.fromJson(Map<String, dynamic> j) => BoutonMessage(
+        label: (j["label"] as String?) ?? "",
+        action: (j["action"] as String?) == "url" ? "url" : "route",
+        target: (j["target"] as String?) ?? "",
       );
 }
 

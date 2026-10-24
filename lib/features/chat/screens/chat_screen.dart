@@ -74,6 +74,7 @@ import '../../../widgets/dialogues_traduction.dart';
 import '../../../widgets/motif_background.dart';
 import '../../../widgets/selecteur_emojis.dart';
 import '../widgets/bulle_media_chiffre.dart';
+import '../widgets/bulle_boutons.dart';
 import '../widgets/bulle_vue_unique.dart';
 import 'visionneur_vue_unique.dart';
 import '../../account/screens/avatar_viewer_screen.dart';
@@ -6691,6 +6692,15 @@ class _ChatScreenState extends State<ChatScreen>
                                                 : null,
                                             isMe: mine,
                                           )
+                                        : m.boutons.isNotEmpty
+                                            // Boutons d'un message officiel :
+                                            // ils remplacent le texte de repli.
+                                            ? BulleBoutons(
+                                                boutons: m.boutons,
+                                                timestamp: _time(m.createdAt),
+                                                onLongPress: () =>
+                                                    _openMessageActions(m),
+                                              )
                                         : isGrid
                                             ? _grilleAvecLegende(
                                                 medias: m.media,
