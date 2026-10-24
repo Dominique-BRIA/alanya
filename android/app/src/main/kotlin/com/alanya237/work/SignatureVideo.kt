@@ -15,6 +15,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.BitmapOverlay
 import androidx.media3.effect.OverlayEffect
 import androidx.media3.effect.Presentation
+import androidx.media3.effect.TextureOverlay
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.Effects
@@ -82,7 +83,10 @@ class SignatureVideo(
                 emptyList(),
                 listOf(
                     Presentation.createForWidthAndHeight(l, h, Presentation.LAYOUT_SCALE_TO_FIT),
-                    OverlayEffect(ImmutableList.of(BitmapOverlay.createStaticBitmapOverlay(calque))),
+                    // Type explicite : la liste Java attendue est invariante.
+                    OverlayEffect(
+                        ImmutableList.of<TextureOverlay>(BitmapOverlay.createStaticBitmapOverlay(calque)),
+                    ),
                 ),
             )
             val element = EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(File(entree))))
