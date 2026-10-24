@@ -64,6 +64,7 @@ import 'core/server_config.dart';
 import 'features/chat/envoi_morceaux/envoi_morceaux_api.dart';
 import 'features/chat/envoi_morceaux/envoi_morceaux_chiffre.dart';
 import 'features/chat/envoi_morceaux/transport_morceaux.dart';
+import 'widgets/ecran_maintenance.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -375,6 +376,8 @@ class AlanyaApp extends StatelessWidget {
             if (child != null) Positioned.fill(child: child),
             const CallBanner(),
             const MeetingBanner(),
+            // Par-dessus tout : le serveur est en maintenance.
+            const EcranMaintenance(),
           ],
         );
         // ⚠️ L'overlay se place SOUS le `Directionality`, jamais au-dessus.

@@ -6,6 +6,7 @@ import 'package:http_parser/http_parser.dart' show MediaType;
 
 import 'cache_ecrans.dart';
 import 'locale_controller.dart';
+import 'maintenance.dart';
 import 'server_config.dart';
 
 /// Exception levée quand l'API renvoie une erreur (status >= 400).
@@ -305,6 +306,8 @@ class ApiClient {
           ?? (data["message"] as String?)
           ?? "Erreur ${res.statusCode}";
       final code = err?["code"] as String?;
+      // Le serveur est en maintenance : l'écran d'attente prend le relais.
+      if (res.statusCode == 503 && code == "MAINTENANCE") Maintenance.signaler();
       throw ApiException(res.statusCode, msg, code);
     }
     return data;
