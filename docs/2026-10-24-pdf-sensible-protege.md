@@ -9,7 +9,9 @@
 - **autoriser l'impression** ou non ;
 - **protéger par mot de passe** ou non. S'il en met un, il en saisit deux :
   - le mot de passe **d'ouverture**, pour ouvrir la copie téléchargée ;
-  - le mot de passe **propriétaire**, qui lève les restrictions (l'impression). Il doit être différent de celui d'ouverture.
+  - le mot de passe **propriétaire**, qui lève les restrictions (l'impression).
+
+  Seule règle : 4 caractères au moins chacun, chiffres ou lettres. Les deux peuvent être identiques ; dans ce cas, celui qui ouvre la copie avec ce mot de passe a aussi les droits du propriétaire, impression comprise.
 
 Sous le message PDF :
 

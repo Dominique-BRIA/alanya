@@ -71,18 +71,15 @@ class _DialogueProtectionPdfState extends State<DialogueProtectionPdf> {
       ));
       return;
     }
-    // Sans trim : un espace fait partie du mot de passe.
+    // Sans trim : un espace fait partie du mot de passe. Seule règle : la
+    // longueur, quels que soient les caractères. Les deux mots de passe
+    // PEUVENT être identiques (choix du user, 24/10/2026) — le lecteur PDF
+    // donne alors les droits du propriétaire, impression comprise, à qui
+    // ouvre avec ce mot.
     final o = _ouverture.text;
     final p = _proprietaire.text;
-    String? eo, ep;
-    if (o.length < longueurMinMotDePassePdf) eo = 'pdfp_trop_court';
-    if (p.length < longueurMinMotDePassePdf) {
-      ep = 'pdfp_trop_court';
-    } else if (p == o) {
-      // Le même mot ouvrirait ET lèverait les restrictions : l'impression
-      // interdite ne tiendrait plus chez qui reçoit le mot d'ouverture.
-      ep = 'pdfp_differents';
-    }
+    final eo = o.length < longueurMinMotDePassePdf ? 'pdfp_trop_court' : null;
+    final ep = p.length < longueurMinMotDePassePdf ? 'pdfp_trop_court' : null;
     if (eo != null || ep != null) {
       setState(() {
         _erreurOuverture = eo;

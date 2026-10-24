@@ -75,7 +75,7 @@ void main() {
       expect(p.proprietaire.length, 24);
     });
 
-    testWidgets('deux mots de passe : trop courts, identiques, puis valides', (
+    testWidgets('deux mots de passe : trop courts, puis valides', (
       tester,
     ) async {
       await ouvrir(tester);
@@ -83,22 +83,13 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.enterText(find.byKey(const Key('pdfp_ouverture')), 'ab');
-      await tester.enterText(find.byKey(const Key('pdfp_proprietaire')), 'ab');
+      await tester.enterText(find.byKey(const Key('pdfp_proprietaire')), '123');
       await tester.tap(find.byKey(const Key('pdfp_valider')));
       await tester.pumpAndSettle();
       expect(ferme, isFalse);
       expect(find.text('4 caractères au moins.'), findsNWidgets(2));
 
       await tester.enterText(find.byKey(const Key('pdfp_ouverture')), 'secret1');
-      await tester.enterText(find.byKey(const Key('pdfp_proprietaire')), 'secret1');
-      await tester.tap(find.byKey(const Key('pdfp_valider')));
-      await tester.pumpAndSettle();
-      expect(ferme, isFalse);
-      expect(
-        find.text('Il doit être différent du mot de passe d\'ouverture.'),
-        findsOneWidget,
-      );
-
       await tester.enterText(find.byKey(const Key('pdfp_proprietaire')), 'patron22');
       await tester.tap(find.byKey(const Key('pdfp_valider')));
       await tester.pumpAndSettle();
@@ -106,6 +97,22 @@ void main() {
       expect(p.imprimer, isTrue);
       expect(p.ouverture, 'secret1');
       expect(p.proprietaire, 'patron22');
+    });
+
+    testWidgets('identiques et tout en chiffres : acceptés (4 au moins)', (
+      tester,
+    ) async {
+      await ouvrir(tester);
+      await tester.tap(find.byKey(const Key('pdfp_mot_de_passe')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('pdfp_ouverture')), '1234');
+      await tester.enterText(find.byKey(const Key('pdfp_proprietaire')), '1234');
+      await tester.tap(find.byKey(const Key('pdfp_valider')));
+      await tester.pumpAndSettle();
+      expect(ferme, isTrue);
+      final p = choix!.protection!;
+      expect(p.ouverture, '1234');
+      expect(p.proprietaire, '1234');
     });
   });
 
