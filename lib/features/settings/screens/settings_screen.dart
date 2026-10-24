@@ -14,6 +14,7 @@ import '../../account/screens/delete_account_screen.dart';
 import '../../account/screens/profile_screen.dart';
 import '../../parametres/screens/sauvegarde_chiffree_screen.dart';
 import 'privacy_settings_screen.dart';
+import 'empreinte_screen.dart';
 import 'login_history_screen.dart';
 import 'pays_mobile_screen.dart';
 import 'recuperation_screen.dart';
@@ -183,6 +184,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
             trailing: _chevron(),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const LoginHistoryScreen()),
+            ),
+          ),
+          // Retrouver qui a fait sortir une copie d'un document sensible, à
+          // partir de l'empreinte écrite sur ses bords (24/10/2026).
+          _settingsTile(
+            icon: Icons.fingerprint,
+            iconColor: _positive,
+            title: tr(context, 'emp_titre'),
+            subtitle: tr(context, 'emp_sous_titre'),
+            trailing: _chevron(),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const EmpreinteScreen()),
             ),
           ),
           _settingsTile(

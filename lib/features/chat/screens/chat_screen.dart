@@ -115,7 +115,6 @@ import '../../../widgets/media/gps_preview.dart';
 import 'media_gallery_viewer.dart';
 import '../transfert_appareil.dart';
 import '../sortie_document_sensible.dart';
-import '../../../core/signature_document.dart' show GesteSortie;
 import '../../../services/e2ee/e2ee_media_ouverture.dart';
 import 'dart:io' show File;
 import 'package:path_provider/path_provider.dart' show getTemporaryDirectory;
@@ -2196,6 +2195,8 @@ class _ChatScreenState extends State<ChatScreen>
   bool _peutTransferer(Message m) =>
       // Une vue unique ne se transfère pas : le serveur le refuse aussi.
       !m.vueUnique &&
+      // Un document sensible ne se transfère ni ne se partage (24/10/2026).
+      !_estSensible(m) &&
       !m.isDeleted &&
       !m.id.startsWith('tmp-') &&
       // Un message chiffré dont l'appareil n'a ni le texte ni le média.
@@ -5222,9 +5223,13 @@ class _ChatScreenState extends State<ChatScreen>
             ])));
   }
 
-  /// Un document SENSIBLE. Depuis le 22/10/2026, il se transfère, se partage
-  /// et s'enregistre — mais ce qui sort est une copie SIGNÉE à mon nom
-  /// (`SortieDocumentSensible`), et le geste est noté par le serveur.
+  /// Un document SENSIBLE.
+  ///
+  /// * 18/10/2026 : ni transfert, ni partage, ni enregistrement.
+  /// * 22/10/2026 : tout est permis, en copie SIGNÉE à mon nom.
+  /// * 24/10/2026 (user) : le partage et le transfert sont de nouveau
+  ///   BLOQUÉS ; seul l'enregistrement reste, en copie signée
+  ///   (`SortieDocumentSensible`), noté par le serveur.
   bool _estSensible(Message m) => m.mediaChiffre?.sensible == true;
 
   /// L'Alanya ID de qui a envoyé [m], écrit dans une copie signée : le mien,
@@ -5245,29 +5250,6 @@ class _ChatScreenState extends State<ChatScreen>
         token: _token,
         jeton: fournisseurJeton(context),
       );
-
-  /// La copie SIGNÉE d'un document sensible, pour un transfert : un seul
-  /// code de trace, quel que soit le nombre de conversations visées.
-  Future<({Uint8List octets, String nom, String mime, int? dureeMs})>
-      _copieATransferer(Message m, SortieDocumentSensible sortie,
-          String? expediteur, FournisseurJeton? jeton) async {
-    final d = m.mediaChiffre!;
-    final clair = await OuvertureMediaChiffre.ouvrir(d,
-        baseUrl: _baseUrl, token: _token, jeton: jeton);
-    final c = await sortie.copie(
-      clair: clair,
-      d: d,
-      geste: GesteSortie.transfert,
-      convId: widget.convId,
-      expediteurId: expediteur,
-    );
-    return (
-      octets: await c.fichier.readAsBytes(),
-      nom: c.nom,
-      mime: c.mime,
-      dureeMs: d.dureeMs,
-    );
-  }
 
   /// Enregistre la copie SIGNÉE d'un document sensible (22/10/2026).
   Future<void> _enregistrerSensible(Message m) async {
@@ -5297,6 +5279,10 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Future<void> _forwardMessage(Message m) async {
+    if (_estSensible(m)) {
+      showAppSnackBar(tr(context, 'sens_pas_partage'));
+      return;
+    }
     final conversations =
         await context.read<ChatRepository>().listConversations();
     if (!mounted) return;
@@ -5337,12 +5323,6 @@ class _ChatScreenState extends State<ChatScreen>
     final moi = _myId ?? '';
     final erreurGenerique = tr(context, 'send_failed');
     final reussi = tr(context, 'forwarded_success');
-    // Un document SENSIBLE part en copie SIGNÉE à mon nom, et le transfert
-    // est noté (22/10/2026).
-    final sortieSensible =
-        _estSensible(m) ? SortieDocumentSensible.de(context) : null;
-    final expediteur = _alanyaIdExpediteur(m);
-    final jeton = fournisseurJeton(context);
     var echecs = 0;
     try {
       if (parLeServeur.isNotEmpty) {
@@ -5371,10 +5351,7 @@ class _ChatScreenState extends State<ChatScreen>
           pile: pile,
           chat: chat,
           medias: medias,
-          octetsDuMedia: () async => fichier ??= sortieSensible == null
-              ? await _fichierEnClair(m)
-              : await _copieATransferer(m, sortieSensible, expediteur, jeton),
-          sensible: sortieSensible != null,
+          octetsDuMedia: () async => fichier ??= await _fichierEnClair(m),
         );
       } catch (_) {
         echecs++;
@@ -5396,27 +5373,11 @@ class _ChatScreenState extends State<ChatScreen>
   /// C'est le geste demandé — l'utilisateur choisit de faire sortir ce message
   /// du chiffrement de bout en bout, comme une capture d'écran.
   Future<void> _partagerMessage(Message m) async {
-    final erreur = tr(context, 'send_failed');
     if (_estSensible(m)) {
-      // Une copie signée à mon nom, et le partage noté (22/10/2026).
-      final nonSignee = tr(context, 'sens_copie_non_signee');
-      try {
-        final sortie = SortieDocumentSensible.de(context);
-        final expediteur = _alanyaIdExpediteur(m);
-        final clair = await _clairChiffre(m);
-        final c = await sortie.partager(
-          clair: clair,
-          d: m.mediaChiffre!,
-          convId: widget.convId,
-          expediteurId: expediteur,
-          legende: m.content,
-        );
-        if (!c.signee) showAppSnackBar(nonSignee);
-      } catch (_) {
-        if (mounted) _showError(erreur);
-      }
+      showAppSnackBar(tr(context, 'sens_pas_partage'));
       return;
     }
+    final erreur = tr(context, 'send_failed');
     try {
       final aUnMedia = m.mediaChiffre != null || m.media.isNotEmpty;
       if (!aUnMedia) {

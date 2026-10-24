@@ -3,7 +3,6 @@ import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
-import 'package:share_plus/share_plus.dart';
 
 import '../../core/authed_api.dart';
 import '../../core/downloader.dart';
@@ -13,13 +12,13 @@ import '../../services/e2ee/e2ee_media.dart';
 import '../auth/auth_controller.dart';
 import 'screens/media_gallery_viewer.dart' show nomPourEnregistrer;
 
-/// FAIRE SORTIR UN DOCUMENT SENSIBLE (22/10/2026).
+/// FAIRE SORTIR UN DOCUMENT SENSIBLE (22/10/2026, revu le 24/10/2026).
 ///
-/// Jusqu'au 22/10, un document sensible ne sortait pas de l'application : ni
-/// enregistrement, ni partage, ni transfert. Le user a levé l'interdiction ;
-/// en échange, CHAQUE copie qui sort est signée (`SignatureDocument` : texte
-/// aux quatre bords, métadonnées, code de trace) et le geste est noté par le
-/// serveur avec ce code (`document_consultation`).
+/// Seul l'ENREGISTREMENT sort un document sensible de l'application : le
+/// partage et le transfert, permis du 22 au 24/10, sont de nouveau bloqués
+/// (user). La copie enregistrée est signée (`SignatureDocument` : texte aux
+/// quatre bords, métadonnées, empreinte numérique) et le geste est noté par
+/// le serveur avec l'empreinte (`document_consultation`).
 ///
 /// Le contexte est lu à la construction ([SortieDocumentSensible.de]), avant
 /// toute attente : la suite ne touche plus au `BuildContext`.
@@ -79,28 +78,6 @@ class SortieDocumentSensible {
     );
     final chemin = await enregistrerOctets(await c.fichier.readAsBytes(), c.nom);
     return (chemin: chemin, copie: c);
-  }
-
-  /// Ouvre la feuille de partage d'Android avec la copie signée.
-  Future<CopieSignee> partager({
-    required File clair,
-    required DescripteurMedia d,
-    String? convId,
-    String? expediteurId,
-    String? legende,
-  }) async {
-    final c = await copie(
-      clair: clair,
-      d: d,
-      geste: GesteSortie.partage,
-      convId: convId,
-      expediteurId: expediteurId,
-    );
-    await SharePlus.instance.share(ShareParams(
-      files: [XFile(c.fichier.path, mimeType: c.mime, name: c.nom)],
-      text: (legende ?? '').trim().isEmpty ? null : legende,
-    ));
-    return c;
   }
 
   /// La trace au serveur. Ne bloque jamais le geste : hors ligne, la copie

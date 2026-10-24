@@ -14,6 +14,7 @@ import '../../../core/ecran_protege.dart';
 import '../../../core/infos_appareil.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../services/e2ee/e2ee_media.dart';
+import '../../../widgets/media/bouton_telecharger.dart';
 import '../../auth/auth_controller.dart';
 import '../sortie_document_sensible.dart';
 
@@ -31,10 +32,10 @@ import '../sortie_document_sensible.dart';
 /// * l'écran est protégé (`EcranProtege`) : ni capture, ni enregistrement ;
 /// * la consultation est tracée côté serveur.
 ///
-/// 22/10 : ENREGISTRER et PARTAGER ne sont plus interdits (demande du user).
-/// La copie qui sort est signée à son tour, aux quatre bords et dans ses
-/// métadonnées, avec un code de trace noté par le serveur
-/// (`SortieDocumentSensible`).
+/// ENREGISTRER est permis depuis le 22/10 (demande du user) : la copie qui
+/// sort est signée à son tour, aux quatre bords et dans ses métadonnées, avec
+/// une empreinte numérique notée par le serveur (`SortieDocumentSensible`).
+/// PARTAGER, permis le 22/10, est de nouveau bloqué depuis le 24/10.
 class VisionneuseDocumentSensible extends StatefulWidget {
   const VisionneuseDocumentSensible({
     super.key,
@@ -144,26 +145,6 @@ class _VisionneuseDocumentSensibleState
     }
   }
 
-  Future<void> _partager() async {
-    final sortie = SortieDocumentSensible.de(context);
-    final echec = tr(context, 'send_failed');
-    final nonSignee = tr(context, 'sens_copie_non_signee');
-    setState(() => _occupe = true);
-    try {
-      final c = await sortie.partager(
-        clair: widget.fichier,
-        d: d,
-        convId: widget.convId,
-        expediteurId: widget.expediteurId,
-      );
-      if (!c.signee) showAppSnackBar(nonSignee);
-    } catch (_) {
-      showAppSnackBar(echec);
-    } finally {
-      if (mounted) setState(() => _occupe = false);
-    }
-  }
-
   Widget _lecteurVideo() {
     final c = _video;
     if (c == null || !c.value.isInitialized) {
@@ -238,29 +219,13 @@ class _VisionneuseDocumentSensibleState
                 style: const TextStyle(fontSize: 16)),
           ),
         ]),
+        // 🐛 « NOIR SUR NOIR » (user, 24/10/2026) : l'icône nue prenait la
+        // couleur du thème, invisible sur la barre noire. Le bouton commun des
+        // lecteurs de médias (pastille terre cuite, icône blanche, anneau
+        // pendant l'enregistrement) se voit partout. Pas de « Partager » : un
+        // document sensible ne se partage pas (24/10/2026).
         actions: [
-          if (_occupe)
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16),
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                    strokeWidth: 2, color: Colors.white70),
-              ),
-            )
-          else ...[
-            IconButton(
-              tooltip: tr(context, 'save'),
-              icon: const Icon(Icons.download_outlined),
-              onPressed: _enregistrer,
-            ),
-            IconButton(
-              tooltip: tr(context, 'share'),
-              icon: const Icon(Icons.share_outlined),
-              onPressed: _partager,
-            ),
-          ],
+          BoutonTelecharger(enCours: _occupe, onPressed: _enregistrer),
         ],
       ),
       body: Stack(children: [

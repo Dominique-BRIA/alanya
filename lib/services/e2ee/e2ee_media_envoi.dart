@@ -175,17 +175,14 @@ class EnvoiMediaChiffre {
 }
 
 /// Pour l'appelant qui n'a que des octets (vocal) : la même forme.
-/// [sensible] : le transfert d'un document sensible (22/10/2026).
 MediaPickResult fichierDepuisOctets(
   Uint8List octets,
   String nom,
   String mime, {
   int? dureeMs,
-  bool sensible = false,
 }) => MediaPickResult(
   bytes: octets,
   fileName: nom,
   mimeType: mime,
   durationMs: dureeMs,
-  sensible: sensible,
 );
