@@ -400,7 +400,7 @@ class GroupeChiffre {
     if (moi == null) throw StateError('Compte inconnu');
     final id = uuidV4();
     final appareil = await _monDeviceId();
-    final genre = (type == 'CONTACT' || type == 'LOCATION') ? type : null;
+    final genre = genresCharge.contains(type) ? type : null;
     final charge = ecrireCharge(id, texte, media, replyToId, genre);
     final corps = g.chiffrerMessageGroupe(
       charge,

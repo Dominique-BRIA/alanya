@@ -230,7 +230,22 @@ String? apercuStructure(String type, String? content) {
     final label = position.label;
     return label != null ? "📍 $label" : "📍 Position partagée";
   }
+  if (type == "STICKER") {
+    // Comme le serveur (`apercuStructure`, message-payload.mjs) et WhatsApp :
+    // « Sticker », précédé de son émoji quand il en a un.
+    final emoji = _emojiDuSticker(content);
+    return emoji.isEmpty ? "Sticker" : "$emoji Sticker";
+  }
   return null;
+}
+
+/// L'émoji d'une charge STICKER, `""` si elle est illisible.
+String _emojiDuSticker(String? content) {
+  try {
+    final j = jsonDecode(content ?? '');
+    if (j is Map && j['emoji'] is String) return (j['emoji'] as String).trim();
+  } catch (_) {}
+  return "";
 }
 
 /// L'aperçu D'UNE LIGNE d'un message, quel que soit son type.

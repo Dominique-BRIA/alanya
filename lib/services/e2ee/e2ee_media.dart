@@ -247,8 +247,9 @@ class Charge {
   final bool modifie;
 }
 
-/// Les messages STRUCTURÉS qu'une charge peut porter dans son texte.
-const genresCharge = {'CONTACT', 'LOCATION'};
+/// Les messages STRUCTURÉS qu'une charge peut porter dans son texte —
+/// `STICKER` depuis le 24/10/2026 (même vecteur que le web).
+const genresCharge = {'CONTACT', 'LOCATION', 'STICKER'};
 
 class ChargeInvalide implements Exception {
   const ChargeInvalide(this.message);

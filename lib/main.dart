@@ -30,6 +30,7 @@ import 'core/token_storage.dart';
 import 'features/auth/auth_controller.dart';
 import 'features/auth/auth_repository.dart';
 import 'features/auth/screens/welcome_screen.dart';
+import 'features/stickers/stickers_service.dart';
 import 'features/account/account_repository.dart';
 import 'features/ai/ai_repository.dart';
 import 'features/calls/call_banner.dart';
@@ -282,6 +283,12 @@ void main() async {
             storage,
             realtime: ctx.read<RealtimeClient>(),
           )..bootstrap(),
+        ),
+        // Les stickers (24/10/2026) : catalogue, panneau et favoris du compte
+        // connecté — il suit le compte, voir `StickersService.suivreCompte`.
+        ChangeNotifierProxyProvider<AuthController, StickersService>(
+          create: (ctx) => StickersService(ctx.read<AuthedApi>()),
+          update: (_, auth, s) => s!..suivreCompte(auth.user?.id),
         ),
         /*
          * 🔴 LA PILE DE CHIFFREMENT SUIT LE COMPTE CONNECTÉ, elle n'est plus

@@ -77,6 +77,8 @@ import '../../../widgets/motif_background.dart';
 import '../../../widgets/selecteur_emojis.dart';
 import '../widgets/bulle_media_chiffre.dart';
 import '../widgets/bulle_boutons.dart';
+import '../../stickers/bulle_sticker.dart';
+import '../../stickers/stickers_service.dart';
 import '../widgets/bulle_vue_unique.dart';
 import 'visionneur_vue_unique.dart';
 import '../../account/screens/avatar_viewer_screen.dart';
@@ -4708,6 +4710,65 @@ class _ChatScreenState extends State<ChatScreen>
   /// Aucun média : la charge JSON de `content` suffit, et la carte est dessinée
   /// chez le destinataire à partir des coordonnées. Envoyer une image de carte
   /// serait plus lourd, moins net, et non zoomable.
+  /// ENVOIE UN STICKER (24/10/2026), dès le toucher, comme WhatsApp : pas
+  /// d'aperçu ni de légende. Même chemin qu'une position — chiffré si le fil
+  /// l'est, la charge dans l'enveloppe ; sinon par le temps réel, ou la route
+  /// si la socket est coupée. Le panneau reste ouvert pour en envoyer d'autres.
+  Future<void> _envoyerSticker(Sticker sticker) async {
+    final replyId = _replyTo?.id;
+    final replySnapshot = _apercuReponse(_replyTo);
+    setState(() => _replyTo = null);
+    unawaited(context.read<StickersService>().noterRecent(sticker.id));
+
+    final charge = sticker.charge();
+    if (await _envoyerStructureChiffree("STICKER", charge, replyId, replySnapshot)) {
+      return;
+    }
+    if (!mounted) return;
+    final rt = context.read<RealtimeClient>();
+    try {
+      if (rt.connected) {
+        final tempId = "tmp-${DateTime.now().microsecondsSinceEpoch}";
+        setState(() {
+          _messages = [
+            ..._messages,
+            Message(
+              id: tempId,
+              convId: widget.convId,
+              senderId: _myId ?? "",
+              content: charge,
+              type: "STICKER",
+              status: "SENT",
+              replyToId: replyId,
+              replyTo: replySnapshot,
+              media: const [],
+              createdAt: DateTime.now(),
+            ),
+          ];
+          _rebuildCombined();
+        });
+        rt.sendStructured(widget.convId, "STICKER", charge, tempId,
+            replyToId: replyId);
+      } else {
+        final msg = await context.read<ChatRepository>().sendStructured(
+            widget.convId, "STICKER", charge,
+            replyToId: replyId);
+        _cacheMsg(msg);
+        if (mounted) {
+          setState(() {
+            _messages = [..._messages, msg];
+            _rebuildCombined();
+          });
+        }
+      }
+      _scrollToBottom();
+    } on ApiException catch (e) {
+      _showError(e.message);
+    } catch (_) {
+      if (mounted) _showError(tr(context, 'send_failed'));
+    }
+  }
+
   Future<void> _sendLocation(SharedLocation position) async {
     final replyId = _replyTo?.id;
     final replyMsg = _replyTo;
@@ -5483,6 +5544,8 @@ class _ChatScreenState extends State<ChatScreen>
         return '${nom.isEmpty ? '' : '$nom\n'}https://maps.google.com/?q=${p.lat},${p.lng}';
       }
     }
+    // Un sticker hors d'Alanya : son libellé, jamais sa charge JSON.
+    if (m.type == 'STICKER') return apercuMessage('STICKER', contenu);
     return sansMarqueursWhatsApp(contenu);
   }
 
@@ -5939,6 +6002,8 @@ class _ChatScreenState extends State<ChatScreen>
                         Navigator.pop(ctx);
                         _partagerMessage(m);
                       }),
+                // Un sticker n'a pas de texte à copier : sa charge est du JSON.
+                if (m.type != 'STICKER')
                 ListTile(
                     leading: Icon(Icons.copy, color: _iconNeutral),
                     title: Text(tr(context, 'copy')),
@@ -6230,7 +6295,7 @@ class _ChatScreenState extends State<ChatScreen>
   // + menu 3 points (Copier, Modifier). (Étoile/Épingler/Infos = lot suivant.)
   PreferredSizeWidget _selectionAppBar(Message m) {
     final mine = m.senderId == _myId;
-    final hasText = (m.content ?? '').isNotEmpty;
+    final hasText = m.type != 'STICKER' && (m.content ?? '').isNotEmpty;
     return AppBar(
       backgroundColor: _appBarBg,
       foregroundColor: _onAppBar,
@@ -6594,6 +6659,11 @@ class _ChatScreenState extends State<ChatScreen>
     // une carte vide au milieu de l'océan.
     final positionPartagee =
         effectif == "LOCATION" ? positionDepuisContenu(m.content) : null;
+    // Sticker (24/10/2026) : l'image seule, sans bulle autour. Charge illisible
+    // (version future) → bulle texte, qui dira « Sticker ».
+    final stickerRecu = effectif == "STICKER" && !m.isDeleted && envoiEnCours == null
+        ? ChargeSticker.lire(m.content)
+        : null;
     final senderLabel = widget.isGroup && !mine ? _nomExpediteur(m.senderId) : null;
     final isHighlighted =
         _highlightedMessageId == m.id || _selectedMessageId == m.id;
@@ -6621,7 +6691,9 @@ class _ChatScreenState extends State<ChatScreen>
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 400),
                   margin: const EdgeInsets.symmetric(vertical: 4),
-                  padding: (isImage || isVideo || isGrid)
+                  padding: stickerRecu != null
+                      ? EdgeInsets.zero
+                      : (isImage || isVideo || isGrid)
                       ? const EdgeInsets.all(3)
                       : const EdgeInsets.symmetric(
                           horizontal: 14, vertical: 10),
@@ -6630,6 +6702,8 @@ class _ChatScreenState extends State<ChatScreen>
                     color: isHighlighted
                         ? AlanyaColors.gold
                             .withValues(alpha: _dark ? 0.22 : 0.3)
+                        : stickerRecu != null
+                        ? Colors.transparent
                         : (mine ? _sentBubbleColor : _recvBubbleColor),
                     // Forme WhatsApp : petite queue en haut du côté de l'expéditeur
                     borderRadius: BorderRadius.only(
@@ -6638,7 +6712,7 @@ class _ChatScreenState extends State<ChatScreen>
                       bottomLeft: const Radius.circular(12),
                       bottomRight: const Radius.circular(12),
                     ),
-                    border: mine
+                    border: mine || stickerRecu != null
                         ? null
                         : Border.all(
                             color:
@@ -6688,6 +6762,17 @@ class _ChatScreenState extends State<ChatScreen>
                                         (m.media.isNotEmpty &&
                                             m.media.first.chiffre)
                                     ? _bulleMediaChiffre(m, mine)
+                                : stickerRecu != null
+                                    ? BulleSticker(
+                                        charge: stickerRecu,
+                                        timestamp: _time(m.createdAt),
+                                        statusWidget: mine
+                                            ? _statusTicks(
+                                                m.status, Colors.white)
+                                            : null,
+                                        onLongPress: () =>
+                                            _openMessageActions(m),
+                                      )
                                 : isContact
                                     ? ContactBubble(
                                         contacts: contactsPartages,
@@ -7292,7 +7377,9 @@ class _ChatScreenState extends State<ChatScreen>
     // grand à la place de la fiche — la règle du MIME existe pour rattraper des
     // messages MAL ÉTIQUETÉS, pas pour contredire un type structuré, dont la
     // charge utile est dans `content`.
-    if (m.type == "CONTACT" || m.type == "LOCATION") return m.type;
+    if (m.type == "CONTACT" || m.type == "LOCATION" || m.type == "STICKER") {
+      return m.type;
+    }
     if (m.media.isEmpty) return m.type;
     final mime = m.media.first.mimeType;
     if (mime.startsWith('image/')) return 'IMAGE';
@@ -8423,7 +8510,8 @@ class _ChatScreenState extends State<ChatScreen>
     return Container(
       height: 300,
       margin: const EdgeInsets.only(top: 6),
-      child: SelecteurEmojis(onChoisir: _insereEmoji),
+      // L'onglet Stickers s'ajoute quand la console les a ouverts (24/10/2026).
+      child: SelecteurEmojis(onChoisir: _insereEmoji, onSticker: _envoyerSticker),
     );
   }
 

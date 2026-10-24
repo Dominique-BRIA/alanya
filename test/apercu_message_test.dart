@@ -98,8 +98,14 @@ void main() {
 
     test("un type inconnu montre son texte plutôt que son nom technique", () {
       // Le serveur a ajouté deux types en août 2026 ; il en ajoutera d'autres.
-      expect(apercuMessage("STICKER", "salut"), "salut");
-      expect(apercuMessage("STICKER", null), "[STICKER]");
+      // (STICKER, l'ancien exemple, est connu depuis le 24/10/2026.)
+      expect(apercuMessage("SONDAGE", "salut"), "salut");
+      expect(apercuMessage("SONDAGE", null), "[SONDAGE]");
+    });
+
+    test("un sticker se résume à « Sticker », jamais à sa charge", () {
+      expect(apercuMessage("STICKER", '{"v":1,"pack":"p","sid":1,"asset":2,"emoji":"🎉"}'), "🎉 Sticker");
+      expect(apercuMessage("STICKER", null), "Sticker");
     });
   });
 }

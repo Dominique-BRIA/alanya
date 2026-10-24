@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/emojis_catalogue.dart';
+import '../features/stickers/panneau_stickers.dart';
+import '../features/stickers/stickers_service.dart';
 import '../l10n/app_localizations.dart';
 import '../theme/alanya_theme.dart';
 
@@ -19,15 +22,21 @@ import '../theme/alanya_theme.dart';
 ///
 /// ⚠️ [sombre] force la palette sombre : la feuille des statuts s'ouvre
 /// par-dessus un éditeur noir, quel que soit le thème de l'application.
+///
+/// [onSticker] (24/10/2026) ajoute, comme WhatsApp, une barre en bas :
+/// « Émoji » et « Stickers ». Elle n'apparaît que si la console a ouvert les
+/// stickers ; sans [onSticker] (statuts), le sélecteur reste celui d'avant.
 class SelecteurEmojis extends StatefulWidget {
   const SelecteurEmojis({
     super.key,
     required this.onChoisir,
     this.sombre = false,
+    this.onSticker,
   });
 
   final ValueChanged<String> onChoisir;
   final bool sombre;
+  final ValueChanged<Sticker>? onSticker;
 
   @override
   State<SelecteurEmojis> createState() => _SelecteurEmojisState();
@@ -75,10 +84,14 @@ class _SelecteurEmojisState extends State<SelecteurEmojis> {
   String? _actif;
   String _requete = '';
 
+  /// L'onglet du bas : les émojis, ou les stickers.
+  bool _stickers = false;
+
   @override
   void initState() {
     super.initState();
     _chargerRecents();
+    if (widget.onSticker != null) context.read<StickersService>().assurer();
   }
 
   @override
@@ -138,6 +151,52 @@ class _SelecteurEmojisState extends State<SelecteurEmojis> {
 
   @override
   Widget build(BuildContext context) {
+    final onSticker = widget.onSticker;
+    final avecStickers =
+        onSticker != null && context.watch<StickersService>().ouverts;
+    if (!avecStickers) return _emojis(context);
+    final accent = widget.sombre
+        ? AlanyaColors.terracottaNuit
+        : accentOf(context);
+    final muted = widget.sombre
+        ? Colors.white60
+        : mutedOf(context, Colors.black54);
+    Widget onglet(bool stickers, IconData icone, String aide) => Expanded(
+          child: Tooltip(
+            message: aide,
+            child: InkWell(
+              key: Key(stickers ? 'onglet_stickers' : 'onglet_emojis'),
+              onTap: () => setState(() => _stickers = stickers),
+              child: SizedBox(
+                height: 40,
+                child: Icon(
+                  icone,
+                  size: 22,
+                  color: _stickers == stickers ? accent : muted,
+                ),
+              ),
+            ),
+          ),
+        );
+    return Column(
+      children: [
+        Expanded(
+          child: _stickers
+              ? PanneauStickers(onEnvoyer: onSticker, sombre: widget.sombre)
+              : _emojis(context),
+        ),
+        Divider(height: 1, color: muted.withValues(alpha: 0.2)),
+        Row(
+          children: [
+            onglet(false, Icons.emoji_emotions_outlined, tr(context, 'stickers_onglet_emoji')),
+            onglet(true, Icons.sticky_note_2_outlined, tr(context, 'stickers_onglet')),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _emojis(BuildContext context) {
     final accent = widget.sombre
         ? AlanyaColors.terracottaNuit
         : accentOf(context);
