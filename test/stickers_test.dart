@@ -1,9 +1,12 @@
 import 'dart:convert';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:alanya/core/api_client.dart';
 import 'package:alanya/core/authed_api.dart';
 import 'package:alanya/core/locale_controller.dart';
 import 'package:alanya/features/stickers/bulle_sticker.dart';
+import 'package:alanya/features/stickers/creer_sticker_screen.dart';
 import 'package:alanya/features/stickers/image_sticker.dart';
 import 'package:alanya/features/stickers/stickers_service.dart';
 import 'package:alanya/models/message_payload.dart';
@@ -60,9 +63,44 @@ class _FauxApi implements AuthedApi {
           {'id': 1, 'code': 'salutations', 'position': 1},
         ],
         'favorites': [12],
+        'features': {'creation': creation},
+        'created': creation && creees.isNotEmpty
+            ? {
+                'id': 9,
+                'code': 'perso-moi',
+                'nom': {'fr': 'Mes créations'},
+                'stickers': [for (final id in creees) _sticker(id, id + 1000, '', 'à moi')],
+              }
+            : null,
       };
     }
     throw ApiException(404, 'Introuvable');
+  }
+
+  bool creation = true;
+  final creees = <int>[91];
+  Uint8List? dernierEnvoi;
+
+  @override
+  Future<Map<String, dynamic>> uploadBytes(
+    String path,
+    Uint8List bytes,
+    String filename,
+    String mimeType, {
+    Map<String, String>? fields,
+    void Function(int envoyes, int total)? onProgress,
+  }) async {
+    appels.add('UPLOAD $path $mimeType');
+    dernierEnvoi = bytes;
+    creees.insert(0, 92);
+    return {'stickerId': 92, 'assetId': 1092, 'packId': 9};
+  }
+
+  @override
+  Future<Map<String, dynamic>> post(String path, Map<String, dynamic> body) async {
+    appels.add('POST $path');
+    if (path.endsWith('/copy')) creees.insert(0, 93);
+    return {};
   }
 
   @override
@@ -245,6 +283,95 @@ void main() {
       await tester.tap(find.byKey(const Key('sticker_favori')));
       await tester.pumpAndSettle();
       expect(service.estFavori(11), isTrue);
+    });
+  });
+
+  group('créer ses stickers', () {
+    test('/me : création ouverte, « Mes créations » se lit et se trouve', () async {
+      final api = _FauxApi();
+      final s = StickersService(api)..suivreCompte('moi');
+      await s.assurer();
+      expect(s.creation, isTrue);
+      expect(s.creations?.stickers.map((x) => x.id), [91]);
+      expect(s.estMaCreation(91), isTrue);
+      expect(s.sticker(91)?.packCode, 'perso-moi');
+      expect(s.chercher('à moi').map((x) => x.id), [91]);
+    });
+
+    test('supprimer une création, copier un sticker reçu', () async {
+      final api = _FauxApi();
+      final s = StickersService(api)..suivreCompte('moi');
+      await s.assurer();
+      await s.supprimerCreation(91);
+      expect(s.creations?.stickers, isEmpty);
+      expect(api.appels.last, 'DELETE /api/stickers/stickers/91');
+      api.creees.clear();
+      await s.copier(55);
+      expect(api.appels, contains('POST /api/stickers/stickers/55/copy'));
+      expect(s.estMaCreation(93), isTrue);
+    });
+
+    test('création fermée : pas de « Mes créations »', () async {
+      final api = _FauxApi()..creation = false;
+      final s = StickersService(api)..suivreCompte('moi');
+      await s.assurer();
+      expect(s.creation, isFalse);
+      expect(s.creations, isNull);
+    });
+
+    testWidgets('l\'écran capture le cadre en PNG de 512 px, et rend le sticker', (tester) async {
+      final api = _FauxApi();
+      final service = StickersService(api)..suivreCompte('moi');
+      await tester.runAsync(service.assurer);
+      // Une vraie photo : 8 × 8 pixels rouges.
+      final photo = await tester.runAsync(() async {
+        final r = ui.PictureRecorder();
+        ui.Canvas(r).drawRect(const Rect.fromLTWH(0, 0, 8, 8), Paint()..color = Colors.red);
+        final img = await r.endRecording().toImage(8, 8);
+        return (await img.toByteData(format: ui.ImageByteFormat.png))!.buffer.asUint8List();
+      });
+      Sticker? rendu;
+      await tester.pumpWidget(MultiProvider(
+        providers: [
+          ChangeNotifierProvider<LocaleController>(create: (_) => LocaleController()),
+          ChangeNotifierProvider<StickersService>.value(value: service),
+        ],
+        child: MaterialApp(
+          home: Builder(
+            builder: (c) => TextButton(
+              onPressed: () async => rendu = await Navigator.of(c).push<Sticker>(
+                MaterialPageRoute(builder: (_) => CreerStickerScreen(photo: photo)),
+              ),
+              child: const Text('ouvrir'),
+            ),
+          ),
+        ),
+      ));
+      await tester.tap(find.text('ouvrir'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('creer_texte')), 'Salut');
+      await tester.pump();
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('creer_envoyer')),
+        200,
+        scrollable: find.descendant(of: find.byType(ListView), matching: find.byType(Scrollable)).first,
+      );
+      await tester.runAsync(() async {
+        await tester.tap(find.byKey(const Key('creer_envoyer')));
+        for (var i = 0; i < 50 && rendu == null; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+          await tester.pump();
+        }
+      });
+      await tester.pumpAndSettle();
+      expect(api.appels, contains('UPLOAD /api/stickers/assets image/png'));
+      final octets = api.dernierEnvoi!;
+      // La signature PNG, et 512 × 512 dans l'en-tête IHDR.
+      expect(octets.sublist(1, 4), 'PNG'.codeUnits);
+      final entete = ByteData.sublistView(octets, 16, 24);
+      expect(entete.getUint32(0), 512);
+      expect(entete.getUint32(4), 512);
+      expect(rendu?.id, 92);
     });
   });
 }

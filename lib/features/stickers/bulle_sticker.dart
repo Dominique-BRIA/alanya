@@ -80,6 +80,20 @@ Future<void> ouvrirStickerRecu(BuildContext context, ChargeSticker charge) {
       final sticker = svc.ouverts ? svc.sticker(charge.sid) : null;
       final pack = svc.ouverts ? svc.packParCode(charge.pack) : null;
       final favori = sticker != null && svc.estFavori(sticker.id);
+      // La création de quelqu'un d'autre (25/10/2026) : ni au catalogue ni à
+      // moi — on peut en garder une copie, comme WhatsApp, ou la signaler.
+      final creationAutrui = svc.ouverts && sticker == null && charge.pack.startsWith('perso-');
+      Future<void> agir(Future<void> Function() action, String reussite) async {
+        final messager = ScaffoldMessenger.of(ctx);
+        final ok = trLu(ctx, reussite);
+        final erreur = trLu(ctx, 'stickers_erreur');
+        try {
+          await action();
+          messager.showSnackBar(SnackBar(content: Text(ok)));
+        } catch (_) {
+          messager.showSnackBar(SnackBar(content: Text(erreur)));
+        }
+      }
       return SafeArea(
         // Défile sur un petit écran plutôt que de déborder.
         child: SingleChildScrollView(
@@ -94,9 +108,26 @@ Future<void> ouvrirStickerRecu(BuildContext context, ChargeSticker charge) {
                   pack.nomDans(langue),
                   style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
                 )
-              else
+              else if (svc.estMaCreation(charge.sid))
+                Text(tr(ctx, 'stickers_creations'),
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16))
+              else if (!creationAutrui)
                 Text(tr(ctx, 'stickers_indisponible'), textAlign: TextAlign.center),
               const SizedBox(height: 12),
+              if (creationAutrui && svc.creation)
+                ListTile(
+                  key: const Key('sticker_enregistrer'),
+                  leading: const Icon(Icons.bookmark_add_outlined),
+                  title: Text(tr(ctx, 'stickers_enregistrer')),
+                  onTap: () => agir(() => svc.copier(charge.sid), 'stickers_enregistre'),
+                ),
+              if (creationAutrui)
+                ListTile(
+                  key: const Key('sticker_signaler'),
+                  leading: const Icon(Icons.flag_outlined),
+                  title: Text(tr(ctx, 'stickers_signaler')),
+                  onTap: () => agir(() => svc.signaler(charge.assetId), 'stickers_signale'),
+                ),
               if (sticker != null)
                 ListTile(
                   key: const Key('sticker_favori'),
@@ -108,7 +139,7 @@ Future<void> ouvrirStickerRecu(BuildContext context, ChargeSticker charge) {
                     } catch (_) {
                       if (ctx.mounted) {
                         ScaffoldMessenger.of(ctx).showSnackBar(
-                          SnackBar(content: Text(tr(ctx, 'stickers_erreur'))),
+                          SnackBar(content: Text(trLu(ctx, 'stickers_erreur'))),
                         );
                       }
                     }

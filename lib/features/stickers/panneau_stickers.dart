@@ -5,6 +5,7 @@ import '../../core/locale_controller.dart';
 import '../../l10n/app_localizations.dart';
 import '../../theme/alanya_theme.dart';
 import 'boutique_stickers_screen.dart';
+import 'creer_sticker_screen.dart';
 import 'image_sticker.dart';
 import 'stickers_service.dart';
 
@@ -28,6 +29,9 @@ class PanneauStickers extends StatefulWidget {
 const _recherche = -1;
 const _recents = -2;
 const _favoris = -3;
+
+/// « Mes créations » (25/10/2026) : une case « Créer » en tête de la grille.
+const _creations = -4;
 
 class _PanneauStickersState extends State<PanneauStickers> {
   int? _actif;
@@ -53,6 +57,52 @@ class _PanneauStickersState extends State<PanneauStickers> {
     return packs.isNotEmpty ? packs.first.id : _favoris;
   }
 
+  /// Crée un sticker et l'ENVOIE aussitôt, comme WhatsApp.
+  Future<void> _creer() async {
+    final cree = await CreerStickerScreen.ouvrir(context);
+    if (cree != null && mounted) {
+      setState(() => _actif = _creations);
+      widget.onEnvoyer(cree);
+    }
+  }
+
+  /// Appui long sur une de MES créations : favori, ou suppression.
+  Future<void> _optionsCreation(Sticker st) async {
+    final s = context.read<StickersService>();
+    final choix = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ImageSticker(url: st.url, taille: 120),
+            ListTile(
+              leading: Icon(s.estFavori(st.id) ? Icons.star : Icons.star_border),
+              title: Text(tr(ctx, s.estFavori(st.id) ? 'stickers_retirer_favori' : 'stickers_ajouter_favori')),
+              onTap: () => Navigator.pop(ctx, 'favori'),
+            ),
+            ListTile(
+              key: const Key('creation_supprimer'),
+              leading: const Icon(Icons.delete_outline),
+              title: Text(tr(ctx, 'stickers_supprimer')),
+              onTap: () => Navigator.pop(ctx, 'supprimer'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || choix == null) return;
+    if (choix == 'favori') return _basculerFavori(st);
+    final messager = ScaffoldMessenger.of(context);
+    final erreur = trLu(context, 'stickers_erreur');
+    try {
+      await s.supprimerCreation(st.id);
+    } catch (_) {
+      messager.showSnackBar(SnackBar(content: Text(erreur)));
+    }
+  }
+
   Future<void> _basculerFavori(Sticker st) async {
     final s = context.read<StickersService>();
     final ajout = !s.estFavori(st.id);
@@ -61,12 +111,12 @@ class _PanneauStickersState extends State<PanneauStickers> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         duration: const Duration(seconds: 2),
-        content: Text(tr(context, ajout ? 'stickers_favori_ajoute' : 'stickers_favori_retire')),
+        content: Text(trLu(context, ajout ? 'stickers_favori_ajoute' : 'stickers_favori_retire')),
       ));
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(tr(context, 'stickers_erreur'))),
+          SnackBar(content: Text(trLu(context, 'stickers_erreur'))),
         );
       }
     }
@@ -96,6 +146,9 @@ class _PanneauStickersState extends State<PanneauStickers> {
       case _favoris:
         grille = s.stickersFavoris;
         vide = 'stickers_vide_favoris';
+      case _creations:
+        grille = s.creations?.stickers ?? const [];
+        vide = null;
       default:
         grille = packs.firstWhere((p) => p.id == actif).stickers;
     }
@@ -136,6 +189,9 @@ class _PanneauStickersState extends State<PanneauStickers> {
                         tr(context, 'stickers_recents')),
                     onglet(_favoris, Icon(Icons.star_border, size: 21, color: actif == _favoris ? accent : muted),
                         tr(context, 'stickers_favoris')),
+                    if (s.creation)
+                      onglet(_creations, Icon(Icons.brush_outlined, size: 20, color: actif == _creations ? accent : muted),
+                          tr(context, 'stickers_creations')),
                     for (final p in packs)
                       onglet(
                         p.id,
@@ -174,7 +230,7 @@ class _PanneauStickersState extends State<PanneauStickers> {
             ),
           ),
         Expanded(
-          child: grille.isEmpty
+          child: grille.isEmpty && actif != _creations
               ? Center(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
@@ -192,14 +248,37 @@ class _PanneauStickersState extends State<PanneauStickers> {
                     mainAxisSpacing: 6,
                     crossAxisSpacing: 6,
                   ),
-                  itemCount: grille.length,
-                  itemBuilder: (_, i) {
-                    final st = grille[i];
+                  // « Mes créations » commence par la case « Créer ».
+                  itemCount: grille.length + (actif == _creations ? 1 : 0),
+                  itemBuilder: (_, n) {
+                    if (actif == _creations && n == 0) {
+                      return InkWell(
+                        key: const Key('sticker_creer'),
+                        borderRadius: BorderRadius.circular(10),
+                        onTap: _creer,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: muted.withValues(alpha: 0.4)),
+                          ),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.add_photo_alternate_outlined, color: accent),
+                              const SizedBox(height: 4),
+                              Text(tr(context, 'stickers_creer'),
+                                  style: TextStyle(fontSize: 12, color: accent)),
+                            ],
+                          ),
+                        ),
+                      );
+                    }
+                    final st = grille[actif == _creations ? n - 1 : n];
                     return InkWell(
                       key: ValueKey('sticker-${st.id}'),
                       borderRadius: BorderRadius.circular(10),
                       onTap: () => widget.onEnvoyer(st),
-                      onLongPress: () => _basculerFavori(st),
+                      onLongPress: () => s.estMaCreation(st.id) ? _optionsCreation(st) : _basculerFavori(st),
                       child: Padding(
                         padding: const EdgeInsets.all(4),
                         child: ImageSticker(url: st.url, taille: 76),

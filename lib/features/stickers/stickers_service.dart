@@ -193,6 +193,8 @@ class StickersService extends ChangeNotifier {
     mesPacks = const [];
     favoris = const [];
     recents = const [];
+    creation = false;
+    creations = null;
     notifyListeners();
   }
 
@@ -207,6 +209,13 @@ class StickersService extends ChangeNotifier {
 
   /// Les derniers envoyés depuis cet appareil, le plus récent d'abord.
   List<int> recents = const [];
+
+  /// La console permet-elle de CRÉER ses stickers (25/10/2026) ?
+  bool creation = false;
+
+  /// « Mes créations » : mon pack personnel, la plus récente d'abord ; `null`
+  /// tant que je n'ai rien créé.
+  PackStickers? creations;
 
   bool _charge = false;
   Future<void>? _enCours;
@@ -275,6 +284,9 @@ class StickersService extends ChangeNotifier {
         for (final f in (j['favorites'] as List? ?? const []))
           if (f is int) f,
       ];
+      final features = j['features'];
+      creation = features is Map && features['creation'] == true;
+      creations = PackStickers.depuisJson(j['created']);
     } catch (_) {}
   }
 
@@ -295,13 +307,17 @@ class StickersService extends ChangeNotifier {
   }
 
   Sticker? sticker(int id) {
-    for (final p in catalogue) {
+    for (final p in [...catalogue, ?creations]) {
       for (final s in p.stickers) {
         if (s.id == id) return s;
       }
     }
     return null;
   }
+
+  /// Un sticker de MES créations ?
+  bool estMaCreation(int id) =>
+      creations?.stickers.any((s) => s.id == id) ?? false;
 
   /// Mes packs, dans l'ordre du panneau (ceux qui existent encore).
   List<PackStickers> get packsInstalles => [
@@ -327,7 +343,7 @@ class StickersService extends ChangeNotifier {
     final q = requete.trim().toLowerCase();
     if (q.isEmpty) return const [];
     return [
-      for (final p in packsInstalles)
+      for (final p in [?creations, ...packsInstalles])
         for (final s in p.stickers)
           if (s.emoji.contains(q) ||
               s.nom.values.any((n) => n.toLowerCase().contains(q)))
@@ -404,6 +420,69 @@ class StickersService extends ChangeNotifier {
     }
   }
 
+  // ── Créer ses stickers (25/10/2026) ───────────────────────────────────────
+
+  /// Crée un sticker à partir d'une image PNG (le cadre capturé par l'écran
+  /// de création) ; il entre en tête de « Mes créations ». Rend le sticker.
+  Future<Sticker> creer(Uint8List png, {String emoji = ''}) async {
+    final r = await _api.uploadBytes(
+      '/api/stickers/assets',
+      png,
+      'sticker.png',
+      'image/png',
+      fields: {if (emoji.isNotEmpty) 'emoji': emoji},
+    );
+    await _relireMoi();
+    final cree = sticker(r['stickerId'] as int);
+    if (cree == null) throw StateError('Sticker créé introuvable');
+    return cree;
+  }
+
+  /// Retire une de mes créations. Son image reste dans les messages envoyés.
+  Future<void> supprimerCreation(int id) async {
+    final avant = creations;
+    final avantFavoris = favoris;
+    if (avant != null) {
+      creations = PackStickers(
+        id: avant.id,
+        code: avant.code,
+        nom: avant.nom,
+        stickers: avant.stickers.where((s) => s.id != id).toList(),
+      );
+      favoris = favoris.where((f) => f != id).toList();
+      notifyListeners();
+    }
+    try {
+      await _api.delete('/api/stickers/stickers/$id');
+      unawaited(_memoriserMoi());
+    } catch (e) {
+      creations = avant;
+      favoris = avantFavoris;
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  /// Garde dans « Mes créations » un sticker reçu (celui d'un autre).
+  Future<void> copier(int stickerId) async {
+    await _api.post('/api/stickers/stickers/$stickerId/copy', const {});
+    await _relireMoi();
+  }
+
+  /// Signale l'image d'un sticker reçu à la modération.
+  Future<void> signaler(int assetId) =>
+      _api.post('/api/stickers/signalements', {'assetId': assetId, 'motif': 'inapproprie'});
+
+  Future<void> _relireMoi() async {
+    final moi = await _api.get('/api/stickers/me');
+    _lireMoi(jsonEncode(moi));
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_cleMoi, jsonEncode(moi));
+    } catch (_) {}
+  }
+
   /// Après un envoi : le sticker passe en tête des récents de cet appareil.
   Future<void> noterRecent(int stickerId) async {
     recents = [
@@ -425,6 +504,24 @@ class StickersService extends ChangeNotifier {
         jsonEncode({
           'packs': [for (final id in mesPacks) {'id': id}],
           'favorites': favoris,
+          'features': {'creation': creation},
+          if (creations case final PackStickers c)
+            'created': {
+              'id': c.id,
+              'code': c.code,
+              'nom': c.nom,
+              'stickers': [
+                for (final st in c.stickers)
+                  {
+                    'id': st.id,
+                    'assetId': st.assetId,
+                    'emoji': st.emoji,
+                    'nom': st.nom,
+                    'url': st.url,
+                    'anime': st.anime,
+                  },
+              ],
+            },
         }),
       );
     } catch (_) {}

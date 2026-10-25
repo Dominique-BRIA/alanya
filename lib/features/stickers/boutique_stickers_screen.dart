@@ -47,7 +47,7 @@ class _BoutiqueStickersScreenState extends State<BoutiqueStickersScreen> {
 Future<void> basculerPack(BuildContext context, PackStickers p) async {
   final s = context.read<StickersService>();
   final messager = ScaffoldMessenger.of(context);
-  final erreur = tr(context, 'stickers_erreur');
+  final erreur = trLu(context, 'stickers_erreur');
   try {
     if (s.estInstalle(p.id)) {
       await s.retirer(p.id);
@@ -139,7 +139,7 @@ class _MesPacks extends StatelessWidget {
         s.ordonner(ids).catchError((_) {
           if (context.mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(tr(context, 'stickers_erreur'))),
+              SnackBar(content: Text(trLu(context, 'stickers_erreur'))),
             );
           }
         });
