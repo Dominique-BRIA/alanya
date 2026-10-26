@@ -154,7 +154,7 @@ void main() {
       expect(signature().numeroSeul, '83792376');
     });
 
-    test('la copie téléchargée est chiffrée, au nom de qui télécharge', () async {
+    test("la copie téléchargée est chiffrée, à l'empreinte de qui télécharge", () async {
       final dossier = await Directory.systemTemp.createTemp('pdfp');
       addTearDown(() => dossier.delete(recursive: true));
       final source = File('${dossier.path}/contrat.pdf')
@@ -172,7 +172,10 @@ void main() {
       final octets = c.fichier.readAsBytesSync();
       expect(DetecteurCopieSignee.contientSignature(octets), isTrue);
       final doc = PdfDocument(inputBytes: octets, password: 'ouvre-moi');
-      expect(PdfTextExtractor(doc).extractText(), contains('83792376'));
+      // L'empreinte en haut à droite, plus l'Alanya ID (25/10/2026, patron).
+      final texte = PdfTextExtractor(doc).extractText();
+      expect(texte, contains('0123'));
+      expect(texte, isNot(contains('83792376')));
       doc.dispose();
     });
 

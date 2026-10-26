@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../services/e2ee/e2ee_media.dart' show ProtectionPdf;
 import 'alanya_id_formatter.dart';
+import 'audio_metadonnees.dart';
 import 'mp4_metadonnees.dart';
 import 'protection_pdf_copie.dart';
 
@@ -128,7 +129,33 @@ class SignatureSortie {
   /// une copie PROTÉGÉE en haut à droite (24/10/2026, demande du user).
   String get numeroSeul => alanyaId.replaceAll(RegExp(r'\D'), '');
 
-  /// Le texte écrit aux quatre bords.
+  /// L'Alanya ID tel que l'écrit le filigrane : « AW 3333 3333 ».
+  String get alanyaIdAw {
+    final d = numeroSeul;
+    return d.length == 8 ? 'AW ${d.substring(0, 4)} ${d.substring(4)}' : 'AW $d';
+  }
+
+  /// PHOTOS ET VIDÉOS : UN CHAMP PAR BORD (25/10/2026, recommandation retenue
+  /// par le patron) — haut, bas, gauche, droite, séparés par « \n » :
+  /// l'application et l'Alanya ID, la date, l'appareil, l'empreinte. Écrits
+  /// en blanc cerné de noir, 16 px au moins (`SignatureDocument.kt`).
+  String get bordsVisuels => [
+    '$application · $alanyaIdAw',
+    dateLisible,
+    appareil,
+    codeLisible,
+  ].join('\n');
+
+  /// PDF : l'EMPREINTE NUMÉRIQUE à la place de l'Alanya ID (25/10/2026,
+  /// demande du patron). L'Alanya ID reste dans les métadonnées.
+  String get texteBordsPdf => [
+    application,
+    codeLisible,
+    appareil,
+    dateLisible,
+  ].join(' · ');
+
+  /// La chaîne complète (commentaire d'une vidéo, ancien filigrane).
   String get texteBords => [
     application,
     'Alanya $alanyaId',
@@ -152,12 +179,21 @@ class SignatureSortie {
   };
 
   /// Les mêmes informations pour une vidéo (`moov/udta/meta/ilst`).
+  /// 🐛 LES MÉTADONNÉES D'UNE VIDÉO SEMBLAIENT INCOMPLÈTES (user, 25/10/2026) :
+  /// les huit champs n'étaient que dans des éléments libres (`----`), que
+  /// l'Explorateur de Windows n'affiche pas. Ils vont aussi, en toutes
+  /// lettres, dans le COMMENTAIRE (`©cmt`) — comme le commentaire EXIF d'une
+  /// image — et l'onglet « Détails » les montre ; titre, description et
+  /// copyright suivent.
   ElementsMp4 get elementsMp4 => ElementsMp4(
     standard: {
+      '©nam': texteBords,
+      'desc': texteBords,
       '©too': application,
       '©ART': 'Alanya $alanyaId',
-      '©cmt': texteBords,
+      '©cmt': [for (final e in metadonnees.entries) '${e.key}=${e.value}'].join('; '),
       '©day': dateIso,
+      'cprt': application,
     },
     libres: metadonnees,
   );
@@ -192,6 +228,9 @@ enum NatureSignature {
   /// à défaut, métadonnées seules.
   video,
 
+  /// L'empreinte SEULE dans les métadonnées (MP3, WAV, M4A) — 25/10/2026.
+  audio,
+
   /// Rien : la copie sort telle quelle (le serveur note quand même le geste).
   aucune,
 }
@@ -202,6 +241,7 @@ String _extension(String nom) {
 }
 
 const _imagesSignables = {'jpg', 'jpeg', 'png', 'webp', 'heic', 'heif', 'bmp'};
+const _audios = {'mp3', 'm4a', 'aac', 'wav', 'ogg', 'oga', 'opus', 'flac', 'amr', '3ga', 'weba'};
 
 NatureSignature natureSignature(String mime, String nom) {
   final m = mime.toLowerCase();
@@ -213,6 +253,8 @@ NatureSignature natureSignature(String mime, String nom) {
       (m.startsWith('image/') && m != 'image/gif' && !m.contains('svg'))) {
     return NatureSignature.image;
   }
+  // L'audio AVANT la vidéo : un M4A est un MP4, il ne doit pas être réencodé.
+  if (m.startsWith('audio/') || _audios.contains(ext)) return NatureSignature.audio;
   // Toute vidéo peut recevoir l'incrustation (Android la réencode en MP4) ;
   // à défaut, seuls MP4, MOV et 3GP reçoivent les métadonnées.
   if (m.startsWith('video/') || Mp4Metadonnees.prisEnCharge(m, nom)) {
@@ -278,11 +320,12 @@ class SignatureDocument {
       switch (natureSignature(mime, nom)) {
         case NatureSignature.pdf:
         case NatureSignature.image:
+          final pdf = natureSignature(mime, nom) == NatureSignature.pdf;
           final r = await _canal.invokeMapMethod<String, Object?>('signer', {
             'entree': source.path,
             'sortie': cible,
             'mime': mime,
-            'bords': signature.texteBords,
+            'bords': pdf ? signature.texteBordsPdf : signature.bordsVisuels,
             'meta': signature.metadonnees,
           });
           final chemin = r?['chemin'] as String?;
@@ -311,6 +354,10 @@ class SignatureDocument {
             mime: mime,
             signee: true,
           );
+        case NatureSignature.audio:
+          final ok = await _empreinteAudio(source, File(cible), signature.code);
+          if (!ok) break;
+          return CopieSignee(fichier: File(cible), nom: nom, mime: mime, signee: true);
         case NatureSignature.aucune:
           break;
       }
@@ -341,7 +388,8 @@ class SignatureDocument {
         travail = CopiePdfProtegee(
           octets: await source.readAsBytes(),
           protection: protection,
-          coin: signature.numeroSeul,
+          // L'empreinte, et non plus l'Alanya ID (25/10/2026, patron).
+          coin: signature.codeLisible,
           meta: signature.metadonnees,
         );
       } else {
@@ -349,7 +397,7 @@ class SignatureDocument {
           'entree': source.path,
           'sortie': cible,
           'mime': mime,
-          'bords': signature.texteBords,
+          'bords': signature.texteBordsPdf,
           'meta': signature.metadonnees,
         });
         final chemin = r?['chemin'] as String?;
@@ -375,6 +423,29 @@ class SignatureDocument {
     }
   }
 
+  /// L'empreinte SEULE dans un fichier audio (`audio_metadonnees.dart`).
+  /// Rend faux si le format n'est pas pris en charge.
+  static Future<bool> _empreinteAudio(File source, File cible, String code) async {
+    final debut = await source.openRead(0, 16).fold<List<int>>([], (a, b) => a..addAll(b));
+    switch (formatAudio(Uint8List.fromList(debut))) {
+      case FormatAudio.mp4:
+        await Mp4Metadonnees.ecrire(
+          source,
+          cible,
+          ElementsMp4(standard: const {}, libres: {CleMeta.empreinte: code}),
+        );
+        return true;
+      case FormatAudio.mp3:
+        await cible.writeAsBytes(avecEmpreinteMp3(await source.readAsBytes(), code), flush: true);
+        return true;
+      case FormatAudio.wav:
+        await cible.writeAsBytes(avecEmpreinteWav(await source.readAsBytes(), code), flush: true);
+        return true;
+      case null:
+        return false;
+    }
+  }
+
   /// La signature incrustée aux quatre bords d'une vidéo (Android seulement,
   /// `SignatureVideo.kt`), puis les métadonnées écrites sur le MP4 produit.
   ///
@@ -395,7 +466,7 @@ class SignatureDocument {
       final r = await _canal.invokeMapMethod<String, Object?>('signerVideo', {
         'entree': source.path,
         'sortie': brute.path,
-        'bords': signature.texteBords,
+        'bords': signature.bordsVisuels,
       });
       if (r?['chemin'] == null || !await brute.exists()) return null;
     } catch (e) {

@@ -312,46 +312,68 @@ class SignatureDocument(private val contexte: Context) {
      * presque carrée, chaque ligne occupait tout son bord et mordait sur la
      * colonne voisine. Chaque ligne laisse maintenant libre, à ses deux bouts,
      * la bande du texte perpendiculaire. Même règle que le web.
+     *
+     * 🔴 UN CHAMP PAR BORD (25/10/2026, recommandation retenue par le patron) :
+     * [texte] porte quatre lignes séparées par « \n » — haut, bas, gauche,
+     * droite. Plus courte qu'une chaîne complète, chaque ligne garde sa pleine
+     * taille au lieu d'être réduite pour tenir sur le bord. Une seule ligne
+     * (ancien appel) est répétée sur les quatre bords.
      */
     internal fun peindreBords(toile: Canvas, l: Float, h: Float, texte: String) {
-        val base = max(12f, min(l, h) / 50f)
+        val lignes = texte.split('\n')
+        val (haut, bas, gauche, droite) = if (lignes.size == 4) lignes else List(4) { texte }
+        // 16 px au moins (25/10/2026, demande du patron), davantage sur une
+        // grande image : la ligne garde sa taille lisible une fois l'image
+        // réduite par WhatsApp.
+        val base = max(16f, min(l, h) / 50f)
+        // 🔴 BLANC CERNÉ DE NOIR (25/10/2026) : le rouge sur blanc devenait
+        // illisible quand WhatsApp recompressait la photo ou la vidéo — la
+        // compression bave sur les couleurs, pas sur un fort contraste.
         val remplissage = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(225, (ROUGE shr 16) and 0xFF, (ROUGE shr 8) and 0xFF, ROUGE and 0xFF)
+            color = Color.argb(240, 255, 255, 255)
             typeface = Typeface.DEFAULT_BOLD
             textSize = base
         }
         val contour = Paint(remplissage).apply {
             style = Paint.Style.STROKE
-            color = Color.argb(200, 255, 255, 255)
+            strokeJoin = Paint.Join.ROUND
+            color = Color.argb(230, 0, 0, 0)
         }
         val marge = base * 0.6f
         // La bande du texte perpendiculaire : sa marge, plus sa hauteur de ligne.
         val coin = marge + base * 1.3f
-        val unite = remplissage.measureText(texte) / base
-        fun taillePour(longueur: Float) = min(base, (longueur - 2 * coin) / unite)
+        // Réduite seulement si la ligne ne tient pas sur son bord.
+        fun taillePour(ligne: String, longueur: Float): Float {
+            remplissage.textSize = base
+            val unite = remplissage.measureText(ligne) / base
+            return if (unite <= 0f) base else min(base, (longueur - 2 * coin) / unite)
+        }
 
-        fun bord(cx: Float, cy: Float, angle: Float, taille: Float) {
+        fun bord(ligne: String, cx: Float, cy: Float, angle: Float, taille: Float) {
+            if (ligne.isBlank()) return
             remplissage.textSize = taille
             contour.textSize = taille
-            contour.strokeWidth = taille * 0.18f
-            val largeur = remplissage.measureText(texte)
+            contour.strokeWidth = taille * 0.22f
+            val largeur = remplissage.measureText(ligne)
             val m = remplissage.fontMetrics
             val y = -(m.ascent + m.descent) / 2
             toile.save()
             toile.translate(cx, cy)
             toile.rotate(angle)
-            toile.drawText(texte, -largeur / 2, y, contour)
-            toile.drawText(texte, -largeur / 2, y, remplissage)
+            toile.drawText(ligne, -largeur / 2, y, contour)
+            toile.drawText(ligne, -largeur / 2, y, remplissage)
             toile.restore()
         }
 
-        val tH = taillePour(l)
-        val tV = taillePour(h)
-        bord(l / 2, marge + tH * 0.6f, 0f, tH)
-        bord(l / 2, h - marge - tH * 0.6f, 0f, tH)
+        val tHaut = taillePour(haut, l)
+        val tBas = taillePour(bas, l)
+        val tGauche = taillePour(gauche, h)
+        val tDroite = taillePour(droite, h)
+        bord(haut, l / 2, marge + tHaut * 0.6f, 0f, tHaut)
+        bord(bas, l / 2, h - marge - tBas * 0.6f, 0f, tBas)
         // Gauche : lu de bas en haut. Droite : lu de haut en bas.
-        bord(marge + tV * 0.6f, h / 2, -90f, tV)
-        bord(l - marge - tV * 0.6f, h / 2, 90f, tV)
+        bord(gauche, marge + tGauche * 0.6f, h / 2, -90f, tGauche)
+        bord(droite, l - marge - tDroite * 0.6f, h / 2, 90f, tDroite)
     }
 
     /**
@@ -364,7 +386,8 @@ class SignatureDocument(private val contexte: Context) {
             val application = ascii(meta[CLE_APPLICATION] ?: "Alanya Work")
             exif.setAttribute(ExifInterface.TAG_SOFTWARE, application)
             meta[CLE_ALANYA_ID]?.let { exif.setAttribute(ExifInterface.TAG_ARTIST, ascii("Alanya $it")) }
-            exif.setAttribute(ExifInterface.TAG_IMAGE_DESCRIPTION, ascii(texte))
+            // Les quatre lignes des bords, sur une seule ligne de description.
+            exif.setAttribute(ExifInterface.TAG_IMAGE_DESCRIPTION, ascii(texte.replace("\n", " · ")))
             exif.setAttribute(ExifInterface.TAG_COPYRIGHT, application)
             exif.setAttribute(
                 ExifInterface.TAG_USER_COMMENT,

@@ -27,6 +27,22 @@ void main() {
     );
   });
 
+  test('photos et vidéos : un champ par bord (recommandation du 25/10/2026)', () {
+    expect(signature().bordsVisuels.split('\n'), [
+      'Alanya Work · AW 6764 1599',
+      '22/10/2026 09:05',
+      'samsung SM-A515F',
+      '3F9A 0C1E 5B7D 2A4C 6E8F 0A1B 2C3D 4E5F',
+    ]);
+  });
+
+  test("PDF : l'empreinte à la place de l'Alanya ID (25/10/2026)", () {
+    final t = signature().texteBordsPdf;
+    expect(t, contains('3F9A 0C1E'));
+    expect(t, isNot(contains('67 64 15 99')));
+    expect(t, isNot(contains('6764')));
+  });
+
   // Les noms sont écrits en toutes lettres : ce sont ceux que lit une
   // personne dans les propriétés du fichier (demande du user, 24/10/2026).
   test('les métadonnées, sous leurs noms courts', () {
@@ -55,7 +71,14 @@ void main() {
 
   test('la vidéo reçoit les mêmes informations, sous les mêmes noms', () {
     final e = signature().elementsMp4;
-    expect(e.standard['©cmt'], signature().texteBords);
+    // Les huit champs en toutes lettres dans le commentaire, que Windows
+    // affiche (onglet « Détails »), comme le commentaire EXIF d'une image.
+    final commentaire = e.standard['©cmt']!;
+    for (final c in signature().metadonnees.entries) {
+      expect(commentaire, contains('${c.key}=${c.value}'));
+    }
+    expect(e.standard['©nam'], signature().texteBords);
+    expect(e.standard['cprt'], 'Alanya Work');
     expect(e.standard['©ART'], 'Alanya 67 64 15 99');
     expect(e.libres, signature().metadonnees);
   });
@@ -83,6 +106,10 @@ void main() {
     expect(natureSignature('image/gif', 'a.gif'), NatureSignature.aucune);
     expect(natureSignature('image/svg+xml', 'a.svg'), NatureSignature.aucune);
     expect(natureSignature('video/mp4', 'a.mp4'), NatureSignature.video);
+    // L'audio (25/10/2026) : un M4A est un MP4, mais il n'est pas réencodé.
+    expect(natureSignature('audio/mpeg', 'a.mp3'), NatureSignature.audio);
+    expect(natureSignature('audio/mp4', 'voix.m4a'), NatureSignature.audio);
+    expect(natureSignature('application/octet-stream', 'son.wav'), NatureSignature.audio);
     expect(natureSignature('video/quicktime', 'a.mov'), NatureSignature.video);
     // Incrustable sur Android (réencodée en MP4), sans métadonnées sinon.
     expect(natureSignature('video/webm', 'a.webm'), NatureSignature.video);
