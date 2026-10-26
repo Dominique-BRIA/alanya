@@ -20,7 +20,7 @@ Sous le message PDF :
 
 La copie **téléchargée** :
 
-- **avec mot de passe** : plus de texte aux quatre bords. Seul le **numéro Alanya de la personne qui télécharge** est écrit, en chiffres seuls, **en haut à droite** de chaque page. Le fichier est chiffré en AES-256, avec l'impression interdite si l'expéditeur l'a choisi ;
+- **avec mot de passe** : plus de texte aux quatre bords. Seule l'**empreinte numérique** de la personne qui télécharge est écrite, **en haut à droite** de chaque page (le numéro Alanya jusqu'au 25/10/2026 ; il reste dans les métadonnées). Le fichier est chiffré en AES-256, avec l'impression interdite si l'expéditeur l'a choisi ;
 - **sans mot de passe, impression interdite** : la signature habituelle aux quatre bords, plus l'interdiction d'imprimer. Le mot de passe propriétaire est alors tiré au hasard et personne ne le voit.
 
 Dans Alanya, le document reste lisible dans la visionneuse protégée, comme avant. Les métadonnées (empreinte numérique, Alanya ID, appareil…) sont toujours écrites, et une copie téléchargée reste reconnue si on essaie de la renvoyer en document sensible.
@@ -33,7 +33,7 @@ Ils voyagent **dans l'enveloppe chiffrée** du message (champ `protection` du de
 
 ## Bibliothèque : Syncfusion Flutter PDF
 
-Le chiffrement et le dessin du numéro passent par **[Syncfusion Flutter PDF](https://pub.dev/packages/syncfusion_flutter_pdf)** (`syncfusion_flutter_pdf`), utilisée sous la **[Syncfusion Community License](https://www.syncfusion.com/products/communitylicense)**.
+Le chiffrement et le dessin de l'empreinte passent par **[Syncfusion Flutter PDF](https://pub.dev/packages/syncfusion_flutter_pdf)** (`syncfusion_flutter_pdf`), utilisée sous la **[Syncfusion Community License](https://www.syncfusion.com/products/communitylicense)**.
 
 ⚠️ Cette licence gratuite a des conditions : l'entreprise doit rester sous des plafonds de chiffre d'affaires, de développeurs et de salariés fixés par Syncfusion. Les vérifier sur la page de la licence et s'inscrire au programme Community avec le compte de l'entreprise. Au-delà de ces plafonds, une licence payante est nécessaire.
 

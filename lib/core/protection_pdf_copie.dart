@@ -24,9 +24,10 @@ import '../services/e2ee/e2ee_media.dart' show ProtectionPdf;
 ///
 /// Ce qu'elle fait de la copie qui sort :
 ///
-/// * AVEC mot de passe : plus de texte aux quatre bords — seulement le numéro
-///   Alanya de QUI TÉLÉCHARGE, en chiffres seuls, EN HAUT À DROITE de chaque
-///   page ([coin]) ; puis les métadonnées et le chiffrement.
+/// * AVEC mot de passe : plus de texte aux quatre bords — seulement
+///   l'EMPREINTE NUMÉRIQUE de qui télécharge, EN HAUT À DROITE de chaque page
+///   ([coin] ; le numéro Alanya jusqu'au 25/10/2026, demande du patron) ;
+///   puis les métadonnées et le chiffrement.
 /// * SANS mot de passe mais sans impression : la copie arrive déjà signée aux
 ///   quatre bords (`SignatureDocument.kt`), on n'y ajoute que la restriction.
 ///
@@ -48,7 +49,7 @@ class CopiePdfProtegee {
   final Uint8List octets;
   final ProtectionPdf protection;
 
-  /// Le texte du coin supérieur droit (le numéro, chiffres seuls), ou `null`
+  /// Le texte du coin supérieur droit (l'empreinte numérique), ou `null`
   /// pour ne rien écrire (la copie porte déjà ses quatre bords).
   final String? coin;
 
@@ -96,7 +97,7 @@ Uint8List protegerPdf(CopiePdfProtegee p) {
   }
 }
 
-/// Le numéro en haut à droite de la page, par-dessus le contenu.
+/// L'empreinte en haut à droite de la page, par-dessus le contenu.
 ///
 /// Taille proportionnée à la page comme les quatre bords (entre 7 et 12 pt),
 /// un peu plus grande puisqu'il est seul.
