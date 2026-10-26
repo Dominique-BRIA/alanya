@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
@@ -442,25 +443,41 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
   /// [sensible] : document SENSIBLE (18/10/2026) — filigrane et visionneuse
   /// protégée chez le destinataire, ni transfert ni partage.
   Future<void> _pickDocuments({bool sensible = false}) async {
+    /*
+     * 🐛 UN GROS FICHIER FAISAIT TUER L'APPLICATION (user, 26/10/2026).
+     * `withData: true` faisait lire TOUT le fichier par le greffon Android,
+     * dans le tas Java — bien plus petit que la mémoire de Dart — puis le
+     * recopiait vers Dart : `OutOfMemoryError`, et le système fermait
+     * l'application. Et le plafond n'était vérifié qu'APRÈS cette lecture.
+     * Désormais : un chemin, la taille contrôlée d'abord, puis la lecture
+     * côté Dart, une seule copie.
+     */
     final result = await FilePicker.platform.pickFiles(
       type: FileType.any,
       allowMultiple: true,
-      withData: true,
+      withData: false,
     );
     if (result == null || result.files.isEmpty || !mounted) return;
     final results = <MediaPickResult>[];
     final tropGros = <String>[];
     for (final file in result.files) {
-      if (file.bytes == null) continue;
       // Le plafond et le message vivent dans `core/plafond_media.dart` : ce
       // contrôle n'existait qu'ICI, et les trois autres chemins de sélection
       // laissaient tout passer.
-      if (depassePlafondMedia(file.bytes!.length)) {
+      if (depassePlafondMedia(file.size)) {
         tropGros.add(file.name);
         continue;
       }
+      final Uint8List octets;
+      try {
+        octets = file.bytes ??
+            (file.path == null ? Uint8List(0) : await File(file.path!).readAsBytes());
+      } catch (_) {
+        continue;
+      }
+      if (octets.isEmpty) continue;
       results.add(MediaPickResult(
-        bytes: file.bytes!,
+        bytes: octets,
         fileName: file.name,
         mimeType: _guessMime(file.name),
         path: file.path,

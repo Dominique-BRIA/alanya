@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io' show SocketException;
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' show ClientException;
@@ -257,8 +256,10 @@ class EnvoiMediaStore extends ChangeNotifier {
           continue;
         }
 
+        // Les octets tels quels : une copie doublait la mémoire d'un gros
+        // fichier (26/10/2026).
         final envoye = await media.upload(
-          Uint8List.fromList(f.bytes),
+          f.bytes,
           f.fileName,
           f.mimeType,
           durationMs: f.durationMs,

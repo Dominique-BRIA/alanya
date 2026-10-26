@@ -86,6 +86,7 @@
         android:label="Alanya Work"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
+        android:largeHeap="true"
         android:usesCleartextTraffic="true">
         <!-- `singleTask` et NON `singleTop` : une seule instance de
              l'application peut exister, quel que soit le point d'entrée.
