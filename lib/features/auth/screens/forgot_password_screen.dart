@@ -143,7 +143,10 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
       });
       showAppSnackBar(tr(context, 'forgot_code_sent'));
     } on ApiException catch (e) {
-      _onError(e.message);
+      // 26/10/2026 : le serveur dit enfin quand aucun compte n'a cette adresse.
+      _onError(e.code == 'EMAIL_INCONNU'
+          ? trLu(context, 'forgot_email_unknown')
+          : e.message);
     } catch (_) {
       _onError(tr(context, 'network_error_retry'));
     }
