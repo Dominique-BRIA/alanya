@@ -327,7 +327,7 @@ class SuiviEnvoisMorceaux {
     try {
       // Un chemin dont le contenu ne correspond plus aux octets (fichier
       // remplacé depuis la sélection) chiffrerait autre chose que l'aperçu.
-      return File(p).lengthSync() == f.bytes.length ? p : null;
+      return File(p).lengthSync() == f.taille ? p : null;
     } catch (_) {
       return null;
     }

@@ -13,6 +13,10 @@ import '../../theme/alanya_theme.dart';
 import '../../l10n/app_localizations.dart';
 import '../../services/e2ee/e2ee_media.dart' show ProtectionPdf;
 
+/// Au-delà, un document choisi reste sur le disque : voir
+/// [MediaPickResult.tailleSurDisque].
+const int seuilSurDisque = 8 * 1024 * 1024;
+
 /// Résultat de la sélection de médias.
 class MediaPickResult {
   final Uint8List bytes;
@@ -89,7 +93,25 @@ class MediaPickResult {
     this.asset,
     this.sensible = false,
     this.protectionPdf,
+    this.tailleSurDisque,
   });
+
+  /// 🔴 UN DOCUMENT LOURD RESTE SUR LE DISQUE (26/10/2026, comme WhatsApp).
+  /// Non nul : [bytes] est VIDE et le contenu est à [path], qui pèse ce
+  /// nombre d'octets. Tenir 200 Mo en mémoire faisait tuer l'application ;
+  /// le chiffrement, l'envoi en morceaux et l'aperçu lisent le fichier.
+  final int? tailleSurDisque;
+
+  /// Le contenu est-il à [path] plutôt que dans [bytes] ?
+  bool get surDisque => tailleSurDisque != null;
+
+  /// Le poids du fichier, qu'il soit en mémoire ou sur le disque.
+  int get taille => tailleSurDisque ?? bytes.length;
+
+  /// Les octets, relus du disque si besoin — pour les seuls chemins qui ne
+  /// savent pas lire un fichier (envoi d'un seul bloc, ancien serveur).
+  Future<Uint8List> octets() async =>
+      surDisque ? await File(path!).readAsBytes() : bytes;
 
   /// Document SENSIBLE (18/10/2026) : voir `DescripteurMedia.sensible`.
   final bool sensible;
@@ -113,6 +135,8 @@ class MediaPickResult {
   }) =>
       MediaPickResult(
         bytes: bytes ?? this.bytes,
+        // De nouveaux octets remplacent le fichier : ils font foi.
+        tailleSurDisque: bytes == null ? tailleSurDisque : null,
         fileName: fileName ?? this.fileName,
         mimeType: mimeType ?? this.mimeType,
         durationMs: durationMs,
@@ -468,6 +492,26 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
         tropGros.add(file.name);
         continue;
       }
+      final mime = _guessMime(file.name);
+      /*
+       * Au-delà de [seuilSurDisque], un DOCUMENT n'est pas lu : il part du
+       * disque. Photos et vidéos sont encore lues — l'écran de légende les
+       * montre, et leur compression travaille sur des octets.
+       */
+      if (file.path != null &&
+          file.size > seuilSurDisque &&
+          !mime.startsWith('image/') &&
+          !mime.startsWith('video/')) {
+        results.add(MediaPickResult(
+          bytes: Uint8List(0),
+          tailleSurDisque: file.size,
+          fileName: file.name,
+          mimeType: mime,
+          path: file.path,
+          sensible: sensible,
+        ));
+        continue;
+      }
       final Uint8List octets;
       try {
         octets = file.bytes ??
@@ -479,7 +523,7 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
       results.add(MediaPickResult(
         bytes: octets,
         fileName: file.name,
-        mimeType: _guessMime(file.name),
+        mimeType: mime,
         path: file.path,
         sensible: sensible,
       ));

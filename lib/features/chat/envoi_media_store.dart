@@ -259,7 +259,7 @@ class EnvoiMediaStore extends ChangeNotifier {
         // Les octets tels quels : une copie doublait la mémoire d'un gros
         // fichier (26/10/2026).
         final envoye = await media.upload(
-          f.bytes,
+          await f.octets(),
           f.fileName,
           f.mimeType,
           durationMs: f.durationMs,

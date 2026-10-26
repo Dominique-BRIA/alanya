@@ -49,7 +49,7 @@ Future<Apercu> fabriquerApercu(
     if (mime.startsWith('image/')) return await _image(octets);
     if (mime.startsWith('video/')) return await _video(octets, chemin, dureeMs);
     if (mime.startsWith('audio/')) return Apercu(dureeMs: dureeMs);
-    if (mime == 'application/pdf') return await _pdf(octets);
+    if (mime == 'application/pdf') return await _pdf(octets, chemin);
   } catch (e) {
     debugPrint('[e2ee] aperçu impossible, le média part sans : $e');
   }
@@ -112,8 +112,12 @@ Future<Apercu> _video(Uint8List octets, String? chemin, int? dureeMs) async {
 }
 
 /// Un PDF : sa première page (~160 px) et son nombre de pages.
-Future<Apercu> _pdf(Uint8List octets) async {
-  final doc = await PdfDocument.openData(octets);
+Future<Apercu> _pdf(Uint8List octets, String? chemin) async {
+  // Un document resté sur le disque (26/10/2026) n'a pas d'octets : le moteur
+  // PDF lit le fichier lui-même.
+  final doc = octets.isEmpty && chemin != null
+      ? await PdfDocument.openFile(chemin)
+      : await PdfDocument.openData(octets);
   try {
     final pages = doc.pagesCount;
     final page = await doc.getPage(1);

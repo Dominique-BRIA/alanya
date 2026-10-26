@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
@@ -53,6 +54,34 @@ class DetecteurCopieSignee {
       octets.length < (1 << 20)
       ? Future.value(contientSignature(octets))
       : compute(contientSignature, octets);
+
+  /// La même chose pour un document resté SUR LE DISQUE (26/10/2026) : lu
+  /// par morceaux de 4 Mio, qui se chevauchent d'une marque moins un octet
+  /// pour qu'aucune ne tombe à cheval sur deux lectures.
+  static Future<bool> estCopieSigneeFichier(String chemin) =>
+      compute(_fichierContientSignature, chemin);
+
+  static bool _fichierContientSignature(String chemin) {
+    final recouvrement =
+        _marques.map((m) => m.length).reduce((a, b) => a > b ? a : b) - 1;
+    final f = File(chemin).openSync();
+    try {
+      var reste = Uint8List(0);
+      while (true) {
+        final lu = f.readSync(4 << 20);
+        if (lu.isEmpty) return false;
+        final bloc = Uint8List(reste.length + lu.length)
+          ..setAll(0, reste)
+          ..setAll(reste.length, lu);
+        if (contientSignature(bloc)) return true;
+        reste = bloc.length > recouvrement
+            ? Uint8List.sublistView(bloc, bloc.length - recouvrement)
+            : bloc;
+      }
+    } finally {
+      f.closeSync();
+    }
+  }
 
   static int _indexDe(Uint8List d, Uint8List m) {
     final premier = m[0];

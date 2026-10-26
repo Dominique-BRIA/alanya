@@ -3920,7 +3920,10 @@ class _ChatScreenState extends State<ChatScreen>
      */
     final signees = <MediaPickResult>[];
     for (final f in files) {
-      if (f.sensible && await DetecteurCopieSignee.estCopieSignee(f.bytes)) {
+      if (f.sensible &&
+          await (f.surDisque
+              ? DetecteurCopieSignee.estCopieSigneeFichier(f.path!)
+              : DetecteurCopieSignee.estCopieSignee(f.bytes))) {
         signees.add(f);
       }
     }
@@ -4277,7 +4280,8 @@ class _ChatScreenState extends State<ChatScreen>
               legende: legende,
               replyToId: replyToId,
               vueUnique: vueUnique,
-              octets: fichier.bytes,
+              octets: fichier.surDisque ? null : fichier.bytes,
+              cheminClair: fichier.surDisque ? fichier.path : null,
             ),
             onPreparation: (f) => suivi.preparation.value = f,
           );

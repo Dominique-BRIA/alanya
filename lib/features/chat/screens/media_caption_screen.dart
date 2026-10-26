@@ -203,7 +203,7 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
      */
     final tropGros = <String>[];
     for (var i = _fichiers.length - 1; i >= 0; i--) {
-      if (depassePlafondMedia(_fichiers[i].bytes.length)) {
+      if (depassePlafondMedia(_fichiers[i].taille)) {
         tropGros.add(_fichiers[i].fileName);
         setState(() => _fichiers.removeAt(i));
       }
@@ -622,8 +622,8 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
         Flexible(
           child: Text(
             courant.compresse && avant != null
-                ? "${poidsLisible(avant)} → ${poidsLisible(courant.bytes.length)}"
-                : poidsLisible(courant.bytes.length),
+                ? "${poidsLisible(avant)} → ${poidsLisible(courant.taille)}"
+                : poidsLisible(courant.taille),
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(color: Colors.white54, fontSize: 12),
           ),

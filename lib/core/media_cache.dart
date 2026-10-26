@@ -35,6 +35,14 @@ class MediaCache {
     }
   }
 
+  /// [put] depuis un fichier, copié sans passer en mémoire (26/10/2026).
+  static Future<String> putFichier(String mediaId, String ext, String source) async {
+    final dir = await _cacheDir();
+    final path = '${dir.path}/$mediaId.$ext';
+    await File(source).copy(path);
+    return path;
+  }
+
   /// Récupère ou télécharge un média : cache d'abord, réseau ensuite.
   /// [fetchNetwork] est appelé seulement si le média n'est pas en cache.
   static Future<String> getOrFetch({

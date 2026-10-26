@@ -69,6 +69,13 @@ class OuvertureMediaChiffre {
     } catch (_) {}
   }
 
+  /// [garderClair] pour un document resté sur le disque : une copie de fichier.
+  static Future<void> garderClairFichier(DescripteurMedia d, String chemin) async {
+    try {
+      await MediaCache.putFichier(_cle(d), _extension(d), chemin);
+    } catch (_) {}
+  }
+
   static String _cle(DescripteurMedia d) => 'e2ee_${d.id}';
 
   static String _extension(DescripteurMedia d) {

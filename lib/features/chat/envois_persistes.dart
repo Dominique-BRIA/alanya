@@ -95,7 +95,14 @@ class EnvoisPersistes {
         final sur = f.fileName.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
         final chemin = p.join(dossier.path, '${i}_$sur');
         final cible = File(chemin);
-        if (!await cible.exists()) await cible.writeAsBytes(f.bytes, flush: true);
+        if (!await cible.exists()) {
+          // Un document resté sur le disque se COPIE, sans passer en mémoire.
+          if (f.surDisque) {
+            await File(f.path!).copy(chemin);
+          } else {
+            await cible.writeAsBytes(f.bytes, flush: true);
+          }
+        }
         fichiers.add({
           'nom': f.fileName,
           'mime': f.mimeType,
@@ -177,8 +184,15 @@ class EnvoisPersistes {
               complet = false;
               break;
             }
+            // Un document lourd reste sur le disque, comme à la sélection.
+            final taille = await f.length();
+            final mime = b['mime'] as String;
+            final surDisque = taille > seuilSurDisque &&
+                !mime.startsWith('image/') &&
+                !mime.startsWith('video/');
             fichiers.add(MediaPickResult(
-              bytes: Uint8List.fromList(await f.readAsBytes()),
+              bytes: surDisque ? Uint8List(0) : await f.readAsBytes(),
+              tailleSurDisque: surDisque ? taille : null,
               fileName: b['nom'] as String,
               mimeType: b['mime'] as String,
               durationMs: b['dureeMs'] as int?,

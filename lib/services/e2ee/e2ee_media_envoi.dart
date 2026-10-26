@@ -44,7 +44,7 @@ class EnvoiMediaChiffre {
     /// enveloppes) : 1.
     void Function(double ratio)? onProgression,
   }) async {
-    final octets = fichier.bytes;
+    final octets = await fichier.octets();
     final mime = fichier.mimeType;
 
     // 1. Aperçu.
@@ -132,6 +132,9 @@ class EnvoiMediaChiffre {
     /// le chemin ordinaire d'un média dont la publication différée a été
     /// refusée — même descripteur, même clé de cache.
     Uint8List? octets,
+    /// Ou son FICHIER, pour un document resté sur le disque (26/10/2026) :
+    /// copié dans le cache sans passer en mémoire.
+    String? cheminClair,
   }) async {
     final quand = DateTime.now();
     await MessageCache.rangeTexteDechiffre(
@@ -154,7 +157,9 @@ class EnvoiMediaChiffre {
         if (replyToId != null) 'reponseA': replyToId,
       },
     ]);
-    if (!vueUnique && octets != null) {
+    if (!vueUnique && cheminClair != null) {
+      await OuvertureMediaChiffre.garderClairFichier(d, cheminClair);
+    } else if (!vueUnique && octets != null) {
       await OuvertureMediaChiffre.garderClair(d, octets);
     }
 

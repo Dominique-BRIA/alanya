@@ -94,7 +94,7 @@ class SendingMediaBubble extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                     fontSize: 13, fontWeight: FontWeight.w600, color: onText)),
-            Text(_taille(apercu.bytes.length),
+            Text(_taille(apercu.taille),
                 style: TextStyle(fontSize: 11, color: onSub)),
           ],
           if (envoi.total > 1) ...[
