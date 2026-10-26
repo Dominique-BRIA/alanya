@@ -5360,15 +5360,13 @@ class _ChatScreenState extends State<ChatScreen>
   ///   (`SortieDocumentSensible`), noté par le serveur.
   bool _estSensible(Message m) => m.mediaChiffre?.sensible == true;
 
-  /// L'Alanya ID de qui a envoyé [m], écrit dans une copie signée : le mien,
-  /// ou celui du correspondant d'un tête-à-tête. Inconnu dans un groupe.
+  /// L'Alanya ID de qui a envoyé [m], écrit dans une copie signée — SEULEMENT
+  /// quand c'est moi. 🔴 26/10/2026 (user) : la copie du destinataire ne porte
+  /// plus l'Alanya ID de l'expéditeur, ni à l'écran ni dans les métadonnées
+  /// (comme le web).
   String? _alanyaIdExpediteur(Message m) {
     final moi = context.read<AuthController>().user;
-    if (m.senderId == moi?.id) return moi?.publicNumber;
-    if (!widget.isGroup && m.senderId == widget.otherUserId) {
-      return widget.otherPublicNumber;
-    }
-    return null;
+    return m.senderId == moi?.id ? moi?.publicNumber : null;
   }
 
   /// Le fichier EN CLAIR d'un média chiffré (cache, ou déchiffré à la volée).
