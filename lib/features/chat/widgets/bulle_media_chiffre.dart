@@ -90,7 +90,9 @@ class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
   @override
   void initState() {
     super.initState();
-    if (_image) unawaited(_charger());
+    // Une ouverture lancée avant de quitter la conversation continue : la
+    // bulle recréée s'y raccroche, pourcentage compris (27/10/2026).
+    if (_image || OuvertureMediaChiffre.enCours(d.id)) unawaited(_charger());
   }
 
   Future<File?> _charger() async {
@@ -198,14 +200,12 @@ class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
                 if (_image && _fichier != null)
                   Image.file(_fichier!, fit: BoxFit.cover),
                 if (_etat == _Etat.chargement)
-                  const Center(
-                    child: SizedBox(
-                      width: 28,
-                      height: 28,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 3,
-                        color: Colors.white,
-                      ),
+                  Center(
+                    child: AvancementOuverture(
+                      mediaId: d.id,
+                      cote: 28,
+                      epaisseur: 3,
+                      couleur: Colors.white,
                     ),
                   ),
                 if (_video && _etat != _Etat.chargement)
@@ -401,11 +401,7 @@ class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
                 ),
                 const SizedBox(width: 8),
                 if (_etat == _Etat.chargement)
-                  const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
+                  AvancementOuverture(mediaId: d.id, cote: 20, epaisseur: 2)
                 else
                   Icon(Icons.file_download_outlined,
                       color: widget.couleurDiscrete, size: 22),
@@ -756,5 +752,50 @@ class EnvoiChiffreEnCours extends StatelessWidget {
       Text(tr(context, enEnvoi ? 'sending' : 'envoi_preparation'),
           style: const TextStyle(color: Colors.white, fontSize: 11)),
     ]);
+  }
+}
+
+/// La roue d'une ouverture en cours, avec son POURCENTAGE (27/10/2026) : elle
+/// suit `OuvertureMediaChiffre.avancement`, qui vit hors de la bulle. Sans
+/// avancement connu (déchiffrement), elle tourne simplement.
+class AvancementOuverture extends StatelessWidget {
+  const AvancementOuverture({
+    super.key,
+    required this.mediaId,
+    required this.cote,
+    required this.epaisseur,
+    this.couleur,
+  });
+
+  final String mediaId;
+  final double cote;
+  final double epaisseur;
+  final Color? couleur;
+
+  @override
+  Widget build(BuildContext context) {
+    final suivi = OuvertureMediaChiffre.avancement(mediaId);
+    Widget roue(double? v) => Column(mainAxisSize: MainAxisSize.min, children: [
+          SizedBox(
+            width: cote,
+            height: cote,
+            child: CircularProgressIndicator(
+              value: v == null || v <= 0 ? null : v,
+              strokeWidth: epaisseur,
+              color: couleur,
+            ),
+          ),
+          if (v != null && v > 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text('${(v * 100).round()} %',
+                  style: TextStyle(fontSize: 10, color: couleur)),
+            ),
+        ]);
+    if (suivi == null) return roue(null);
+    return ValueListenableBuilder<double?>(
+      valueListenable: suivi,
+      builder: (_, v, __) => roue(v),
+    );
   }
 }

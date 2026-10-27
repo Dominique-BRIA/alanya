@@ -1,6 +1,6 @@
 import 'dart:io';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../../core/media_cache.dart';
@@ -28,6 +28,22 @@ class OuvertureMediaChiffre {
 
   static final _enCours = <String, Future<File>>{};
 
+  /// L'avancement d'une ouverture en cours, de 0 à 1 ; `null` pendant le
+  /// déchiffrement d'un fichier dont on ne sait pas encore le poids.
+  ///
+  /// 🐛 « ÇA TOURNE, SANS POURCENTAGE, ET ÇA S'ARRÊTE QUAND ON SORT DE LA
+  /// CONVERSATION » (user, 27/10/2026). Le téléchargement continuait, mais la
+  /// bulle recréée au retour ne le savait pas. Tenu ICI, hors de la bulle, il
+  /// se retrouve par l'identifiant du média.
+  static final _avancements = <String, ValueNotifier<double?>>{};
+
+  /// Une ouverture de ce média est-elle en cours ?
+  static bool enCours(String mediaId) => _enCours.containsKey(mediaId);
+
+  /// L'avancement de l'ouverture en cours de ce média, s'il y en a une.
+  static ValueListenable<double?>? avancement(String mediaId) =>
+      _avancements[mediaId];
+
   /// Le fichier en clair, prêt à afficher. Lève [FichierInvalide] si le
   /// fichier reçu n'est pas celui annoncé, [MediaIndisponible] si le serveur ne
   /// l'a plus.
@@ -54,8 +70,10 @@ class OuvertureMediaChiffre {
      * `test/e2ee_media_ouverture_test.dart` : le banc d'interopérabilité
      * déchiffrait sans passer par `ouvrir`, il ne pouvait pas le voir.
      */
-    final f = _ouvrir(d, baseUrl, token, jeton).whenComplete(() {
+    final avance = _avancements[d.id] = ValueNotifier<double?>(0);
+    final f = _ouvrir(d, baseUrl, token, jeton, avance).whenComplete(() {
       _enCours.remove(d.id);
+      _avancements.remove(d.id);
     });
     _enCours[d.id] = f;
     return f;
@@ -87,29 +105,52 @@ class OuvertureMediaChiffre {
     return sous.isEmpty ? 'bin' : sous;
   }
 
+  /*
+   * 🔴 SUR LE DISQUE DE BOUT EN BOUT (27/10/2026, comme WhatsApp). Le chiffré
+   * était reçu EN MÉMOIRE, déchiffré en mémoire — une seconde copie — puis
+   * écrit : un gros document reçu ne s'ouvrait jamais. Désormais le chiffré
+   * s'écrit en flux dans `.part`, se déchiffre de fichier à fichier vers
+   * `.dec`, et ne prend son nom définitif qu'entier et vérifié : un fichier à
+   * moitié écrit ne passe jamais pour le média.
+   */
   static Future<File> _ouvrir(
     DescripteurMedia d,
     String baseUrl,
     String? token,
     FournisseurJeton? jeton,
+    ValueNotifier<double?> avance,
   ) async {
     final garde = await MediaCache.get(_cle(d), _extension(d));
     if (garde != null) return File(garde);
 
-    final chiffre = await _telecharger(
-      Uri.parse('$baseUrl/api/media/${d.id}'),
-      token,
-      jeton,
-    );
-
-    final clair = await dechiffrerHorsDuFil(
-      chiffre,
-      cle: d.cle,
-      empreinte: d.empreinte,
-      taille: d.taille,
-    );
-
-    return File(await MediaCache.put(_cle(d), _extension(d), clair));
+    final cible = await MediaCache.chemin(_cle(d), _extension(d));
+    final partiel = File('$cible.part');
+    final dechiffre = File('$cible.dec');
+    try {
+      await _telecharger(
+        Uri.parse('$baseUrl/api/media/${d.id}'),
+        token,
+        jeton,
+        partiel,
+        // Le chiffré pèse le clair plus 16 octets par bloc de 64 Kio.
+        (recus, total) {
+          final t = total ?? d.taille + (d.taille ~/ tailleBloc + 1) * 16;
+          if (t > 0) avance.value = (recus / t).clamp(0.0, 1.0);
+        },
+      );
+      avance.value = null;
+      await dechiffrerFichierHorsDuFil(
+        source: partiel.path,
+        destination: dechiffre.path,
+        cle: d.cle,
+        empreinte: d.empreinte,
+        taille: d.taille,
+      );
+      return await dechiffre.rename(cible);
+    } finally {
+      if (await partiel.exists()) await partiel.delete();
+      if (await dechiffre.exists()) await dechiffre.delete();
+    }
   }
 
   /// Au-delà, sans un octet reçu, le téléchargement est abandonné.
@@ -141,10 +182,12 @@ class OuvertureMediaChiffre {
   /// [jeton], on lit le jeton du stockage — que le reste de l'application tient
   /// à jour — et, sur un 401, on le fait rafraîchir UNE fois avant de
   /// réessayer. [token] ne sert plus que de repli, sans fournisseur.
-  static Future<Uint8List> _telecharger(
+  static Future<void> _telecharger(
     Uri adresse,
     String? token,
     FournisseurJeton? jeton,
+    File cible,
+    void Function(int recus, int? total) onRecu,
   ) async {
     var courant = jeton != null ? await jeton() : token;
     var renouvele = false;
@@ -167,11 +210,19 @@ class OuvertureMediaChiffre {
         }
         // Un refus du serveur ne se répare pas en réessayant.
         if (rep.statusCode != 200) throw MediaIndisponible(rep.statusCode);
-        final octets = BytesBuilder(copy: false);
-        await for (final morceau in rep.stream.timeout(delaiInactivite)) {
-          octets.add(morceau);
+        // En flux vers le disque : un morceau à la fois en mémoire.
+        final sortie = cible.openWrite();
+        var recus = 0;
+        try {
+          await for (final morceau in rep.stream.timeout(delaiInactivite)) {
+            sortie.add(morceau);
+            recus += morceau.length;
+            onRecu(recus, rep.contentLength);
+          }
+        } finally {
+          await sortie.close();
         }
-        return octets.takeBytes();
+        return;
       } on MediaIndisponible {
         rethrow;
       } catch (_) {

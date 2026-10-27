@@ -11,6 +11,7 @@
 library;
 
 import 'dart:convert';
+import 'dart:io';
 import 'dart:isolate';
 import 'dart:math';
 import 'dart:typed_data';
@@ -466,6 +467,65 @@ Uint8List dechiffrerFichier(
   return clair;
 }
 
+/// [dechiffrerFichier] DE FICHIER À FICHIER (27/10/2026) : l'empreinte en
+/// flux, puis un bloc à la fois. Un gros document reçu ne tient plus en
+/// mémoire. SYNCHRONE : à n'appeler que dans un isolat. Lève
+/// [FichierInvalide] et efface alors [destination].
+void dechiffrerVersFichier({
+  required String source,
+  required String destination,
+  required String cle,
+  required String empreinte,
+  required int taille,
+}) {
+  const tailleBlocChiffre = tailleBloc + _tailleTag;
+  final entree = File(source).openSync();
+  final sortie = File(destination).openSync(mode: FileMode.write);
+  var reussi = false;
+  try {
+    final sha = SHA256Digest();
+    while (true) {
+      final lu = entree.readSync(1 << 20);
+      if (lu.isEmpty) break;
+      sha.update(lu, 0, lu.length);
+    }
+    final calcule = Uint8List(sha.digestSize);
+    sha.doFinal(calcule, 0);
+    if (base64Encode(calcule) != empreinte) {
+      throw const FichierInvalide('empreinte différente : fichier remplacé ou abîmé');
+    }
+    final k = _b64(cle);
+    if (k == null || k.length != 32) throw const FichierInvalide('clé invalide');
+    final tailleChiffre = entree.lengthSync();
+    final nbBlocs = (tailleChiffre + tailleBlocChiffre - 1) ~/ tailleBlocChiffre;
+    if (nbBlocs == 0) throw const FichierInvalide('fichier vide');
+    entree.setPositionSync(0);
+    var ecrits = 0;
+    for (var i = 0; i < nbBlocs; i++) {
+      final bloc = entree.readSync(tailleBlocChiffre);
+      if (bloc.length < _tailleTag) throw const FichierInvalide('bloc tronqué');
+      final Uint8List clair;
+      try {
+        clair = _gcm(false, k, _nonce(i, i == nbBlocs - 1), bloc);
+      } catch (_) {
+        throw FichierInvalide(
+          'bloc $i refusé : clé fausse, ordre changé ou fichier coupé',
+        );
+      }
+      sortie.writeFromSync(clair);
+      ecrits += clair.length;
+    }
+    if (ecrits != taille) {
+      throw const FichierInvalide('taille différente de celle annoncée');
+    }
+    reussi = true;
+  } finally {
+    entree.closeSync();
+    sortie.closeSync();
+    if (!reussi) File(destination).deleteSync();
+  }
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // 4. HORS DU FIL DE L'ÉCRAN
 // ════════════════════════════════════════════════════════════════════════════
@@ -481,6 +541,43 @@ Uint8List dechiffrerFichier(
 /// [chiffrerFichier] dans un isolat.
 Future<FichierChiffre> chiffrerHorsDuFil(Uint8List clair) =>
     Isolate.run(() => chiffrerFichier(clair));
+
+/// [dechiffrerVersFichier] — par le processeur sur Android, dans un isolat
+/// sinon. Lève [FichierInvalide].
+Future<void> dechiffrerFichierHorsDuFil({
+  required String source,
+  required String destination,
+  required String cle,
+  required String empreinte,
+  required int taille,
+  void Function(double fraction)? onProgression,
+}) async {
+  final k = _b64(cle);
+  if (k != null && k.length == 32) {
+    try {
+      final fait = await Agb1Natif.dechiffrerFichier(
+        source: source,
+        destination: destination,
+        cle: k,
+        empreinte: empreinte,
+        taille: taille,
+        onProgression: onProgression,
+      );
+      if (fait) return;
+    } on StateError catch (e) {
+      throw FichierInvalide(e.message);
+    }
+  }
+  await Isolate.run(
+    () => dechiffrerVersFichier(
+      source: source,
+      destination: destination,
+      cle: cle,
+      empreinte: empreinte,
+      taille: taille,
+    ),
+  );
+}
 
 /// [dechiffrerFichier] — par le processeur sur Android (`Agb1Natif`, mêmes
 /// vérifications), dans un isolat sinon. Lève [FichierInvalide].

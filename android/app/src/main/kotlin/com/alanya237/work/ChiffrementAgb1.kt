@@ -73,6 +73,23 @@ class ChiffrementAgb1(private val canal: MethodChannel) {
                     principal.post { resultat.error("ECHEC", e.message, null) }
                 }
             }
+            "dechiffrerFichier" -> travailleur.execute {
+                try {
+                    dechiffrerFichier(
+                        source = appel.argument<String>("source")!!,
+                        destination = appel.argument<String>("destination")!!,
+                        cle = appel.argument<ByteArray>("cle")!!,
+                        empreinte = appel.argument<String>("empreinte")!!,
+                        taille = (appel.argument<Number>("taille")!!).toLong(),
+                        jeton = appel.argument<Int>("jeton") ?: 0,
+                    )
+                    principal.post { resultat.success(true) }
+                } catch (e: FichierInvalide) {
+                    principal.post { resultat.error("INVALIDE", e.message, null) }
+                } catch (e: Exception) {
+                    principal.post { resultat.error("ECHEC", e.message, null) }
+                }
+            }
             else -> resultat.notImplemented()
         }
     }
@@ -152,6 +169,84 @@ class ChiffrementAgb1(private val canal: MethodChannel) {
             )
         } finally {
             entree?.close()
+            if (!reussi) sortieFichier.delete()
+        }
+    }
+
+    /*
+     * 🔴 DE FICHIER À FICHIER (27/10/2026). [dechiffrer] reçoit tout le
+     * chiffré par le canal, dans le tas Java : un gros document reçu ne
+     * s'ouvrait jamais. Ici, deux lectures en flux — l'empreinte d'abord,
+     * le déchiffrement ensuite — et un bloc de 64 Kio en mémoire.
+     */
+    private fun dechiffrerFichier(
+        source: String,
+        destination: String,
+        cle: ByteArray,
+        empreinte: String,
+        taille: Long,
+        jeton: Int,
+    ) {
+        val entreeFichier = File(source)
+        val sha = MessageDigest.getInstance("SHA-256")
+        val tampon = ByteArray(BLOC + TAG)
+        FileInputStream(entreeFichier).use { e ->
+            while (true) {
+                val k = e.read(tampon)
+                if (k <= 0) break
+                sha.update(tampon, 0, k)
+            }
+        }
+        if (Base64.encodeToString(sha.digest(), Base64.NO_WRAP) != empreinte) {
+            throw FichierInvalide("empreinte différente : fichier remplacé ou abîmé")
+        }
+        if (cle.size != 32) throw FichierInvalide("clé invalide")
+        val blocChiffre = BLOC + TAG
+        val tailleChiffre = entreeFichier.length()
+        val nbBlocs = ((tailleChiffre + blocChiffre - 1) / blocChiffre).toInt()
+        if (nbBlocs == 0) throw FichierInvalide("fichier vide")
+        val cleAes = SecretKeySpec(cle, "AES")
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        val sortieFichier = File(destination)
+        sortieFichier.parentFile?.mkdirs()
+        val clair = ByteArray(BLOC)
+        var ecrits = 0L
+        var reussi = false
+        var dernierPourcent = -1
+        try {
+            FileInputStream(entreeFichier).use { e ->
+                FileOutputStream(sortieFichier).use { sortie ->
+                    for (i in 0 until nbBlocs) {
+                        val n = minOf(blocChiffre.toLong(), tailleChiffre - i.toLong() * blocChiffre).toInt()
+                        if (n < TAG) throw FichierInvalide("bloc tronqué")
+                        var lus = 0
+                        while (lus < n) {
+                            val k = e.read(tampon, lus, n - lus)
+                            if (k <= 0) throw FichierInvalide("bloc tronqué")
+                            lus += k
+                        }
+                        val m = try {
+                            cipher.init(Cipher.DECRYPT_MODE, cleAes, GCMParameterSpec(TAG * 8, nonce(i, i == nbBlocs - 1)))
+                            cipher.doFinal(tampon, 0, n, clair, 0)
+                        } catch (x: Exception) {
+                            throw FichierInvalide("bloc $i refusé : clé fausse, ordre changé ou fichier coupé")
+                        }
+                        sortie.write(clair, 0, m)
+                        ecrits += m
+                        val pourcent = ((i + 1) * 100L / nbBlocs).toInt()
+                        if (pourcent != dernierPourcent) {
+                            dernierPourcent = pourcent
+                            val fraction = pourcent / 100.0
+                            principal.post {
+                                canal.invokeMethod("progression", mapOf("jeton" to jeton, "fraction" to fraction))
+                            }
+                        }
+                    }
+                }
+            }
+            if (ecrits != taille) throw FichierInvalide("taille différente de celle annoncée")
+            reussi = true
+        } finally {
             if (!reussi) sortieFichier.delete()
         }
     }

@@ -35,6 +35,10 @@ class MediaCache {
     }
   }
 
+  /// Le chemin où [put] rangerait ce média, sans rien écrire (27/10/2026).
+  static Future<String> chemin(String mediaId, String ext) async =>
+      '${(await _cacheDir()).path}/$mediaId.$ext';
+
   /// [put] depuis un fichier, copié sans passer en mémoire (26/10/2026).
   static Future<String> putFichier(String mediaId, String ext, String source) async {
     final dir = await _cacheDir();

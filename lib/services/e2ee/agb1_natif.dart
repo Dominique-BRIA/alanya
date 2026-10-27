@@ -82,6 +82,43 @@ class Agb1Natif {
   /// Vérifie l'empreinte puis déchiffre. `null` : à faire en Dart.
   /// Lève [StateError] avec le message du natif si le FICHIER est invalide —
   /// l'appelant le traduit en `FichierInvalide`.
+  /// Déchiffre le fichier [source] vers [destination], en flux (27/10/2026).
+  /// `false` : le natif n'est pas là, à l'appelant de faire en Dart. Lève
+  /// [StateError] pour un fichier invalide.
+  static Future<bool> dechiffrerFichier({
+    required String source,
+    required String destination,
+    required Uint8List cle,
+    required String empreinte,
+    required int taille,
+    void Function(double fraction)? onProgression,
+  }) async {
+    if (!disponible) return false;
+    _ecouter();
+    final jeton = ++_jeton;
+    if (onProgression != null) _progressions[jeton] = onProgression;
+    try {
+      await _canal.invokeMethod<bool>('dechiffrerFichier', {
+        'source': source,
+        'destination': destination,
+        'cle': cle,
+        'empreinte': empreinte,
+        'taille': taille,
+        'jeton': jeton,
+      });
+      return true;
+    } on PlatformException catch (e) {
+      if (e.code == 'INVALIDE') throw StateError(e.message ?? 'fichier invalide');
+      debugPrint('[Agb1Natif] déchiffrement natif impossible, repli Dart : $e');
+      return false;
+    } on MissingPluginException {
+      _horsService = true;
+      return false;
+    } finally {
+      _progressions.remove(jeton);
+    }
+  }
+
   static Future<Uint8List?> dechiffrer(
     Uint8List chiffre, {
     required Uint8List cle,
