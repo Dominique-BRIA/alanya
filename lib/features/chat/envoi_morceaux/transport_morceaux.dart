@@ -105,6 +105,16 @@ class TransportArrierePlan implements TransportMorceaux {
   Future<void> demarrer() async {
     if (_demarre) return;
     _demarre = true;
+    /*
+     * 🐛 LES GROS ENVOIS N'ABOUTISSAIENT JAMAIS (user, 27/10/2026). Sans
+     * limite, Android lançait des dizaines de morceaux à la fois : sur un
+     * réseau mobile, chacun avançait au compte-gouttes — 408 de nginx après
+     * 300 s sans octet, 400 quand le réseau coupait —, et les dix essais
+     * s'épuisaient. Relevé en production : 207 morceaux attendus, 49 reçus.
+     * Trois à la fois, comme `TransportDirect` : chacun finit vite.
+     */
+    await FileDownloader().configure(
+        globalConfig: (Config.holdingQueue, (null, 3, null)));
     FileDownloader().updates.listen(_surMiseAJour);
     await FileDownloader().start(markDownloadedComplete: false);
   }

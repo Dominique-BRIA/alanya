@@ -2024,6 +2024,13 @@ class _ChatScreenState extends State<ChatScreen>
             createdAt: e.creeA,
           ),
     ];
+    // 🐛 Même chose pour un envoi CHIFFRÉ en morceaux (27/10/2026, « je vois
+    // les APK puis ils disparaissent ») : sa copie venait du cache, puis la
+    // synchronisation l'effaçait — le serveur ne publie qu'au dernier morceau.
+    for (final s in SuiviEnvoisMorceaux.instance.enCoursPour(widget.convId)) {
+      final m = s.message;
+      if (m != null && !_messages.any((x) => x.id == m.id)) provisoires.add(m);
+    }
     final all = <dynamic>[..._messages, ...provisoires, ..._callsForConv];
     all.sort((a, b) => _dateOfCombined(a).compareTo(_dateOfCombined(b)));
     final avant = _combined.length;
