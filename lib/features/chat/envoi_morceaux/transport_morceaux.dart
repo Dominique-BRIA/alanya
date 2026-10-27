@@ -148,8 +148,15 @@ class TransportArrierePlan implements TransportMorceaux {
     );
     final dossier = cheminRelatif.substring(0, cheminRelatif.lastIndexOf('/'));
     final fichier = cheminRelatif.substring(cheminRelatif.lastIndexOf('/') + 1);
-    for (final m in morceaux) {
-      await FileDownloader().enqueue(UploadTask(
+    /*
+     * 🐛 LA NOTIFICATION REDESCENDAIT (user, 27/10/2026). Celle d'un groupe
+     * affiche « morceaux finis ÷ morceaux connus », et ils étaient confiés UN
+     * PAR UN : le total grossissait pendant que les premiers partaient, et le
+     * pourcentage reculait. Tous d'un coup, le total est juste d'emblée.
+     */
+    await FileDownloader().enqueueAll([
+      for (final m in morceaux)
+        UploadTask(
         taskId: idTacheMorceau(reservation.id, m.indice),
         url: '$_base/api/media/envois/${reservation.id}/morceaux/${m.indice}',
         filename: fichier,
@@ -170,8 +177,8 @@ class TransportArrierePlan implements TransportMorceaux {
         updates: Updates.statusAndProgress,
         retries: 10,
         displayName: titre,
-      ));
-    }
+      ),
+    ]);
   }
 
   @override
