@@ -69,6 +69,56 @@ const _options = AndroidOptions(
   resetOnError: false,
 );
 
+/*
+ * 🐛 « IDENTITÉ ABSENTE — APPELER PREPARER() » À L'ENVOI DE GROS FICHIERS
+ * (user, 27/10/2026), puis à CHAQUE envoi de la conversation.
+ *
+ * Un gros envoi fait des dizaines de lectures et d'écritures SIMULTANÉES du
+ * coffre (sessions, pré-clés, archive). Le greffon Android n'y est pas sûr :
+ * il lève par moments « Failed to unwrap key », que nous prenions pour la
+ * panne définitive de [CoffreE2ee._coffreIllisible] — et nous VIDIONS le
+ * coffre, identité comprise. Plus rien ne partait jusqu'au redémarrage.
+ *
+ * 🔴 DÉSORMAIS : un accès à la fois, pour tous les coffres de l'application,
+ * et une erreur de ce type est retentée trois fois avant que [CoffreE2ee] ne
+ * conclue à la panne et ne répare.
+ */
+class _MagasinSerialise {
+  static const _s = FlutterSecureStorage(aOptions: _options);
+  static Future<void> _file = Future.value();
+
+  Future<T> _tour<T>(Future<T> Function() op) {
+    final r = _file.then((_) => _avecReprises(op));
+    _file = r.then((_) {}, onError: (_) {});
+    return r;
+  }
+
+  static Future<T> _avecReprises<T>(Future<T> Function() op) async {
+    for (var essai = 1;; essai++) {
+      try {
+        return await op();
+      } catch (e) {
+        if (essai >= 3 || !CoffreE2ee._coffreIllisible(e)) rethrow;
+        debugPrint('[e2ee] coffre : erreur passagère, essai $essai — $e');
+        await Future<void>.delayed(Duration(milliseconds: 200 * essai));
+      }
+    }
+  }
+
+  Future<String?> read({required String key}) => _tour(() => _s.read(key: key));
+
+  Future<void> write({required String key, required String? value}) =>
+      _tour(() => _s.write(key: key, value: value));
+
+  Future<void> delete({required String key}) => _tour(() => _s.delete(key: key));
+
+  Future<Map<String, String>> readAll({AndroidOptions? aOptions}) =>
+      _tour(() => _s.readAll(aOptions: aOptions));
+
+  Future<void> deleteAll({AndroidOptions? aOptions}) =>
+      _tour(() => _s.deleteAll(aOptions: aOptions));
+}
+
 /// Les magasins que la bibliothèque Signal exige, adossés au coffre matériel.
 ///
 /// ⚠️ LES QUATRE MAGASINS SONT UN SEUL OBJET ici, contrairement à l'exemple de
@@ -81,7 +131,7 @@ class CoffreE2ee implements SignalProtocolStore {
   CoffreE2ee(this._compte);
 
   final String _compte;
-  final _magasin = const FlutterSecureStorage(aOptions: _options);
+  final _magasin = _MagasinSerialise();
 
   String _cle(String suffixe) => 'e2ee/$_compte/$suffixe';
 
