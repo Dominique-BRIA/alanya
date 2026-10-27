@@ -92,7 +92,21 @@ class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
     super.initState();
     // Une ouverture lancée avant de quitter la conversation continue : la
     // bulle recréée s'y raccroche, pourcentage compris (27/10/2026).
-    if (_image || OuvertureMediaChiffre.enCours(d.id)) unawaited(_charger());
+    if (_image || OuvertureMediaChiffre.enCours(d.id)) {
+      unawaited(_charger());
+    } else {
+      unawaited(_dejaLa());
+    }
+  }
+
+  /// Déjà téléchargé : la bulle le dit, et un toucher l'ouvre sans réseau.
+  Future<void> _dejaLa() async {
+    final f = await OuvertureMediaChiffre.dejaLa(d);
+    if (f == null || !mounted || _fichier != null) return;
+    setState(() {
+      _fichier = f;
+      _etat = _Etat.pret;
+    });
   }
 
   Future<File?> _charger() async {
@@ -403,8 +417,12 @@ class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
                 if (_etat == _Etat.chargement)
                   AvancementOuverture(mediaId: d.id, cote: 20, epaisseur: 2)
                 else
-                  Icon(Icons.file_download_outlined,
-                      color: widget.couleurDiscrete, size: 22),
+                  Icon(
+                      _etat == _Etat.pret
+                          ? Icons.open_in_new
+                          : Icons.file_download_outlined,
+                      color: widget.couleurDiscrete,
+                      size: 22),
               ],
             ),
             // PDF sensible protégé (24/10/2026) : mots de passe en clair chez

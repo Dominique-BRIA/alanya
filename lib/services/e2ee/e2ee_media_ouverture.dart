@@ -37,6 +37,17 @@ class OuvertureMediaChiffre {
   /// se retrouve par l'identifiant du média.
   static final _avancements = <String, ValueNotifier<double?>>{};
 
+  /// Le clair de ce média s'il est DÉJÀ sur l'appareil — sans réseau.
+  ///
+  /// 🐛 « J'AI TÉLÉCHARGÉ UN PDF, JE REVIENS, IL FAUT LE RETÉLÉCHARGER »
+  /// (user, 27/10/2026). La bulle d'un document partait toujours de
+  /// « télécharger » : elle ne regardait pas le cache. Comme WhatsApp, ce qui
+  /// est téléchargé le reste.
+  static Future<File?> dejaLa(DescripteurMedia d) async {
+    final garde = await MediaCache.get(_cle(d), _extension(d));
+    return garde == null ? null : File(garde);
+  }
+
   /// Une ouverture de ce média est-elle en cours ?
   static bool enCours(String mediaId) => _enCours.containsKey(mediaId);
 
@@ -146,9 +157,16 @@ class OuvertureMediaChiffre {
         empreinte: d.empreinte,
         taille: d.taille,
       );
-      return await dechiffre.rename(cible);
-    } finally {
+      final f = await dechiffre.rename(cible);
+      await partiel.delete();
+      return f;
+    } on FichierInvalide {
+      // Abîmé ou faux : le reprendre ne servirait à rien, on repartira de zéro.
       if (await partiel.exists()) await partiel.delete();
+      rethrow;
+    } finally {
+      // ⚠️ LE .part RESTE après une coupure (27/10/2026) : le prochain essai
+      // reprend là où celui-ci s'est arrêté, au lieu de tout retélécharger.
       if (await dechiffre.exists()) await dechiffre.delete();
     }
   }
@@ -194,12 +212,20 @@ class OuvertureMediaChiffre {
     var essai = 0;
     while (true) {
       final client = http.Client();
+      /*
+       * 🔴 REPRISE (27/10/2026). Ce qui est déjà dans [cible] n'est pas
+       * redemandé : `Range` demande la suite. Le stockage (B2) répond 206 et
+       * l'on écrit à la suite ; un serveur qui l'ignore répond 200 et l'on
+       * repart de zéro — jamais de fichier recollé de travers.
+       */
+      final deja = await cible.exists() ? await cible.length() : 0;
       try {
         final rep = await client
             .send(http.Request('GET', adresse)
               ..headers.addAll({
                 if (courant != null && courant.isNotEmpty)
                   'Authorization': 'Bearer $courant',
+                if (deja > 0) 'Range': 'bytes=$deja-',
               }))
             .timeout(delaiInactivite);
         // Jeton expiré : on le renouvelle une fois, et on rejoue.
@@ -209,15 +235,21 @@ class OuvertureMediaChiffre {
           if (courant != null) continue;
         }
         // Un refus du serveur ne se répare pas en réessayant.
-        if (rep.statusCode != 200) throw MediaIndisponible(rep.statusCode);
+        // Plus rien à demander : le fichier était déjà entier.
+        if (rep.statusCode == 416 && deja > 0) return;
+        final suite = rep.statusCode == 206 && deja > 0;
+        if (rep.statusCode != 200 && !suite) throw MediaIndisponible(rep.statusCode);
         // En flux vers le disque : un morceau à la fois en mémoire.
-        final sortie = cible.openWrite();
-        var recus = 0;
+        final sortie =
+            cible.openWrite(mode: suite ? FileMode.append : FileMode.write);
+        var recus = suite ? deja : 0;
+        final total =
+            rep.contentLength == null ? null : rep.contentLength! + (suite ? deja : 0);
         try {
           await for (final morceau in rep.stream.timeout(delaiInactivite)) {
             sortie.add(morceau);
             recus += morceau.length;
-            onRecu(recus, rep.contentLength);
+            onRecu(recus, total);
           }
         } finally {
           await sortie.close();
@@ -226,9 +258,11 @@ class OuvertureMediaChiffre {
       } on MediaIndisponible {
         rethrow;
       } catch (_) {
-        if (essai < 2) {
+        // Chaque essai reprend où le précédent s'est arrêté : on peut se
+        // permettre d'insister davantage sur un réseau mobile.
+        if (essai < 5) {
           essai++;
-          await Future.delayed(Duration(milliseconds: 400 * essai));
+          await Future.delayed(Duration(milliseconds: 600 * essai));
           continue;
         }
         rethrow;

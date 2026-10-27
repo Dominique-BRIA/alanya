@@ -69,9 +69,10 @@ void main() {
           baseUrl: base, token: 'jeton'),
       throwsA(isA<TimeoutException>()),
     );
-    // Trois essais de 300 ms et deux pauses : bien loin de « jamais ».
-    expect(DateTime.now().difference(debut), lessThan(const Duration(seconds: 5)));
-    expect(recues.length, 3, reason: 'deux nouvelles tentatives');
+    // Six essais de 300 ms et cinq pauses (27/10/2026 : chaque essai reprend
+    // où le précédent s'est arrêté, on insiste davantage) : loin de « jamais ».
+    expect(DateTime.now().difference(debut), lessThan(const Duration(seconds: 15)));
+    expect(recues.length, 6, reason: 'cinq nouvelles tentatives');
 
     // Le Future mort n'est pas gardé : le serveur répond enfin, ça passe.
     repondre = (r) async {
@@ -83,6 +84,55 @@ void main() {
         baseUrl: base,
         token: 'jeton');
     expect(await fichier.readAsBytes(), clair);
+  });
+
+  test('une coupure en plein milieu REPREND où elle s’est arrêtée (Range)',
+      () async {
+    // Le banc de Flutter remplace le client HTTP par un faux à chaque test.
+    HttpOverrides.global = null;
+    final clair = Uint8List.fromList(List.generate(200000, (i) => i % 241));
+    final f = chiffrerFichier(clair);
+    final moitie = f.chiffre.length ~/ 2;
+    repondre = (r) async {
+      final range = r.headers.value('range');
+      if (range == null) {
+        // Première requête : la moitié, puis la connexion tombe.
+        final s = await r.response.detachSocket(writeHeaders: false);
+        s.add('HTTP/1.1 200 OK\r\nContent-Length: ${f.chiffre.length}\r\n\r\n'
+            .codeUnits);
+        s.add(f.chiffre.sublist(0, moitie));
+        await s.flush();
+        s.destroy();
+        return;
+      }
+      final debut = int.parse(range.substring(6, range.length - 1));
+      r.response.statusCode = 206;
+      r.response.add(f.chiffre.sublist(debut));
+      await r.response.close();
+    };
+    final fichier = await OuvertureMediaChiffre.ouvrir(
+        descripteur('reprise', f, clair.length),
+        baseUrl: base,
+        token: 'jeton');
+    expect(await fichier.readAsBytes(), clair);
+    expect(recues.length, 2);
+    expect(recues.last.headers.value('range'), 'bytes=$moitie-');
+  });
+
+  test('déjà téléchargé : dejaLa le rend sans réseau', () async {
+    HttpOverrides.global = null;
+    final clair = Uint8List.fromList(List.generate(500, (i) => i % 9));
+    final f = chiffrerFichier(clair);
+    final d = descripteur('deja', f, clair.length);
+    expect(await OuvertureMediaChiffre.dejaLa(d), isNull);
+    repondre = (r) async {
+      r.response.add(f.chiffre);
+      await r.response.close();
+    };
+    await OuvertureMediaChiffre.ouvrir(d, baseUrl: base, token: 'jeton');
+    final garde = await OuvertureMediaChiffre.dejaLa(d);
+    expect(await garde!.readAsBytes(), clair);
+    expect(recues.length, 1);
   });
 
   test('le jeton part en EN-TÊTE, comme pour les autres médias', () async {
