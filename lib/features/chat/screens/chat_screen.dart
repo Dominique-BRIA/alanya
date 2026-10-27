@@ -460,6 +460,19 @@ class _ChatScreenState extends State<ChatScreen>
         ValueNotifier<double> preparation,
         ValueNotifier<double> progression,
       })> _envoisChiffres = {};
+
+  /// Envoi chiffré en morceaux : identifiant du message → bulle d'attente de
+  /// CET écran (27/10/2026). Tant qu'elle existe, la copie du message ne
+  /// s'affiche pas en double à côté d'elle.
+  final Map<String, String> _bulleDeMessage = {};
+
+  /// L'envoi en morceaux encore en cours de ce message, s'il y en a un.
+  EnvoiMorceauxSuivi? _envoiEnCoursDe(String messageId) {
+    for (final s in SuiviEnvoisMorceaux.instance.enCoursPour(widget.convId)) {
+      if (s.messageId == messageId) return s;
+    }
+    return null;
+  }
   String _baseUrl = "";
   bool _uploading = false;
 
@@ -2031,7 +2044,17 @@ class _ChatScreenState extends State<ChatScreen>
       final m = s.message;
       if (m != null && !_messages.any((x) => x.id == m.id)) provisoires.add(m);
     }
-    final all = <dynamic>[..._messages, ...provisoires, ..._callsForConv];
+    /*
+     * 🐛 DEUX BULLES POUR LE MÊME FICHIER (user, 27/10/2026) : la bulle
+     * « Envoi… 22 % » et, à côté, la copie du message — rangée en cache dès
+     * le départ — qui avait l'air déjà envoyée. Tant que la bulle d'attente
+     * existe, la copie ne s'affiche pas.
+     */
+    final all = <dynamic>[
+      ..._messages.where((m) => !_bulleDeMessage.containsKey(m.id)),
+      ...provisoires.where((m) => !_bulleDeMessage.containsKey(m.id)),
+      ..._callsForConv,
+    ];
     all.sort((a, b) => _dateOfCombined(a).compareTo(_dateOfCombined(b)));
     final avant = _combined.length;
     _combined = _regroupeMedias(all);
@@ -4163,7 +4186,16 @@ class _ChatScreenState extends State<ChatScreen>
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (d == null && m.status == "PENDING")
+        if (d != null && _envoiEnCoursDe(m.id) != null)
+          // Envoi encore en cours, retrouvé en revenant : son avancement, et
+          // non l'allure d'un fichier déjà parti (27/10/2026).
+          EnvoiChiffreEnCours(
+            octets: null,
+            mime: d.mime,
+            progression: _envoiEnCoursDe(m.id)!.progression,
+            preparation: null,
+          )
+        else if (d == null && m.status == "PENDING")
           EnvoiChiffreEnCours(
             octets: _envoisChiffres[m.id]?.fichier.bytes,
             mime: _envoisChiffres[m.id]?.fichier.mimeType ?? '',
@@ -4300,6 +4332,8 @@ class _ChatScreenState extends State<ChatScreen>
       }
       if (enMorceaux != null) {
         confie = true;
+        final idMessage = enMorceaux.messageId;
+        if (idMessage != null) _bulleDeMessage[idMessage] = tempId;
         unawaited(_suivreEnvoiMorceaux(
           enMorceaux,
           tempId,
@@ -4373,6 +4407,8 @@ class _ChatScreenState extends State<ChatScreen>
     envoi.progression.addListener(relayer);
     try {
       final etat = await envoi.fin;
+      // Avant le remplacement : la copie devient LE message, plus un doublon.
+      _bulleDeMessage.remove(envoi.messageId);
       var envoye = envoi.message!;
       if (!etat.publie) {
         /*
@@ -4414,6 +4450,7 @@ class _ChatScreenState extends State<ChatScreen>
       });
       showAppSnackBar("$erreur : $e");
     } finally {
+      _bulleDeMessage.remove(envoi.messageId);
       envoi.progression.removeListener(relayer);
       _libererSuiviChiffre(tempId);
     }
