@@ -127,6 +127,8 @@ class SuiviEnvoisMorceaux {
     _transport = null;
     _racine = null;
     _actifs.clear();
+    _veille?.cancel();
+    _veille = null;
   }
 
   // ═══════════════════════ LANCER ═══════════════════════
@@ -225,6 +227,7 @@ class SuiviEnvoisMorceaux {
       await _ecrireRegistre(r,
           convId: convId, messageId: messageId, fichier: suivi.cheminRelatif);
       _actifs[r.id] = suivi;
+      _veiller();
       await transport.confier(r, suivi.cheminRelatif, morceaux, titre: _titre(mime));
       return suivi;
     } catch (_) {
@@ -275,6 +278,7 @@ class SuiviEnvoisMorceaux {
       await Directory('$racine/$dossierEnvoisMorceaux/${r.id}').create(recursive: true);
       await _ecrireRegistre(r, convId: '', fichier: cheminRelatif);
       _actifs[r.id] = suivi;
+      _veiller();
       await transport.confier(r, cheminRelatif, morceaux, titre: _titre(mime));
       return suivi;
     } catch (_) {
@@ -301,6 +305,7 @@ class SuiviEnvoisMorceaux {
       morceaux: morceauxDe(_tailleDe(cheminRelatif), r.tailleMorceau),
     );
     _actifs[r.id] = s;
+    _veiller();
     unawaited(() async {
       await Directory('$_racine/$dossierEnvoisMorceaux/${r.id}').create(recursive: true);
       await _ecrireRegistre(r, convId: '', fichier: cheminRelatif);
@@ -412,6 +417,55 @@ class SuiviEnvoisMorceaux {
     }
   }
 
+  /*
+   * 🐛 « JE NE REÇOIS PAS DE CONFIRMATION APRÈS QUE LE FICHIER DE 206 Mo EST
+   * PARTI » (user, 27/10/2026). En production : 207 morceaux sur 207, média
+   * créé — mais le message n'a jamais été posté. La fin n'était apprise QUE
+   * par la réponse au dernier morceau ; arrivée application en arrière-plan,
+   * elle s'est perdue, et rien ne redemandait.
+   *
+   * 🔴 LA VEILLE : tant qu'un envoi est actif, le serveur est relu toutes les
+   * 30 s. Elle ne fait que CONCLURE (terminé, ou tout reçu sans assemblage) :
+   * redonner des morceaux à Android reste l'affaire de [_verifier], sur un
+   * échec — la veille ne doit pas doubler ceux qui attendent leur tour.
+   */
+  Timer? _veille;
+
+  void _veiller() {
+    _veille ??= Timer.periodic(const Duration(seconds: 30), (_) {
+      if (_actifs.isEmpty) {
+        _veille?.cancel();
+        _veille = null;
+        return;
+      }
+      for (final s in _actifs.values.toList()) {
+        unawaited(_conclureSiFini(s));
+      }
+    });
+  }
+
+  Future<void> _conclureSiFini(EnvoiMorceauxSuivi s) async {
+    final api = _api;
+    if (api == null || s._fin.isCompleted) return;
+    try {
+      final etat = await api.etat(s.reservation.id, s.reservation.jeton);
+      if (etat.termine) return _finir(s, etat);
+      if (etat.manquants.isEmpty) {
+        final apres = await api.terminer(s.reservation.id, s.reservation.jeton);
+        if (apres.termine) return _finir(s, apres);
+      }
+    } on ApiException catch (e) {
+      // Disparu chez le serveur : même conclusion que [_verifier].
+      if (e.statusCode == 404 || e.statusCode == 410) {
+        _actifs.remove(s.reservation.id);
+        await _effacerDossier('$_racine/$dossierEnvoisMorceaux/${s.reservation.id}');
+        if (!s._fin.isCompleted) s._fin.completeError(e);
+      }
+    } catch (_) {
+      // Réseau : la prochaine veille redemandera.
+    }
+  }
+
   int _tailleDe(String cheminRelatif) {
     try {
       return File('$_racine/$cheminRelatif').lengthSync();
@@ -475,6 +529,7 @@ class SuiviEnvoisMorceaux {
         morceaux: morceauxDe(_tailleDe(chemin), r.tailleMorceau),
       );
       _actifs[r.id] = s;
+      _veiller();
       await _verifier(s, relire: true);
     }
   }
