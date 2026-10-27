@@ -29,7 +29,7 @@ void main() {
 
   test('photos et vidéos : un champ par bord (recommandation du 25/10/2026)', () {
     expect(signature().bordsVisuels.split('\n'), [
-      'Alanya Work · AW 6764 1599',
+      'Alanya Work · AW 67 64 15 99',
       '22/10/2026 09:05',
       'samsung SM-A515F',
       '3F9A 0C1E 5B7D 2A4C 6E8F 0A1B 2C3D 4E5F',

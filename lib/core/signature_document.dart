@@ -129,11 +129,12 @@ class SignatureSortie {
   /// une copie PROTÉGÉE en haut à droite (24/10/2026, demande du user).
   String get numeroSeul => alanyaId.replaceAll(RegExp(r'\D'), '');
 
-  /// L'Alanya ID tel que l'écrit le filigrane : « AW 3333 3333 ».
-  String get alanyaIdAw {
-    final d = numeroSeul;
-    return d.length == 8 ? 'AW ${d.substring(0, 4)} ${d.substring(4)}' : 'AW $d';
-  }
+  /// L'Alanya ID tel que l'écrit le filigrane : « AW 67 64 15 99 ».
+  ///
+  /// ⚠️ PAR [formatAlanyaId], comme partout ailleurs (27/10/2026, user) : le
+  /// découpage écrit ici à la main (« 6764 1599 ») ne ressemblait à aucun
+  /// Alanya ID affiché dans l'application.
+  String get alanyaIdAw => 'AW ${formatAlanyaId(numeroSeul)}';
 
   /// PHOTOS ET VIDÉOS : UN CHAMP PAR BORD (25/10/2026, recommandation retenue
   /// par le patron) — haut, bas, gauche, droite, séparés par « \n » :
