@@ -19,6 +19,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 
 import '../../../core/avec_reprises.dart';
+import '../../../core/detecteur_capture.dart';
 import '../../../core/compression_image.dart';
 import '../../../core/connectivity_service.dart';
 import '../../../core/conversation_cache.dart';
@@ -583,6 +584,13 @@ class _ChatScreenState extends State<ChatScreen>
       duration: const Duration(milliseconds: 900),
     )..repeat(reverse: true);
     ChatScreen.activeConvId = widget.convId;
+    // « X a fait une capture d'écran » (29/10/2026) : cette conversation est
+    // au sommet de la pile tant qu'elle est ouverte, fichiers ouverts compris.
+    final repoCapture = context.read<ChatRepository>();
+    _jetonCapture = DetecteurCapture.instance.entrer(widget.convId, () async {
+      await repoCapture.signalerCapture(widget.convId);
+      if (mounted) await _load();
+    });
     if (widget.isGroup) _chargeMembres();
     // Avant `_load()` : les traductions n'attendent pas le réseau, et une bulle
     // qui s'affiche traduite dès la première image vaut mieux qu'une bulle qui
@@ -938,6 +946,8 @@ class _ChatScreenState extends State<ChatScreen>
 
   @override
   void dispose() {
+    final jeton = _jetonCapture;
+    if (jeton != null) DetecteurCapture.instance.sortir(jeton);
     /*
      * 🔴 LE BANDEAU « CLÉ CHANGÉE » PART AVEC LA CONVERSATION. Il est posé sur
      * le messager de toute l'application : sans ceci, il restait sur l'accueil
@@ -1770,6 +1780,9 @@ class _ChatScreenState extends State<ChatScreen>
 
   /// Vrai pendant que la version du serveur arrive : la fine barre en haut.
   bool _miseAJour = false;
+
+  /// L'inscription de cette conversation auprès de [DetecteurCapture].
+  Object? _jetonCapture;
 
   Future<void> _load() async {
     // _myId est désormais un getter (toujours à jour) — plus besoin de le figer ici.

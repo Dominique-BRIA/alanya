@@ -22,6 +22,10 @@
          automatique de USE_FULL_SCREEN_INTENT sur Android 14 et suivants. -->
     <uses-permission android:name="android.permission.MANAGE_OWN_CALLS"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
+    <!-- Android 14+ : être prévenu d'une capture d'écran de l'application, pour
+         l'avis « X a fait une capture d'écran » (29/10/2026). Permission normale,
+         accordée à l'installation. -->
+    <uses-permission android:name="android.permission.DETECT_SCREEN_CAPTURE"/>
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>

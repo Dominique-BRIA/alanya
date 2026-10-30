@@ -115,6 +115,11 @@ String composerMessageSysteme(
       return tr(context, 'system_e2ee_cle_changee')
           .replaceFirst("{actor}", _texte(charge["actor"]));
 
+    // « X a fait une capture d'écran » (29/10/2026).
+    case "capture_ecran":
+      return tr(context, 'system_capture_ecran')
+          .replaceFirst("{actor}", _texte(charge["actor"]));
+
     default:
       return "";
   }

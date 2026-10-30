@@ -138,6 +138,12 @@ class ChatRepository {
   /// Rend l'état RETENU PAR LE SERVEUR, et non celui qu'on espérait : c'est lui
   /// que l'écran doit afficher. Même règle que le web, dont la fiche de
   /// conversation basculait un état local sans rien envoyer nulle part.
+  /// Annonce une capture d'écran prise dans la conversation (29/10/2026) : le
+  /// serveur dépose l'avis « X a fait une capture d'écran ».
+  Future<void> signalerCapture(String convId) async {
+    await _api.post("/api/conversations/$convId/capture", const {});
+  }
+
   Future<bool> definirSourdine(String convId, bool sourdine) async {
     final data = await _api.post(
       "/api/conversations/$convId/sourdine",

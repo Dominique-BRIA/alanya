@@ -108,9 +108,17 @@ class MainActivity : FlutterFragmentActivity() {
      */
     private var moteurFlutter: FlutterEngine? = null
 
+    /** « X a fait une capture d'écran » (29/10/2026) : voir DetecteurCapture. */
+    private var detecteurCapture: DetecteurCapture? = null
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         moteurFlutter = flutterEngine
+
+        detecteurCapture = DetecteurCapture(
+            this,
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "alanya/capture"),
+        ).also { it.demarrer() }
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CANAL)
             .setMethodCallHandler { appel, resultat ->
@@ -384,6 +392,18 @@ class MainActivity : FlutterFragmentActivity() {
      * s'éteindre hors de tout appel, sans que rien ne le rallume depuis
      * l'application — celle-ci n'existant plus.
      */
+    // La détection de capture ne vaut qu'au premier plan : Android 14 l'exige
+    // pour son rappel, et une capture prise ailleurs ne concerne personne ici.
+    override fun onStart() {
+        super.onStart()
+        detecteurCapture?.demarrer()
+    }
+
+    override fun onStop() {
+        detecteurCapture?.arreter()
+        super.onStop()
+    }
+
     override fun onDestroy() {
         runCatching { reglerCapteurProximite(false) }
         super.onDestroy()
