@@ -16,7 +16,7 @@ import '../statut_envoi.dart';
 import 'dart:convert' show base64Decode;
 import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show ValueListenable, kIsWeb;
 
 import '../../../core/avec_reprises.dart';
 import '../../../core/detecteur_capture.dart';
@@ -466,6 +466,34 @@ class _ChatScreenState extends State<ChatScreen>
   /// CET écran (27/10/2026). Tant qu'elle existe, la copie du message ne
   /// s'affiche pas en double à côté d'elle.
   final Map<String, String> _bulleDeMessage = {};
+
+  /// Les envois que j'ai annulés : leur fin en erreur ne mérite pas d'alerte.
+  final Set<String> _annulesParMoi = {};
+
+  /// L'envoi en morceaux derrière une bulle d'attente, une fois confié.
+  EnvoiMorceauxSuivi? _envoiDeBulle(String tempId) {
+    for (final e in _bulleDeMessage.entries) {
+      if (e.value == tempId) return _envoiEnCoursDe(e.key);
+    }
+    return null;
+  }
+
+  /// ✕ sur un envoi chiffré (29/10/2026) : Android cesse d'envoyer, le serveur
+  /// efface le fichier partiel et la publication prévue, et la copie locale
+  /// du message disparaît — il ne partira jamais.
+  Future<void> _annulerEnvoiChiffre(EnvoiMorceauxSuivi s) async {
+    _annulesParMoi.add(s.reservation.id);
+    final id = s.messageId;
+    final tempId = id == null ? null : _bulleDeMessage[id];
+    await SuiviEnvoisMorceaux.instance.abandonner(s.reservation);
+    if (id != null) await MessageCache.remove(id);
+    if (!mounted) return;
+    setState(() {
+      _messages =
+          _messages.where((m) => m.id != id && m.id != tempId).toList();
+      _rebuildCombined();
+    });
+  }
 
   /// L'envoi en morceaux encore en cours de ce message, s'il y en a un.
   EnvoiMorceauxSuivi? _envoiEnCoursDe(String messageId) {
@@ -2063,9 +2091,20 @@ class _ChatScreenState extends State<ChatScreen>
      * le départ — qui avait l'air déjà envoyée. Tant que la bulle d'attente
      * existe, la copie ne s'affiche pas.
      */
+    /*
+     * 🐛 DES FICHIERS DISPARAISSAIENT PENDANT L'ENVOI, PUIS REVENAIENT À LA FIN
+     * (user, 29/10/2026). La copie était masquée dès qu'une bulle d'attente
+     * était INSCRITE — même quand un rechargement du fil l'avait fait sortir de
+     * la liste : plus rien ne s'affichait. Elle n'est masquée que si sa bulle
+     * est réellement là ; sinon elle s'affiche, avec l'avancement.
+     */
+    final bullesPresentes = <String>{
+      for (final e in _bulleDeMessage.entries)
+        if (_messages.any((m) => m.id == e.value)) e.key,
+    };
     final all = <dynamic>[
-      ..._messages.where((m) => !_bulleDeMessage.containsKey(m.id)),
-      ...provisoires.where((m) => !_bulleDeMessage.containsKey(m.id)),
+      ..._messages.where((m) => !bullesPresentes.contains(m.id)),
+      ...provisoires.where((m) => !bullesPresentes.contains(m.id)),
       ..._callsForConv,
     ];
     all.sort((a, b) => _dateOfCombined(a).compareTo(_dateOfCombined(b)));
@@ -4202,14 +4241,15 @@ class _ChatScreenState extends State<ChatScreen>
         if (d != null && _envoiEnCoursDe(m.id) != null)
           // Envoi encore en cours, retrouvé en revenant : son avancement, et
           // non l'allure d'un fichier déjà parti (27/10/2026).
-          EnvoiChiffreEnCours(
+          _envoiChiffreEnCours(
+            suivi: _envoiEnCoursDe(m.id)!,
             octets: null,
             mime: d.mime,
             progression: _envoiEnCoursDe(m.id)!.progression,
-            preparation: null,
           )
         else if (d == null && m.status == "PENDING")
-          EnvoiChiffreEnCours(
+          _envoiChiffreEnCours(
+            suivi: _envoiDeBulle(m.id),
             octets: _envoisChiffres[m.id]?.fichier.bytes,
             mime: _envoisChiffres[m.id]?.fichier.mimeType ?? '',
             progression: _envoisChiffres[m.id]?.progression ??
@@ -4393,6 +4433,28 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
+  /// La bulle d'un envoi chiffré, avec pause, reprise et annulation dès qu'il
+  /// est confié à Android (29/10/2026).
+  Widget _envoiChiffreEnCours({
+    required EnvoiMorceauxSuivi? suivi,
+    required Uint8List? octets,
+    required String mime,
+    required ValueListenable<double> progression,
+    ValueListenable<double>? preparation,
+  }) {
+    final moteur = SuiviEnvoisMorceaux.instance;
+    return EnvoiChiffreEnCours(
+      octets: octets,
+      mime: mime,
+      progression: progression,
+      preparation: preparation,
+      enPause: suivi?.enPause,
+      onPause: suivi == null ? null : () => unawaited(moteur.mettreEnPause(suivi)),
+      onReprendre: suivi == null ? null : () => unawaited(moteur.relancer(suivi)),
+      onAnnuler: suivi == null ? null : () => unawaited(_annulerEnvoiChiffre(suivi)),
+    );
+  }
+
   void _libererSuiviChiffre(String tempId) {
     final s = _envoisChiffres.remove(tempId);
     s?.preparation.dispose();
@@ -4456,12 +4518,14 @@ class _ChatScreenState extends State<ChatScreen>
         _rebuildCombined();
       });
     } catch (e) {
+      // Annulé par moi : la bulle part, sans alerte.
+      final annule = _annulesParMoi.remove(envoi.reservation.id);
       if (!mounted) return;
       setState(() {
         _messages = _messages.where((m) => m.id != tempId).toList();
         _rebuildCombined();
       });
-      showAppSnackBar("$erreur : $e");
+      if (!annule) showAppSnackBar("$erreur : $e");
     } finally {
       _bulleDeMessage.remove(envoi.messageId);
       envoi.progression.removeListener(relayer);
@@ -6812,6 +6876,18 @@ class _ChatScreenState extends State<ChatScreen>
                                         _reessayerEnvoi(envoiEnCours),
                                     onAbandonner: () =>
                                         _abandonneEnvoi(envoiEnCours),
+                                    // En morceaux seulement : un envoi d'un
+                                    // seul bloc ne se suspend pas.
+                                    onPause: envoiEnCours.reservations.isEmpty
+                                        ? null
+                                        : () => unawaited(EnvoiMediaStore
+                                            .instance
+                                            .mettreEnPause(envoiEnCours.tempId)),
+                                    onReprendre: envoiEnCours.reservations.isEmpty
+                                        ? null
+                                        : () => unawaited(EnvoiMediaStore
+                                            .instance
+                                            .reprendreEnvoi(envoiEnCours.tempId)),
                                   )
                                 : m.vueUnique
                                     ? BulleVueUnique(

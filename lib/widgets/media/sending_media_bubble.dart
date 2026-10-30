@@ -22,9 +22,15 @@ class SendingMediaBubble extends StatelessWidget {
     required this.envoi,
     required this.onReessayer,
     required this.onAbandonner,
+    this.onPause,
+    this.onReprendre,
     this.legende,
     this.isMe = true,
   });
+
+  /// Pause et reprise d'un envoi EN MORCEAUX (29/10/2026). Nuls : pas de bouton.
+  final VoidCallback? onPause;
+  final VoidCallback? onReprendre;
 
   final EnvoiMedia envoi;
   final VoidCallback onReessayer;
@@ -75,6 +81,9 @@ class SendingMediaBubble extends StatelessWidget {
                 Container(color: Colors.black.withValues(alpha: 0.35)),
                 if (envoi.echoue)
                   const Icon(Icons.error_outline, size: 40, color: Colors.white)
+                else if (envoi.enPause)
+                  const Icon(Icons.pause_circle_outline,
+                      size: 40, color: Colors.white)
                 else if (envoi.enAttenteReseau)
                   // ⚠️ UNE HORLOGE, PAS UNE CROIX. Rien n'a échoué : l'envoi
                   // attend le réseau et partira seul. Une croix ferait croire
@@ -148,6 +157,27 @@ class SendingMediaBubble extends StatelessWidget {
               _action(context,
                   icone: Icons.delete_outline,
                   label: tr(context, 'delete'),
+                  onTap: onAbandonner),
+            ]),
+          ] else if (envoi.progression < 1) ...[
+            // En cours (29/10/2026, demande du user) : on peut suspendre un
+            // envoi en morceaux, et renoncer à n'importe quel envoi.
+            const SizedBox(height: 2),
+            Row(children: [
+              if (envoi.enPause && onReprendre != null)
+                _action(context,
+                    icone: Icons.play_arrow,
+                    label: tr(context, 'envoi_reprendre'),
+                    onTap: onReprendre!)
+              else if (!envoi.enPause && onPause != null)
+                _action(context,
+                    icone: Icons.pause,
+                    label: tr(context, 'envoi_pause'),
+                    onTap: onPause!),
+              const SizedBox(width: 4),
+              _action(context,
+                  icone: Icons.close,
+                  label: tr(context, 'cancel'),
                   onTap: onAbandonner),
             ]),
           ] else if (envoi.progression >= 1) ...[

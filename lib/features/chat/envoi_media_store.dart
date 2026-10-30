@@ -135,6 +135,31 @@ class EnvoiMediaStore extends ChangeNotifier {
   /// L'utilisateur renonce. Les morceaux encore confiés à Android sont
   /// annulés, et le serveur efface le fichier partiel — sans quoi Android
   /// finirait d'envoyer un fichier dont plus personne ne veut.
+  /// Met en pause les fichiers de cet envoi qui partent en morceaux (29/10/2026).
+  /// Un envoi d'un seul bloc ne se suspend pas : seul l'abandon reste.
+  Future<void> mettreEnPause(String tempId) async {
+    final envoi = _envois[tempId];
+    if (envoi == null) return;
+    envoi.enPause = true;
+    notifyListeners();
+    for (final r in envoi.reservations.values) {
+      final s = SuiviEnvoisMorceaux.instance.suiviDe(r.id);
+      if (s != null) await SuiviEnvoisMorceaux.instance.mettreEnPause(s);
+    }
+  }
+
+  /// Reprend un envoi mis en pause : seuls les morceaux manquants repartent.
+  Future<void> reprendreEnvoi(String tempId) async {
+    final envoi = _envois[tempId];
+    if (envoi == null) return;
+    envoi.enPause = false;
+    notifyListeners();
+    for (final r in envoi.reservations.values) {
+      final s = SuiviEnvoisMorceaux.instance.suiviDe(r.id);
+      if (s != null) await SuiviEnvoisMorceaux.instance.relancer(s);
+    }
+  }
+
   void abandonner(String tempId) {
     final envoi = _envois[tempId];
     if (envoi != null) {

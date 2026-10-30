@@ -72,6 +72,10 @@ class EnvoiMorceauxSuivi {
   /// 0 à 0,99 pendant l'envoi ; 1 quand le serveur a assemblé.
   final ValueNotifier<double> progression = ValueNotifier(0);
 
+  /// En pause à la demande de l'utilisateur (29/10/2026) : plus rien n'est
+  /// confié à Android tant que la reprise n'est pas demandée.
+  final ValueNotifier<bool> enPause = ValueNotifier(false);
+
   final Completer<EtatEnvoiServeur> _fin = Completer();
 
   /// Rend l'état final (publié, ou refusé à la publication). Lève si l'envoi
@@ -314,6 +318,33 @@ class SuiviEnvoisMorceaux {
     return s;
   }
 
+  /// Le suivi actif de cette réservation, s'il y en a un.
+  EnvoiMorceauxSuivi? suiviDe(String reservationId) => _actifs[reservationId];
+
+  /*
+   * ⏸ PAUSE ET REPRISE (29/10/2026, demande du user).
+   *
+   * Android (`background_downloader`) ne sait pas suspendre un ENVOI : seuls
+   * les téléchargements se mettent en pause. La pause annule donc les morceaux
+   * en vol, en gardant tout le reste — la réservation chez le serveur, le
+   * fichier sur le disque, les morceaux déjà reçus. La reprise redemande au
+   * serveur ce qui manque et ne confie que cela : rien n'est renvoyé deux fois.
+   *
+   * ⚠️ UNE PAUSE NE SURVIT PAS À UN REDÉMARRAGE : `reprendre` relance au
+   * démarrage tout envoi resté sur le disque.
+   */
+  Future<void> mettreEnPause(EnvoiMorceauxSuivi s) async {
+    if (s._fin.isCompleted) return;
+    s.enPause.value = true;
+    await _transport?.annuler(s.reservation.id);
+  }
+
+  Future<void> relancer(EnvoiMorceauxSuivi s) async {
+    if (s._fin.isCompleted) return;
+    s.enPause.value = false;
+    await _verifier(s);
+  }
+
   /// L'utilisateur renonce : Android cesse d'envoyer, le serveur efface le
   /// fichier partiel.
   Future<void> abandonner(ReservationEnvoi r) async {
@@ -393,6 +424,8 @@ class SuiviEnvoisMorceaux {
         final apres = await api.terminer(s.reservation.id, s.reservation.jeton);
         if (apres.termine) return _finir(s, apres);
       }
+      // En pause : on ne redonne rien, la reprise s'en chargera.
+      if (s.enPause.value) return;
       // Des morceaux manquent et Android ne les a plus : on les lui redonne.
       final enVol = await _transport!.enVol(s.reservation.id);
       final aRedonner = etat.manquants.where((i) => !enVol.contains(i)).toSet();

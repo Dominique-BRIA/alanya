@@ -103,6 +103,9 @@ class EnvoiMedia {
   /// rien à faire — et lui faire croire qu'il a perdu son fichier.
   bool enAttenteReseau = false;
 
+  /// Mis en pause par l'utilisateur (29/10/2026) — envoi en morceaux seulement.
+  bool enPause = false;
+
   /// Message d'erreur à afficher dans la bulle.
   String? erreur;
 

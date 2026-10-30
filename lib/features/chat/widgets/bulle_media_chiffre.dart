@@ -669,7 +669,18 @@ class EnvoiChiffreEnCours extends StatelessWidget {
     required this.mime,
     required this.progression,
     this.preparation,
+    this.enPause,
+    this.onPause,
+    this.onReprendre,
+    this.onAnnuler,
   });
+
+  /// Pause, reprise et annulation d'un envoi en morceaux (29/10/2026). Nuls
+  /// tant que l'envoi n'est pas confié à Android (préparation) : pas de bouton.
+  final ValueListenable<bool>? enPause;
+  final VoidCallback? onPause;
+  final VoidCallback? onReprendre;
+  final VoidCallback? onAnnuler;
 
   /// Le fichier EN CLAIR, encore en mémoire chez l'expéditeur.
   final Uint8List? octets;
@@ -714,10 +725,43 @@ class EnvoiChiffreEnCours extends StatelessWidget {
           Container(color: Colors.black.withValues(alpha: 0.35)),
           Center(
             child: ListenableBuilder(
-              listenable: Listenable.merge([progression, preparation]),
-              builder: (context, _) => _anneau(context),
+              listenable: Listenable.merge([progression, preparation, enPause]),
+              builder: (context, _) => enPause?.value == true
+                  ? Column(mainAxisSize: MainAxisSize.min, children: [
+                      const Icon(Icons.pause_circle_outline,
+                          size: 40, color: Colors.white),
+                      const SizedBox(height: 4),
+                      Text(tr(context, 'envoi_en_pause'),
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 13)),
+                    ])
+                  : _anneau(context),
             ),
           ),
+          if (onAnnuler != null)
+            Positioned(
+              right: 4,
+              top: 4,
+              child: IconButton(
+                tooltip: tr(context, 'cancel'),
+                icon: const Icon(Icons.close, color: Colors.white),
+                onPressed: onAnnuler,
+              ),
+            ),
+          if (onPause != null && onReprendre != null && enPause != null)
+            Positioned(
+              left: 4,
+              top: 4,
+              child: ValueListenableBuilder<bool>(
+                valueListenable: enPause!,
+                builder: (context, pause, _) => IconButton(
+                  tooltip: tr(context, pause ? 'envoi_reprendre' : 'envoi_pause'),
+                  icon: Icon(pause ? Icons.play_arrow : Icons.pause,
+                      color: Colors.white),
+                  onPressed: pause ? onReprendre : onPause,
+                ),
+              ),
+            ),
           const Positioned(
             right: 8,
             bottom: 8,
