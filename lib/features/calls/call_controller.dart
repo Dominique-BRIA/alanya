@@ -1361,6 +1361,8 @@ class CallController extends ChangeNotifier {
     // Relâché sans condition : l'appel est fini, et un verrou oublié
     // éteindrait l'écran au premier objet passant devant le capteur.
     unawaited(ProximiteAppel.regler(false));
+    // L'écran peut de nouveau se mettre en veille.
+    unawaited(ProximiteAppel.garderEcranAllume(false));
     connectedSince = null;
     // Remise à zéro du compteur : l'appel est fini, plus aucun écran ne le
     // concerne. Les `dispose` qui suivront décrémenteraient dans le vide, ce
@@ -1529,6 +1531,9 @@ class CallController extends ChangeNotifier {
     traceAppel("proximité → $vise (média=$mediaConnected, "
         "hp=$isSpeakerOn, type=$activeType)");
     unawaited(ProximiteAppel.regler(vise));
+    // 🐛 En VIDÉO, l'écran ne doit jamais se mettre en veille (user,
+    // 30/10/2026) : Android coupait la caméra, l'image se figeait chez l'autre.
+    unawaited(ProximiteAppel.garderEcranAllume(activeType == "VIDEO"));
   }
 
   /// 🐛 LE STANDARD ALLUME LE HAUT-PARLEUR, ET C'EST UN CORRECTIF, PAS UN CONFORT.

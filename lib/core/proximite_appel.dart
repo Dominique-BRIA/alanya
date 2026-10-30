@@ -43,4 +43,22 @@ class ProximiteAppel {
       _actif = !actif;
     }
   }
+
+  static bool _ecranAllume = false;
+
+  /// Garde l'écran allumé pendant un appel VIDÉO (30/10/2026).
+  ///
+  /// 🐛 L'écran se mettait en veille en pleine vidéo : Android coupait la
+  /// caméra, et le correspondant voyait une image figée jusqu'à ce qu'on
+  /// touche l'écran. Le son, lui, continuait.
+  static Future<void> garderEcranAllume(bool actif) async {
+    if (!Platform.isAndroid) return;
+    if (_ecranAllume == actif) return;
+    _ecranAllume = actif;
+    try {
+      await _canal.invokeMethod('ecranAllume', {'actif': actif});
+    } catch (_) {
+      _ecranAllume = !actif;
+    }
+  }
 }

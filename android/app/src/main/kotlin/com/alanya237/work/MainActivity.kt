@@ -153,6 +153,21 @@ class MainActivity : FlutterFragmentActivity() {
                         runCatching { reglerCapteurProximite(actif) }
                         resultat.success(true)
                     }
+                    // 🐛 EN APPEL VIDÉO, L'ÉCRAN SE METTAIT EN VEILLE (user,
+                    // 30/10/2026) : Android coupait alors la caméra, et le
+                    // correspondant voyait une image figée jusqu'au prochain
+                    // toucher. Tenu pendant tout l'appel vidéo, relâché à la fin.
+                    "ecranAllume" -> {
+                        val actif = appel.argument<Boolean>("actif") ?: false
+                        runOnUiThread {
+                            if (actif) {
+                                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                            } else {
+                                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                            }
+                        }
+                        resultat.success(true)
+                    }
                     // Service de premier plan qui maintient les envois et
                     // téléchargements vivants application fermée. Voir
                     // TransferForegroundService pour les limites du type
