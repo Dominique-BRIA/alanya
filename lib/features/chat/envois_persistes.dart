@@ -98,7 +98,7 @@ class EnvoisPersistes {
         if (!await cible.exists()) {
           // Un document resté sur le disque se COPIE, sans passer en mémoire.
           if (f.surDisque) {
-            await File(f.path!).copy(chemin);
+            await File(f.fichierContenu!).copy(chemin);
           } else {
             await cible.writeAsBytes(f.bytes, flush: true);
           }
@@ -187,9 +187,10 @@ class EnvoisPersistes {
             // Un document lourd reste sur le disque, comme à la sélection.
             final taille = await f.length();
             final mime = b['mime'] as String;
-            final surDisque = taille > seuilSurDisque &&
-                !mime.startsWith('image/') &&
-                !mime.startsWith('video/');
+            // Une vidéo aussi (29/10/2026) : relue en mémoire au redémarrage,
+            // une vidéo de 262 Mo refermait l'application.
+            final surDisque =
+                taille > seuilSurDisque && !mime.startsWith('image/');
             fichiers.add(MediaPickResult(
               bytes: surDisque ? Uint8List(0) : await f.readAsBytes(),
               tailleSurDisque: surDisque ? taille : null,

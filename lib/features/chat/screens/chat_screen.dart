@@ -3965,7 +3965,7 @@ class _ChatScreenState extends State<ChatScreen>
     for (final f in files) {
       if (f.sensible &&
           await (f.surDisque
-              ? DetecteurCopieSignee.estCopieSigneeFichier(f.path!)
+              ? DetecteurCopieSignee.estCopieSigneeFichier(f.fichierContenu!)
               : DetecteurCopieSignee.estCopieSignee(f.bytes))) {
         signees.add(f);
       }
@@ -4333,7 +4333,7 @@ class _ChatScreenState extends State<ChatScreen>
               replyToId: replyToId,
               vueUnique: vueUnique,
               octets: fichier.surDisque ? null : fichier.bytes,
-              cheminClair: fichier.surDisque ? fichier.path : null,
+              cheminClair: fichier.fichierContenu,
             ),
             onPreparation: (f) => suivi.preparation.value = f,
           );
@@ -4714,6 +4714,19 @@ class _ChatScreenState extends State<ChatScreen>
         final f = File(chemin);
         if (depassePlafondMedia(await f.length())) {
           tropGros.add(nom);
+          continue;
+        }
+        // Lourd et pas une photo : il reste sur le disque (29/10/2026).
+        final taille = await f.length();
+        if (taille > seuilSurDisque &&
+            !mimeFichierRecu(nom).startsWith('image/')) {
+          fichiers.add(MediaPickResult(
+            bytes: Uint8List(0),
+            tailleSurDisque: taille,
+            fileName: nom,
+            mimeType: mimeFichierRecu(nom),
+            path: chemin,
+          ));
           continue;
         }
         final octets = await f.readAsBytes();

@@ -12,6 +12,7 @@
 /// ses mégaoctets.
 library;
 
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:photo_manager/photo_manager.dart';
@@ -41,13 +42,18 @@ Future<ResultatCompression> compresserPourEnvoi({
   /// l'écran de légende, qui a remplacé « Envoyer l'original ».
   NiveauQualite niveau = NiveauQualite.normal,
 }) async {
+  // Une vidéo restée sur le disque n'a pas d'octets : son poids est celui du
+  // fichier (29/10/2026).
+  final poids = octets.isEmpty && chemin != null && File(chemin).existsSync()
+      ? File(chemin).lengthSync()
+      : octets.length;
   final intact = ResultatCompression(
     octets: octets,
     nomFichier: nomFichier,
     mimeType: mimeType,
     compresse: false,
-    tailleAvant: octets.length,
-    tailleApres: octets.length,
+    tailleAvant: poids,
+    tailleApres: poids,
   );
   try {
     if (mimeType.toLowerCase().startsWith("video/")) {
@@ -67,6 +73,7 @@ Future<ResultatCompression> compresserPourEnvoi({
       );
       return ResultatCompression(
         octets: v.octets,
+        cheminProduit: v.cheminProduit,
         nomFichier: v.nomFichier,
         mimeType: v.mimeType,
         compresse: v.compresse,

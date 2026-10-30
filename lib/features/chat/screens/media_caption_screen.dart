@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -175,15 +176,29 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
         );
         if (!mounted) return;
         setState(() {
-          _fichiers[i] = m.copieAvec(
-            bytes: pret.octets,
-            fileName: pret.nomFichier,
-            mimeType: pret.mimeType,
-            compresse: pret.compresse,
-            tailleOriginale: pret.compresse ? pret.tailleAvant : null,
-            niveauSuperieurPossible: pret.niveauSuperieurPossible,
-            definitionAutreNiveau: pret.definitionAutreNiveau,
-          );
+          // Restée sur le disque (29/10/2026) : le MP4 produit le remplace,
+          // sans passer en mémoire ; sans gain, l'original part tel quel.
+          _fichiers[i] = m.surDisque
+              ? m.copieAvec(
+                  cheminContenu: pret.cheminProduit,
+                  tailleSurDisque:
+                      pret.cheminProduit != null ? pret.tailleApres : null,
+                  fileName: pret.nomFichier,
+                  mimeType: pret.mimeType,
+                  compresse: pret.compresse,
+                  tailleOriginale: pret.compresse ? pret.tailleAvant : null,
+                  niveauSuperieurPossible: pret.niveauSuperieurPossible,
+                  definitionAutreNiveau: pret.definitionAutreNiveau,
+                )
+              : m.copieAvec(
+                  bytes: pret.octets,
+                  fileName: pret.nomFichier,
+                  mimeType: pret.mimeType,
+                  compresse: pret.compresse,
+                  tailleOriginale: pret.compresse ? pret.tailleAvant : null,
+                  niveauSuperieurPossible: pret.niveauSuperieurPossible,
+                  definitionAutreNiveau: pret.definitionAutreNiveau,
+                );
         });
       } catch (_) {
         // La vidéo partira telle quelle.
@@ -696,9 +711,16 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
        * pas toujours de chemin local : `originBytes` la fait descendre, et
        * c'est la seule façon d'honorer le bouton pour elle.
        */
-      final original = chemin != null
-          ? await File(chemin).readAsBytes()
-          : (await courant.asset!.originBytes)!;
+      // Une vidéo restée sur le disque ne se relit pas en mémoire : elle se
+      // retranscode depuis son chemin (29/10/2026).
+      final videoSurDisque = courant.surDisque && courant.estVideo && chemin != null;
+      final original = videoSurDisque
+          ? Uint8List(0)
+          : chemin != null
+              ? await File(chemin).readAsBytes()
+              : (await courant.asset!.originBytes)!;
+      final tailleOriginal =
+          videoSurDisque ? await File(chemin).length() : original.length;
       final nom = chemin != null
           ? chemin.split(Platform.pathSeparator).last
           : courant.fileName;
@@ -719,16 +741,31 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
       );
       if (!mounted) return;
       setState(() {
-        _fichiers[index] = courant.copieAvec(
-          bytes: pret.octets,
-          fileName: pret.nomFichier,
-          mimeType: pret.mimeType,
-          compresse: pret.compresse,
-          tailleOriginale: original.length,
-          niveauSuperieurPossible: pret.niveauSuperieurPossible,
-          definitionAutreNiveau: pret.definitionAutreNiveau,
-          niveau: vise,
-        );
+        _fichiers[index] = videoSurDisque
+            ? courant.copieAvec(
+                // Sans fichier produit, c'est l'original qui partira.
+                cheminContenu: pret.cheminProduit ?? chemin,
+                tailleSurDisque: pret.cheminProduit != null
+                    ? pret.tailleApres
+                    : tailleOriginal,
+                fileName: pret.nomFichier,
+                mimeType: pret.mimeType,
+                compresse: pret.compresse,
+                tailleOriginale: tailleOriginal,
+                niveauSuperieurPossible: pret.niveauSuperieurPossible,
+                definitionAutreNiveau: pret.definitionAutreNiveau,
+                niveau: vise,
+              )
+            : courant.copieAvec(
+                bytes: pret.octets,
+                fileName: pret.nomFichier,
+                mimeType: pret.mimeType,
+                compresse: pret.compresse,
+                tailleOriginale: tailleOriginal,
+                niveauSuperieurPossible: pret.niveauSuperieurPossible,
+                definitionAutreNiveau: pret.definitionAutreNiveau,
+                niveau: vise,
+              );
       });
     } catch (_) {
       if (!mounted) return;

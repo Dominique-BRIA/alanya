@@ -94,6 +94,7 @@ class MediaPickResult {
     this.sensible = false,
     this.protectionPdf,
     this.tailleSurDisque,
+    this.cheminContenu,
   });
 
   /// 🔴 UN DOCUMENT LOURD RESTE SUR LE DISQUE (26/10/2026, comme WhatsApp).
@@ -102,8 +103,16 @@ class MediaPickResult {
   /// le chiffrement, l'envoi en morceaux et l'aperçu lisent le fichier.
   final int? tailleSurDisque;
 
-  /// Le contenu est-il à [path] plutôt que dans [bytes] ?
+  /// Le fichier qui PARTIRA, quand il diffère de [path] : le MP4 produit par
+  /// la compression d'une vidéo restée sur le disque (29/10/2026). [path]
+  /// reste l'original — aperçu, et bascule de qualité.
+  final String? cheminContenu;
+
+  /// Le contenu est-il sur le disque plutôt que dans [bytes] ?
   bool get surDisque => tailleSurDisque != null;
+
+  /// Le fichier du contenu quand il est sur le disque, sinon nul.
+  String? get fichierContenu => surDisque ? (cheminContenu ?? path) : null;
 
   /// Le poids du fichier, qu'il soit en mémoire ou sur le disque.
   int get taille => tailleSurDisque ?? bytes.length;
@@ -111,7 +120,7 @@ class MediaPickResult {
   /// Les octets, relus du disque si besoin — pour les seuls chemins qui ne
   /// savent pas lire un fichier (envoi d'un seul bloc, ancien serveur).
   Future<Uint8List> octets() async =>
-      surDisque ? await File(path!).readAsBytes() : bytes;
+      surDisque ? await File(fichierContenu!).readAsBytes() : bytes;
 
   /// Document SENSIBLE (18/10/2026) : voir `DescripteurMedia.sensible`.
   final bool sensible;
@@ -132,11 +141,16 @@ class MediaPickResult {
     bool? sensible,
     ProtectionPdf? protectionPdf,
     bool sansProtection = false,
+    int? tailleSurDisque,
+    String? cheminContenu,
   }) =>
       MediaPickResult(
         bytes: bytes ?? this.bytes,
         // De nouveaux octets remplacent le fichier : ils font foi.
-        tailleSurDisque: bytes == null ? tailleSurDisque : null,
+        tailleSurDisque:
+            tailleSurDisque ?? (bytes == null ? this.tailleSurDisque : null),
+        cheminContenu:
+            cheminContenu ?? (bytes == null ? this.cheminContenu : null),
         fileName: fileName ?? this.fileName,
         mimeType: mimeType ?? this.mimeType,
         durationMs: durationMs,
@@ -419,6 +433,20 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
       final results = <MediaPickResult>[];
       final tropGros = <String>[];
       for (final file in choisis) {
+        // Une vidéo reste sur le disque (29/10/2026) : l'écran de légende la
+        // compresse depuis son chemin.
+        if (_guessMime(file.name).startsWith('video/')) {
+          final taille = await File(file.path).length();
+          if (taille == 0) continue;
+          results.add(MediaPickResult(
+            bytes: Uint8List(0),
+            tailleSurDisque: taille,
+            fileName: file.name,
+            mimeType: _guessMime(file.name),
+            path: file.path,
+          ));
+          continue;
+        }
         final octets = await file.readAsBytes();
         if (octets.isEmpty) continue;
         // ⚠️ MÊME PLAFOND QUE LES DOCUMENTS, plus bas. Ce chemin ne sert que si
@@ -494,14 +522,13 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
       }
       final mime = _guessMime(file.name);
       /*
-       * Au-delà de [seuilSurDisque], un DOCUMENT n'est pas lu : il part du
-       * disque. Photos et vidéos sont encore lues — l'écran de légende les
-       * montre, et leur compression travaille sur des octets.
+       * Au-delà de [seuilSurDisque], un document ou une vidéo n'est pas lu :
+       * il part du disque, et une vidéo s'y compresse (29/10/2026). Les
+       * photos sont encore lues — l'écran de légende les montre.
        */
       if (file.path != null &&
           file.size > seuilSurDisque &&
-          !mime.startsWith('image/') &&
-          !mime.startsWith('video/')) {
+          !mime.startsWith('image/')) {
         results.add(MediaPickResult(
           bytes: Uint8List(0),
           tailleSurDisque: file.size,

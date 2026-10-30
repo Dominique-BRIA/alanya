@@ -327,7 +327,8 @@ class SuiviEnvoisMorceaux {
   }
 
   String? _cheminUtilisable(MediaPickResult f) {
-    final p = f.path;
+    // Le fichier qui part : le MP4 produit d'une vidéo restée sur le disque.
+    final p = f.cheminContenu ?? f.path;
     if (p == null || p.isEmpty) return null;
     try {
       // Un chemin dont le contenu ne correspond plus aux octets (fichier

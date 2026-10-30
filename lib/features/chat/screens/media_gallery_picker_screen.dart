@@ -250,6 +250,29 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
     final tropGros = <String>[];
     for (final asset in _choisis) {
       try {
+        /*
+         * 🐛 UNE VIDÉO DE 262 Mo FAISAIT FERMER L'APPLICATION (user,
+         * 29/10/2026). `originBytes` la faisait passer TOUT ENTIÈRE par le tas
+         * Java, puis par le canal, jusqu'à Dart. Une vidéo ne prend plus que
+         * son chemin : l'écran de légende la compresse depuis le disque, et
+         * l'envoi la lit par morceaux.
+         */
+        if (asset.type == AssetType.video) {
+          final fichierVideo = await asset.file;
+          if (fichierVideo == null) continue;
+          final taille = await fichierVideo.length();
+          if (taille == 0) continue;
+          resultats.add(MediaPickResult(
+            bytes: Uint8List(0),
+            tailleSurDisque: taille,
+            fileName: asset.title ?? 'media_${asset.id}',
+            mimeType: _mime(asset),
+            durationMs: (asset.duration * 1000).toInt(),
+            path: fichierVideo.path,
+            asset: asset,
+          ));
+          continue;
+        }
         final octets = await asset.originBytes;
         if (octets == null) continue;
         final fichier = await asset.file;

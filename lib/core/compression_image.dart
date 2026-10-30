@@ -127,10 +127,15 @@ class ResultatCompression {
     this.raisonSaut,
     this.niveauSuperieurPossible = false,
     this.definitionAutreNiveau,
+    this.cheminProduit,
   });
 
   /// Les octets à envoyer — CEUX D'ORIGINE si rien n'a été fait.
   final Uint8List octets;
+
+  /// Vidéo restée SUR LE DISQUE (29/10/2026) : le fichier produit par le
+  /// transcodage, quand il y en a un — [octets] est alors vide.
+  final String? cheminProduit;
   final String nomFichier;
   final String mimeType;
   final bool compresse;

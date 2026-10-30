@@ -391,10 +391,15 @@ class ResultatCompressionVideo {
     this.raisonSaut,
     this.niveauSuperieurPossible = false,
     this.definitionAutreNiveau,
+    this.cheminProduit,
   });
 
   /// Les octets à envoyer — CEUX D'ORIGINE si rien n'a été fait.
   final Uint8List octets;
+
+  /// Source sur le disque (29/10/2026) : le MP4 produit, laissé sur le disque
+  /// au lieu d'être relu en mémoire — [octets] est alors vide.
+  final String? cheminProduit;
   final String nomFichier;
   final String mimeType;
   final bool compresse;
@@ -433,14 +438,22 @@ Future<ResultatCompressionVideo> compresserVideo(
   // que s'il change quelque chose, et doit dire ce qu'il va produire.
   var hautePossible = false;
   int? definitionAutre;
+  /*
+   * 🐛 UNE VIDÉO DE 262 Mo FAISAIT FERMER L'APPLICATION (user, 29/10/2026) :
+   * elle était lue en mémoire à la sélection, puis le MP4 produit l'était à
+   * son tour. Sans octets mais avec un chemin, la vidéo est lue et produite
+   * SUR LE DISQUE de bout en bout.
+   */
+  final surDisque = original.isEmpty && chemin != null && chemin.isNotEmpty;
+  final tailleSource = surDisque ? File(chemin).lengthSync() : original.length;
   ResultatCompressionVideo intact(RaisonSautVideo raison) =>
       ResultatCompressionVideo(
         octets: original,
         nomFichier: nomFichier,
         mimeType: mimeType,
         compresse: false,
-        tailleAvant: original.length,
-        tailleApres: original.length,
+        tailleAvant: tailleSource,
+        tailleApres: tailleSource,
         raisonSaut: raison,
         niveauSuperieurPossible: hautePossible,
         definitionAutreNiveau: definitionAutre,
@@ -477,7 +490,7 @@ Future<ResultatCompressionVideo> compresserVideo(
   final consigne = consignePour(
     largeur: largeur,
     hauteur: hauteur,
-    tailleOctets: original.length,
+    tailleOctets: tailleSource,
     dureeMs: dureeMs,
     niveau: niveau,
   );
@@ -496,6 +509,29 @@ Future<ResultatCompressionVideo> compresserVideo(
   if (produit == null) return intact(RaisonSautVideo.transcodageImpossible);
 
   final fichier = File(produit);
+  if (surDisque) {
+    // Le MP4 reste sur le disque : c'est lui qui partira, lu par morceaux.
+    final taille = fichier.existsSync() ? fichier.lengthSync() : 0;
+    if (taille == 0 || taille >= tailleSource * gainMinimumVideo) {
+      try {
+        if (fichier.existsSync()) fichier.deleteSync();
+      } catch (_) {}
+      return intact(taille == 0
+          ? RaisonSautVideo.transcodageImpossible
+          : RaisonSautVideo.sansGain);
+    }
+    return ResultatCompressionVideo(
+      octets: Uint8List(0),
+      cheminProduit: produit,
+      nomFichier: _enMp4(nomFichier),
+      mimeType: "video/mp4",
+      compresse: true,
+      tailleAvant: tailleSource,
+      tailleApres: taille,
+      niveauSuperieurPossible: hautePossible,
+      definitionAutreNiveau: definitionAutre,
+    );
+  }
   Uint8List octets;
   try {
     octets = await fichier.readAsBytes();
