@@ -868,7 +868,23 @@ class _ConversationsTabState extends State<_ConversationsTab>
       }
     });
     // Rafraîchissement de repli (dernier message, non-lus) si le WS est coupé.
-    _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) => _poll());
+    /*
+     * 🐛 « LE SCROLL CALE, ÇA NE RÉPOND PAS QUELQUES MILLISECONDES » (user,
+     * 30/10/2026). Le commentaire ci-dessus le disait, le code ne le faisait
+     * pas : toutes les 5 s, connexion temps réel ou non, l'accueil rechargeait
+     * les conversations, les archivées et les appels — trois requêtes, une
+     * écriture du cache, et la reconstruction de tout l'accueil, qui reste
+     * vivant SOUS la conversation ouverte. Mesuré au téléphone : 17 % d'images
+     * en retard, jusqu'à 150 ms, fil de l'interface en cause.
+     *
+     * Connexion établie, les événements (message, e2ee_arrivee, read…) et le
+     * rattrapage de `ws_connected` suffisent : comme l'écran de conversation,
+     * on ne sonde que lorsqu'elle est coupée.
+     */
+    _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (!mounted || context.read<RealtimeClient>().connected) return;
+      _poll();
+    });
     // Ecoute fin d'appel pour auto-refresh sans pull-to-refresh
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
