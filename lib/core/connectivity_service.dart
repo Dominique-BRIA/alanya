@@ -1,60 +1,94 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import 'realtime_client.dart';
 
 /// Observe l'état de connectivité (online/offline) de l'app.
 ///
-/// On s'appuie sur le [RealtimeClient] comme source de vérité principale :
-///  - Si la WS est connectée → online
-///  - Si elle n'arrive pas à se reconnecter → offline (probablement pas de réseau)
+/// 🐛 « EN ATTENTE DE CONNEXION » S'AFFICHAIT ALORS QU'ON ÉTAIT CONNECTÉ (user,
+/// 30/10/2026). L'ancienne règle était « temps réel connecté ET aucune requête
+/// HTTP en échec » : la moindre requête refusée — un jeton expiré, une erreur
+/// du serveur — allumait le bandeau, que seul un sondage réussi éteignait.
 ///
-/// Optionnellement, on peut aussi marquer offline explicitement quand une
-/// requête HTTP échoue avec un SocketException.
+/// 🔴 LA RÈGLE, DÉSORMAIS :
+///  - connexion temps réel établie → en ligne, quoi qu'aient donné les requêtes
+///    HTTP (le ping du [RealtimeClient] détecte lui-même une liaison morte) ;
+///  - temps réel coupé → en ligne tant que la dernière requête HTTP a réussi ;
+///    la coupure efface la réussite précédente ;
+///  - « hors ligne » n'est annoncé qu'après [delaiConfirmation] de coupure
+///    continue : une reconnexion d'une seconde n'a pas à faire clignoter
+///    l'écran.
 class ConnectivityService extends ChangeNotifier {
-  ConnectivityService(this._rt) {
-    _rt.addListener(_onRealtimeChange);
-    _isOnline = _rt.connected;
+  ConnectivityService(
+    this._rt, {
+    this.delaiConfirmation = const Duration(seconds: 3),
+  }) {
+    _wsConnecte = _rt.connected;
+    _rt.addListener(_surTempsReel);
+    _reevaluer();
   }
 
   final RealtimeClient _rt;
-  bool _isOnline = false;
-  bool _httpFailed = false;
 
-  bool get isOnline => _isOnline && !_httpFailed;
-  bool get isOffline => !isOnline;
+  /// Durée de coupure continue avant d'annoncer « hors ligne ».
+  final Duration delaiConfirmation;
 
-  void _onRealtimeChange() {
-    final newState = _rt.connected;
-    if (newState != _isOnline) {
-      _isOnline = newState;
-      // Un reconnect WS remet à zéro le drapeau HTTP.
-      if (newState) _httpFailed = false;
-      notifyListeners();
-    }
+  bool _wsConnecte = false;
+  bool _httpOk = false;
+  bool _horsLigne = false;
+  Timer? _attente;
+
+  bool get isOnline => !_horsLigne;
+  bool get isOffline => _horsLigne;
+
+  bool get _brutHorsLigne => !_wsConnecte && !_httpOk;
+
+  void _surTempsReel() {
+    final connecte = _rt.connected;
+    if (connecte == _wsConnecte) return;
+    _wsConnecte = connecte;
+    // La liaison vient de tomber : une réussite HTTP d'avant ne prouve plus rien.
+    if (!connecte) _httpOk = false;
+    _reevaluer();
   }
 
-  /// Appelé par les repositories quand une requête HTTP échoue avec un
-  /// SocketException. Bascule l'app en "offline" même si la WS croit encore
-  /// être connectée (souvent le TCP idle sur mobile).
+  void _reevaluer() {
+    if (!_brutHorsLigne) {
+      _attente?.cancel();
+      _attente = null;
+      if (_horsLigne) {
+        _horsLigne = false;
+        notifyListeners();
+      }
+      return;
+    }
+    if (_horsLigne || _attente != null) return;
+    _attente = Timer(delaiConfirmation, () {
+      _attente = null;
+      if (_brutHorsLigne && !_horsLigne) {
+        _horsLigne = true;
+        notifyListeners();
+      }
+    });
+  }
+
+  /// Une requête HTTP a échoué. Ne compte que si le temps réel est coupé.
   void markHttpFailed() {
-    if (!_httpFailed) {
-      _httpFailed = true;
-      notifyListeners();
-    }
+    _httpOk = false;
+    _reevaluer();
   }
 
-  /// Appelé quand une requête HTTP réussit → on est effectivement online.
+  /// Une requête HTTP a réussi → on est effectivement en ligne.
   void markHttpSucceeded() {
-    if (_httpFailed || !_isOnline) {
-      _httpFailed = false;
-      _isOnline = true;
-      notifyListeners();
-    }
+    _httpOk = true;
+    _reevaluer();
   }
 
   @override
   void dispose() {
-    _rt.removeListener(_onRealtimeChange);
+    _attente?.cancel();
+    _rt.removeListener(_surTempsReel);
     super.dispose();
   }
 }
