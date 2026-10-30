@@ -30,6 +30,10 @@ String messageErreurAppel(Object erreur,
 
   if (erreur is ApiException) {
     if (erreur.statusCode == 404 && messageSi404 != null) return messageSi404;
+    // « Contacts préférés uniquement » chez l'appelé (29/10/2026) : traduit ici.
+    if (erreur.code == 'APPEL_CONTACTS_SEULEMENT') {
+      return tr(context, 'call_err_contacts_only');
+    }
     return erreur.message;
   }
 

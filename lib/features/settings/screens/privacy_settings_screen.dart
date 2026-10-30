@@ -26,6 +26,7 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
 
   /// « Interdire qu'on me renomme » (18/10/2026).
   bool _nomVerrouille = false;
+  bool _appelsContactsSeulement = false;
 
   /// Connexion web en deux étapes (18/10/2026) ; imposée : agent d'entreprise.
   bool _deuxEtapes = false;
@@ -59,6 +60,7 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
           _lastSeenVisibility = p["lastSeenVisibility"] ?? 2;
           _chiffrementActif = (p["chiffrementActif"] ?? 1) == 1;
           _nomVerrouille = (p["nomVerrouille"] ?? 0) == 1;
+          _appelsContactsSeulement = (p["appelsContactsSeulement"] ?? 0) == 1;
           _deuxEtapes = (p["deuxEtapes"] ?? 0) == 1;
           _deuxEtapesImposee = (p["deuxEtapesImposee"] ?? 0) == 1;
           _loading = false;
@@ -87,6 +89,7 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
     int? lastSeenVisibility,
     bool? chiffrementActif,
     bool? nomVerrouille,
+    bool? appelsContactsSeulement,
     bool? deuxEtapes,
   }) async {
     try {
@@ -95,6 +98,7 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
             lastSeenVisibility: lastSeenVisibility,
             chiffrementActif: chiffrementActif,
             nomVerrouille: nomVerrouille,
+            appelsContactsSeulement: appelsContactsSeulement,
             deuxEtapes: deuxEtapes,
           );
     } catch (_) {
@@ -186,6 +190,22 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
                   onChanged: (v) {
                     setState(() => _nomVerrouille = v);
                     _save(nomVerrouille: v);
+                  },
+                ),
+                const Divider(height: 1),
+                // Demande du user (29/10/2026) : seuls mes contacts enregistrés
+                // peuvent m'appeler. Le serveur refuse les autres avant de sonner.
+                SwitchListTile(
+                  secondary: Icon(Icons.phone_locked_outlined,
+                      color: themed(context,
+                          light: AlanyaColors.forest,
+                          dark: AlanyaColors.indigoLight)),
+                  title: Text(tr(context, 'priv_calls_contacts_only')),
+                  subtitle: Text(tr(context, 'priv_calls_contacts_only_sub')),
+                  value: _appelsContactsSeulement,
+                  onChanged: (v) {
+                    setState(() => _appelsContactsSeulement = v);
+                    _save(appelsContactsSeulement: v);
                   },
                 ),
                 const Divider(height: 1),

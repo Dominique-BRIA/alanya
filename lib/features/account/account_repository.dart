@@ -107,6 +107,8 @@ class AccountRepository {
       "chiffrementActif": data["chiffrementActif"] == false ? 0 : 1,
       // « Interdire qu'on me renomme » — absent d'un serveur plus ancien : non.
       "nomVerrouille": data["nomVerrouille"] == true ? 1 : 0,
+      // « Contacts préférés uniquement » (29/10/2026) — absent d'un serveur plus ancien : non.
+      "appelsContactsSeulement": data["appelsContactsSeulement"] == true ? 1 : 0,
       // Connexion web en deux étapes ; « imposée » : agent d'entreprise.
       "deuxEtapes": data["deuxEtapes"] == true ? 1 : 0,
       "deuxEtapesImposee": data["deuxEtapesImposee"] == true ? 1 : 0,
@@ -118,9 +120,13 @@ class AccountRepository {
     int? lastSeenVisibility,
     bool? chiffrementActif,
     bool? nomVerrouille,
+    bool? appelsContactsSeulement,
     bool? deuxEtapes,
   }) async {
     final body = <String, dynamic>{};
+    if (appelsContactsSeulement != null) {
+      body["appelsContactsSeulement"] = appelsContactsSeulement;
+    }
     if (deuxEtapes != null) body["deuxEtapes"] = deuxEtapes;
     if (nomVerrouille != null) body["nomVerrouille"] = nomVerrouille;
     if (readReceipts != null) body["readReceipts"] = readReceipts;
