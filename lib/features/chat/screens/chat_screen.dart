@@ -1345,32 +1345,23 @@ class _ChatScreenState extends State<ChatScreen>
         // ⚠️ « EN ATTENTE » EST MARQUÉ LU, ET C'EST VOULU : le destinataire
         // peut lire avant que le serveur nous ait répondu (voir
         // `statutFusionne`). Un message en ÉCHEC, lui, n'est jamais parti.
+        /*
+         * 🐛 UN GROS FICHIER DISPARAISSAIT À 100 % (user, 30/10/2026).
+         *
+         * 1. La bulle d'attente d'un média chiffré ne s'affiche que tant qu'elle
+         *    est « en attente » ; ce passage la marquait LUE comme un texte :
+         *    elle cessait de s'afficher, et la copie du message restait
+         *    masquée derrière elle. Elle garde donc son état jusqu'à la fin de
+         *    l'envoi, qui la remplace.
+         * 2. La copie était faite à la main et perdait `chiffreGroupe`,
+         *    `mentions` et `boutons` : `avecStatut` garde tout.
+         */
         _messages = _messages
             .map((m) => m.senderId == _myId &&
                     m.status != "READ" &&
-                    m.status != "FAILED"
-                ? Message(
-                    id: m.id,
-                    chiffre: m.chiffre,
-                    vueUnique: m.vueUnique,
-                    vueUniqueOuverte: m.vueUniqueOuverte,
-                    vueUniqueEffacee: m.vueUniqueEffacee,
-                    mediaChiffre: m.mediaChiffre,
-                    convId: m.convId,
-                    senderId: m.senderId,
-                    content: m.content,
-                    type: m.type,
-                    status: "READ",
-                    replyToId: m.replyToId,
-                    replyTo: m.replyTo,
-                    statutCite: m.statutCite,
-                    deletedAt: m.deletedAt,
-                    editedAt: m.editedAt,
-                    media: m.media,
-                    createdAt: m.createdAt,
-                    reactions: m.reactions,
-                    starred: m.starred,
-                    expiresAt: m.expiresAt)
+                    m.status != "FAILED" &&
+                    !_envoisChiffres.containsKey(m.id)
+                ? m.avecStatut("READ")
                 : m)
             .toList();
         // 🐛 SANS CETTE LIGNE, L ÉCRAN NE CHANGEAIT PAS : `_messages` était à
@@ -1402,28 +1393,9 @@ class _ChatScreenState extends State<ChatScreen>
         _messages = _messages
             .map((m) => m.id == messageId &&
                     _statusRank(newStatus) > _statusRank(m.status)
-                ? Message(
-                    id: m.id,
-                    chiffre: m.chiffre,
-                    vueUnique: m.vueUnique,
-                    vueUniqueOuverte: m.vueUniqueOuverte,
-                    vueUniqueEffacee: m.vueUniqueEffacee,
-                    mediaChiffre: m.mediaChiffre,
-                    convId: m.convId,
-                    senderId: m.senderId,
-                    content: m.content,
-                    type: m.type,
-                    status: newStatus,
-                    replyToId: m.replyToId,
-                    replyTo: m.replyTo,
-                    statutCite: m.statutCite,
-                    deletedAt: m.deletedAt,
-                    editedAt: m.editedAt,
-                    media: m.media,
-                    createdAt: m.createdAt,
-                    reactions: m.reactions,
-                    starred: m.starred,
-                    expiresAt: m.expiresAt)
+                // Tous les champs suivent (30/10/2026) : la copie à la main
+                // perdait `chiffreGroupe`, `mentions` et `boutons`.
+                ? m.avecStatut(newStatus)
                 : m)
             .toList();
         // 🐛 SANS CETTE LIGNE, L ÉCRAN NE CHANGEAIT PAS : `_messages` était à
@@ -4247,7 +4219,9 @@ class _ChatScreenState extends State<ChatScreen>
             mime: d.mime,
             progression: _envoiEnCoursDe(m.id)!.progression,
           )
-        else if (d == null && m.status == "PENDING")
+        // Tant que son envoi existe, quel que soit l'état affiché (30/10/2026).
+        else if (d == null &&
+            (m.status == "PENDING" || _envoisChiffres.containsKey(m.id)))
           _envoiChiffreEnCours(
             suivi: _envoiDeBulle(m.id),
             octets: _envoisChiffres[m.id]?.fichier.bytes,
