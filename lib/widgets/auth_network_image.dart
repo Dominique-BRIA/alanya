@@ -19,6 +19,7 @@ class AuthNetworkImage extends StatefulWidget {
     this.borderRadius,
     this.onCharge,
     this.onEchec,
+    this.pendant,
   });
 
   final String url;
@@ -41,6 +42,29 @@ class AuthNetworkImage extends StatefulWidget {
   /// attendrait pour toujours.
   final VoidCallback? onEchec;
 
+  /// Ce qui s'affiche tant que l'image n'est pas là, ou si elle ne vient pas.
+  /// Un avatar y met son initiale : un cercle de chargement dans un rond de
+  /// quarante pixels, puis la photo, c'était un clignotement de plus.
+  final Widget? pendant;
+
+  /*
+   * LES PETITES IMAGES DÉJÀ LUES RESTENT EN MÉMOIRE (01/11/2026) : photos de
+   * profil, vignettes. Le cache disque les gardait, mais chaque nouvel avatar
+   * — une ligne qui revient à l'écran, une conversation rouverte — attendait
+   * la lecture du fichier avant de s'afficher. Les grosses images n'y entrent
+   * pas : la mémoire n'est pas faite pour elles.
+   */
+  static const _tailleMaxMemoire = 400 * 1024;
+  static const _entreesMax = 150;
+  static final Map<String, Uint8List> _memoire = {};
+
+  static void _retenir(String url, Uint8List octets) {
+    if (octets.length > _tailleMaxMemoire) return;
+    _memoire.remove(url);
+    _memoire[url] = octets;
+    if (_memoire.length > _entreesMax) _memoire.remove(_memoire.keys.first);
+  }
+
   @override
   State<AuthNetworkImage> createState() => _AuthNetworkImageState();
 }
@@ -52,14 +76,26 @@ class _AuthNetworkImageState extends State<AuthNetworkImage> {
   @override
   void initState() {
     super.initState();
+    final connu = AuthNetworkImage._memoire[widget.url];
+    if (connu != null) {
+      // Déjà lue : affichée au premier tracé, sans rien relire.
+      _bytes = connu;
+      WidgetsBinding.instance.addPostFrameCallback((_) => widget.onCharge?.call());
+      return;
+    }
     _load();
   }
 
   @override
   void didUpdateWidget(AuthNetworkImage old) {
     super.didUpdateWidget(old);
-    if (old.url != widget.url || old.token != widget.token) {
-      _bytes = null;
+    if (old.url != widget.url) {
+      _bytes = AuthNetworkImage._memoire[widget.url];
+      _error = false;
+      if (_bytes == null) _load();
+    } else if (old.token != widget.token && _bytes == null) {
+      // ⚠️ UN JETON RAFRAÎCHI NE RECHARGE PAS UNE IMAGE DÉJÀ LÀ : elle ne
+      // dépend que de son adresse. Recharger la faisait disparaître un instant.
       _error = false;
       _load();
     }
@@ -115,6 +151,7 @@ class _AuthNetworkImageState extends State<AuthNetworkImage> {
       final bytes = await loadCachedMediaBytes(widget.url, token);
       if (!mounted) return;
       if (bytes != null && _looksLikeImage(bytes, null)) {
+        AuthNetworkImage._retenir(widget.url, bytes);
         setState(() {
           _bytes = bytes;
           _error = false;
@@ -131,6 +168,8 @@ class _AuthNetworkImageState extends State<AuthNetworkImage> {
   }
 
   Widget _errorPlaceholder() {
+    final pendant = widget.pendant;
+    if (pendant != null) return pendant;
     return Container(
       width: widget.width,
       height: widget.height ?? 120,
@@ -154,11 +193,12 @@ class _AuthNetworkImageState extends State<AuthNetworkImage> {
     } else if (_error) {
       child = _errorPlaceholder();
     } else {
-      child = SizedBox(
-        width: widget.width,
-        height: widget.height ?? 200,
-        child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-      );
+      child = widget.pendant ??
+          SizedBox(
+            width: widget.width,
+            height: widget.height ?? 200,
+            child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+          );
     }
     if (widget.borderRadius != null) {
       child = ClipRRect(borderRadius: widget.borderRadius!, child: child);

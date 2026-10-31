@@ -42,7 +42,9 @@ class AvatarCircle extends StatefulWidget {
 }
 
 class _AvatarCircleState extends State<AvatarCircle> {
-  String? _token;
+  // Le jeton connu dès le premier tracé : sans lui, chaque avatar montrait son
+  // initiale le temps de relire le coffre, puis sa photo (01/11/2026).
+  String? _token = TokenStorage.accesConnu;
 
   @override
   void initState() {
@@ -71,10 +73,22 @@ class _AvatarCircleState extends State<AvatarCircle> {
 
     // Trois formes coexistent en base — chemin relatif, URL absolue, et image
     // base64 écrite par l'application de l'équipe. Voir [AvatarSource].
+    final lettre = Center(
+      child: Text(
+        initial,
+        style: TextStyle(
+          color: widget.textColor,
+          fontSize: widget.radius * 0.9,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
     final photo = AvatarSource.depuis(widget.avatarUrl).image(
       width: size,
       height: size,
       token: _token,
+      // L'initiale, et non un cercle de chargement, en attendant la photo.
+      pendant: lettre,
     );
 
     Widget content = Container(
@@ -87,19 +101,7 @@ class _AvatarCircleState extends State<AvatarCircle> {
             ? Border.all(color: widget.borderColor!, width: widget.borderWidth)
             : null,
       ),
-      child: ClipOval(
-        child: photo ??
-            Center(
-              child: Text(
-                initial,
-                style: TextStyle(
-                  color: widget.textColor,
-                  fontSize: widget.radius * 0.9,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-      ),
+      child: ClipOval(child: photo ?? lettre),
     );
 
     if (widget.onTap != null) {

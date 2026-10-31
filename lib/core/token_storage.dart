@@ -70,6 +70,19 @@ class TokenStorage {
   );
 
   static const _kAccess = "alanya_access_token";
+
+  /*
+   * 🐛 LES PHOTOS DE PROFIL CLIGNOTAIENT (user, 01/11/2026). Chaque avatar
+   * relisait le jeton dans le coffre sécurisé — un aller-retour par le canal
+   * de plateforme, une liste de trente conversations en faisait trente — et
+   * affichait l'initiale en attendant. Le jeton connu est gardé ici : relu une
+   * fois, il est rendu sans attente, et SYNCHRONE pour le premier tracé.
+   */
+  static String? _accesConnu;
+
+  /// Le dernier jeton d'accès connu, sans lire le coffre. `null` tant qu'il
+  /// n'a jamais été lu ni écrit.
+  static String? get accesConnu => _accesConnu;
   static const _kRefresh = "alanya_refresh_token";
   static const _kUser = "alanya_user_json";
 
@@ -104,11 +117,16 @@ class TokenStorage {
 
   Future<void> saveTokens(
       {required String access, required String refresh}) async {
+    _accesConnu = access;
     await _ecrire(_kAccess, access);
     await _ecrire(_kRefresh, refresh);
   }
 
-  Future<String?> get accessToken => _lire(_kAccess);
+  Future<String?> get accessToken async {
+    final connu = _accesConnu;
+    if (connu != null) return connu;
+    return _accesConnu = await _lire(_kAccess);
+  }
   Future<String?> get refreshToken => _lire(_kRefresh);
 
   // --- Profil utilisateur en cache, pour un démarrage instantané offline ---
@@ -116,6 +134,7 @@ class TokenStorage {
   Future<String?> get userJson => _lire(_kUser);
 
   Future<void> clear() async {
+    _accesConnu = null;
     /*
      * ⚠️ `deleteAll` ET NON TROIS `delete` : depuis que cet espace de nom est
      * à nous seuls, il ne contient rien d'autre. Et une entrée devenue

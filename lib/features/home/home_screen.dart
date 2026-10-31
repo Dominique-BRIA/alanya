@@ -81,6 +81,7 @@ import '../status/screens/status_viewer_screen.dart';
 import '../status/status_repository.dart';
 import '../status/widgets/anneau_statuts.dart';
 import '../status/ouvrir_statut.dart';
+import '../account/screens/avatar_viewer_screen.dart';
 import '../status/statuts_en_direct.dart';
 // L'aperçu d'une ligne d'un message, commun aux quatre écrans qui en affichent
 // un — voir `apercuMessage`.
@@ -1554,11 +1555,18 @@ class _ConversationsTabState extends State<_ConversationsTab>
       ),
       child: Row(
         children: [
+          // Toucher sa photo l'affiche (01/11/2026, demande du user).
           AvatarCircle(
             name: user.nom ?? user.pseudo ?? "?",
             avatarUrl: user.avatarUrl,
             radius: 22,
             backgroundColor: AlanyaColors.terracotta,
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => AvatarViewerScreen(
+                name: user.nom ?? user.pseudo ?? "?",
+                avatarUrl: user.avatarUrl,
+              ),
+            )),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -1828,8 +1836,12 @@ class _ConversationsTabState extends State<_ConversationsTab>
   /*
    * 🔴 L'ANNEAU DE STATUT DANS LA LISTE DES DISCUSSIONS (01/11/2026, repris
    * d'Alanya). Un contact qui a des statuts porte l'anneau segmenté de
-   * l'onglet Statuts — vert ce qui reste à voir, sable ce qui est vu — et un
-   * toucher sur sa photo les ouvre.
+   * l'onglet Statuts — vert ce qui reste à voir, sable ce qui est vu.
+   *
+   * UN TOUCHER SUR LA PHOTO (demande du user, 01/11/2026) :
+   *   - pas de statut → sa photo de profil ;
+   *   - des statuts pas encore vus → les statuts ;
+   *   - des statuts déjà vus → on demande : le statut ou la photo ?
    *
    * ⚠️ LA PLACE EST LA MÊME AVEC OU SANS ANNEAU : sinon les noms ne seraient
    * plus alignés d'une ligne à l'autre.
@@ -1845,13 +1857,52 @@ class _ConversationsTabState extends State<_ConversationsTab>
       listenable: StatutsEnDirect.instance,
       builder: (context, _) {
         final groupe = StatutsEnDirect.instance.groupeDe(userId);
+        void voirPhoto() => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => AvatarViewerScreen(name: title, avatarUrl: avatarUrl),
+            ));
         if (groupe == null) {
-          return Padding(padding: const EdgeInsets.all(3), child: avatar);
+          // Un groupe garde son geste d'avant : le toucher ouvre la discussion.
+          if (userId == null) {
+            return Padding(padding: const EdgeInsets.all(3), child: avatar);
+          }
+          return GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: voirPhoto,
+            child: Padding(padding: const EdgeInsets.all(3), child: avatar),
+          );
         }
         final isDark = Theme.of(context).brightness == Brightness.dark;
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTap: () => ouvrirStatutsDe(context, groupe),
+          onTap: () async {
+            if (groupe.hasUnviewed) {
+              await ouvrirStatutsDe(context, groupe);
+              return;
+            }
+            final choix = await showModalBottomSheet<String>(
+              context: context,
+              builder: (ctx) => SafeArea(
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  ListTile(
+                    leading: const Icon(Icons.donut_large_rounded),
+                    title: Text(tr(ctx, 'avatar_view_status')),
+                    onTap: () => Navigator.of(ctx).pop('statut'),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.account_circle_outlined),
+                    title: Text(tr(ctx, 'avatar_view_profile_photo')),
+                    onTap: () => Navigator.of(ctx).pop('photo'),
+                  ),
+                ]),
+              ),
+            );
+            if (!context.mounted) return;
+            if (choix == 'statut') {
+              await ouvrirStatutsDe(context, groupe);
+            } else if (choix == 'photo') {
+              voirPhoto();
+            }
+          },
           child: AnneauStatuts(
             vus: groupe.statuses.map((s) => s.viewed).toList(),
             couleurNonVu:

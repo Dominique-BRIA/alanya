@@ -38,6 +38,8 @@ import '../../../widgets/qr_alanya.dart';
 import '../../auth/auth_controller.dart';
 import '../../contacts/contacts_repository.dart';
 import '../../contacts/screens/contact_info_screen.dart';
+import 'avatar_viewer_screen.dart';
+import 'recadrage_photo_screen.dart';
 import '../../contacts/screens/invitation_qr_screen.dart';
 import '../../media/media_repository.dart';
 import '../../parametres/screens/sauvegarde_chiffree_screen.dart';
@@ -148,6 +150,44 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  /// Un toucher sur sa photo (01/11/2026, demande du user) : la voir, ou la
+  /// modifier. Sans photo, il n'y a rien à voir — on va droit au choix.
+  Future<void> _toucherPhoto(AuthUser? user) async {
+    final avatar = user?.avatarUrl;
+    if (avatar == null || avatar.trim().isEmpty) {
+      await _pickAvatar();
+      return;
+    }
+    final choix = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: const Icon(Icons.visibility_outlined),
+            title: Text(tr(ctx, 'avatar_view_photo')),
+            onTap: () => Navigator.of(ctx).pop('voir'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.photo_camera_outlined),
+            title: Text(tr(ctx, 'avatar_change_photo')),
+            onTap: () => Navigator.of(ctx).pop('modifier'),
+          ),
+        ]),
+      ),
+    );
+    if (!mounted) return;
+    if (choix == 'voir') {
+      await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => AvatarViewerScreen(
+          name: user?.nom ?? user?.pseudo ?? tr(context, 'home_me'),
+          avatarUrl: avatar,
+        ),
+      ));
+    } else if (choix == 'modifier') {
+      await _pickAvatar();
+    }
+  }
+
   Future<void> _pickAvatar() async {
     if (_uploadingAvatar) return;
 
@@ -164,13 +204,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (result == null || result.files.isEmpty) return;
 
     final file = result.files.first;
-    final bytes = file.bytes;
-    if (bytes == null) return;
+    final original = file.bytes;
+    if (original == null) return;
 
-    if (bytes.length > 5 * 1024 * 1024) {
-      _snack("Image trop lourde (max 5 Mo)");
+    // L'original peut dépasser la limite : c'est le RECADRÉ qui part, un carré
+    // de 640 pixels. On ne refuse que ce qu'il serait déraisonnable de décoder.
+    if (original.length > 25 * 1024 * 1024) {
+      _snack("Image trop lourde (max 25 Mo)");
       return;
     }
+
+    /*
+     * L'APERÇU D'ABORD (01/11/2026, demande du user) : on recadre la photo
+     * sous le cercle avant qu'elle parte sur le profil. Annuler n'envoie rien.
+     */
+    if (!mounted) return;
+    final bytes = await RecadragePhotoScreen.ouvrir(context, original);
+    if (bytes == null || !mounted) return;
 
     setState(() => _uploadingAvatar = true);
     final mediaRepo = context.read<MediaRepository>();
@@ -178,8 +228,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final auth = context.read<AuthController>();
 
     try {
-      final mime = _mimeFromBytes(bytes) ?? _mimeFromName(file.name);
-      final uploaded = await mediaRepo.upload(bytes, file.name, mime);
+      // Le recadré est toujours un PNG.
+      final uploaded = await mediaRepo.upload(bytes, 'photo-profil.png', 'image/png');
       final res = await account.updateProfile(avatarUrl: uploaded.url);
       auth.applyProfile(
         pseudo: res.pseudo,
@@ -194,44 +244,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } finally {
       if (mounted) setState(() => _uploadingAvatar = false);
     }
-  }
-
-  String? _mimeFromBytes(Uint8List bytes) {
-    if (bytes.length < 12) return null;
-    if (bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) {
-      return "image/jpeg";
-    }
-    if (bytes[0] == 0x89 &&
-        bytes[1] == 0x50 &&
-        bytes[2] == 0x4E &&
-        bytes[3] == 0x47) {
-      return "image/png";
-    }
-    if (bytes[0] == 0x47 &&
-        bytes[1] == 0x49 &&
-        bytes[2] == 0x46 &&
-        bytes[3] == 0x38) {
-      return "image/gif";
-    }
-    if (bytes[0] == 0x52 &&
-        bytes[1] == 0x49 &&
-        bytes[2] == 0x46 &&
-        bytes[3] == 0x46 &&
-        bytes[8] == 0x57 &&
-        bytes[9] == 0x45 &&
-        bytes[10] == 0x42 &&
-        bytes[11] == 0x50) {
-      return "image/webp";
-    }
-    return null;
-  }
-
-  String _mimeFromName(String name) {
-    final n = name.toLowerCase();
-    if (n.endsWith(".png")) return "image/png";
-    if (n.endsWith(".webp")) return "image/webp";
-    if (n.endsWith(".gif")) return "image/gif";
-    return "image/jpeg";
   }
 
   void _snack(String m) =>
@@ -482,7 +494,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             avatarUrl: user?.avatarUrl,
             token: _token,
             uploading: _uploadingAvatar,
-            onTap: _pickAvatar,
+            onTap: () => _toucherPhoto(user),
           ),
           const SizedBox(height: 16),
           InkWell(

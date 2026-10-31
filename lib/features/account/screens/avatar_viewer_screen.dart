@@ -27,7 +27,7 @@ class AvatarViewerScreen extends StatefulWidget {
 }
 
 class _AvatarViewerScreenState extends State<AvatarViewerScreen> {
-  String? _token;
+  String? _token = TokenStorage.accesConnu;
   double _dragOffset = 0;
 
   @override

@@ -12,6 +12,7 @@ import '../../auth/auth_controller.dart';
 import '../../account/screens/change_password_screen.dart';
 import '../../account/screens/delete_account_screen.dart';
 import '../../account/screens/profile_screen.dart';
+import '../../account/screens/avatar_viewer_screen.dart';
 import '../../parametres/screens/sauvegarde_chiffree_screen.dart';
 import 'privacy_settings_screen.dart';
 import 'empreinte_screen.dart';
@@ -119,11 +120,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: ListTile(
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              // Toucher la photo l'affiche ; le reste du cadre mène au profil
+              // (01/11/2026, demande du user).
               leading: AvatarCircle(
                 name: user?.pseudo ?? "?",
                 avatarUrl: user?.avatarUrl,
                 radius: 28,
                 backgroundColor: AlanyaColors.terracotta,
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => AvatarViewerScreen(
+                    name: user?.nom ?? user?.pseudo ?? "?",
+                    avatarUrl: user?.avatarUrl,
+                  ),
+                )),
               ),
               title: Text(user?.pseudo ?? tr(context, 'set_user_fallback'),
                   style: const TextStyle(

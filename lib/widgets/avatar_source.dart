@@ -81,6 +81,8 @@ class AvatarSource {
     double? height,
     String? token,
     BoxFit fit = BoxFit.cover,
+    /// Affiché tant que la photo n'est pas là (voir `AuthNetworkImage.pendant`).
+    Widget? pendant,
   }) {
     if (bytes != null) {
       // Passe par le rendu commun : la valeur peut etre un SVG encode en
@@ -94,6 +96,7 @@ class AvatarSource {
         width: width,
         height: height,
         fit: fit,
+        pendant: pendant,
       );
     }
     return null;
