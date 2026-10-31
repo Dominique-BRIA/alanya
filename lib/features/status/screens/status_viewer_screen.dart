@@ -206,6 +206,11 @@ class _VueGroupeState extends State<_VueGroupe>
 
   /// Le champ « Répondre… » sous le statut de quelqu'un d'autre.
   final TextEditingController _reponseCtrl = TextEditingController();
+
+  /// Le champ de réponse : tirer vers le haut lui donne la main (01/11/2026).
+  /// Tant qu'il l'a, la lecture attend ; quand le clavier se ferme sans rien
+  /// envoyer, elle reprend.
+  final FocusNode _reponseFocus = FocusNode();
   bool _envoiReponse = false;
 
   /// Réponse VOCALE (01/11/2026, repris d'Alanya) : enregistrée ici, envoyée
@@ -246,6 +251,27 @@ class _VueGroupeState extends State<_VueGroupe>
         if (mounted && widget.actif) _entre();
       });
     }
+    _reponseFocus.addListener(() {
+      if (!mounted) return;
+      if (_reponseFocus.hasFocus) {
+        _ajoutePause(_RaisonPause.dialogue);
+      } else if (!_envoiReponse && !_enregistreReponse) {
+        _retirePause(_RaisonPause.dialogue);
+      }
+    });
+  }
+
+  /*
+   * TIRER VERS LE HAUT (01/11/2026, comme WhatsApp) : sur le statut de
+   * quelqu'un, on lui répond — le champ prend la main et le clavier s'ouvre ;
+   * sur le mien, la liste de qui l'a vu et aimé s'ouvre.
+   */
+  void _tireVersLeHaut(StatusItem s) {
+    if (widget.estMien) {
+      _showViewers(s.id);
+    } else if (!_enregistreReponse && !_envoiReponse) {
+      _reponseFocus.requestFocus();
+    }
   }
 
   @override
@@ -275,6 +301,7 @@ class _VueGroupeState extends State<_VueGroupe>
     if (_enregistreReponse) _micro.cancel();
     _progression.dispose();
     _reponseCtrl.dispose();
+    _reponseFocus.dispose();
     super.dispose();
   }
 
@@ -460,6 +487,17 @@ class _VueGroupeState extends State<_VueGroupe>
         onTapDown: (_) => _appuiDebut(),
         onTapUp: (d) => _appuiFin(d.localPosition.dx),
         onTapCancel: _appuiAnnule,
+        // Le geste vertical se joue ICI, sur la page du statut affiché : vers
+        // le bas on ferme, vers le haut on répond — ou, sur le mien, on voit
+        // qui l'a vu.
+        onVerticalDragEnd: (d) {
+          final v = d.primaryVelocity ?? 0;
+          if (v > 250) {
+            Navigator.of(context).maybePop();
+          } else if (v < -250) {
+            _tireVersLeHaut(s);
+          }
+        },
         child: SafeArea(
           child: Column(
             children: [
@@ -820,6 +858,7 @@ class _VueGroupeState extends State<_VueGroupe>
                     ? _indicateurVocal()
                     : TextField(
                   controller: _reponseCtrl,
+                  focusNode: _reponseFocus,
                   maxLength: 500,
                   minLines: 1,
                   maxLines: 3,
