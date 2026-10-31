@@ -45,6 +45,8 @@ class MessageReaction {
         userId: j["userId"] as String,
         emoji: j["emoji"] as String,
       );
+
+  Map<String, dynamic> toJson() => {"userId": userId, "emoji": emoji};
 }
 
 /// Snapshot d'un message cité (réponse). Permet d'afficher l'aperçu du message
@@ -107,6 +109,17 @@ class StatutCite {
         mediaUrl: j["mediaUrl"] as String?,
         bgColor: j["bgColor"] as String?,
       );
+
+  /// Pour le cache local (01/11/2026) : la citation doit s'afficher avant la
+  /// réponse du serveur.
+  Map<String, dynamic> toJson() => {
+        "statusId": statusId,
+        "authorId": authorId,
+        "type": type,
+        if (text != null) "text": text,
+        if (mediaUrl != null) "mediaUrl": mediaUrl,
+        if (bgColor != null) "bgColor": bgColor,
+      };
 
   /// Ce que la citation affiche quand le statut n'a pas de texte.
   String get apercu {
@@ -379,6 +392,8 @@ class BoutonMessage {
         action: (j["action"] as String?) == "url" ? "url" : "route",
         target: (j["target"] as String?) ?? "",
       );
+
+  Map<String, dynamic> toJson() => {"label": label, "action": action, "target": target};
 }
 
 /// UNE MENTION `@` : le compte visé, et le texte écrit dans le message.

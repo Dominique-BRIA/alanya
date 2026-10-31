@@ -87,7 +87,7 @@ class MessageCache {
        * Toute évolution future de ce cache passe désormais par `onUpgrade`, en
        * incrémentant `version`.
        */
-      version: 8,
+      version: 9,
       onUpgrade: (db, ancienne, nouvelle) async {
         if (ancienne < 2) await _creeTableTraductions(db);
         /*
@@ -166,6 +166,28 @@ class MessageCache {
         if (ancienne < 8) {
           await db.execute('ALTER TABLE messages ADD COLUMN e2ee_media_json TEXT');
         }
+        /*
+         * v9 — LA CITATION D'UN STATUT (01/11/2026).
+         *
+         * 🐛 « LE CADRE DU STATUT DISPARAÎT AVANT D'APPARAÎTRE » (user) : le
+         * fil s'affiche d'abord depuis ce cache, qui ne la gardait pas ; elle
+         * n'arrivait qu'avec la réponse du serveur. Recopiée par le serveur
+         * au moment de la réponse, elle ne change plus : la garder ici est
+         * sans risque.
+         */
+        if (ancienne < 9) {
+          await db.execute('ALTER TABLE messages ADD COLUMN statut_cite_json TEXT');
+          /*
+           * Et, pour la même raison, tout ce que le fil n'affichait qu'après le
+           * réseau : la mention « modifié », les réactions, l'étoile, les
+           * boutons d'un message officiel.
+           */
+          await db.execute('ALTER TABLE messages ADD COLUMN edited_at TEXT');
+          await db.execute('ALTER TABLE messages ADD COLUMN reactions_json TEXT');
+          await db.execute(
+              'ALTER TABLE messages ADD COLUMN starred INTEGER NOT NULL DEFAULT 0');
+          await db.execute('ALTER TABLE messages ADD COLUMN boutons_json TEXT');
+        }
       },
       onCreate: (db, _) async {
         await db.execute('''
@@ -185,7 +207,12 @@ class MessageCache {
             chiffre INTEGER NOT NULL DEFAULT 0,
             expires_at TEXT,
             vue_unique INTEGER NOT NULL DEFAULT 0,
-            e2ee_media_json TEXT
+            e2ee_media_json TEXT,
+            statut_cite_json TEXT,
+            edited_at TEXT,
+            reactions_json TEXT,
+            starred INTEGER NOT NULL DEFAULT 0,
+            boutons_json TEXT
           )
         ''');
         await db.execute(
@@ -317,10 +344,17 @@ class MessageCache {
     final db = await _database();
     final lignes = await db.query(
       'messages',
-      columns: ['id', 'content', 'created_at', 'chiffre', 'e2ee_media_json'],
+      columns: ['id', 'content', 'created_at', 'chiffre', 'e2ee_media_json', 'statut_cite_json'],
       where: 'conv_id = ?',
       whereArgs: [convId],
     );
+    // La citation d'un statut survit elle aussi : une copie locale (envoi
+    // chiffré, relève) arrive sans elle, le serveur seul la porte.
+    final citations = <String, String>{
+      for (final l in lignes)
+        if (l['statut_cite_json'] != null)
+          l['id'] as String: l['statut_cite_json'] as String,
+    };
     // 🔴 LE DESCRIPTEUR SURVIT AU RAFRAÎCHISSEMENT, comme le texte : le serveur
     // rend ce message sans lui, et l'écraser rendrait la photo impossible à
     // rouvrir, l'enveloppe étant déjà acquittée (chapitre 23).
@@ -374,6 +408,10 @@ class MessageCache {
               : m.mediaChiffre != null
                   ? jsonEncode(m.mediaChiffre!.toJson())
                   : descripteurs[m.id],
+          'statut_cite_json': m.statutCite != null
+              ? jsonEncode(m.statutCite!.toJson())
+              : citations[m.id],
+          ..._colonnesAffichage(m),
         },
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
@@ -390,15 +428,18 @@ class MessageCache {
     final db = await _database();
     String? ancien;
     String? ancienDescripteur;
-    if (((m.content ?? '').isEmpty || m.mediaChiffre == null) && m.deletedAt == null) {
+    String? ancienneCitation;
+    if (((m.content ?? '').isEmpty || m.mediaChiffre == null || m.statutCite == null) &&
+        m.deletedAt == null) {
       final l = await db.query('messages',
-          columns: ['content', 'e2ee_media_json'],
+          columns: ['content', 'e2ee_media_json', 'statut_cite_json'],
           where: 'id = ?',
           whereArgs: [m.id],
           limit: 1);
       if (l.isNotEmpty) {
         ancien = l.first['content'] as String?;
         ancienDescripteur = l.first['e2ee_media_json'] as String?;
+        ancienneCitation = l.first['statut_cite_json'] as String?;
       }
     }
     await db.insert(
@@ -427,6 +468,12 @@ class MessageCache {
               : m.mediaChiffre != null
                   ? jsonEncode(m.mediaChiffre!.toJson())
                   : ancienDescripteur,
+          'statut_cite_json': m.deletedAt != null
+              ? null
+              : m.statutCite != null
+                  ? jsonEncode(m.statutCite!.toJson())
+                  : ancienneCitation,
+          ..._colonnesAffichage(m),
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
@@ -749,6 +796,31 @@ class MessageCache {
 
   // --- Sérialisation helpers ---
 
+  /// Ce que le fil affiche et que le serveur seul envoyait (v9) : la mention
+  /// « modifié », les réactions, l'étoile, les boutons d'un message officiel.
+  /// Le serveur les tient à jour ; la dernière version reçue fait foi.
+  static Map<String, Object?> _colonnesAffichage(Message m) => {
+        'edited_at': m.editedAt == null ? null : dateCache(m.editedAt!),
+        'reactions_json': m.reactions.isEmpty
+            ? null
+            : jsonEncode(m.reactions.map((r) => r.toJson()).toList()),
+        'starred': m.starred ? 1 : 0,
+        'boutons_json': m.boutons.isEmpty
+            ? null
+            : jsonEncode(m.boutons.map((b) => b.toJson()).toList()),
+      };
+
+  /// Une liste JSON relue ; illisible = vide, jamais une exception qui ferait
+  /// tomber tout le fil.
+  static List<T> _liste<T>(String? json, T Function(Map<String, dynamic>) lire) {
+    if (json == null) return const [];
+    try {
+      return (jsonDecode(json) as List).whereType<Map<String, dynamic>>().map(lire).toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
   /// L'état de vue unique en un entier (voir la migration v7).
   static int bitsVueUnique(Message m) => !m.vueUnique
       ? 0
@@ -834,6 +906,26 @@ class MessageCache {
       vueUnique: ((row['vue_unique'] as int?) ?? 0) & 1 != 0,
       vueUniqueOuverte: ((row['vue_unique'] as int?) ?? 0) & 2 != 0,
       vueUniqueEffacee: ((row['vue_unique'] as int?) ?? 0) & 4 != 0,
+      statutCite: _citation(row['statut_cite_json'] as String?),
+      editedAt: row['edited_at'] != null
+          ? DateTime.tryParse(row['edited_at'] as String)
+          : null,
+      reactions: _liste(row['reactions_json'] as String?, MessageReaction.fromJson),
+      // `?? 0` : base encore en v8 le temps de la migration.
+      starred: ((row['starred'] as int?) ?? 0) == 1,
+      boutons: _liste(row['boutons_json'] as String?, BoutonMessage.fromJson)
+          .where((b) => b.label.isNotEmpty && b.target.isNotEmpty)
+          .toList(),
     );
+  }
+
+  /// Une citation de statut relue ; illisible = absente, comme un descripteur.
+  static StatutCite? _citation(String? json) {
+    if (json == null) return null;
+    try {
+      return StatutCite.fromJson(jsonDecode(json) as Map<String, dynamic>);
+    } catch (_) {
+      return null;
+    }
   }
 }

@@ -1809,14 +1809,27 @@ class _ChatScreenState extends State<ChatScreen>
      * elle-meme attendre. Trois secondes, puis on continue sans elle — un
      * ecran vide qui se remplit ensuite vaut mieux qu un ecran qui tourne.
      */
+    /*
+     * 🐛 « LES JOURNAUX D'APPELS DISPARAISSENT AVANT D'APPARAÎTRE » (user,
+     * 01/11/2026). Les appels en cache n'étaient lus qu'APRÈS la réponse du
+     * serveur pour les messages : le fil s'affichait sans eux, puis ils
+     * venaient s'y insérer. Ils sont lus EN MÊME TEMPS que les messages, et
+     * affichés avec eux.
+     */
+    final appelsEnCache = _appelsEnCache(context.read<CallsRepository>())
+        .timeout(const Duration(seconds: 3), onTimeout: () => null);
     final cached = await MessageCache.getConv(widget.convId)
         .timeout(const Duration(seconds: 3), onTimeout: () => const [])
         .catchError((_) => const <Message>[]);
-    if (cached.isNotEmpty && mounted) {
+    final appels = await appelsEnCache;
+    if (appels != null && mounted) {
+      _callsForConv = appels.where((c) => c.convId == widget.convId).toList();
+    }
+    if ((cached.isNotEmpty || appels != null) && mounted) {
       setState(() {
-        _messages = cached;
+        if (cached.isNotEmpty) _messages = cached;
         _rebuildCombined();
-        _loading = false;
+        if (cached.isNotEmpty) _loading = false;
       });
       for (final m in _messages) {
         _cacheMsg(m);
@@ -1894,8 +1907,22 @@ class _ChatScreenState extends State<ChatScreen>
     unawaited(_releverChiffres());
     unawaited(_completerParArchive());
 
-    // Charge aussi les appels de cette conversation pour les afficher façon WhatsApp
-    _loadCalls();
+    // Charge aussi les appels de cette conversation pour les afficher façon
+    // WhatsApp. Leur copie est déjà affichée : le réseau seulement.
+    _loadCalls(cacheDejaLu: appels != null);
+  }
+
+  /// Les appels de ce fil connus sans réseau : sa copie à lui, sinon le cache
+  /// global des appels. `null` si rien.
+  Future<List<CallRecord>?> _appelsEnCache(CallsRepository repo) async {
+    try {
+      final duFil = await repo.forConversationEnCache(widget.convId);
+      if (duFil != null) return duFil;
+      final caches = await CallCache.getAll();
+      return caches.isEmpty ? null : caches;
+    } catch (_) {
+      return null;
+    }
   }
 
   // Scroll infini : proche du haut → charge les messages plus anciens.
@@ -2540,7 +2567,7 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
-  Future<void> _loadCalls() async {
+  Future<void> _loadCalls({bool cacheDejaLu = false}) async {
     // Dépôt capturé AVANT tout await : le lire après reviendrait à toucher un
     // BuildContext qui peut avoir été démonté entre-temps.
     final repo = context.read<CallsRepository>();
@@ -2551,15 +2578,10 @@ class _ChatScreenState extends State<ChatScreen>
      * anciens de CE fil n'apparaissaient qu'après le réseau. Il a maintenant sa
      * copie à lui ; le cache global ne sert plus que de repli.
      */
-    try {
-      final duFil = await repo.forConversationEnCache(widget.convId);
-      if (duFil != null && mounted) {
-        _appliqueCalls(duFil);
-      } else {
-        final caches = await CallCache.getAll();
-        if (caches.isNotEmpty && mounted) _appliqueCalls(caches);
-      }
-    } catch (_) {}
+    if (!cacheDejaLu) {
+      final caches = await _appelsEnCache(repo);
+      if (caches != null && mounted) _appliqueCalls(caches);
+    }
     try {
       // Endpoint dédié à CETTE conversation, au lieu des 50 derniers appels
       // toutes conversations confondues qu'il fallait ensuite filtrer. Au-delà

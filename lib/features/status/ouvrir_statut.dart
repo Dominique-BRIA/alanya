@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -26,6 +28,12 @@ Future<void> ouvrirStatutsDe(BuildContext context, StatusGroup groupe) async {
 ///
 /// Rend `false` s'il a expiré, été supprimé, ou n'est plus visible : la
 /// citation garde son instantané, mais le statut vivant n'existe plus.
+///
+/// 🐛 « ÇA PREND TROP DE TEMPS À OUVRIR » (user, 01/11/2026) : le fil était
+/// TOUJOURS redemandé au serveur avant d'ouvrir. Il est cherché d'abord dans
+/// le fil déjà en mémoire, puis dans la copie du téléphone ; le réseau n'est
+/// attendu que si le statut n'y est pas — publié il y a un instant, par
+/// exemple. Trouvé sans réseau, le fil se rafraîchit ensuite, en fond.
 Future<bool> ouvrirStatutCite(
   BuildContext context, {
   required String statusId,
@@ -33,40 +41,63 @@ Future<bool> ouvrirStatutCite(
 }) async {
   final repo = context.read<StatusRepository>();
   final nav = Navigator.of(context);
-  StatusFeed? fil;
-  try {
-    fil = await repo.feed();
-    StatutsEnDirect.instance.retenirFil(fil);
-  } catch (_) {
-    fil = StatutsEnDirect.instance.fil;
+  final direct = StatutsEnDirect.instance;
+
+  var trouve = _chercher(direct.fil, statusId, authorId);
+  if (trouve == null) {
+    final copie = await repo.feedEnCache().catchError((_) => null);
+    trouve = _chercher(copie, statusId, authorId);
   }
-  if (fil == null) return false;
+  if (trouve != null) {
+    unawaited(direct.charger(repo));
+  } else {
+    try {
+      final fil = await repo.feed();
+      direct.retenirFil(fil);
+      trouve = _chercher(fil, statusId, authorId);
+    } catch (_) {
+      // Hors ligne et inconnu de la copie : rien à ouvrir.
+    }
+  }
+  if (trouve == null) return false;
+  final (g, s, estMoi) = trouve;
+  // Ce statut-là, et lui seul : c'est de lui que parle la réponse.
+  await nav.push(
+    MaterialPageRoute(
+      builder: (_) => StatusViewerScreen(
+        groups: [
+          StatusGroup(
+            userId: g.userId,
+            pseudo: g.pseudo,
+            avatarUrl: g.avatarUrl,
+            publicNumber: g.publicNumber,
+            hasUnviewed: !s.viewed,
+            statuses: [s],
+          ),
+        ],
+        isMine: estMoi,
+      ),
+    ),
+  );
+  return true;
+}
+
+/// Le statut [statusId] de [authorId] dans [fil], s'il est encore en ligne.
+(StatusGroup, StatusItem, bool)? _chercher(
+  StatusFeed? fil,
+  String statusId,
+  String authorId,
+) {
+  if (fil == null) return null;
   final maintenant = DateTime.now();
   final moi = fil.me;
   for (final g in [if (moi != null) moi, ...fil.others]) {
     if (g.userId != authorId) continue;
     for (final s in g.statuses) {
-      if (s.id != statusId || !s.expiresAt.isAfter(maintenant)) continue;
-      // Ce statut-là, et lui seul : c'est de lui que parle la réponse.
-      await nav.push(
-        MaterialPageRoute(
-          builder: (_) => StatusViewerScreen(
-            groups: [
-              StatusGroup(
-                userId: g.userId,
-                pseudo: g.pseudo,
-                avatarUrl: g.avatarUrl,
-                publicNumber: g.publicNumber,
-                hasUnviewed: !s.viewed,
-                statuses: [s],
-              ),
-            ],
-            isMine: identical(g, moi),
-          ),
-        ),
-      );
-      return true;
+      if (s.id == statusId && s.expiresAt.isAfter(maintenant)) {
+        return (g, s, identical(g, moi));
+      }
     }
   }
-  return false;
+  return null;
 }
