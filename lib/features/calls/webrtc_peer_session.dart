@@ -123,12 +123,17 @@ class WebrtcPeerSession {
    *
    * Toutes les 3 s, la session relit ses statistiques : pertes de paquets
    * (dans les deux sens), aller-retour, débit montant disponible. Réseau
-   * dégradé deux fois de suite (6 s) : la vidéo passe à moitié de définition
-   * et 300 kbit/s, AVANT que l'image ne se fige — et l'écran dit « Connexion
+   * dégradé deux fois de suite (6 s) : la vidéo descend à 360 lignes et
+   * 300 kbit/s, AVANT que l'image ne se fige — et l'écran dit « Connexion
    * faible ». Trois mesures saines de suite (9 s) : on remonte. Le décalage
    * entre les deux seuils évite de faire le yo-yo sur un réseau limite.
    */
   static const _debitVideoFaible = 300 * 1000;
+
+  /// Le plancher de définition (demande du user) : en connexion faible, la
+  /// vidéo descend jusqu'à 360 lignes, jamais en dessous. Elle était divisée
+  /// par deux : une capture 640×480 tombait à 320×240.
+  static const _definitionMin = 360;
   static const _perteMax = 0.05;
   static const _allerRetourMax = 0.6;
   static const _debitDisponibleMin = 250 * 1000;
@@ -627,7 +632,18 @@ class WebrtcPeerSession {
     }
   }
 
-  /// Vidéo allégée (moitié de définition, 300 kbit/s) ou normale.
+  /// Le facteur qui ramène la piste à [_definitionMin] lignes sur son petit
+  /// côté (le portrait compte aussi) — 1, si elle n'est pas plus grande.
+  /// Sans réglages lisibles, on part de la cible de capture, 640×480.
+  static double _facteurVersPlancher(MediaStreamTrack? piste) {
+    final s = piste?.getSettings() ?? const <String, dynamic>{};
+    final l = _nombre(s['width']);
+    final h = _nombre(s['height']);
+    final petitCote = (l != null && h != null && l > 0 && h > 0) ? math.min(l, h) : 480.0;
+    return math.max(1.0, petitCote / _definitionMin);
+  }
+
+  /// Vidéo allégée (360 lignes, 300 kbit/s) ou normale.
   Future<void> _appliquerDebit({required bool faible}) async {
     final pc = _pc;
     if (pc == null || !isVideo) return;
@@ -639,7 +655,8 @@ class WebrtcPeerSession {
         if (encodages == null || encodages.isEmpty) continue;
         for (final e in encodages) {
           e.maxBitrate = faible ? _debitVideoFaible : _debitVideoMax;
-          e.scaleResolutionDownBy = faible ? 2.0 : 1.0;
+          e.scaleResolutionDownBy =
+              faible ? _facteurVersPlancher(emetteur.track) : 1.0;
         }
         await emetteur.setParameters(parametres);
       }

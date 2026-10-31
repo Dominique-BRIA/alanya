@@ -143,20 +143,28 @@ class WebrtcGroupMesh {
 
   Future<void> ensureLocal() async {
     /*
-     * 🔴 640×480, 720p AU PLUS, 15 À 30 IMAGES/S (demande du patron et guide
-     * du 31/10/2026). Sans contrainte, la caméra s'ouvrait en 720p ou plus :
-     * l'encodeur et le réseau saturaient, et l'image se figeait. 640×480 suffit
-     * à un appel sur mobile ; l'émission (`WebrtcPeerSession`) en baisse
-     * encore la définition quand le réseau se dégrade.
+     * 🔴 640×480, 360 LIGNES AU MOINS, 720p AU PLUS, 15 À 30 IMAGES/S (demande
+     * du patron et guide du 31/10/2026 ; plancher de 360 demandé par le user).
+     * Sans contrainte, la caméra s'ouvrait en 720p ou plus : l'encodeur et le
+     * réseau saturaient, et l'image se figeait. L'émission
+     * (`WebrtcPeerSession`) baisse la définition quand le réseau se dégrade,
+     * jusqu'au plancher et pas en dessous.
+     *
+     * ⚠️ `width`/`height` SONT LA CIBLE DE CAPTURE. Sur Android,
+     * `flutter_webrtc` capture à leur taille, et à défaut au MINIMUM demandé
+     * (il ignore le maximum) : sans eux, poser le plancher à 360 aurait fait
+     * capturer tous les appels en 360p.
      */
     _local ??= await navigator.mediaDevices.getUserMedia({
       "audio": true,
       "video": isVideo
           ? {
               "facingMode": "user",
+              "width": 640,
+              "height": 480,
               "mandatory": {
-                "minWidth": "640",
-                "minHeight": "480",
+                "minWidth": "480",
+                "minHeight": "360",
                 "maxWidth": "1280",
                 "maxHeight": "720",
                 "minFrameRate": "15",
