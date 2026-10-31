@@ -43,6 +43,8 @@ class EnvoiMediaChiffre {
     /// connaît la taille. Avant (aperçu, chiffrement) : 0 ; après (ligne et
     /// enveloppes) : 1.
     void Function(double ratio)? onProgression,
+    /// Une réponse vocale à un statut (01/11/2026).
+    String? statutCite,
   }) async {
     final octets = await fichier.octets();
     final mime = fichier.mimeType;
@@ -95,6 +97,7 @@ class EnvoiMediaChiffre {
       legende: legende,
       replyToId: replyToId,
       vueUnique: vueUnique,
+      statutCite: statutCite,
     );
 
     // 5. Ma copie.

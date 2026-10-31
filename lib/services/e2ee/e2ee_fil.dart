@@ -232,6 +232,10 @@ class E2eeFil {
     /// `LOCATION` quand [texte] porte une fiche JSON.
     String type = 'TEXT',
     String? replyToId,
+    /// Le statut auquel ce message répond (01/11/2026). Le serveur en recopie
+    /// l'aperçu depuis le statut — qu'il connaît déjà — sans rien lire du
+    /// message.
+    String? statutCite,
   }) async {
     // 🔴 UN GROUPE PREND SON PROPRE CHEMIN : un seul chiffré, signé, envoyé
     // avec la ligne (lot 3).
@@ -263,6 +267,7 @@ class E2eeFil {
       'type': type,
       'chiffre': true,
       if (replyToId != null) 'replyToId': replyToId,
+      if (statutCite != null) 'statutCite': statutCite,
     });
     final messageId = message['id'] as String;
 
@@ -402,6 +407,8 @@ class E2eeFil {
     String legende = '',
     String? replyToId,
     bool vueUnique = false,
+    /// Une réponse VOCALE à un statut (01/11/2026), comme [envoyer].
+    String? statutCite,
   }) async {
     if (pairId == null) {
       return groupe.envoyer(
@@ -423,6 +430,7 @@ class E2eeFil {
       'mediaIds': [media.id],
       if (replyToId != null) 'replyToId': replyToId,
       if (vueUnique) 'vueUnique': true,
+      if (statutCite != null) 'statutCite': statutCite,
     });
     final messageId = message['id'] as String;
     final enveloppes =

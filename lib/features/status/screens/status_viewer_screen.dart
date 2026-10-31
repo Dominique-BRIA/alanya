@@ -16,6 +16,9 @@ import '../../../core/app_snackbar.dart';
 import '../../../core/voice_recorder.dart';
 import '../../chat/chat_repository.dart';
 import '../../media/media_repository.dart';
+import '../../../services/e2ee/e2ee_fournisseur.dart';
+import '../../auth/auth_controller.dart';
+import '../reponse_statut.dart';
 import '../statuts_en_direct.dart';
 import '../gestes_visionneuse.dart';
 import '../horodatage_statut.dart';
@@ -630,33 +633,54 @@ class _VueGroupeState extends State<_VueGroupe>
     final t = texte.trim();
     if (t.isEmpty || _envoiReponse) return;
     setState(() => _envoiReponse = true);
+    // Le statut regardé au moment de l'envoi : c'est lui que la conversation
+    // citera. On le lit AVANT l'await de l'envoi, la barre pouvant avoir
+    // avancé entre-temps.
     final statutId = _courant.id;
-    final chat = context.read<ChatRepository>();
+    final envoi = _preparerEnvoi();
     final messenger = ScaffoldMessenger.of(context);
+    final envoye = tr(context, 'status_sent_to', {'nom': widget.groupe.displayName});
+    final echec = tr(context, 'status_reply_failed');
     // Même raison que pour une feuille : le statut ne doit pas défiler pendant
     // qu'on écrit ni pendant l'envoi.
     _ajoutePause(_RaisonPause.dialogue);
     try {
-      final conv = await chat.getOrCreateDirectConversation(widget.groupe.userId);
-      final convId = conv["id"] as String;
-      // Le statut regardé au moment de l'envoi : c'est lui que la conversation
-      // citera. On le lit AVANT l'await de l'envoi, la barre pouvant avoir
-      // avancé entre-temps.
-      await chat.sendText(convId, t, statutCite: statutId);
+      // Chiffré si le fil l'est (01/11/2026) : voir `ReponseStatut`.
+      await envoi(statutId: statutId, texte: t);
       _reponseCtrl.clear();
-      messenger.showSnackBar(
-        SnackBar(content: Text(tr(context, 'status_sent_to', {'nom': widget.groupe.displayName}))),
-      );
+      messenger.showSnackBar(SnackBar(content: Text(envoye)));
     } catch (_) {
-      messenger.showSnackBar(
-        SnackBar(content: Text(tr(context, 'status_reply_failed'))),
-      );
+      messenger.showSnackBar(SnackBar(content: Text(echec)));
     } finally {
       if (mounted) {
         setState(() => _envoiReponse = false);
         _retirePause(_RaisonPause.dialogue);
       }
     }
+  }
+
+  /// Tout ce que l'envoi d'une réponse lit dans le contexte, lu AVANT le
+  /// premier await : l'écran peut se fermer pendant l'envoi.
+  Future<void> Function({
+    required String statutId,
+    String? texte,
+    ({Uint8List octets, int dureeMs})? vocal,
+  }) _preparerEnvoi() {
+    final chat = context.read<ChatRepository>();
+    final medias = context.read<MediaRepository>();
+    final pile = context.e2ee;
+    final moi = context.read<AuthController>().user?.id;
+    final auteurId = widget.groupe.userId;
+    return ({required statutId, texte, vocal}) => ReponseStatut.envoyer(
+          chat: chat,
+          medias: medias,
+          pile: pile,
+          moi: moi,
+          auteurId: auteurId,
+          statutId: statutId,
+          texte: texte,
+          vocal: vocal,
+        );
   }
 
   /// « J'aime » (01/11/2026) : affiché tout de suite, annulé si le serveur
@@ -714,18 +738,13 @@ class _VueGroupeState extends State<_VueGroupe>
       return;
     }
     final statutId = _courant.id;
-    final chat = context.read<ChatRepository>();
-    final medias = context.read<MediaRepository>();
+    final envoi = _preparerEnvoi();
     final messenger = ScaffoldMessenger.of(context);
     final envoye = tr(context, 'status_sent_to', {'nom': widget.groupe.displayName});
     final echec = tr(context, 'status_reply_failed');
     setState(() => _envoiReponse = true);
     try {
-      final conv = await chat.getOrCreateDirectConversation(widget.groupe.userId);
-      final media = await medias.upload(r.bytes, 'reponse-statut.m4a', 'audio/mp4',
-          durationMs: r.durationMs);
-      await chat.sendMedia(conv["id"] as String, media.id, 'AUDIO',
-          statutCite: statutId);
+      await envoi(statutId: statutId, vocal: (octets: r.bytes, dureeMs: r.durationMs));
       messenger.showSnackBar(SnackBar(content: Text(envoye)));
     } catch (_) {
       messenger.showSnackBar(SnackBar(content: Text(echec)));
