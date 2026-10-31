@@ -59,7 +59,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   late final TextEditingController _statusCtrl;
   bool _saving = false;
   bool _uploadingAvatar = false;
-  String? _token;
+  // Le jeton connu dès le premier tracé (01/11/2026) : les images n'attendent
+  // pas la lecture du coffre sécurisé pour s'afficher.
+  String? _token = TokenStorage.accesConnu;
 
   /// Les contacts enregistrés — « Contacts préférés » de la maquette (« ce
   /// sont mes contacts que j'ai enregistrés »). Nuls pendant le chargement.

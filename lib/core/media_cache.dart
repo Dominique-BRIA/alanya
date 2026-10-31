@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:path_provider/path_provider.dart';
 
 /// Gestionnaire de cache local pour les médias (images, vidéos, fichiers).
@@ -74,7 +75,34 @@ class MediaCache {
     } catch (_) {}
   }
 
+  /*
+   * 🐛 LE DOSSIER ÉTAIT REDEMANDÉ À ANDROID AVANT CHAQUE IMAGE (01/11/2026,
+   * « les images testent d'abord le réseau »). `getExternalStorageDirectory`
+   * passe par le canal de plateforme, une file partagée : quand elle est
+   * occupée — démarrage, synchronisation, coffre sécurisé —, chaque photo
+   * déjà sur le téléphone attendait son tour avant de s'afficher, comme si
+   * elle venait du réseau. Le chemin ne change pas : il est demandé une fois.
+   */
+  static Future<Directory>? _dossier;
+
   static Future<Directory> _cacheDir() async {
+    final dir = await (_dossier ??= _trouverDossier().catchError((Object e) {
+      // Un échec ne reste pas en mémoire : le prochain appel réessaiera.
+      _dossier = null;
+      throw e;
+    }));
+    // ⚠️ RETENU, MAIS PAS CRU SUR PAROLE : le dossier a pu être vidé depuis
+    // (stockage nettoyé). Le vérifier est une lecture du disque, pas un
+    // aller-retour par le canal de plateforme.
+    if (!await dir.exists()) await dir.create(recursive: true);
+    return dir;
+  }
+
+  /// Oublie le dossier retenu — pour les tests, qui en changent à chaque cas.
+  @visibleForTesting
+  static void oublierDossier() => _dossier = null;
+
+  static Future<Directory> _trouverDossier() async {
     Directory base;
     if (Platform.isAndroid) {
       base = await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();

@@ -68,7 +68,9 @@ class _StatusViewerScreenState extends State<StatusViewerScreen> {
   late final PageController _pages = PageController(initialPage: _groupe);
 
   String _baseUrl = "";
-  String? _token;
+  // Le jeton connu dès le premier tracé (01/11/2026) : les images n'attendent
+  // pas la lecture du coffre sécurisé pour s'afficher.
+  String? _token = TokenStorage.accesConnu;
 
   @override
   void initState() {

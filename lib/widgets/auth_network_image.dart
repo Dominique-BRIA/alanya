@@ -1,7 +1,9 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
+import '../core/media_cache.dart';
 import 'image_octets.dart';
 import 'media/cached_media.dart';
 import '../l10n/app_localizations.dart';
@@ -142,6 +144,28 @@ class _AuthNetworkImageState extends State<AuthNetworkImage> {
   Future<void> _load() async {
     final token = widget.token;
     if (token == null || token.isEmpty) {
+      /*
+       * 🐛 SANS JETON, LA COPIE DU TÉLÉPHONE ÉTAIT IGNORÉE (01/11/2026) : un
+       * écran qui s'ouvre n'a pas encore lu le sien, et l'image affichait
+       * « indisponible » le temps qu'il arrive — alors qu'elle était sur le
+       * disque, et qu'il n'en faut aucun pour la lire.
+       */
+      try {
+        final chemin = await MediaCache.get(CachedMedia.cacheKey(widget.url), 'dat');
+        if (chemin != null) {
+          final bytes = await File(chemin).readAsBytes();
+          if (!mounted) return;
+          if (_looksLikeImage(bytes, null)) {
+            AuthNetworkImage._retenir(widget.url, bytes);
+            setState(() {
+              _bytes = bytes;
+              _error = false;
+            });
+            widget.onCharge?.call();
+            return;
+          }
+        }
+      } catch (_) {}
       if (mounted) setState(() => _error = true);
       widget.onEchec?.call();
       return;

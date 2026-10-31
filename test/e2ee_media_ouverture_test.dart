@@ -11,6 +11,7 @@ import 'package:alanya/services/e2ee/e2ee_media.dart';
 import 'package:alanya/services/e2ee/e2ee_media_ouverture.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:alanya/core/media_cache.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -29,6 +30,8 @@ void main() {
       const MethodChannel('plugins.flutter.io/path_provider'),
       (_) async => dossier.path,
     );
+    // Le cache retient son dossier : chaque cas a le sien.
+    MediaCache.oublierDossier();
     recues.clear();
     serveur = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     base = 'http://127.0.0.1:${serveur.port}';

@@ -450,7 +450,9 @@ class _ChatScreenState extends State<ChatScreen>
       ? AlanyaColors.erreurNuit.withValues(alpha: 0.16)
       : Colors.red.shade50;
 
-  String? _token;
+  // Le jeton connu dès le premier tracé (01/11/2026) : les images n'attendent
+  // pas la lecture du coffre sécurisé pour s'afficher.
+  String? _token = TokenStorage.accesConnu;
 
   /// Les envois de médias CHIFFRÉS en cours, par identifiant provisoire : le
   /// fichier (pour la vignette), l'avancement de la PRÉPARATION (chiffrement)
