@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
@@ -113,8 +114,37 @@ class WebrtcPeerSession {
    *   définition et la cadence, plutôt que de figer l'une pour garder l'autre.
    */
   static const _debitVideoMax = 800 * 1000;
-  static const _cadenceVideoMax = 24;
+  static const _debitVideoMin = 150 * 1000;
+  static const _cadenceVideoMax = 30;
   bool _emissionReglee = false;
+
+  /*
+   * 🔴 L'ADAPTATION PAR LES STATISTIQUES (guide du patron, 31/10/2026).
+   *
+   * Toutes les 3 s, la session relit ses statistiques : pertes de paquets
+   * (dans les deux sens), aller-retour, débit montant disponible. Réseau
+   * dégradé deux fois de suite (6 s) : la vidéo passe à moitié de définition
+   * et 300 kbit/s, AVANT que l'image ne se fige — et l'écran dit « Connexion
+   * faible ». Trois mesures saines de suite (9 s) : on remonte. Le décalage
+   * entre les deux seuils évite de faire le yo-yo sur un réseau limite.
+   */
+  static const _debitVideoFaible = 300 * 1000;
+  static const _perteMax = 0.05;
+  static const _allerRetourMax = 0.6;
+  static const _debitDisponibleMin = 250 * 1000;
+  Timer? _mesure;
+  int _mauvaisesDeSuite = 0;
+  int _bonnesDeSuite = 0;
+  int _recusAvant = 0;
+  int _perdusAvant = 0;
+
+  /// La liaison avec ce pair est-elle dégradée ? L'écran affiche alors
+  /// « Connexion faible », comme WhatsApp.
+  final ValueNotifier<bool> connexionFaible = ValueNotifier(false);
+
+  /// Le pair a-t-il coupé sa caméra (bouton, ou application en arrière-plan) ?
+  /// L'écran affiche alors son avatar au lieu d'une image figée.
+  bool cameraDistanteActive = true;
 
   Timer? _repriseTimer;
   int _tentativesReprise = 0;
@@ -163,6 +193,9 @@ class WebrtcPeerSession {
       "bundlePolicy": "max-bundle",
       "rtcpMuxPolicy": "require",
       "sdpSemantics": "unified-plan",
+      // Quelques candidats collectés d'avance : la négociation (et chaque
+      // reprise) démarre plus vite (guide du 31/10/2026).
+      "iceCandidatePoolSize": 2,
     });
     _pc!.onIceCandidate = (RTCIceCandidate? c) {
       if (c == null) return;
@@ -194,6 +227,7 @@ class WebrtcPeerSession {
           _graceTimer?.cancel();
           _finDeReprise();
           unawaited(_reglerEmission());
+          _demarrerMesure();
           break;
         default:
           break;
@@ -213,6 +247,8 @@ class WebrtcPeerSession {
     for (final track in localStream.getTracks()) {
       await _pc!.addTrack(track, localStream);
     }
+    // Avant toute offre ou réponse : l'ordre des codecs s'écrit dans le SDP.
+    await _preferH264();
 
     if (isOfferer) {
       await _createOffer();
@@ -459,14 +495,17 @@ class WebrtcPeerSession {
         final nature = emetteur.track?.kind;
         if (nature == null) continue;
         final parametres = emetteur.parameters;
-        final encodages = parametres.encodings;
-        if (encodages == null || encodages.isEmpty) continue;
-        for (final e in encodages) {
+        // Sans encodage déclaré, on en pose un : sinon aucun réglage ne prend.
+        if (parametres.encodings == null || parametres.encodings!.isEmpty) {
+          parametres.encodings = [RTCRtpEncoding()];
+        }
+        for (final e in parametres.encodings!) {
           if (nature == "audio") {
             e.priority = RTCPriorityType.high;
             e.networkPriority = RTCPriorityType.high;
           } else {
             e.maxBitrate = _debitVideoMax;
+            e.minBitrate = _debitVideoMin;
             e.maxFramerate = _cadenceVideoMax;
             e.priority = RTCPriorityType.low;
             e.networkPriority = RTCPriorityType.low;
@@ -484,6 +523,135 @@ class WebrtcPeerSession {
       _emissionReglee = false;
       traceAppel("$peerId : réglage de l'émission impossible — $e");
     }
+  }
+
+  /// H.264 en tête (guide du 31/10/2026) : souvent accéléré par le matériel
+  /// sur mobile, donc moins de charge et moins de saccades. Les autres codecs
+  /// restent derrière, dans leur ordre : un appareil sans H.264 (ou un pair qui
+  /// ne le parle pas) retombe simplement sur VP8.
+  Future<void> _preferH264() async {
+    final pc = _pc;
+    if (pc == null || !isVideo) return;
+    try {
+      final codecs = (await getRtpSenderCapabilities('video')).codecs ?? [];
+      bool h264(RTCRtpCodecCapability c) =>
+          c.mimeType.toLowerCase() == 'video/h264';
+      if (!codecs.any(h264)) return;
+      final ordonnes = [...codecs.where(h264), ...codecs.where((c) => !h264(c))];
+      for (final t in await pc.getTransceivers()) {
+        if (t.sender.track?.kind == 'video') {
+          await t.setCodecPreferences(ordonnes);
+        }
+      }
+    } catch (e) {
+      traceAppel("$peerId : préférence H.264 impossible — $e");
+    }
+  }
+
+  void _demarrerMesure() {
+    _mesure ??= Timer.periodic(const Duration(seconds: 3), (_) => _mesurer());
+  }
+
+  static double? _nombre(dynamic v) =>
+      v is num ? v.toDouble() : (v is String ? double.tryParse(v) : null);
+
+  Future<void> _mesurer() async {
+    final pc = _pc;
+    if (pc == null || _enReprise) return;
+    final List<StatsReport> rapports;
+    try {
+      rapports = await pc.getStats();
+    } catch (_) {
+      return;
+    }
+    var perteEmise = 0.0;
+    var allerRetour = 0.0;
+    double? debitDisponible;
+    var recus = 0;
+    var perdus = 0;
+    for (final r in rapports) {
+      final v = r.values;
+      switch (r.type) {
+        // Ce que le PAIR dit recevoir de nous.
+        case 'remote-inbound-rtp':
+          perteEmise = math.max(perteEmise, _nombre(v['fractionLost']) ?? 0);
+          allerRetour = math.max(allerRetour, _nombre(v['roundTripTime']) ?? 0);
+          break;
+        case 'candidate-pair':
+          final retenue = v['nominated'] == true || v['nominated'] == 'true';
+          if (v['state'] == 'succeeded' && retenue) {
+            allerRetour =
+                math.max(allerRetour, _nombre(v['currentRoundTripTime']) ?? 0);
+            debitDisponible =
+                _nombre(v['availableOutgoingBitrate']) ?? debitDisponible;
+          }
+          break;
+        // Ce que NOUS recevons du pair.
+        case 'inbound-rtp':
+          recus += (_nombre(v['packetsReceived']) ?? 0).toInt();
+          perdus += (_nombre(v['packetsLost']) ?? 0).toInt();
+          break;
+      }
+    }
+    final dRecus = recus - _recusAvant;
+    final dPerdus = perdus - _perdusAvant;
+    _recusAvant = recus;
+    _perdusAvant = perdus;
+    final perteRecue =
+        dRecus + dPerdus > 20 ? dPerdus / (dRecus + dPerdus) : 0.0;
+
+    final degrade = perteEmise > _perteMax ||
+        perteRecue > _perteMax ||
+        allerRetour > _allerRetourMax ||
+        (debitDisponible != null && debitDisponible < _debitDisponibleMin);
+    if (degrade) {
+      _bonnesDeSuite = 0;
+      _mauvaisesDeSuite++;
+      if (_mauvaisesDeSuite >= 2 && !connexionFaible.value) {
+        traceAppel("$peerId : réseau dégradé (perte émise "
+            "${(perteEmise * 100).round()} %, reçue ${(perteRecue * 100).round()} %, "
+            "aller-retour ${(allerRetour * 1000).round()} ms) → vidéo allégée");
+        connexionFaible.value = true;
+        onUpdated();
+        unawaited(_appliquerDebit(faible: true));
+      }
+    } else {
+      _mauvaisesDeSuite = 0;
+      _bonnesDeSuite++;
+      if (_bonnesDeSuite >= 3 && connexionFaible.value) {
+        traceAppel("$peerId : réseau rétabli → vidéo normale");
+        connexionFaible.value = false;
+        onUpdated();
+        unawaited(_appliquerDebit(faible: false));
+      }
+    }
+  }
+
+  /// Vidéo allégée (moitié de définition, 300 kbit/s) ou normale.
+  Future<void> _appliquerDebit({required bool faible}) async {
+    final pc = _pc;
+    if (pc == null || !isVideo) return;
+    try {
+      for (final emetteur in await pc.getSenders()) {
+        if (emetteur.track?.kind != 'video') continue;
+        final parametres = emetteur.parameters;
+        final encodages = parametres.encodings;
+        if (encodages == null || encodages.isEmpty) continue;
+        for (final e in encodages) {
+          e.maxBitrate = faible ? _debitVideoFaible : _debitVideoMax;
+          e.scaleResolutionDownBy = faible ? 2.0 : 1.0;
+        }
+        await emetteur.setParameters(parametres);
+      }
+    } catch (e) {
+      traceAppel("$peerId : adaptation du débit impossible — $e");
+    }
+  }
+
+  /// Prévient le pair que notre caméra est coupée ou rallumée.
+  void envoyerEtatCamera(bool active) {
+    if (_pc == null) return;
+    onSendSignal({"kind": "camera_state", "enabled": active});
   }
 
   Future<void> handleSignal(Map<String, dynamic> signal) async {
@@ -567,6 +735,11 @@ class WebrtcPeerSession {
         traceAppel("$peerId : demande de reprise reçue");
         _demarreLaReprise(immediat: true, annoncer: false);
       }
+    } else if (kind == "camera_state") {
+      // Caméra du pair coupée ou rallumée (31/10/2026) : l'écran montre son
+      // avatar plutôt qu'une image figée.
+      cameraDistanteActive = signal["enabled"] != false;
+      onUpdated();
     } else if (kind == "ice") {
       final raw = signal["candidate"];
       if (raw is! Map) return;
@@ -601,6 +774,9 @@ class WebrtcPeerSession {
   }
 
   Future<void> close() async {
+    _mesure?.cancel();
+    _mesure = null;
+    connexionFaible.value = false;
     _graceTimer?.cancel();
     _graceTimer = null;
     _repriseTimer?.cancel();

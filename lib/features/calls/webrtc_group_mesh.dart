@@ -39,6 +39,43 @@ class WebrtcGroupMesh {
 
   /// Le réseau a changé pendant l'appel : chaque liaison se relance tout de
   /// suite (voir `WebrtcPeerSession.relancerApresChangementDeReseau`).
+  /// Une liaison au moins est-elle dégradée ? → « Connexion faible ».
+  bool get connexionFaible =>
+      _peers.values.any((s) => s.connexionFaible.value);
+
+  /// La caméra de [peerId] est-elle allumée ?
+  bool cameraDistanteActive(String peerId) =>
+      _peers[peerId]?.cameraDistanteActive ?? true;
+
+  /// Prévient tous les pairs de l'état de notre caméra.
+  void envoyerEtatCamera(bool active) {
+    for (final s in _peers.values) {
+      s.envoyerEtatCamera(active);
+    }
+  }
+
+  /// Coupe ou rallume l'ÉMISSION de nos images sans toucher au choix de
+  /// l'utilisateur ([cameraEnabled]) : l'application passe en arrière-plan.
+  void suspendreVideoLocale(bool suspendue) {
+    for (final t in _local?.getVideoTracks() ?? const <MediaStreamTrack>[]) {
+      t.enabled = !suspendue;
+    }
+  }
+
+  /// Force une image clé chez les pairs : la piste est coupée puis rallumée.
+  /// Sans elle, un décodeur qui a perdu le fil attend en montrant une image
+  /// figée (guide du 31/10/2026).
+  Future<void> rafraichirVideoLocale() async {
+    final pistes = _local?.getVideoTracks() ?? const <MediaStreamTrack>[];
+    for (final t in pistes) {
+      t.enabled = false;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    for (final t in pistes) {
+      t.enabled = true;
+    }
+  }
+
   void relancerLesLiaisons() {
     for (final s in _peers.values) {
       s.relancerApresChangementDeReseau();
@@ -71,12 +108,14 @@ class WebrtcGroupMesh {
   }
 
   /// Active/coupe la caméra locale (les pistes vidéo restent négociées, on
-  /// bascule juste leur état enabled — le correspondant voit un flux figé/noir).
+  /// bascule juste leur état enabled). Le correspondant en est prévenu
+  /// (31/10/2026) : il voit notre avatar, et non plus un flux figé ou noir.
   void setCamera(bool on) {
     _cameraEnabled = on;
     for (final t in _local?.getVideoTracks() ?? <MediaStreamTrack>[]) {
       t.enabled = on;
     }
+    envoyerEtatCamera(on);
     onUpdated();
   }
 
@@ -103,9 +142,29 @@ class WebrtcGroupMesh {
   // toujours attribués par des événements différents.
 
   Future<void> ensureLocal() async {
+    /*
+     * 🔴 640×480, 720p AU PLUS, 15 À 30 IMAGES/S (demande du patron et guide
+     * du 31/10/2026). Sans contrainte, la caméra s'ouvrait en 720p ou plus :
+     * l'encodeur et le réseau saturaient, et l'image se figeait. 640×480 suffit
+     * à un appel sur mobile ; l'émission (`WebrtcPeerSession`) en baisse
+     * encore la définition quand le réseau se dégrade.
+     */
     _local ??= await navigator.mediaDevices.getUserMedia({
       "audio": true,
-      "video": isVideo,
+      "video": isVideo
+          ? {
+              "facingMode": "user",
+              "mandatory": {
+                "minWidth": "640",
+                "minHeight": "480",
+                "maxWidth": "1280",
+                "maxHeight": "720",
+                "minFrameRate": "15",
+                "maxFrameRate": "30",
+              },
+              "optional": [],
+            }
+          : false,
     });
     onUpdated();
   }

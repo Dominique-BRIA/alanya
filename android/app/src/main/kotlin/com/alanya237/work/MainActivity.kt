@@ -133,9 +133,11 @@ class MainActivity : FlutterFragmentActivity() {
                     // CallForegroundService pour le détail des verrous.
                     "demarrerServiceAppel" -> {
                         val titre = appel.argument<String>("titre") ?: "Appel en cours"
+                        val video = appel.argument<Boolean>("video") ?: false
                         val i = Intent(this, CallForegroundService::class.java).apply {
                             action = CallForegroundService.ACTION_DEMARRER
                             putExtra(CallForegroundService.EXTRA_TITRE, titre)
+                            putExtra(CallForegroundService.EXTRA_VIDEO, video)
                         }
                         // startForegroundService à partir d'Android 8 : le
                         // service doit alors appeler startForeground() dans les

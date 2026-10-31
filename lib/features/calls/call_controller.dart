@@ -254,7 +254,7 @@ class SessionRepondeur {
 }
 
 /// Appels directs et de groupe — mesh WebRTC (une connexion par participant).
-class CallController extends ChangeNotifier {
+class CallController extends ChangeNotifier with WidgetsBindingObserver {
   CallController(
     this._calls,
     this._rt,
@@ -269,7 +269,55 @@ class CallController extends ChangeNotifier {
     // Reprise des enregistrements qu'une session précédente n'a pas pu déposer
     // (coupure réseau, app tuée). Non attendu : c'est un rattrapage de fond.
     unawaited(_enregistrements.traiterEnAttente());
+    // Pause de la vidéo en arrière-plan (31/10/2026). Hors application (tests
+    // sans liaison Flutter), il n'y a pas de cycle de vie à suivre.
+    try {
+      WidgetsBinding.instance.addObserver(this);
+    } catch (_) {}
   }
+
+  /*
+   * 🔴 L'APPLICATION PASSE EN ARRIÈRE-PLAN EN PLEIN APPEL VIDÉO (guide du
+   * patron, 31/10/2026). Android coupe alors l'accès à la caméra : le
+   * correspondant gardait la dernière image, figée, sans savoir pourquoi.
+   * On suspend donc nous-mêmes l'émission et on le PRÉVIENT — il voit notre
+   * avatar. Au retour, on rallume, on le prévient, et on force une image clé
+   * pour que son décodeur reparte tout de suite.
+   *
+   * ⚠️ LE CHOIX DE L'UTILISATEUR N'EST PAS TOUCHÉ : une caméra qu'il avait
+   * coupée reste coupée au retour.
+   */
+  bool _videoSuspendue = false;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final m = _mesh;
+    if (m == null || activeCallId == null || activeType != "VIDEO") return;
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      if (_videoSuspendue || !m.cameraEnabled) return;
+      _videoSuspendue = true;
+      m.suspendreVideoLocale(true);
+      m.envoyerEtatCamera(false);
+      traceAppel("arrière-plan → vidéo en pause, correspondant prévenu");
+    } else if (state == AppLifecycleState.resumed && _videoSuspendue) {
+      _videoSuspendue = false;
+      if (m.cameraEnabled) {
+        m.suspendreVideoLocale(false);
+        m.envoyerEtatCamera(true);
+        unawaited(m.rafraichirVideoLocale());
+      }
+      traceAppel("premier plan → vidéo reprise");
+      notifyListeners();
+    }
+  }
+
+  /// Une liaison est dégradée : l'écran affiche « Connexion faible ».
+  bool get connexionFaible => _mesh?.connexionFaible ?? false;
+
+  /// La caméra de [peerId] est-elle allumée ? Sinon, l'écran montre son avatar.
+  bool cameraDistanteActive(String peerId) =>
+      _mesh?.cameraDistanteActive(peerId) ?? true;
 
   final CallsRepository _calls;
   final RealtimeClient _rt;
@@ -1363,6 +1411,7 @@ class CallController extends ChangeNotifier {
     unawaited(ProximiteAppel.regler(false));
     // L'écran peut de nouveau se mettre en veille.
     unawaited(ProximiteAppel.garderEcranAllume(false));
+    _videoSuspendue = false;
     connectedSince = null;
     // Remise à zéro du compteur : l'appel est fini, plus aucun écran ne le
     // concerne. Les `dispose` qui suivront décrémenteraient dans le vide, ce
@@ -1388,6 +1437,9 @@ class CallController extends ChangeNotifier {
       // l'appel entrant.
       CallForegroundService.demarrer(
         titre: activePeerName ?? _trAppel('call_ongoing', "Appel en cours"),
+        // Type « caméra » en plus du micro (31/10/2026) : sans lui, Android
+        // retire l'accès à la caméra dès que l'application quitte l'écran.
+        video: activeType == "VIDEO",
       );
       // Chip vert de la barre d'état, au MÊME endroit et pour la même raison :
       // c'est ici, et nulle part ailleurs, qu'on sait qu'une communication est
@@ -2633,6 +2685,9 @@ class CallController extends ChangeNotifier {
 
   @override
   void dispose() {
+    try {
+      WidgetsBinding.instance.removeObserver(this);
+    } catch (_) {}
     _sub?.cancel();
     _ringTimeout?.cancel();
     _annulerMinuteurConnexion();

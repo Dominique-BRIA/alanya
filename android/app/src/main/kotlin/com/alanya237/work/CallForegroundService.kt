@@ -6,7 +6,9 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.net.wifi.WifiManager
 import android.os.Build
@@ -43,6 +45,7 @@ class CallForegroundService : Service() {
         const val ACTION_DEMARRER = "com.alanya237.work.APPEL_DEMARRER"
         const val ACTION_ARRETER = "com.alanya237.work.APPEL_ARRETER"
         const val EXTRA_TITRE = "titre"
+        const val EXTRA_VIDEO = "video"
 
         private const val CANAL = "appel_en_cours"
         private const val NOTIF_ID = 4242
@@ -59,7 +62,10 @@ class CallForegroundService : Service() {
                 arreteTout()
                 return START_NOT_STICKY
             }
-            else -> demarre(intent?.getStringExtra(EXTRA_TITRE) ?: "Appel en cours")
+            else -> demarre(
+                intent?.getStringExtra(EXTRA_TITRE) ?: "Appel en cours",
+                intent?.getBooleanExtra(EXTRA_VIDEO, false) ?: false,
+            )
         }
         // START_NOT_STICKY : si le système tue quand même le service, il ne doit
         // PAS le relancer tout seul — l'appel, lui, sera bel et bien terminé, et
@@ -68,7 +74,7 @@ class CallForegroundService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun demarre(titre: String) {
+    private fun demarre(titre: String, video: Boolean) {
         creeCanal()
 
         val ouvrir = packageManager.getLaunchIntentForPackage(packageName)?.apply {
@@ -90,12 +96,20 @@ class CallForegroundService : Service() {
 
         // Depuis Android 10, un service qui capte le micro doit DÉCLARER ce type,
         // sinon le système refuse la capture en arrière-plan sans message clair.
+        //
+        // Appel VIDÉO (31/10/2026) : le type CAMÉRA en plus, sans quoi Android
+        // retire l'accès à la caméra dès que l'application quitte l'écran. Il
+        // exige la permission caméra DÉJÀ accordée — sinon SecurityException :
+        // sans elle, on reste au seul micro plutôt que de faire tomber l'appel.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIF_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
-            )
+            var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            if (video &&
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+            ) {
+                type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+            }
+            startForeground(NOTIF_ID, notification, type)
         } else {
             startForeground(NOTIF_ID, notification)
         }

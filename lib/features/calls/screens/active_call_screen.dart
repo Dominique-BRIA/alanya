@@ -29,7 +29,8 @@ class ActiveCallScreen extends StatefulWidget {
   State<ActiveCallScreen> createState() => _ActiveCallScreenState();
 }
 
-class _ActiveCallScreenState extends State<ActiveCallScreen> {
+class _ActiveCallScreenState extends State<ActiveCallScreen>
+    with WidgetsBindingObserver {
   CallController? _calls;
   Timer? _timer;
   int _elapsed = 0;
@@ -71,6 +72,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initRenderers();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
@@ -240,8 +242,35 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     }
   }
 
+  /*
+   * 🔴 AU RETOUR AU PREMIER PLAN, ON RATTACHE LES IMAGES (guide du patron,
+   * 31/10/2026). La surface de rendu peut avoir été détruite pendant
+   * l'arrière-plan : le flux arrive encore, mais l'image affichée reste celle
+   * d'avant. Détacher puis rattacher chaque flux relance l'affichage.
+   */
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) unawaited(_rattacherLesImages());
+  }
+
+  Future<void> _rattacherLesImages() async {
+    if (!_renderersReady || !mounted) return;
+    final lecteurs = [_localRenderer, ..._remoteRenderers.values];
+    final flux = [for (final r in lecteurs) r.srcObject];
+    for (final r in lecteurs) {
+      r.srcObject = null;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    if (!mounted) return;
+    for (var i = 0; i < lecteurs.length; i++) {
+      lecteurs[i].srcObject = flux[i];
+    }
+    setState(() {});
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     _hideTimer?.cancel();
     // Lot 2b : l'écran n'est plus affiché → le bandeau reprend si l'appel continue.
@@ -366,7 +395,12 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
        * « Connexion en cours… », qui décrit un appel qui n'a jamais abouti.
        */
       if (cc.reconnexionEnCours) return tr(context, 'call_reconnecting');
-      if (cc.mediaConnected) return _formatElapsed(cc);
+      // « 02:15 · Connexion faible » (31/10/2026), comme WhatsApp.
+      if (cc.mediaConnected) {
+        return cc.connexionFaible
+            ? "${_formatElapsed(cc)} · ${tr(context, 'call_weak_connection')}"
+            : _formatElapsed(cc);
+      }
       return tr(context, 'call_connecting');
     }
     return tr(context, 'call_connecting');
@@ -497,6 +531,8 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
         cc.localStream != null;
     RTCVideoRenderer? dynMain;
     bool dynMainMirror = false;
+    // Le correspondant en grand, caméra coupée : son avatar à la place.
+    var dynMainCameraCoupee = false;
     RTCVideoRenderer? dynPip;
     bool dynPipMirror = false;
     if (useDynamic) {
@@ -514,6 +550,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
         dynMain = remoteR;
         dynPip = _localRenderer;
         dynPipMirror = true;
+        dynMainCameraCoupee = !cc.cameraDistanteActive(remoteId!);
       }
     }
 
@@ -568,6 +605,17 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                   // WhatsApp en appel de groupe, et cela règle le chevauchement
                   // : l'encart couvrait le haut de la première vignette.
                   local: cc.localStream != null ? _localRenderer : null,
+                ),
+              if (useDynamic && dynMainCameraCoupee)
+                Positioned.fill(child: _cameraEnPause()),
+              // « Connexion faible » quand les commandes sont masquées : le
+              // texte sous le nom disparaît avec elles (31/10/2026).
+              if (cc.connexionFaible && !showControls)
+                Positioned(
+                  top: 12,
+                  left: 0,
+                  right: 0,
+                  child: IgnorePointer(child: Center(child: _pastilleConnexionFaible())),
                 ),
               // Lot 6 : couche de tap plein écran (toggle des contrôles en vidéo).
               Positioned.fill(
@@ -1059,6 +1107,38 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     );
   }
 
+  /// À la place d'une image figée : le correspondant a coupé sa caméra, ou son
+  /// application est passée en arrière-plan (31/10/2026).
+  Widget _cameraEnPause() => Container(
+        color: AlanyaColors.chocolate,
+        alignment: Alignment.center,
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const CircleAvatar(
+            radius: 48,
+            backgroundColor: Colors.white12,
+            child: Icon(Icons.videocam_off_outlined, size: 44, color: Colors.white70),
+          ),
+          const SizedBox(height: 12),
+          Text(tr(context, 'call_camera_paused'),
+              style: const TextStyle(color: Colors.white70, fontSize: 14)),
+        ]),
+      );
+
+  Widget _pastilleConnexionFaible() => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.black54,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          const Icon(Icons.signal_cellular_connected_no_internet_4_bar,
+              size: 14, color: Colors.amberAccent),
+          const SizedBox(width: 6),
+          Text(tr(context, 'call_weak_connection'),
+              style: const TextStyle(color: Colors.white, fontSize: 12.5)),
+        ]),
+      );
+
   /// Une vignette de participant : son image, ou son initiale s'il n'a pas
   /// encore de flux, et son nom en bas à gauche.
   Widget _vignette(
@@ -1085,7 +1165,8 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (r != null)
+          // Caméra coupée chez lui : son initiale, plutôt qu'une image figée.
+          if (r != null && cc.cameraDistanteActive(id))
             RTCVideoView(
               r,
               objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,

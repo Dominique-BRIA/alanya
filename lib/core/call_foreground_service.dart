@@ -24,14 +24,22 @@ class CallForegroundService {
   /// À appeler quand l'appel devient ACTIF — pas quand il sonne. Un appel qui
   /// sonne n'a pas encore de flux à protéger, et la notification persistante
   /// ferait double emploi avec celle de l'appel entrant.
-  static Future<void> demarrer({String titre = "Appel en cours"}) =>
-      _regler(true, titre);
+  ///
+  /// [video] : le service déclare aussi le type CAMÉRA (31/10/2026) — sans
+  /// lui, Android retire l'accès à la caméra dès que l'application quitte
+  /// l'écran, et la vidéo ne repart pas au retour.
+  static Future<void> demarrer({
+    String titre = "Appel en cours",
+    bool video = false,
+  }) =>
+      _regler(true, titre, video: video);
 
   /// À appeler dès que l'appel se termine, quelle qu'en soit la raison.
   /// Oublier cet appel laisse les verrous pris et la notification affichée.
   static Future<void> arreter() => _regler(false, null);
 
-  static Future<void> _regler(bool actif, String? titre) async {
+  static Future<void> _regler(bool actif, String? titre,
+      {bool video = false}) async {
     if (!Platform.isAndroid) return;
     // L'état est suivi ici pour ne pas traverser le pont natif inutilement :
     // `demarrer` peut être appelé plusieurs fois pour un même appel, au fil des
@@ -40,7 +48,8 @@ class CallForegroundService {
     _actif = actif;
     try {
       if (actif) {
-        await _canal.invokeMethod('demarrerServiceAppel', {'titre': titre});
+        await _canal.invokeMethod(
+            'demarrerServiceAppel', {'titre': titre, 'video': video});
       } else {
         await _canal.invokeMethod('arreterServiceAppel');
       }

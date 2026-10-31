@@ -42,6 +42,9 @@
          lève une SecurityException et l'appel se coupe dès que l'application
          passe en arrière-plan. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
+    <!-- Appel VIDÉO (31/10/2026) : le service d'appel déclare aussi le type
+         caméra, pour qu'Android ne coupe pas la caméra hors de l'écran. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA"/>
     <!-- Même règle, pour les envois et téléchargements qui doivent survivre à la
          fermeture de l'application. ⚠️ Depuis Android 15, un service `dataSync`
          est plafonné à 6 h par jour cumulées : sans effet sur des transferts de
@@ -192,7 +195,7 @@
         <service
             android:name=".CallForegroundService"
             android:exported="false"
-            android:foregroundServiceType="microphone" />
+            android:foregroundServiceType="microphone|camera" />
 
         <!-- Maintient les envois et téléchargements quand l'application quitte
              l'écran, ou est balayée des tâches récentes.
