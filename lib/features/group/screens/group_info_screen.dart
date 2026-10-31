@@ -217,6 +217,11 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
 
   ReglagesGroupe _reglages = const ReglagesGroupe();
 
+  /// « Voir plus » (01/11/2026, demande du user) : une longue liste de
+  /// membres repoussait tout le reste de l'écran.
+  static const _membresVisibles = 8;
+  bool _tousLesMembres = false;
+
   Future<void> _lireReglagesEnCache() async {
     final r = await context.read<ChatRepository>().reglagesGroupeEnCache(widget.convId);
     if (r != null && mounted) setState(() => _reglages = r);
@@ -930,7 +935,23 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                       color: accentOf(context), fontWeight: FontWeight.w600, fontSize: 15.5)),
               onTap: _addMembers,
             ),
-          ...tries.map((m) => _ligneMembre(m, nomDe(m), cs)),
+          ...(_tousLesMembres ? tries : tries.take(_membresVisibles))
+              .map((m) => _ligneMembre(m, nomDe(m), cs)),
+          if (tries.length > _membresVisibles)
+            ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 18),
+              leading: Icon(
+                  _tousLesMembres ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+                  color: accentOf(context)),
+              title: Text(
+                _tousLesMembres
+                    ? tr(context, 'grp_see_less')
+                    : tr(context, 'grp_see_more',
+                        {'n': '${tries.length - _membresVisibles}'}),
+                style: TextStyle(color: accentOf(context), fontWeight: FontWeight.w600),
+              ),
+              onTap: () => setState(() => _tousLesMembres = !_tousLesMembres),
+            ),
         ],
       ),
     );
