@@ -3,9 +3,18 @@ import '../core/noms_donnes.dart';
 
 class StatusItem {
   final String id;
-  final String type; // TEXT, IMAGE, VIDEO
+  final String type; // TEXT, IMAGE, VIDEO, AUDIO (01/11/2026)
   final String? text;
   final String? mediaUrl;
+
+  /// Durée d'un statut audio ou vidéo, en millisecondes (01/11/2026).
+  final int? mediaDurationMs;
+
+  /// L'ai-je aimé ? (01/11/2026)
+  final bool likedByMe;
+
+  /// Nombre de « J'aime » — connu de l'auteur seul.
+  final int? likesCount;
   final String? bgColor; // #RRGGBB / #AARRGGBB
   final DateTime createdAt;
   final DateTime expiresAt;
@@ -22,6 +31,9 @@ class StatusItem {
     required this.expiresAt,
     required this.viewed,
     required this.viewsCount,
+    this.mediaDurationMs,
+    this.likedByMe = false,
+    this.likesCount,
   });
 
   factory StatusItem.fromJson(Map<String, dynamic> j) => StatusItem(
@@ -34,6 +46,9 @@ class StatusItem {
         expiresAt: DateTime.parse(j["expiresAt"] as String),
         viewed: (j["viewed"] as bool?) ?? false,
         viewsCount: (j["viewsCount"] as num?)?.toInt() ?? 0,
+        mediaDurationMs: (j["mediaDurationMs"] as num?)?.toInt(),
+        likedByMe: (j["likedByMe"] as bool?) ?? false,
+        likesCount: (j["likesCount"] as num?)?.toInt(),
       );
 }
 

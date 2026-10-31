@@ -12,7 +12,11 @@ import '../../../core/token_storage.dart';
 import '../../../models/status.dart';
 import '../../../widgets/auth_network_image.dart';
 import '../../../widgets/avatar_circle.dart';
+import '../../../core/app_snackbar.dart';
+import '../../../core/voice_recorder.dart';
 import '../../chat/chat_repository.dart';
+import '../../media/media_repository.dart';
+import '../statuts_en_direct.dart';
 import '../gestes_visionneuse.dart';
 import '../horodatage_statut.dart';
 import '../status_repository.dart';
@@ -198,6 +202,12 @@ class _VueGroupeState extends State<_VueGroupe>
   /// Le champ « Répondre… » sous le statut de quelqu'un d'autre.
   final TextEditingController _reponseCtrl = TextEditingController();
   bool _envoiReponse = false;
+
+  /// Réponse VOCALE (01/11/2026, repris d'Alanya) : enregistrée ici, envoyée
+  /// comme un message vocal qui cite le statut.
+  final VoiceRecorder _micro = VoiceRecorder();
+  bool _enregistreReponse = false;
+  Timer? _ticReponse;
   bool get _enPause => _pauses.isNotEmpty;
 
   /// Instant où le doigt s'est posé. Sert à départager, au relâchement, le tap
@@ -256,6 +266,8 @@ class _VueGroupeState extends State<_VueGroupe>
   @override
   void dispose() {
     _minuteurChargement?.cancel();
+    _ticReponse?.cancel();
+    if (_enregistreReponse) _micro.cancel();
     _progression.dispose();
     _reponseCtrl.dispose();
     super.dispose();
@@ -566,6 +578,16 @@ class _VueGroupeState extends State<_VueGroupe>
         ),
       );
     }
+    if (s.type == "AUDIO" && s.mediaUrl != null) {
+      return _StatusAudioPlayer(
+        key: ValueKey(s.id),
+        url: "${widget.baseUrl}${s.mediaUrl}?token=${widget.token ?? ''}",
+        mediaId: s.mediaUrl?.split("/").last,
+        enPause: _pauses.contains(_RaisonPause.doigt),
+        onPret: (duree) => _mediaPret(duree: duree),
+        onEchec: _mediaEchoue,
+      );
+    }
     if (s.type == "VIDEO" && s.mediaUrl != null) {
       return _StatusVideoPlayer(
         key: ValueKey(s.id),
@@ -637,6 +659,109 @@ class _VueGroupeState extends State<_VueGroupe>
     }
   }
 
+  /// « J'aime » (01/11/2026) : affiché tout de suite, annulé si le serveur
+  /// refuse.
+  Future<void> _basculerAime() async {
+    final s = _courant;
+    final direct = StatutsEnDirect.instance;
+    final repo = context.read<StatusRepository>();
+    final aime = !direct.aimeParMoi(s);
+    direct.marquerAime(s.id, aime);
+    HapticFeedback.lightImpact();
+    try {
+      await repo.aimer(s.id, aime);
+    } catch (_) {
+      direct.marquerAime(s.id, !aime);
+    }
+  }
+
+  /// Le micro : commence l'enregistrement, ou l'arrête et l'envoie.
+  Future<void> _basculerVocal() async {
+    if (_enregistreReponse) {
+      await _envoyerVocal();
+      return;
+    }
+    if (!await _micro.start()) {
+      if (mounted) showAppSnackBar(tr(context, 'status_mic_denied'));
+      return;
+    }
+    if (!mounted) return;
+    _ajoutePause(_RaisonPause.dialogue);
+    setState(() => _enregistreReponse = true);
+    _ticReponse = Timer.periodic(const Duration(milliseconds: 200), (_) {
+      if (_micro.duree >= dureeVideoStatutMax) {
+        unawaited(_envoyerVocal());
+      } else if (mounted) {
+        setState(() {});
+      }
+    });
+  }
+
+  void _annulerVocal() {
+    _ticReponse?.cancel();
+    _micro.cancel();
+    setState(() => _enregistreReponse = false);
+    _retirePause(_RaisonPause.dialogue);
+  }
+
+  Future<void> _envoyerVocal() async {
+    _ticReponse?.cancel();
+    final r = await _micro.stop();
+    if (!mounted) return;
+    setState(() => _enregistreReponse = false);
+    if (r == null) {
+      _retirePause(_RaisonPause.dialogue);
+      return;
+    }
+    final statutId = _courant.id;
+    final chat = context.read<ChatRepository>();
+    final medias = context.read<MediaRepository>();
+    final messenger = ScaffoldMessenger.of(context);
+    final envoye = tr(context, 'status_sent_to', {'nom': widget.groupe.displayName});
+    final echec = tr(context, 'status_reply_failed');
+    setState(() => _envoiReponse = true);
+    try {
+      final conv = await chat.getOrCreateDirectConversation(widget.groupe.userId);
+      final media = await medias.upload(r.bytes, 'reponse-statut.m4a', 'audio/mp4',
+          durationMs: r.durationMs);
+      await chat.sendMedia(conv["id"] as String, media.id, 'AUDIO',
+          statutCite: statutId);
+      messenger.showSnackBar(SnackBar(content: Text(envoye)));
+    } catch (_) {
+      messenger.showSnackBar(SnackBar(content: Text(echec)));
+    } finally {
+      if (mounted) {
+        setState(() => _envoiReponse = false);
+        _retirePause(_RaisonPause.dialogue);
+      }
+    }
+  }
+
+  Widget _indicateurVocal() {
+    final d = _micro.duree;
+    return Container(
+      height: 46,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: Colors.white10,
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Row(children: [
+        const Icon(Icons.fiber_manual_record, color: Colors.redAccent, size: 14),
+        const SizedBox(width: 8),
+        Text(
+          '${tr(context, 'status_recording')}  ${d.inMinutes}:${(d.inSeconds % 60).toString().padLeft(2, '0')}',
+          style: const TextStyle(color: Colors.white),
+        ),
+        const Spacer(),
+        IconButton(
+          icon: const Icon(Icons.close, color: Colors.white70),
+          onPressed: _annulerVocal,
+        ),
+      ]),
+    );
+  }
+
   Widget _barreReponse() {
     return Padding(
       padding: EdgeInsets.only(
@@ -670,7 +795,9 @@ class _VueGroupeState extends State<_VueGroupe>
           Row(
             children: [
               Expanded(
-                child: TextField(
+                child: _enregistreReponse
+                    ? _indicateurVocal()
+                    : TextField(
                   controller: _reponseCtrl,
                   maxLength: 500,
                   minLines: 1,
@@ -708,19 +835,39 @@ class _VueGroupeState extends State<_VueGroupe>
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
-              IconButton(
-                icon: _envoiReponse
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white))
-                    : const Icon(Icons.send, color: Colors.white),
-                onPressed: _envoiReponse
-                    ? null
-                    : () => _repondre(_reponseCtrl.text),
+              // « J'aime » (01/11/2026, repris d'Alanya).
+              ListenableBuilder(
+                listenable: StatutsEnDirect.instance,
+                builder: (context, _) {
+                  final aime = StatutsEnDirect.instance.aimeParMoi(_courant);
+                  return IconButton(
+                    tooltip: tr(context, 'status_like'),
+                    icon: Icon(aime ? Icons.favorite : Icons.favorite_border,
+                        color: aime ? Colors.redAccent : Colors.white),
+                    onPressed: _basculerAime,
+                  );
+                },
               ),
+              // Réponse vocale : le micro, puis l'envoi.
+              IconButton(
+                icon: Icon(
+                    _enregistreReponse ? Icons.send : Icons.mic_none_rounded,
+                    color: Colors.white),
+                onPressed: _envoiReponse ? null : _basculerVocal,
+              ),
+              if (!_enregistreReponse)
+                IconButton(
+                  icon: _envoiReponse
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white))
+                      : const Icon(Icons.send, color: Colors.white),
+                  onPressed: _envoiReponse
+                      ? null
+                      : () => _repondre(_reponseCtrl.text),
+                ),
             ],
           ),
         ],
@@ -762,8 +909,20 @@ class _VueGroupeState extends State<_VueGroupe>
           children: [
             const Icon(Icons.visibility, color: Colors.white70, size: 18),
             const SizedBox(width: 6),
-            Text("${s.viewsCount} vue(s)",
-                style: const TextStyle(color: Colors.white70)),
+            // Vues et « J'aime » EN DIRECT (01/11/2026) : ils bougent sans
+            // rouvrir la liste.
+            ListenableBuilder(
+              listenable: StatutsEnDirect.instance,
+              builder: (context, _) {
+                final direct = StatutsEnDirect.instance;
+                final aimes = direct.aimes(s);
+                return Text(
+                  tr(context, 'status_views_count', {'n': '${direct.vues(s)}'}) +
+                      (aimes > 0 ? '   ❤ $aimes' : ''),
+                  style: const TextStyle(color: Colors.white70),
+                );
+              },
+            ),
             const SizedBox(width: 4),
             const Icon(Icons.keyboard_arrow_up,
                 color: Colors.white70, size: 18),
@@ -815,8 +974,17 @@ class _VueGroupeState extends State<_VueGroupe>
                       avatarUrl: v["avatarUrl"] as String?,
                       radius: 18),
                   title: Text((v["name"] as String?) ?? ""),
-                  trailing: Text(when,
-                      style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                  // Le cœur de qui a aimé (01/11/2026).
+                  trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                    if (v["liked"] == true) ...[
+                      const Icon(Icons.favorite,
+                          color: Colors.redAccent, size: 18),
+                      const SizedBox(width: 8),
+                    ],
+                    Text(when,
+                        style:
+                            const TextStyle(fontSize: 12, color: Colors.grey)),
+                  ]),
                 );
               }),
               const SizedBox(height: 8),
@@ -846,6 +1014,111 @@ class _VueGroupeState extends State<_VueGroupe>
     final dd = local.day.toString().padLeft(2, '0');
     final mo = local.month.toString().padLeft(2, '0');
     return tr(context, 'date_on_at', {'date': '$dd/$mo', 'heure': '${hh}h$mm'});
+  }
+}
+
+/// Lecteur d'un statut AUDIO (01/11/2026, repris d'Alanya).
+///
+/// Le lecteur vidéo sait aussi lire l'audio : même cache, même annonce de la
+/// durée à la barre, même pause au doigt. Seul l'affichage change — une onde
+/// et le temps restant à la place de l'image.
+class _StatusAudioPlayer extends StatefulWidget {
+  const _StatusAudioPlayer({
+    super.key,
+    required this.url,
+    required this.mediaId,
+    required this.enPause,
+    required this.onPret,
+    required this.onEchec,
+  });
+
+  final String url;
+  final String? mediaId;
+  final bool enPause;
+  final void Function(Duration duree) onPret;
+  final VoidCallback onEchec;
+
+  @override
+  State<_StatusAudioPlayer> createState() => _StatusAudioPlayerState();
+}
+
+class _StatusAudioPlayerState extends State<_StatusAudioPlayer> {
+  VideoPlayerController? _ctrl;
+  bool _error = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _demarrer();
+  }
+
+  Future<void> _demarrer() async {
+    final cache = widget.mediaId == null
+        ? null
+        : await MediaCache.get(widget.mediaId!, 'dat');
+    if (!mounted) return;
+    final c = cache != null
+        ? VideoPlayerController.file(File(cache))
+        : VideoPlayerController.networkUrl(Uri.parse(widget.url));
+    _ctrl = c;
+    c.initialize().then((_) {
+      if (!mounted) return;
+      if (!widget.enPause) c.play();
+      setState(() {});
+      widget.onPret(c.value.duration);
+    }).catchError((_) {
+      if (!mounted) return;
+      setState(() => _error = true);
+      widget.onEchec();
+    });
+  }
+
+  @override
+  void didUpdateWidget(_StatusAudioPlayer old) {
+    super.didUpdateWidget(old);
+    if (widget.enPause == old.enPause) return;
+    final c = _ctrl;
+    if (c == null || !c.value.isInitialized) return;
+    widget.enPause ? c.pause() : c.play();
+  }
+
+  @override
+  void dispose() {
+    _ctrl?.dispose();
+    super.dispose();
+  }
+
+  static String _temps(Duration d) =>
+      '${d.inMinutes}:${(d.inSeconds % 60).toString().padLeft(2, '0')}';
+
+  @override
+  Widget build(BuildContext context) {
+    if (_error) {
+      return Text(tr(context, 'status_video_unavailable'),
+          style: const TextStyle(color: Colors.white70));
+    }
+    final c = _ctrl;
+    if (c == null || !c.value.isInitialized) {
+      return const CircularProgressIndicator(color: Colors.white);
+    }
+    return ValueListenableBuilder<VideoPlayerValue>(
+      valueListenable: c,
+      builder: (_, v, __) => Column(mainAxisSize: MainAxisSize.min, children: [
+        Container(
+          width: 150,
+          height: 150,
+          decoration: const BoxDecoration(
+            shape: BoxShape.circle,
+            color: Colors.white12,
+          ),
+          child: Icon(v.isPlaying ? Icons.graphic_eq_rounded : Icons.audiotrack,
+              size: 72, color: Colors.white),
+        ),
+        const SizedBox(height: 16),
+        Text('${_temps(v.position)} / ${_temps(v.duration)}',
+            style: const TextStyle(color: Colors.white70, fontSize: 15)),
+      ]),
+    );
   }
 }
 

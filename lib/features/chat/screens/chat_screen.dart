@@ -92,6 +92,7 @@ import '../../contacts/screens/contact_info_screen.dart';
 import '../../contacts/verification_cle.dart';
 import '../../group/screens/group_info_screen.dart';
 import '../../media/media_repository.dart';
+import '../../status/ouvrir_statut.dart';
 import '../../settings/screens/translation_screen.dart';
 import '../chat_repository.dart';
 import '../envoi_media.dart';
@@ -3843,15 +3844,28 @@ class _ChatScreenState extends State<ChatScreen>
   ///
   /// ⚠️ AUCUN LIEN VERS LE STATUT : il a pu expirer depuis, et le texte affiché
   /// est l'instantané recopié à l'envoi, pas le statut vivant.
+  ///
+  /// 🔴 CLIQUABLE DEPUIS LE 01/11/2026 (repris d'Alanya) : un toucher rouvre le
+  /// statut s'il est encore en ligne, et le dit sinon.
   Widget _citationStatut(StatutCite s, bool mine) {
     final citation = _citationTexte("Statut", s.apercu, mine);
+    Widget cliquable(Widget enfant) => GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () async {
+            final expire = tr(context, 'status_expired');
+            final ouvert = await ouvrirStatutCite(context,
+                statusId: s.statusId, authorId: s.authorId);
+            if (!ouvert) showAppSnackBar(expire);
+          },
+          child: enfant,
+        );
     if (s.mediaUrl == null) {
-      return Padding(
+      return cliquable(Padding(
         padding: const EdgeInsets.only(bottom: 6),
         child: citation,
-      );
+      ));
     }
-    return Padding(
+    return cliquable(Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Flexible(child: citation),
@@ -3861,13 +3875,16 @@ class _ChatScreenState extends State<ChatScreen>
           child: SizedBox(
             width: 38,
             height: 38,
-            child: s.type == "VIDEO"
-                // Une vidéo n'a pas de vignette prête côté serveur : l'icône
-                // dit au moins de quelle nature était le statut.
+            child: s.type == "VIDEO" || s.type == "AUDIO"
+                // Ni une vidéo ni un audio n'ont de vignette prête côté
+                // serveur : l'icône dit au moins de quelle nature était le
+                // statut.
                 ? Container(
                     color: Colors.black26,
-                    child: const Icon(Icons.videocam,
-                        size: 18, color: Colors.white70),
+                    child: Icon(
+                        s.type == "AUDIO" ? Icons.audiotrack : Icons.videocam,
+                        size: 18,
+                        color: Colors.white70),
                   )
                 : AuthNetworkImage(
                     url: '$_baseUrl${s.mediaUrl}?token=$_token',
@@ -3878,7 +3895,7 @@ class _ChatScreenState extends State<ChatScreen>
           ),
         ),
       ]),
-    );
+    ));
   }
 
   Widget _replyPreviewTextOnly(Message m, bool mine, dynamic snapshot,

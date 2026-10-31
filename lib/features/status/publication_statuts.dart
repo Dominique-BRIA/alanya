@@ -196,12 +196,17 @@ class PublicationStatuts {
     required StatusRepository statuts,
   }) async {
     final estVideo = m.mimeType.startsWith('video/');
+    final estAudio = m.mimeType.startsWith('audio/');
     final id = 'statut-${DateTime.now().microsecondsSinceEpoch}';
     final centre = CentreTransferts.instance;
     centre.demarrer(
       id: id,
       sorte: SorteTransfert.envoi,
-      titre: estVideo ? "Statut vidéo" : "Statut photo",
+      titre: estVideo
+          ? "Statut vidéo"
+          : estAudio
+              ? "Statut audio"
+              : "Statut photo",
     );
 
     StreamSubscription<void>? _;
@@ -305,10 +310,17 @@ class PublicationStatuts {
         }
       }
 
+      // Statut AUDIO (01/11/2026) : enregistré ou choisi, il part tel quel.
+      final type = mime.startsWith('video/')
+          ? 'VIDEO'
+          : mime.startsWith('audio/')
+              ? 'AUDIO'
+              : 'IMAGE';
       await statuts.createMedia(
         idMedia,
-        mime.startsWith('video/') ? 'VIDEO' : 'IMAGE',
+        type,
         legende: legende,
+        dureeMs: type == 'IMAGE' ? null : durationMs,
       );
       centre.reussir(id);
       await StatutsPersistes.oublier(id);

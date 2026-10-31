@@ -46,12 +46,22 @@ class StatusRepository {
   /// n'exigeait `text` que pour un statut TEXTE, sans jamais l'interdire aux
   /// autres. Elle n'était simplement jamais remplie ni affichée.
   Future<void> createMedia(String mediaId, String type,
-      {String? legende}) async {
+      {String? legende, int? dureeMs}) async {
     await _api.post("/api/statuses", {
       "type": type,
       "mediaId": mediaId,
       if (legende != null && legende.isNotEmpty) "text": legende,
+      // Statut audio ou vidéo (01/11/2026) : la visionneuse s'y cale.
+      if (dureeMs != null && dureeMs > 0) "mediaDurationMs": dureeMs,
     });
+  }
+
+  /// « J'aime » (01/11/2026) : rend le nombre de « J'aime » du statut.
+  Future<int> aimer(String statusId, bool aime) async {
+    final data = aime
+        ? await _api.post("/api/statuses/$statusId/like", {})
+        : await _api.delete("/api/statuses/$statusId/like");
+    return ((data as Map?)?["likesCount"] as num?)?.toInt() ?? 0;
   }
 
   Future<void> markViewed(String statusId) async {

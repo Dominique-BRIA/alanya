@@ -12,6 +12,7 @@ import '../../media/media_repository.dart';
 import '../publication_statuts.dart';
 import '../status_repository.dart';
 import '../widgets/choix_emoji.dart';
+import '../widgets/feuille_statut_audio.dart';
 import 'editeur_media_statut_screen.dart';
 import 'status_viewer_screen.dart' show dureeVideoStatutMax;
 import '../../../l10n/app_localizations.dart';
@@ -255,6 +256,18 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
     if (mounted) Navigator.of(context).pop(true);
   }
 
+  /// Enregistre ou choisit un audio, puis le publie comme une photo : par la
+  /// file de publication, qui survit à la fermeture de l'application.
+  Future<void> _publierAudio() async {
+    final media = context.read<MediaRepository>();
+    final statuts = context.read<StatusRepository>();
+    final audio = await FeuilleStatutAudio.ouvrir(context);
+    if (audio == null || !mounted) return;
+    PublicationStatuts.instance
+        .publierMedias([audio], media: media, statuts: statuts);
+    Navigator.of(context).pop(true);
+  }
+
   /// Insère un emoji À L'ENDROIT DU CURSEUR, pas à la fin.
   ///
   /// ⚠️ Un emoji ne demande AUCUN changement serveur : c'est du texte, il part
@@ -306,6 +319,12 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
             tooltip: tr(context, 'status_add_photo'),
             icon: const Icon(Icons.photo_camera_outlined),
             onPressed: _pickAndPublishMedia,
+          ),
+          // Statut AUDIO (01/11/2026, repris d'Alanya).
+          IconButton(
+            tooltip: tr(context, 'status_audio_title'),
+            icon: const Icon(Icons.mic_none_rounded),
+            onPressed: _publierAudio,
           ),
           IconButton(
             tooltip: tr(context, 'status_change_color'),

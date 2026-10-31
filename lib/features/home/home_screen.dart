@@ -80,6 +80,8 @@ import '../status/screens/create_status_screen.dart';
 import '../status/screens/status_viewer_screen.dart';
 import '../status/status_repository.dart';
 import '../status/widgets/anneau_statuts.dart';
+import '../status/ouvrir_statut.dart';
+import '../status/statuts_en_direct.dart';
 // L'aperçu d'une ligne d'un message, commun aux quatre écrans qui en affichent
 // un — voir `apercuMessage`.
 import '../../models/message_payload.dart';
@@ -753,8 +755,15 @@ class _ConversationsTabState extends State<_ConversationsTab>
     _loadCalls();
     _chargerListes();
     // Rafraîchit la liste + affiche une notification locale pour les nouveaux messages.
+    // Les anneaux de statut autour des avatars (01/11/2026).
+    unawaited(StatutsEnDirect.instance.charger(context.read<StatusRepository>()));
     _rtSub = context.read<RealtimeClient>().events.listen((e) {
       final t = e["type"];
+      // Vues et « J'aime » de mes statuts, en direct (01/11/2026).
+      if (t == "statut_vu" || t == "statut_aime") {
+        StatutsEnDirect.instance.recevoir(e);
+        return;
+      }
       if (t == "message") {
         _poll();
         // Notification locale si l'utilisateur n'est PAS dans cette conversation
@@ -1816,6 +1825,47 @@ class _ConversationsTabState extends State<_ConversationsTab>
     return spans;
   }
 
+  /*
+   * 🔴 L'ANNEAU DE STATUT DANS LA LISTE DES DISCUSSIONS (01/11/2026, repris
+   * d'Alanya). Un contact qui a des statuts porte l'anneau segmenté de
+   * l'onglet Statuts — vert ce qui reste à voir, sable ce qui est vu — et un
+   * toucher sur sa photo les ouvre.
+   *
+   * ⚠️ LA PLACE EST LA MÊME AVEC OU SANS ANNEAU : sinon les noms ne seraient
+   * plus alignés d'une ligne à l'autre.
+   */
+  Widget _avatarAvecStatuts(String? userId, String title, String? avatarUrl) {
+    final avatar = AvatarCircle(
+      name: title,
+      avatarUrl: avatarUrl,
+      radius: 22,
+      backgroundColor: AlanyaColors.gold,
+    );
+    return ListenableBuilder(
+      listenable: StatutsEnDirect.instance,
+      builder: (context, _) {
+        final groupe = StatutsEnDirect.instance.groupeDe(userId);
+        if (groupe == null) {
+          return Padding(padding: const EdgeInsets.all(3), child: avatar);
+        }
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => ouvrirStatutsDe(context, groupe),
+          child: AnneauStatuts(
+            vus: groupe.statuses.map((s) => s.viewed).toList(),
+            couleurNonVu:
+                isDark ? AlanyaColors.terracottaNuit : AlanyaColors.forest,
+            couleurVu: isDark ? AlanyaColors.ligne : AlanyaColors.sand,
+            epaisseur: 2,
+            ecart: 1,
+            child: avatar,
+          ),
+        );
+      },
+    );
+  }
+
   Widget _tile(Conversation c) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final last = c.lastMessage;
@@ -2082,12 +2132,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
                     ),
                   ]),
                 )
-              : AvatarCircle(
-                  name: title,
-                  avatarUrl: c.avatarUrl,
-                  radius: 22,
-                  backgroundColor: AlanyaColors.gold,
-                )),
+              : _avatarAvecStatuts(other?.id, title, c.avatarUrl)),
       title: Row(
         children: [
           Flexible(
@@ -2509,6 +2554,7 @@ class _StatusTabState extends State<_StatusTab> {
       final copie = await repo.feedEnCache();
       if (copie != null && mounted && _feed == null) {
         setState(() => _feed = copie);
+        StatutsEnDirect.instance.retenirFil(copie);
       }
     }
     if (mounted) setState(() => _miseAJour = true);
@@ -2519,6 +2565,8 @@ class _StatusTabState extends State<_StatusTab> {
         _feed = feed;
         _error = false;
       });
+      // Partagé avec la liste des discussions (anneaux) — 01/11/2026.
+      StatutsEnDirect.instance.retenirFil(feed);
     } catch (_) {
       // Hors ligne avec une copie : on la garde, sans message d'erreur.
       if (mounted) setState(() => _error = _feed == null);

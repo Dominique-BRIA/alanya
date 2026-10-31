@@ -115,6 +115,7 @@ class StatutCite {
     return switch (type) {
       "IMAGE" => "Photo",
       "VIDEO" => "Vidéo",
+      "AUDIO" => "Audio",
       _ => "Statut",
     };
   }

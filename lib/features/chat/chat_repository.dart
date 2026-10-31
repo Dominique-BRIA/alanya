@@ -106,11 +106,15 @@ class ChatRepository {
   }
 
   /// Envoi REST d'un message média (repli si le WebSocket est indisponible).
-  Future<Message> sendMedia(String convId, String mediaId, String type, {String? replyToId}) async {
+  /// [statutCite] : une réponse VOCALE à un statut (01/11/2026), qui le cite
+  /// comme une réponse écrite.
+  Future<Message> sendMedia(String convId, String mediaId, String type,
+      {String? replyToId, String? statutCite}) async {
     final data = await _api.post("/api/conversations/$convId/messages", {
       "type": type,
       "mediaId": mediaId,
       if (replyToId != null) "replyToId": replyToId,
+      if (statutCite != null) "statutCite": statutCite,
     });
     return Message.fromJson(data);
   }
