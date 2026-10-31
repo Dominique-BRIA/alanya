@@ -36,6 +36,14 @@ class WebrtcGroupMesh {
 
   MediaStream? _local;
   final Map<String, WebrtcPeerSession> _peers = {};
+
+  /// Le réseau a changé pendant l'appel : chaque liaison se relance tout de
+  /// suite (voir `WebrtcPeerSession.relancerApresChangementDeReseau`).
+  void relancerLesLiaisons() {
+    for (final s in _peers.values) {
+      s.relancerApresChangementDeReseau();
+    }
+  }
   final Map<String, List<Map<String, dynamic>>> _pendingByPeer = {};
 
   MediaStream? get localStream => _local;

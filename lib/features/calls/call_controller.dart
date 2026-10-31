@@ -2352,6 +2352,10 @@ class CallController extends ChangeNotifier {
       if (enCours != null) {
         traceAppel("socket revenue → call_rejoin sur $enCours");
         _rt.sendCallRejoin(enCours);
+        // 🔴 31/10/2026 : la socket revient presque toujours parce que le
+        // réseau a changé. Les liaisons WebRTC se relancent sans attendre que
+        // leur propre état s'en aperçoive — 10 à 30 s d'image figée évitées.
+        _mesh?.relancerLesLiaisons();
       }
     } else if (type == "call_rejoined") {
       // Le serveur confirme qu'on est toujours dans l'appel. Rien à reconstruire

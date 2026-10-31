@@ -70,12 +70,51 @@ class WebrtcPeerSession {
    * il le clôt de son côté. S'acharner plus longtemps ne ferait que laisser un
    * écran d'appel devant quelqu'un dont l'appel n'existe plus.
    */
+  /*
+   * ⚠️ DES ESSAIS ÉTALÉS SUR TOUTE LA FENÊTRE DU SERVEUR (31/10/2026). Ils
+   * étaient trois, à 2, 4 et 8 s : environ 15 s, quand le serveur en accorde
+   * 45. Un passage Wi-Fi → 4G, ou une cellule qui sature, dure souvent plus :
+   * l'appel était déclaré perdu alors qu'il restait 30 s pour le sauver.
+   */
   static const _essaisReprise = [
+    Duration(seconds: 1),
     Duration(seconds: 2),
+    Duration(seconds: 3),
     Duration(seconds: 4),
+    Duration(seconds: 5),
+    Duration(seconds: 6),
+    Duration(seconds: 8),
+    Duration(seconds: 8),
     Duration(seconds: 8),
   ];
   static const _plafondReprise = Duration(seconds: 45);
+
+  /// Une offre de reprise sans réponse au-delà, on la retire (rollback) pour
+  /// pouvoir en envoyer une autre : sinon, toutes les tentatives suivantes
+  /// attendaient une réponse qui ne viendrait plus.
+  static const _offreSansReponseMax = Duration(seconds: 8);
+  DateTime? _offreEnvoyeeLe;
+
+  /// La reprise a-t-elle été annoncée (« Reconnexion… ») ? Une reprise lancée
+  /// par précaution — réseau changé, demande du pair — reste silencieuse tant
+  /// que notre propre liaison n'a rien signalé.
+  bool _repriseAnnoncee = false;
+
+  /*
+   * 🔴 LE RÉGLAGE DE L'ÉMISSION (31/10/2026, « que l'appel continue même
+   * quand le réseau dérange »).
+   *
+   * - LE SON D'ABORD : priorité haute sur la piste audio, basse sur la vidéo.
+   *   Sur un lien saturé, c'est la voix qui doit passer.
+   * - LA VIDÉO PLAFONNÉE : sur un réseau mobile, le débit montant est le
+   *   goulot ; sans plafond, l'encodeur remplit les files d'attente du
+   *   réseau, et l'image se fige au lieu de baisser en qualité.
+   * - « BALANCED » : sous contrainte, l'encodeur baisse à la fois la
+   *   définition et la cadence, plutôt que de figer l'une pour garder l'autre.
+   */
+  static const _debitVideoMax = 800 * 1000;
+  static const _cadenceVideoMax = 24;
+  bool _emissionReglee = false;
 
   Timer? _repriseTimer;
   int _tentativesReprise = 0;
@@ -154,6 +193,7 @@ class WebrtcPeerSession {
         case RTCIceConnectionState.RTCIceConnectionStateCompleted:
           _graceTimer?.cancel();
           _finDeReprise();
+          unawaited(_reglerEmission());
           break;
         default:
           break;
@@ -252,15 +292,37 @@ class WebrtcPeerSession {
   ///
   /// [immediat] saute l'attente du premier essai : sur `failed`, patienter ne
   /// sert à rien puisque l'état ne se répare pas de lui-même.
-  void _demarreLaReprise({bool immediat = false}) {
+  ///
+  /// [annoncer] : faux pour une reprise de précaution (réseau changé, demande
+  /// du pair) — l'écran ne dit « Reconnexion… » que si notre liaison a
+  /// réellement vacillé.
+  void _demarreLaReprise({bool immediat = false, bool annoncer = true}) {
     if (_pc == null) return;
     if (!_enReprise) {
       _enReprise = true;
       _tentativesReprise = 0;
       _repriseDepuis = DateTime.now();
+    }
+    if (annoncer && !_repriseAnnoncee) {
+      _repriseAnnoncee = true;
       onReconnecting?.call();
     }
     _planifieUnEssai(immediat: immediat);
+  }
+
+  /// La connexion temps réel vient de revenir pendant l'appel : le réseau a
+  /// très probablement changé (Wi-Fi ↔ 4G). WebRTC peut mettre 10 à 30 s à
+  /// s'apercevoir que l'ancien chemin est mort — l'image reste figée pendant
+  /// ce temps. On relance donc la liaison TOUT DE SUITE, sans rien afficher :
+  /// si elle allait bien, la reprise se conclut en deux secondes.
+  void relancerApresChangementDeReseau() {
+    if (_pc == null || !_ready) return;
+    traceAppel("$peerId : réseau revenu → reprise de précaution");
+    if (isOfferer) {
+      _demarreLaReprise(immediat: true, annoncer: false);
+    } else {
+      onSendSignal({"kind": "ice_restart_request"});
+    }
   }
 
   void _planifieUnEssai({bool immediat = false}) {
@@ -297,6 +359,22 @@ class WebrtcPeerSession {
     // Une offre part déjà, ou la connexion n'est pas au repos : relancer
     // maintenant lèverait `InvalidStateError` et casserait la session au lieu
     // de la réparer.
+    // Une offre partie il y a longtemps, sans réponse (perdue avec le réseau) :
+    // on la retire pour pouvoir en envoyer une neuve.
+    final envoyee = _offreEnvoyeeLe;
+    if (_offreRepriseEnVol &&
+        envoyee != null &&
+        DateTime.now().difference(envoyee) > _offreSansReponseMax &&
+        pc.signalingState == RTCSignalingState.RTCSignalingStateHaveLocalOffer) {
+      try {
+        await pc.setLocalDescription(RTCSessionDescription("", "rollback"));
+        _offreRepriseEnVol = false;
+        traceAppel("$peerId : offre de reprise sans réponse → retirée");
+      } catch (e) {
+        traceAppel("$peerId : retrait de l'offre impossible — $e");
+      }
+    }
+
     if (_offreRepriseEnVol ||
         pc.signalingState != RTCSignalingState.RTCSignalingStateStable) {
       traceAppel("$peerId : reprise différée (négociation en cours)");
@@ -334,6 +412,7 @@ class WebrtcPeerSession {
         "optional": [],
       });
       await pc.setLocalDescription(offre);
+      _offreEnvoyeeLe = DateTime.now();
       traceAppel("$peerId : OFFRE DE REPRISE envoyée (essai $_tentativesReprise)");
       onSendSignal({"kind": "offer", "sdp": offre.sdp, "type": offre.type});
     } catch (e) {
@@ -353,16 +432,58 @@ class WebrtcPeerSession {
     _tentativesReprise = 0;
     _repriseDepuis = null;
     traceAppel("$peerId : connexion rétablie");
-    onReconnected?.call();
+    if (_repriseAnnoncee) {
+      _repriseAnnoncee = false;
+      onReconnected?.call();
+    }
   }
 
   void _abandonneLaReprise() {
     _repriseTimer?.cancel();
     _repriseTimer = null;
     _enReprise = false;
+    _repriseAnnoncee = false;
     _offreRepriseEnVol = false;
     _repriseDepuis = null;
     onConnectionLost?.call();
+  }
+
+  /// Le réglage de l'émission (voir [_debitVideoMax]). Une fois par session :
+  /// les paramètres survivent aux reprises, qui ne touchent pas aux pistes.
+  Future<void> _reglerEmission() async {
+    final pc = _pc;
+    if (pc == null || _emissionReglee) return;
+    _emissionReglee = true;
+    try {
+      for (final emetteur in await pc.getSenders()) {
+        final nature = emetteur.track?.kind;
+        if (nature == null) continue;
+        final parametres = emetteur.parameters;
+        final encodages = parametres.encodings;
+        if (encodages == null || encodages.isEmpty) continue;
+        for (final e in encodages) {
+          if (nature == "audio") {
+            e.priority = RTCPriorityType.high;
+            e.networkPriority = RTCPriorityType.high;
+          } else {
+            e.maxBitrate = _debitVideoMax;
+            e.maxFramerate = _cadenceVideoMax;
+            e.priority = RTCPriorityType.low;
+            e.networkPriority = RTCPriorityType.low;
+          }
+        }
+        if (nature == "video") {
+          parametres.degradationPreference = RTCDegradationPreference.BALANCED;
+        }
+        await emetteur.setParameters(parametres);
+      }
+      traceAppel("$peerId : émission réglée (son prioritaire, vidéo plafonnée)");
+    } catch (e) {
+      // Un appareil qui refuse un réglage garde le comportement par défaut :
+      // l'appel n'en dépend pas.
+      _emissionReglee = false;
+      traceAppel("$peerId : réglage de l'émission impossible — $e");
+    }
   }
 
   Future<void> handleSignal(Map<String, dynamic> signal) async {
@@ -420,15 +541,31 @@ class WebrtcPeerSession {
       // pour un éventuel essai suivant. Ce n'est PAS encore un succès — seul
       // `RTCIceConnectionStateConnected` le dira.
       _offreRepriseEnVol = false;
+      _offreEnvoyeeLe = null;
       traceAppel("ANSWER recue de $peerId → negociation complete");
       await _flushIceQueue();
+      /*
+       * ⚠️ UNE REPRISE SUR UNE LIAISON QUI ALLAIT BIEN n'émet pas toujours de
+       * nouvel état ICE : elle reste « connected », et sans ce contrôle la
+       * reprise ne se concluait jamais — les essais s'épuisaient, et l'appel
+       * était déclaré PERDU alors que le média passait.
+       */
+      if (_enReprise) {
+        Timer(const Duration(seconds: 2), () {
+          final etat = _pc?.iceConnectionState;
+          if (etat == RTCIceConnectionState.RTCIceConnectionStateConnected ||
+              etat == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
+            _finDeReprise();
+          }
+        });
+      }
     } else if (kind == "ice_restart_request") {
       // Le pair ne peut pas relancer lui-même — il n'est pas offreur. On le
       // fait pour lui, même si de notre côté l'état ICE n'a rien signalé :
       // une coupure n'est pas toujours vue des deux bouts en même temps.
       if (isOfferer) {
         traceAppel("$peerId : demande de reprise reçue");
-        _demarreLaReprise(immediat: true);
+        _demarreLaReprise(immediat: true, annoncer: false);
       }
     } else if (kind == "ice") {
       final raw = signal["candidate"];
@@ -469,7 +606,10 @@ class WebrtcPeerSession {
     _repriseTimer?.cancel();
     _repriseTimer = null;
     _enReprise = false;
+    _repriseAnnoncee = false;
     _offreRepriseEnVol = false;
+    _offreEnvoyeeLe = null;
+    _emissionReglee = false;
     _repriseDepuis = null;
     _remote = null;
     await _pc?.close();
