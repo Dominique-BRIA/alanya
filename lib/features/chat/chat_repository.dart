@@ -5,6 +5,7 @@ import '../../core/cache_ecrans.dart';
 import '../../core/device_registry.dart';
 import '../../core/message_cache.dart';
 import '../../models/conversation.dart';
+import '../../models/groupe_reglages.dart';
 import '../../models/message.dart';
 import '../home/dernier_message_local.dart';
 
@@ -148,6 +149,19 @@ class ChatRepository {
     await _api.post("/api/conversations/$convId/capture", const {});
   }
 
+  /// La sourdine complète (01/11/2026) : [sourdine] pour toujours (ou `false`
+  /// pour tout rétablir), [jusqua] pour un temps, [mentionsSeulement] en
+  /// groupe. Rend l'état RETENU par le serveur.
+  Future<EtatSourdine> definirSourdineDetail(String convId,
+      {bool? sourdine, DateTime? jusqua, bool? mentionsSeulement}) async {
+    final data = await _api.post("/api/conversations/$convId/sourdine", {
+      if (sourdine != null) "sourdine": sourdine,
+      if (jusqua != null) "jusqua": jusqua.toUtc().toIso8601String(),
+      if (mentionsSeulement != null) "mentionsSeulement": mentionsSeulement,
+    });
+    return EtatSourdine.fromJson(data);
+  }
+
   Future<bool> definirSourdine(String convId, bool sourdine) async {
     final data = await _api.post(
       "/api/conversations/$convId/sourdine",
@@ -203,12 +217,74 @@ class ChatRepository {
     });
   }
   
-    /// Modifier le nom/avatar d'un groupe.
-  Future<void> updateGroup(String convId, {String? name, String? avatarUrl}) async {
+    /// Modifier le nom, l'avatar ou la description d'un groupe. Une
+  /// description vide l'efface.
+  Future<void> updateGroup(String convId,
+      {String? name, String? avatarUrl, String? description}) async {
     final body = <String, dynamic>{};
     if (name != null) body['name'] = name;
     if (avatarUrl != null) body['avatarUrl'] = avatarUrl;
+    if (description != null) body['description'] = description;
     await _api.patch("/api/conversations/$convId", body);
+    if (description != null) {
+      final avant = reglagesConnus[convId];
+      if (avant != null) {
+        await _retenirReglages(convId,
+            avant.copyWith(description: description, effacerDescription: description.trim().isEmpty));
+      }
+    }
+  }
+
+  /*
+   * ══════════════ LE GROUPE LUI-MÊME (01/11/2026) ══════════════
+   *
+   * Description, propriétaire, réglages, et la bannière « Rester / Quitter » :
+   * rendus avec les membres, gardés en mémoire et sur le téléphone pour que
+   * la discussion et l'écran d'infos les aient avant le réseau.
+   */
+
+  /// Les derniers réglages connus de chaque groupe, par conversation.
+  final Map<String, ReglagesGroupe> reglagesConnus = {};
+
+  Future<void> _retenirReglages(String convId, ReglagesGroupe r) async {
+    reglagesConnus[convId] = r;
+    await CacheEcrans.ecrire('conv.$convId.groupe', r.toJson());
+  }
+
+  /// Les réglages du groupe sans réseau : la mémoire, sinon le téléphone.
+  Future<ReglagesGroupe?> reglagesGroupeEnCache(String convId) async {
+    final connu = reglagesConnus[convId];
+    if (connu != null) return connu;
+    final data = await CacheEcrans.lire('conv.$convId.groupe');
+    if (data is! Map) return null;
+    final r = ReglagesGroupe.fromJson(
+      (data['groupe'] as Map?)?.cast<String, dynamic>(),
+      (data['moi'] as Map?)?.cast<String, dynamic>(),
+    );
+    reglagesConnus[convId] = r;
+    return r;
+  }
+
+  /// Change des réglages du groupe (admins) : `{"adminsSeulsEcrivent": true}`…
+  Future<ReglagesGroupe> changerReglagesGroupe(String convId, Map<String, bool> reglages) async {
+    final data = await _api.patch("/api/conversations/$convId", reglages);
+    final avant = reglagesConnus[convId] ?? const ReglagesGroupe();
+    final r = avant.copyWith(
+      adminsSeulsEcrivent: data['adminsSeulsEcrivent'] as bool?,
+      adminsSeulsModifient: data['adminsSeulsModifient'] as bool?,
+      adminsSeulsAjoutent: data['adminsSeulsAjoutent'] as bool?,
+      historiqueCacheNouveaux: data['historiqueCacheNouveaux'] as bool?,
+    );
+    await _retenirReglages(convId, r);
+    return r;
+  }
+
+  /// « Rester » sur la bannière d'arrivée : retenu par le serveur, pour que
+  /// la bannière quitte aussi mes autres appareils.
+  Future<void> resterDansGroupe(String convId) async {
+    await _api.post("/api/conversations/$convId/rester", const {});
+    final avant = reglagesConnus[convId];
+    if (avant != null) await _retenirReglages(convId, avant.copyWith(arriveeAConfirmer: false));
   }
 
   /// Ajouter des membres à un groupe.
@@ -312,6 +388,16 @@ class ChatRepository {
     final data = await _api.get("/api/conversations/$convId/members");
     final membres = (data["members"] as List).map((m) => Map<String, dynamic>.from(m as Map)).toList();
     await CacheEcrans.ecrire('conv.$convId.membres', membres);
+    // Le groupe lui-même, rendu à côté des membres (01/11/2026).
+    if (data["groupe"] is Map) {
+      await _retenirReglages(
+        convId,
+        ReglagesGroupe.fromJson(
+          (data["groupe"] as Map).cast<String, dynamic>(),
+          (data["moi"] as Map?)?.cast<String, dynamic>(),
+        ),
+      );
+    }
     return membres;
   }
 

@@ -111,6 +111,16 @@ class Conversation {
   /// l'interrupteur part alors de « non ».
   final bool sourdine;
 
+  /// Sourdine pour un temps : jusqu'à quand (01/11/2026). `null` = pour
+  /// toujours, ou aucune — voir [sourdine].
+  final DateTime? sourdineJusqua;
+
+  /// En groupe : notifié seulement quand on me mentionne (01/11/2026).
+  final bool mentionsSeulement;
+
+  /// Ajouté à ce groupe par quelqu'un, je n'ai pas encore dit « Rester ».
+  final bool arriveeAConfirmer;
+
   /// La conversation est-elle chiffrée de bout en bout ?
   ///
   /// ⚠️ LU ICI POUR LE TRANSFERT : un texte ne peut pas entrer en clair dans un
@@ -144,6 +154,9 @@ class Conversation {
     this.isPinned = false,
     this.isArchived = false,
     this.sourdine = false,
+    this.sourdineJusqua,
+    this.mentionsSeulement = false,
+    this.arriveeAConfirmer = false,
     this.e2eeActif = false,
     this.officiel = false,
     this.badge,
@@ -154,6 +167,31 @@ class Conversation {
   /// La liste des conversations est reconstruite à partir de ces objets : sans
   /// copie, basculer l'interrupteur n'aurait aucun effet visible avant le
   /// prochain rafraîchissement complet.
+  /// L'état complet de la sourdine, tel que le serveur l'a retenu (01/11/2026).
+  Conversation copieAvecEtatSourdine(
+          {required bool sourdine, DateTime? jusqua, required bool mentionsSeulement}) =>
+      Conversation(
+        id: id,
+        isGroup: isGroup,
+        title: title,
+        avatarUrl: avatarUrl,
+        members: members,
+        lastMessage: lastMessage,
+        unread: unread,
+        updatedAt: updatedAt,
+        lastCall: lastCall,
+        lastCallFourni: lastCallFourni,
+        isPinned: isPinned,
+        isArchived: isArchived,
+        sourdine: sourdine,
+        sourdineJusqua: jusqua,
+        mentionsSeulement: mentionsSeulement,
+        arriveeAConfirmer: arriveeAConfirmer,
+        e2eeActif: e2eeActif,
+        officiel: officiel,
+        badge: badge,
+      );
+
   Conversation copieAvecSourdine(bool valeur) => Conversation(
         id: id,
         isGroup: isGroup,
@@ -168,6 +206,9 @@ class Conversation {
         isPinned: isPinned,
         isArchived: isArchived,
         sourdine: valeur,
+        sourdineJusqua: sourdineJusqua,
+        mentionsSeulement: mentionsSeulement,
+        arriveeAConfirmer: arriveeAConfirmer,
         e2eeActif: e2eeActif,
         officiel: officiel,
         badge: badge,
@@ -189,6 +230,9 @@ class Conversation {
         isPinned: isPinned,
         isArchived: valeur,
         sourdine: sourdine,
+        sourdineJusqua: sourdineJusqua,
+        mentionsSeulement: mentionsSeulement,
+        arriveeAConfirmer: arriveeAConfirmer,
         e2eeActif: e2eeActif,
         officiel: officiel,
         badge: badge,
@@ -213,6 +257,9 @@ class Conversation {
         isPinned: isPinned,
         isArchived: isArchived,
         sourdine: sourdine,
+        sourdineJusqua: sourdineJusqua,
+        mentionsSeulement: mentionsSeulement,
+        arriveeAConfirmer: arriveeAConfirmer,
         e2eeActif: e2eeActif,
         officiel: officiel,
         badge: badge,
@@ -265,6 +312,11 @@ class Conversation {
         isPinned: (j["isPinned"] as bool?) ?? false,
         isArchived: (j["isArchived"] as bool?) ?? false,
         sourdine: (j["sourdine"] as bool?) ?? false,
+        sourdineJusqua: j["sourdineJusqua"] is String
+            ? DateTime.tryParse(j["sourdineJusqua"] as String)?.toLocal()
+            : null,
+        mentionsSeulement: (j["mentionsSeulement"] as bool?) ?? false,
+        arriveeAConfirmer: (j["arriveeAConfirmer"] as bool?) ?? false,
         e2eeActif: (j["e2eeActif"] as bool?) ?? false,
         officiel: (j["officiel"] as bool?) ?? false,
         badge: BadgeCompte.fromJson(j["badge"]),

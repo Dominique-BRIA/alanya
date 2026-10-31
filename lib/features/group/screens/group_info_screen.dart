@@ -22,6 +22,7 @@ import '../../chat/screens/chat_screen.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../services/e2ee/e2ee_fournisseur.dart';
 import '../../contacts/verification_cle.dart';
+import '../../../models/groupe_reglages.dart';
 
 /// Écran d'infos d'un groupe — style WhatsApp.
 ///
@@ -55,6 +56,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     _members = List.from(widget.members);
     _title = widget.title;
     _avatarUrl = widget.avatarUrl;
+    _lireReglagesEnCache();
     _refreshMembers();
     _lireEtatChiffrement();
     _chargerMedias();
@@ -200,15 +202,174 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
 
   Future<void> _refreshMembers() async {
     try {
-      final data = await context.read<ChatRepository>().getGroupMembers(widget.convId);
-      if (mounted) setState(() => _members = data);
+      final repo = context.read<ChatRepository>();
+      final data = await repo.getGroupMembers(widget.convId);
+      if (mounted) {
+        setState(() {
+          _members = data;
+          _reglages = repo.reglagesConnus[widget.convId] ?? _reglages;
+        });
+      }
     } catch (_) {}
+  }
+
+  /* ══════════════ LE GROUPE LUI-MÊME (01/11/2026, repris d'Alanya2026) ══════════════ */
+
+  ReglagesGroupe _reglages = const ReglagesGroupe();
+
+  Future<void> _lireReglagesEnCache() async {
+    final r = await context.read<ChatRepository>().reglagesGroupeEnCache(widget.convId);
+    if (r != null && mounted) setState(() => _reglages = r);
+  }
+
+  /// Le propriétaire : désigné par le serveur ; `null` pour un groupe d'avant.
+  String? get _proprietaire {
+    final designe = _reglages.proprietaireId;
+    if (designe != null) return designe;
+    for (final m in _members) {
+      if (m['estProprietaire'] == true) return m['id'] as String?;
+    }
+    return null;
+  }
+
+  bool get _suisProprietaire => _proprietaire != null && _proprietaire == _myId;
+  bool _estProprietaire(Map<String, dynamic> m) =>
+      m['estProprietaire'] == true || (m['id'] != null && m['id'] == _proprietaire);
+
+  /// Nom, photo, description : les admins, ou tout le monde si le groupe l'a
+  /// ouvert.
+  bool get _peutModifier => _amAdmin || !_reglages.adminsSeulsModifient;
+  bool get _peutAjouter => _amAdmin || !_reglages.adminsSeulsAjoutent;
+
+  /// Seul le propriétaire change les rôles, et le sien ne change pas. Un
+  /// groupe sans propriétaire garde la règle d'avant : les admins.
+  bool _peutChangerRole(Map<String, dynamic> m) {
+    if (_estProprietaire(m)) return false;
+    return _proprietaire != null ? _suisProprietaire : _amAdmin;
+  }
+
+  /// Le propriétaire ne se retire pas ; un admin, seul le propriétaire le
+  /// retire.
+  bool _peutRetirer(Map<String, dynamic> m) {
+    if (!_amAdmin || _estProprietaire(m)) return false;
+    if ((m['role'] as String?) == 'ADMIN' && _proprietaire != null) return _suisProprietaire;
+    return true;
+  }
+
+  Future<void> _editDescription() async {
+    final ctrl = TextEditingController(text: _reglages.description ?? '');
+    final texte = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(tr(ctx, 'grp_description')),
+        content: TextField(
+          controller: ctrl,
+          maxLength: 512,
+          minLines: 2,
+          maxLines: 6,
+          autofocus: true,
+          decoration: InputDecoration(hintText: tr(ctx, 'grp_add_description')),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr(ctx, 'cancel'))),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+              child: Text(tr(ctx, 'save'))),
+        ],
+      ),
+    );
+    if (texte == null || texte == (_reglages.description ?? '')) return;
+    if (!mounted) return;
+    try {
+      await context.read<ChatRepository>().updateGroup(widget.convId, description: texte);
+      if (mounted) {
+        setState(() => _reglages =
+            _reglages.copyWith(description: texte, effacerDescription: texte.isEmpty));
+      }
+    } catch (e) {
+      _dire(e is ApiException ? e.message : tr(context, 'grp_update_failed'));
+    }
+  }
+
+  Future<void> _changerReglage(String cle, bool valeur) async {
+    try {
+      final r = await context
+          .read<ChatRepository>()
+          .changerReglagesGroupe(widget.convId, {cle: valeur});
+      if (mounted) setState(() => _reglages = r);
+    } catch (e) {
+      if (mounted) _dire(e is ApiException ? e.message : tr(context, 'grp_settings_failed'));
+    }
+  }
+
+  Widget _carteDescription(ColorScheme cs) {
+    final d = _reglages.description?.trim() ?? '';
+    if (d.isEmpty && !_peutModifier) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: GlassCard(
+        radius: 22,
+        child: ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
+          title: Text(
+            d.isEmpty ? tr(context, 'grp_add_description') : d,
+            style: TextStyle(
+                fontSize: 15,
+                color: d.isEmpty ? accentOf(context) : cs.onSurface,
+                fontWeight: d.isEmpty ? FontWeight.w600 : FontWeight.w400),
+          ),
+          subtitle: d.isEmpty
+              ? null
+              : Text(tr(context, 'grp_description'),
+                  style: TextStyle(fontSize: 12.5, color: cs.onSurfaceVariant)),
+          trailing: _peutModifier
+              ? Icon(Icons.edit_outlined, size: 20, color: accentOf(context))
+              : null,
+          onTap: _peutModifier ? _editDescription : null,
+        ),
+      ),
+    );
+  }
+
+  Widget _carteReglages(ColorScheme cs) {
+    Widget interrupteur(String titre, String sous, bool valeur, String cle) => SwitchListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 18),
+          title: Text(tr(context, titre),
+              style: TextStyle(fontSize: 15, color: cs.onSurface)),
+          subtitle: Text(tr(context, sous),
+              style: TextStyle(fontSize: 12.5, color: cs.onSurfaceVariant)),
+          value: valeur,
+          onChanged: (v) => _changerReglage(cle, v),
+        );
+    return GlassCard(
+      radius: 22,
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 6, 18, 4),
+            child: Text(tr(context, 'grp_settings'),
+                style: TextStyle(
+                    fontWeight: FontWeight.w600, fontSize: 16, color: cs.onSurface)),
+          ),
+          interrupteur('grp_set_admins_send', 'grp_set_admins_send_sub',
+              _reglages.adminsSeulsEcrivent, 'adminsSeulsEcrivent'),
+          interrupteur('grp_set_admins_edit', 'grp_set_admins_edit_sub',
+              _reglages.adminsSeulsModifient, 'adminsSeulsModifient'),
+          interrupteur('grp_set_admins_add', 'grp_set_admins_add_sub',
+              _reglages.adminsSeulsAjoutent, 'adminsSeulsAjoutent'),
+          interrupteur('grp_set_hide_history', 'grp_set_hide_history_sub',
+              _reglages.historiqueCacheNouveaux, 'historiqueCacheNouveaux'),
+        ],
+      ),
+    );
   }
 
   // ===================== MODIFIER LE NOM =====================
 
   Future<void> _editName() async {
-    if (!_amAdmin) {
+    if (!_peutModifier) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(tr(context, 'grp_admin_only_name'))),
       );
@@ -254,7 +415,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   // ===================== MODIFIER L'AVATAR =====================
 
   Future<void> _editAvatar() async {
-    if (!_amAdmin) {
+    if (!_peutModifier) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(tr(context, 'grp_admin_only_avatar'))),
       );
@@ -330,7 +491,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
   // ===================== AJOUTER DES MEMBRES =====================
 
   Future<void> _addMembers() async {
-    if (!_amAdmin) {
+    if (!_peutAjouter) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(tr(context, 'grp_admin_only_add'))),
       );
@@ -538,9 +699,15 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
         children: [
           _carteEnTete(cs),
           const SizedBox(height: 14),
+          _carteDescription(cs),
           _carteMedias(cs),
           const SizedBox(height: 14),
           _carteMembres(cs),
+          // Les réglages du groupe : les admins seulement (01/11/2026).
+          if (_amAdmin) ...[
+            const SizedBox(height: 14),
+            _carteReglages(cs),
+          ],
           if (_chiffre != null) ...[
             const SizedBox(height: 14),
             _carteChiffrement(cs),
@@ -570,7 +737,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
       child: Column(
         children: [
           GestureDetector(
-            onTap: _amAdmin ? _editAvatar : null,
+            onTap: _peutModifier ? _editAvatar : null,
             child: Stack(
               children: [
                 AvatarCircle(
@@ -579,7 +746,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                   radius: 56,
                   backgroundColor: positiveOf(context),
                 ),
-                if (_amAdmin)
+                if (_peutModifier)
                   Positioned(
                     bottom: 0,
                     right: 0,
@@ -606,7 +773,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                     style: TextStyle(
                         fontSize: 23, fontWeight: FontWeight.w700, color: cs.onSurface)),
               ),
-              if (_amAdmin)
+              if (_peutModifier)
                 IconButton(
                   icon: Icon(Icons.edit_outlined, size: 22, color: accentOf(context)),
                   onPressed: _editName,
@@ -732,8 +899,9 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     String nomDe(Map<String, dynamic> m) =>
         '${m['pseudo'] ?? m['publicNumber'] ?? tr(context, 'grp_member')}';
     final tries = [..._members]..sort((a, b) {
-        final adminA = (a['role'] as String?) == 'ADMIN' ? 0 : 1;
-        final adminB = (b['role'] as String?) == 'ADMIN' ? 0 : 1;
+        // Le propriétaire d'abord, puis les admins (01/11/2026).
+        final adminA = _estProprietaire(a) ? -1 : ((a['role'] as String?) == 'ADMIN' ? 0 : 1);
+        final adminB = _estProprietaire(b) ? -1 : ((b['role'] as String?) == 'ADMIN' ? 0 : 1);
         if (adminA != adminB) return adminA - adminB;
         return nomDe(a).toLowerCase().compareTo(nomDe(b).toLowerCase());
       });
@@ -749,7 +917,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                 style: TextStyle(
                     fontWeight: FontWeight.w600, fontSize: 16, color: cs.onSurface)),
           ),
-          if (_amAdmin)
+          if (_peutAjouter)
             ListTile(
               contentPadding: const EdgeInsets.symmetric(horizontal: 18),
               leading: CircleAvatar(
@@ -772,6 +940,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     final isMe = m['id'] == _myId;
     final online = (m['isOnline'] as int?) == 1;
     final isAdmin = (m['role'] as String?) == 'ADMIN';
+    final estProprio = _estProprietaire(m);
     final numero = (m['publicNumber'] as String?) ?? '';
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 18),
@@ -797,7 +966,7 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                 color: accentOf(context).withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: Text(tr(context, 'grp_admin'),
+              child: Text(tr(context, estProprio ? 'grp_owner' : 'grp_admin'),
                   style: TextStyle(
                       fontSize: 11, color: accentOf(context), fontWeight: FontWeight.w600)),
             ),
@@ -890,7 +1059,8 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                         pairId: member['id'] as String, nomPair: '$name');
                   },
                 ),
-              if (_amAdmin) ...[
+              // Les rôles : le propriétaire seul (01/11/2026).
+              if (_peutChangerRole(member)) ...[
                 if ((member['role'] as String?) == 'ADMIN')
                   ListTile(
                     leading: Icon(Icons.remove_moderator_outlined,
@@ -911,6 +1081,8 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                       _changeMemberRole(member, 'ADMIN');
                     },
                   ),
+              ],
+              if (_peutRetirer(member)) ...[
                 ListTile(
                   leading: Icon(Icons.remove_circle_outline, color: dangerOf(context)),
                   title: Text(tr(context, 'remove_from_group'),

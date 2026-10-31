@@ -64,6 +64,7 @@ import '../../../models/message.dart';
 import '../../../models/message_payload.dart';
 import '../../../models/conversation.dart';
 import '../../../theme/alanya_theme.dart';
+import '../../../models/groupe_reglages.dart';
 import '../../../widgets/auth_network_image.dart';
 import '../../../widgets/avatar_circle.dart';
 import '../../../widgets/badge_compte.dart';
@@ -300,10 +301,16 @@ class _ChatScreenState extends State<ChatScreen>
     if (copie != null && mounted && _membresCharges.isEmpty) {
       _appliqueMembres(copie);
     }
+    final reglagesCopie = await repo.reglagesGroupeEnCache(widget.convId);
+    if (reglagesCopie != null && mounted && _reglagesGroupe == null) {
+      setState(() => _reglagesGroupe = reglagesCopie);
+    }
     try {
       final membres = await repo.getGroupMembers(widget.convId);
       if (!mounted) return;
       _appliqueMembres(membres);
+      final reglages = repo.reglagesConnus[widget.convId];
+      if (reglages != null) setState(() => _reglagesGroupe = reglages);
     } catch (_) {
       // Repli sur `widget.memberNames` : rien à dire à l'utilisateur.
     } finally {
@@ -696,6 +703,14 @@ class _ChatScreenState extends State<ChatScreen>
   /// Conditionne la seule entrée réservée : « @tout le monde ». Le reste des
   /// mentions est ouvert à tous les membres, comme sur WhatsApp.
   bool _jeSuisAdmin = false;
+
+  /// Le groupe lui-même (01/11/2026) : mode annonce et bannière d'arrivée.
+  ReglagesGroupe? _reglagesGroupe;
+
+  /// Groupe en mode annonce et je n'en suis pas admin : pas de champ de
+  /// saisie, un avis à la place — le serveur refuserait de toute façon.
+  bool get _annonceSansMoi =>
+      widget.isGroup && (_reglagesGroupe?.adminsSeulsEcrivent ?? false) && !_jeSuisAdmin;
 
   /// Le libellé de la mention collective.
   ///
@@ -6646,6 +6661,9 @@ class _ChatScreenState extends State<ChatScreen>
       body: MotifBackground(
         overlayOpacity: 0.85,
         child: Column(children: [
+          // Ajouté par quelqu'un : « Rester / Quitter » (01/11/2026).
+          if (widget.isGroup && (_reglagesGroupe?.arriveeAConfirmer ?? false))
+            _banniereArrivee(),
           _pinnedBanner(),
           _bandeauLangueManquante(),
           BarreMiseAJour(visible: _miseAJour),
@@ -6730,6 +6748,8 @@ class _ChatScreenState extends State<ChatScreen>
           // taper, et doit rester sous les yeux, au-dessus du clavier.
           if (_officiel)
             _bandeauOfficiel()
+          else if (_annonceSansMoi)
+            _bandeauAnnonce()
           else ...[
             _panneauMentions(),
             _composer(),
@@ -8359,6 +8379,94 @@ class _ChatScreenState extends State<ChatScreen>
   // ══════════════════════════════════════════════
   /// À la place de la saisie, dans un fil avec le compte officiel : on dit
   /// pourquoi on ne peut pas écrire, comme les comptes d'entreprise de WhatsApp.
+  /// MODE ANNONCE (01/11/2026) : à la place du champ, ce qui l'explique.
+  Widget _bandeauAnnonce() {
+    return SafeArea(
+      top: false,
+      child: Container(
+        width: double.infinity,
+        color: _composerBg,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Icon(Icons.campaign_outlined, size: 18, color: _muted),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              tr(context, 'grp_only_admins_send'),
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 13, color: _muted),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  /*
+   * « RESTER / QUITTER » (01/11/2026, repris d'Alanya2026). Ajouté à un groupe
+   * par quelqu'un, on peut refuser tout de suite. Le choix est retenu par le
+   * serveur : la bannière quitte aussi les autres appareils du compte.
+   */
+  Widget _banniereArrivee() {
+    return Material(
+      color: _composerBg,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+        child: Row(children: [
+          Expanded(
+            child: Text(tr(context, 'grp_join_banner'),
+                style: TextStyle(fontSize: 13.5, color: _muted)),
+          ),
+          TextButton(
+            onPressed: _quitterDepuisBanniere,
+            child: Text(tr(context, 'grp_leave_short'),
+                style: TextStyle(color: dangerOf(context))),
+          ),
+          const SizedBox(width: 4),
+          FilledButton(
+            onPressed: _resterDansGroupe,
+            child: Text(tr(context, 'grp_stay')),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Future<void> _resterDansGroupe() async {
+    final repo = context.read<ChatRepository>();
+    // La bannière part tout de suite ; un échec la ramènera au prochain
+    // chargement des membres.
+    setState(() => _reglagesGroupe = _reglagesGroupe?.copyWith(arriveeAConfirmer: false));
+    try {
+      await repo.resterDansGroupe(widget.convId);
+    } catch (_) {}
+  }
+
+  Future<void> _quitterDepuisBanniere() async {
+    final repo = context.read<ChatRepository>();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(tr(ctx, 'grp_leave_q')),
+        content: Text(tr(ctx, 'grp_leave_body')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr(ctx, 'cancel'))),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(tr(ctx, 'leave_action'), style: TextStyle(color: dangerOf(ctx))),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await repo.leaveGroup(widget.convId);
+      if (mounted) Navigator.of(context).pop();
+    } catch (_) {
+      if (mounted) showAppSnackBar(tr(context, 'grp_leave_failed'));
+    }
+  }
+
   Widget _bandeauOfficiel() {
     return SafeArea(
       top: false,

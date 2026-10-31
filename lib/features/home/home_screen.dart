@@ -83,6 +83,8 @@ import '../status/screens/status_viewer_screen.dart';
 import '../status/status_repository.dart';
 import '../status/widgets/anneau_statuts.dart';
 import '../status/ouvrir_statut.dart';
+import '../chat/widgets/feuille_sourdine.dart';
+import '../../models/groupe_reglages.dart';
 import '../account/screens/avatar_viewer_screen.dart';
 import '../status/statuts_en_direct.dart';
 // L'aperçu d'une ligne d'un message, commun aux quatre écrans qui en affichent
@@ -2336,33 +2338,40 @@ class _ConversationsTabState extends State<_ConversationsTab>
               title: Text(c.sourdine
                   ? tr(context, 'unmute')
                   : tr(context, 'mute')),
-              onTap: () async {
+              /*
+               * 8 HEURES, UNE SEMAINE OU TOUJOURS — et « mentions seulement »
+               * en groupe (01/11/2026, repris d'Alanya2026). La feuille rend
+               * l'état retenu par le serveur à chaque changement.
+               */
+              onTap: () {
                 Navigator.pop(ctx);
-                try {
-                  final etat = await context
-                      .read<ChatRepository>()
-                      .definirSourdine(c.id, !c.sourdine);
-                  if (!mounted) return;
-                  // Mise à jour en place : recharger toute la liste pour un
-                  // booléen ferait clignoter l'écran, et le serveur vient de
-                  // nous dire l'état retenu.
-                  setState(() {
-                    final liste = _convs;
-                    if (liste == null) return;
-                    final i = liste.indexWhere((x) => x.id == c.id);
-                    if (i >= 0) liste[i] = liste[i].copieAvecSourdine(etat);
-                  });
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text(etat
-                        ? tr(context, 'muted_toast')
-                        : tr(context, 'unmuted_toast')),
-                  ));
-                } catch (_) {
-                  if (!mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text(tr(context, 'home_server_unreachable')),
-                  ));
-                }
+                FeuilleSourdine.ouvrir(
+                  context,
+                  convId: c.id,
+                  enGroupe: c.isGroup,
+                  actuel: EtatSourdine(
+                    sourdine: c.sourdine,
+                    jusqua: c.sourdineJusqua,
+                    mentionsSeulement: c.mentionsSeulement,
+                  ),
+                  onChange: (e) {
+                    if (!mounted) return;
+                    // Mise à jour en place : recharger toute la liste ferait
+                    // clignoter l'écran, et le serveur vient de dire l'état.
+                    setState(() {
+                      final liste = _convs;
+                      if (liste == null) return;
+                      final i = liste.indexWhere((x) => x.id == c.id);
+                      if (i >= 0) {
+                        liste[i] = liste[i].copieAvecEtatSourdine(
+                          sourdine: e.sourdine,
+                          jusqua: e.jusqua,
+                          mentionsSeulement: e.mentionsSeulement,
+                        );
+                      }
+                    });
+                  },
+                );
               },
             ),
             ListTile(
