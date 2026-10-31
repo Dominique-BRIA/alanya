@@ -180,6 +180,10 @@ dependencies:
   # (https://www.syncfusion.com/products/communitylicense) — voir
   # docs/2026-10-24-pdf-sensible-protege.md.
   syncfusion_flutter_pdf: ^33.2.13
+  # Les réponses de l'assistant mises en forme (01/11/2026, demande du
+  # user) : titres, listes, code, tableaux, formules. Jumeau web :
+  # react-markdown + remark-gfm + remark-math + rehype-katex.
+  gpt_markdown: ^1.4.0
 
 
 dev_dependencies:

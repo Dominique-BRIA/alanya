@@ -2,6 +2,8 @@ import 'dart:async';
 import '../../l10n/app_localizations.dart';
 
 import 'package:flutter/material.dart';
+import 'package:gpt_markdown/gpt_markdown.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -3296,11 +3298,22 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
                   style: TextStyle(
                       color: isDark ? AlanyaColors.craie2 : Colors.black54,
                       fontStyle: FontStyle.italic))
-              : Text(text,
-                  style: TextStyle(
-                      color: mine
-                          ? Colors.white
-                          : (isDark ? AlanyaColors.craie : AlanyaColors.ink))),
+              : mine
+                  ? Text(text, style: const TextStyle(color: Colors.white))
+                  // La réponse de l'assistant, MISE EN FORME (01/11/2026) :
+                  // titres, listes, gras, code, tableaux, formules. Elle
+                  // arrivait en texte brut, astérisques et dièses compris.
+                  : GptMarkdown(
+                      text,
+                      style: TextStyle(
+                          color: isDark ? AlanyaColors.craie : AlanyaColors.ink),
+                      onLinkTap: (url, _) {
+                        final uri = Uri.tryParse(url);
+                        if (uri != null) {
+                          launchUrl(uri, mode: LaunchMode.externalApplication);
+                        }
+                      },
+                    ),
         ),
       ),
     );
