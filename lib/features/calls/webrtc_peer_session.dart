@@ -16,6 +16,8 @@ class WebrtcPeerSession {
     required this.iceServers,
     required this.onSendSignal,
     required this.onUpdated,
+    this.debitVideoMax = 1000000,
+    this.hauteurCapture = 480,
     this.onConnectionLost,
     this.onReconnecting,
     this.onReconnected,
@@ -28,6 +30,14 @@ class WebrtcPeerSession {
   final List<Map<String, dynamic>> iceServers;
   final void Function(Map<String, dynamic> signal) onSendSignal;
   final VoidCallback onUpdated;
+
+  /// Le débit maximal de la vidéo, selon la qualité choisie (voir
+  /// `QualiteVideo`) : 2, 1 ou 0,4 Mbit/s.
+  final int debitVideoMax;
+
+  /// La hauteur de capture de la qualité choisie : sert à voir si WebRTC a
+  /// réduit l'image envoyée.
+  final int hauteurCapture;
 
   /// Connexion avec ce pair définitivement perdue. Au contrôleur de décider :
   /// dernier pair → fin d'appel ; sinon simple retrait du participant.
@@ -102,49 +112,53 @@ class WebrtcPeerSession {
   bool _repriseAnnoncee = false;
 
   /*
-   * 🔴 LE RÉGLAGE DE L'ÉMISSION (31/10/2026, « que l'appel continue même
-   * quand le réseau dérange »).
+   * 🔴 LE RÉGLAGE DE L'ÉMISSION — UNE FOIS, ET C'EST TOUT (procédure du
+   * patron, 01/11/2026).
    *
-   * - LE SON D'ABORD : priorité haute sur la piste audio, basse sur la vidéo.
-   *   Sur un lien saturé, c'est la voix qui doit passer.
-   * - LA VIDÉO PLAFONNÉE : sur un réseau mobile, le débit montant est le
-   *   goulot ; sans plafond, l'encodeur remplit les files d'attente du
-   *   réseau, et l'image se fige au lieu de baisser en qualité.
-   * - « BALANCED » : sous contrainte, l'encodeur baisse à la fois la
-   *   définition et la cadence, plutôt que de figer l'une pour garder l'autre.
+   * On ne pilote plus la qualité pendant l'appel : WebRTC baisse lui-même le
+   * débit, la définition et la cadence quand le réseau faiblit. On pose
+   * seulement, à la première connexion :
+   * - LE DÉBIT MAXIMAL de la qualité choisie ([debitVideoMax]) ;
+   * - LE SON D'ABORD : priorité haute sur la piste audio, basse sur la vidéo ;
+   * - « BALANCED » : sous contrainte, WebRTC baisse à la fois la définition et
+   *   la cadence, plutôt que de figer l'une pour garder l'autre.
    */
-  static const _debitVideoMax = 800 * 1000;
-  static const _debitVideoMin = 150 * 1000;
   static const _cadenceVideoMax = 30;
   bool _emissionReglee = false;
 
   /*
-   * 🔴 L'ADAPTATION PAR LES STATISTIQUES (guide du patron, 31/10/2026).
+   * 🔴 « CONNEXION FAIBLE » : DIRE POURQUOI L'IMAGE SE DÉGRADE (01/11/2026).
    *
-   * Toutes les 3 s, la session relit ses statistiques : pertes de paquets
-   * (dans les deux sens), aller-retour, débit montant disponible. Réseau
-   * dégradé deux fois de suite (6 s) : la vidéo descend à 360 lignes et
-   * 300 kbit/s, AVANT que l'image ne se fige — et l'écran dit « Connexion
-   * faible ». Trois mesures saines de suite (9 s) : on remonte. Le décalage
-   * entre les deux seuils évite de faire le yo-yo sur un réseau limite.
+   * L'avis ne change plus rien à la vidéo : il EXPLIQUE ce que l'utilisateur
+   * voit. Toutes les 3 s, la session relit les statistiques de WebRTC :
+   * - en VIDÉO, l'avis s'affiche quand l'image l'est réellement : l'image
+   *   REÇUE a perdu une bonne part de sa définition ou devient saccadée, ou
+   *   WebRTC a réduit l'image ENVOYÉE faute de débit (elle devient floue chez
+   *   l'autre) ;
+   * - en AUDIO, sur l'état du réseau : pertes, aller-retour.
+   * Deux mesures mauvaises de suite (6 s) pour l'afficher, trois bonnes (9 s)
+   * pour l'effacer : l'avis ne clignote pas sur un réseau limite.
    */
-  static const _debitVideoFaible = 300 * 1000;
-
-  /// Le plancher de définition (demande du user) : en connexion faible, la
-  /// vidéo descend jusqu'à 360 lignes, jamais en dessous. Elle était divisée
-  /// par deux : une capture 640×480 tombait à 320×240.
-  static const _definitionMin = 360;
   static const _perteMax = 0.05;
   static const _allerRetourMax = 0.6;
-  static const _debitDisponibleMin = 250 * 1000;
+
+  /// L'image a perdu plus de 30 % de sa hauteur : elle se voit floue.
+  static const _partDefinitionMin = 0.7;
+
+  /// Moins d'images par seconde : elle se voit saccadée.
+  static const _cadenceMin = 12.0;
   Timer? _mesure;
   int _mauvaisesDeSuite = 0;
   int _bonnesDeSuite = 0;
   int _recusAvant = 0;
   int _perdusAvant = 0;
 
-  /// La liaison avec ce pair est-elle dégradée ? L'écran affiche alors
-  /// « Connexion faible », comme WhatsApp.
+  /// La plus grande hauteur d'image reçue pendant l'appel : la référence de
+  /// « bonne qualité » de ce correspondant, qui a choisi sa propre qualité.
+  double _hauteurRecueMax = 0;
+
+  /// La qualité de l'image est-elle dégradée avec ce pair ? L'écran affiche
+  /// alors « Connexion faible », comme WhatsApp.
   final ValueNotifier<bool> connexionFaible = ValueNotifier(false);
 
   /// Le pair a-t-il coupé sa caméra (bouton, ou application en arrière-plan) ?
@@ -494,7 +508,7 @@ class WebrtcPeerSession {
     onConnectionLost?.call();
   }
 
-  /// Le réglage de l'émission (voir [_debitVideoMax]). Une fois par session :
+  /// Le réglage de l'émission (voir [debitVideoMax]). Une fois par session :
   /// les paramètres survivent aux reprises, qui ne touchent pas aux pistes.
   Future<void> _reglerEmission() async {
     final pc = _pc;
@@ -514,8 +528,7 @@ class WebrtcPeerSession {
             e.priority = RTCPriorityType.high;
             e.networkPriority = RTCPriorityType.high;
           } else {
-            e.maxBitrate = _debitVideoMax;
-            e.minBitrate = _debitVideoMin;
+            e.maxBitrate = debitVideoMax;
             e.maxFramerate = _cadenceVideoMax;
             e.priority = RTCPriorityType.low;
             e.networkPriority = RTCPriorityType.low;
@@ -526,7 +539,7 @@ class WebrtcPeerSession {
         }
         await emetteur.setParameters(parametres);
       }
-      traceAppel("$peerId : émission réglée (son prioritaire, vidéo plafonnée)");
+      traceAppel("$peerId : émission réglée (son prioritaire, vidéo à ${debitVideoMax ~/ 1000} kbit/s au plus)");
     } catch (e) {
       // Un appareil qui refuse un réglage garde le comportement par défaut :
       // l'appel n'en dépend pas.
@@ -565,6 +578,15 @@ class WebrtcPeerSession {
   static double? _nombre(dynamic v) =>
       v is num ? v.toDouble() : (v is String ? double.tryParse(v) : null);
 
+  /// Le petit côté de l'image : le même que l'écran soit tenu droit ou
+  /// couché. Comparer des hauteurs ferait croire à une perte de définition à
+  /// chaque rotation du téléphone.
+  static double? _petitCote(Map<dynamic, dynamic> v) {
+    final l = _nombre(v['frameWidth']);
+    final h = _nombre(v['frameHeight']);
+    return l != null && h != null ? math.min(l, h) : null;
+  }
+
   Future<void> _mesurer() async {
     final pc = _pc;
     if (pc == null || _enReprise) return;
@@ -576,11 +598,15 @@ class WebrtcPeerSession {
     }
     var perteEmise = 0.0;
     var allerRetour = 0.0;
-    double? debitDisponible;
     var recus = 0;
     var perdus = 0;
+    double? hauteurRecue;
+    double? cadenceRecue;
+    double? hauteurEnvoyee;
+    var limiteParLeDebit = false;
     for (final r in rapports) {
       final v = r.values;
+      final video = (v['kind'] ?? v['mediaType']) == 'video';
       switch (r.type) {
         // Ce que le PAIR dit recevoir de nous.
         case 'remote-inbound-rtp':
@@ -592,14 +618,23 @@ class WebrtcPeerSession {
           if (v['state'] == 'succeeded' && retenue) {
             allerRetour =
                 math.max(allerRetour, _nombre(v['currentRoundTripTime']) ?? 0);
-            debitDisponible =
-                _nombre(v['availableOutgoingBitrate']) ?? debitDisponible;
           }
           break;
         // Ce que NOUS recevons du pair.
         case 'inbound-rtp':
           recus += (_nombre(v['packetsReceived']) ?? 0).toInt();
           perdus += (_nombre(v['packetsLost']) ?? 0).toInt();
+          if (video) {
+            hauteurRecue = _petitCote(v) ?? hauteurRecue;
+            cadenceRecue = _nombre(v['framesPerSecond']) ?? cadenceRecue;
+          }
+          break;
+        // Ce que nous ENVOYONS, et pourquoi WebRTC l'a réduit.
+        case 'outbound-rtp':
+          if (video) {
+            hauteurEnvoyee = _petitCote(v) ?? hauteurEnvoyee;
+            if (v['qualityLimitationReason'] == 'bandwidth') limiteParLeDebit = true;
+          }
           break;
       }
     }
@@ -610,63 +645,51 @@ class WebrtcPeerSession {
     final perteRecue =
         dRecus + dPerdus > 20 ? dPerdus / (dRecus + dPerdus) : 0.0;
 
-    final degrade = perteEmise > _perteMax ||
-        perteRecue > _perteMax ||
-        allerRetour > _allerRetourMax ||
-        (debitDisponible != null && debitDisponible < _debitDisponibleMin);
+    final bool degrade;
+    String raison;
+    if (isVideo) {
+      final hRecue = hauteurRecue;
+      if (hRecue != null && hRecue > _hauteurRecueMax) _hauteurRecueMax = hRecue;
+      // L'image que JE vois : moins nette, ou saccadée.
+      final recueFloue = hRecue != null &&
+          _hauteurRecueMax >= 240 &&
+          hRecue < _hauteurRecueMax * _partDefinitionMin;
+      final recueSaccadee =
+          cadenceRecue != null && cadenceRecue > 0 && cadenceRecue < _cadenceMin;
+      // L'image que L'AUTRE voit : réduite par WebRTC faute de débit.
+      final envoyeeFloue = limiteParLeDebit &&
+          hauteurEnvoyee != null &&
+          hauteurEnvoyee < hauteurCapture * _partDefinitionMin;
+      degrade = recueFloue || recueSaccadee || envoyeeFloue;
+      raison = recueFloue
+          ? "image reçue ${hRecue.round()}p sur ${_hauteurRecueMax.round()}p"
+          : recueSaccadee
+              ? "image reçue à ${cadenceRecue.round()} images/s"
+              : "image envoyée réduite à ${hauteurEnvoyee?.round()}p faute de débit";
+    } else {
+      degrade = perteEmise > _perteMax ||
+          perteRecue > _perteMax ||
+          allerRetour > _allerRetourMax;
+      raison = "perte émise ${(perteEmise * 100).round()} %, reçue "
+          "${(perteRecue * 100).round()} %, aller-retour ${(allerRetour * 1000).round()} ms";
+    }
+
     if (degrade) {
       _bonnesDeSuite = 0;
       _mauvaisesDeSuite++;
       if (_mauvaisesDeSuite >= 2 && !connexionFaible.value) {
-        traceAppel("$peerId : réseau dégradé (perte émise "
-            "${(perteEmise * 100).round()} %, reçue ${(perteRecue * 100).round()} %, "
-            "aller-retour ${(allerRetour * 1000).round()} ms) → vidéo allégée");
+        traceAppel("$peerId : qualité dégradée ($raison) → « Connexion faible »");
         connexionFaible.value = true;
         onUpdated();
-        unawaited(_appliquerDebit(faible: true));
       }
     } else {
       _mauvaisesDeSuite = 0;
       _bonnesDeSuite++;
       if (_bonnesDeSuite >= 3 && connexionFaible.value) {
-        traceAppel("$peerId : réseau rétabli → vidéo normale");
+        traceAppel("$peerId : qualité rétablie");
         connexionFaible.value = false;
         onUpdated();
-        unawaited(_appliquerDebit(faible: false));
       }
-    }
-  }
-
-  /// Le facteur qui ramène la piste à [_definitionMin] lignes sur son petit
-  /// côté (le portrait compte aussi) — 1, si elle n'est pas plus grande.
-  /// Sans réglages lisibles, on part de la cible de capture, 640×480.
-  static double _facteurVersPlancher(MediaStreamTrack? piste) {
-    final s = piste?.getSettings() ?? const <String, dynamic>{};
-    final l = _nombre(s['width']);
-    final h = _nombre(s['height']);
-    final petitCote = (l != null && h != null && l > 0 && h > 0) ? math.min(l, h) : 480.0;
-    return math.max(1.0, petitCote / _definitionMin);
-  }
-
-  /// Vidéo allégée (360 lignes, 300 kbit/s) ou normale.
-  Future<void> _appliquerDebit({required bool faible}) async {
-    final pc = _pc;
-    if (pc == null || !isVideo) return;
-    try {
-      for (final emetteur in await pc.getSenders()) {
-        if (emetteur.track?.kind != 'video') continue;
-        final parametres = emetteur.parameters;
-        final encodages = parametres.encodings;
-        if (encodages == null || encodages.isEmpty) continue;
-        for (final e in encodages) {
-          e.maxBitrate = faible ? _debitVideoFaible : _debitVideoMax;
-          e.scaleResolutionDownBy =
-              faible ? _facteurVersPlancher(emetteur.track) : 1.0;
-        }
-        await emetteur.setParameters(parametres);
-      }
-    } catch (e) {
-      traceAppel("$peerId : adaptation du débit impossible — $e");
     }
   }
 

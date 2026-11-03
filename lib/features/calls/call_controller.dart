@@ -29,6 +29,7 @@ import 'prechargement_accueil.dart';
 import 'repondeur_repository.dart';
 import '../../core/server_config.dart';
 import '../../core/token_storage.dart';
+import 'qualite_video.dart';
 import 'webrtc_group_mesh.dart';
 import 'webrtc_peer_session.dart';
 
@@ -886,6 +887,7 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
       // aligne l'état local et on laisse la suite se faire — surtout pas de
       // `_clear()`, qui couperait un appel en cours.
       if (e.code == "ALREADY_JOINED") {
+        isGroupCall = inc.isGroup;
         activeCallId = inc.callId;
         activeConvId = inc.convId;
         activePeerName = inc.displayTitle;
@@ -1796,9 +1798,17 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
     // Réinitialise si la mesh précédente était en erreur
     if (_mesh == null) {
       final callId = activeCallId!;
+      // La qualité choisie dans le profil, plafonnée en groupe (01/11/2026).
+      await ReglageQualiteVideo.instance.charger();
+      final qualite = ReglageQualiteVideo.pourAppel(
+        ReglageQualiteVideo.instance.qualite,
+        groupe: isGroupCall,
+      );
+      traceAppel("qualité vidéo : ${qualite.name} (${qualite.detail})");
       _mesh = WebrtcGroupMesh(
         myUserId: myUserId!,
         isVideo: isVideo,
+        qualite: qualite,
         iceServers: ice,
         onSendSignal: (peerId, sig) => _rt.callSignal(callId, peerId, sig),
         onUpdated: _onMeshUpdated,

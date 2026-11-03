@@ -3,6 +3,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import '../../core/debug_overlay.dart';
 
+import 'qualite_video.dart';
 import 'webrtc_peer_session.dart';
 
 /// Mesh WebRTC : une connexion par participant distant, flux local partagé.
@@ -13,6 +14,7 @@ class WebrtcGroupMesh {
     required this.iceServers,
     required this.onSendSignal,
     required this.onUpdated,
+    this.qualite = QualiteVideo.standard,
     this.onPeerLost,
     this.onPeerReconnecting,
     this.onPeerReconnected,
@@ -23,6 +25,9 @@ class WebrtcGroupMesh {
   final List<Map<String, dynamic>> iceServers;
   final void Function(String peerId, Map<String, dynamic> signal) onSendSignal;
   final VoidCallback onUpdated;
+
+  /// La qualité de cet appel (choix de l'utilisateur, plafonné en groupe).
+  final QualiteVideo qualite;
 
   /// Connexion média définitivement perdue avec ce pair — après que la
   /// session a épuisé ses tentatives de reprise.
@@ -143,34 +148,28 @@ class WebrtcGroupMesh {
 
   Future<void> ensureLocal() async {
     /*
-     * 🔴 640×480, 360 LIGNES AU MOINS, 720p AU PLUS, 15 À 30 IMAGES/S (demande
-     * du patron et guide du 31/10/2026 ; plancher de 360 demandé par le user).
-     * Sans contrainte, la caméra s'ouvrait en 720p ou plus : l'encodeur et le
-     * réseau saturaient, et l'image se figeait. L'émission
-     * (`WebrtcPeerSession`) baisse la définition quand le réseau se dégrade,
-     * jusqu'au plancher et pas en dessous.
+     * 🔴 LA CAPTURE DE LA QUALITÉ CHOISIE, ET RIEN AU-DELÀ (procédure du
+     * patron, 01/11/2026) : 1280×720, 640×480 ou 640×360, 24 images/s. Le
+     * téléphone ne filme pas plus que ce qu'on enverra ; WebRTC baisse
+     * ensuite lui-même la qualité si le réseau faiblit.
      *
-     * ⚠️ `width`/`height` SONT LA CIBLE DE CAPTURE. Sur Android,
-     * `flutter_webrtc` capture à leur taille, et à défaut au MINIMUM demandé
-     * (il ignore le maximum) : sans eux, poser le plancher à 360 aurait fait
-     * capturer tous les appels en 360p.
+     * ⚠️ DES NOMBRES, PAS `{min, ideal, max}`. Sur Android, `flutter_webrtc`
+     * 0.12.12 ne lit cette forme qu'à moitié (il cherche `ideal` au mauvais
+     * niveau) et retombe sur 1280×720 à 30 images/s : exactement ce qu'on veut
+     * éviter. Il ignore aussi `min` et `max`.
      */
     _local ??= await navigator.mediaDevices.getUserMedia({
-      "audio": true,
+      "audio": {
+        "echoCancellation": true,
+        "noiseSuppression": true,
+        "autoGainControl": true,
+      },
       "video": isVideo
           ? {
               "facingMode": "user",
-              "width": 640,
-              "height": 480,
-              "mandatory": {
-                "minWidth": "480",
-                "minHeight": "360",
-                "maxWidth": "1280",
-                "maxHeight": "720",
-                "minFrameRate": "15",
-                "maxFrameRate": "30",
-              },
-              "optional": [],
+              "width": qualite.largeur,
+              "height": qualite.hauteur,
+              "frameRate": QualiteVideo.cadence,
             }
           : false,
     });
@@ -197,6 +196,8 @@ class WebrtcGroupMesh {
       iceServers: iceServers,
       onSendSignal: (sig) => onSendSignal(peerId, sig),
       onUpdated: onUpdated,
+      debitVideoMax: qualite.debitMax,
+      hauteurCapture: qualite.hauteur,
       onConnectionLost: () => onPeerLost?.call(peerId),
       onReconnecting: () => onPeerReconnecting?.call(peerId),
       onReconnected: () => onPeerReconnected?.call(peerId),

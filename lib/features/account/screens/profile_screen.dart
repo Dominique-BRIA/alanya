@@ -36,6 +36,7 @@ import '../../../widgets/avatar_source.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../../../widgets/qr_alanya.dart';
 import '../../auth/auth_controller.dart';
+import '../../calls/qualite_video.dart';
 import '../../contacts/contacts_repository.dart';
 import '../../contacts/screens/contact_info_screen.dart';
 import 'avatar_viewer_screen.dart';
@@ -150,6 +151,43 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  /// « Réglage appel vidéo » : trois qualités, propres à cet appareil.
+  Future<void> _choisirQualiteVideo() async {
+    final reglage = ReglageQualiteVideo.instance;
+    await reglage.charger();
+    if (!mounted) return;
+    final choix = await showModalBottomSheet<QualiteVideo>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
+            child: Text(tr(ctx, 'video_quality_title'),
+                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+          ),
+          RadioGroup<QualiteVideo>(
+            groupValue: reglage.qualite,
+            onChanged: (v) => Navigator.of(ctx).pop(v),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              for (final q in QualiteVideo.values)
+                RadioListTile<QualiteVideo>(
+                  value: q,
+                  title: Text(tr(ctx, q.cleLibelle)),
+                  subtitle: Text(q.detail),
+                ),
+            ]),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 14),
+            child: Text(tr(ctx, 'video_quality_hint'),
+                style: TextStyle(fontSize: 12.5, color: Theme.of(ctx).hintColor)),
+          ),
+        ]),
+      ),
+    );
+    if (choix != null) await reglage.choisir(choix);
   }
 
   /// Un toucher sur sa photo (01/11/2026, demande du user) : la voir, ou la
@@ -437,6 +475,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       builder: (_) => const SauvegardeChiffreeScreen(),
                     ),
                   ),
+                ),
+                separateurReglage(context),
+                // Réglage appel vidéo (procédure du patron, 01/11/2026).
+                ListenableBuilder(
+                  listenable: ReglageQualiteVideo.instance,
+                  builder: (context, _) {
+                    final q = ReglageQualiteVideo.instance.qualite;
+                    return TuileReglage(
+                      icone: Icons.videocam_outlined,
+                      couleur: _accent,
+                      titre: tr(context, 'video_quality_title'),
+                      sousTitre: '${tr(context, q.cleLibelle)} — ${q.detail}',
+                      fin: chevronReglage(context),
+                      margeHorizontale: 0,
+                      onTap: _choisirQualiteVideo,
+                    );
+                  },
                 ),
                 separateurReglage(context),
                 TuileReglage(
