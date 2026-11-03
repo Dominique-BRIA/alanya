@@ -297,9 +297,14 @@ class WebrtcPeerSession {
   /// en dur ne sait donc offrir que du STUN — l'appel reste possible en direct,
   /// pas derrière un NAT symétrique. C'est le choix qu'a fait le modèle, et il
   /// vaut mieux qu'un relais qui prétend exister.
+  ///
+  /// Noms des relais mis à jour le 03/11/2026 (`turn.kemita.eu`,
+  /// `turn.alanya226.com`), et le STUN de Cloudflare, premier choix côté
+  /// serveur depuis la même date.
   static const fallbackIce = [
-    {"urls": "stun:alanya226.com:3478"},
-    {"urls": "stun:kemita.eu:3478"},
+    {"urls": "stun:stun.cloudflare.com:3478"},
+    {"urls": "stun:turn.kemita.eu:3478"},
+    {"urls": "stun:turn.alanya226.com:3478"},
     {"urls": "stun:stun.l.google.com:19302"},
   ];
   /// Normalise la liste ICE avant de la passer à WebRTC :
