@@ -131,11 +131,11 @@ class WebrtcPeerSession {
    *
    * L'avis ne change plus rien à la vidéo : il EXPLIQUE ce que l'utilisateur
    * voit. Toutes les 3 s, la session relit les statistiques de WebRTC :
-   * - en VIDÉO, l'avis s'affiche quand l'image l'est réellement : l'image
-   *   REÇUE a perdu une bonne part de sa définition ou devient saccadée, ou
-   *   WebRTC a réduit l'image ENVOYÉE faute de débit (elle devient floue chez
-   *   l'autre) ;
-   * - en AUDIO, sur l'état du réseau : pertes, aller-retour.
+   * - L'ÉTAT DU RÉSEAU, toujours : pertes de paquets au-delà de 5 %,
+   *   aller-retour au-delà de 600 ms ;
+   * - en VIDÉO, aussi l'état de l'image : l'image REÇUE a perdu une bonne
+   *   part de sa définition ou devient saccadée, ou WebRTC a réduit l'image
+   *   ENVOYÉE faute de débit (elle devient floue chez l'autre).
    * Deux mesures mauvaises de suite (6 s) pour l'afficher, trois bonnes (9 s)
    * pour l'effacer : l'avis ne clignote pas sur un réseau limite.
    */
@@ -645,6 +645,13 @@ class WebrtcPeerSession {
     final perteRecue =
         dRecus + dPerdus > 20 ? dPerdus / (dRecus + dPerdus) : 0.0;
 
+    // L'état du réseau : il compte dans tous les cas, vidéo comprise.
+    final reseauMauvais = perteEmise > _perteMax ||
+        perteRecue > _perteMax ||
+        allerRetour > _allerRetourMax;
+    final raisonReseau = "perte émise ${(perteEmise * 100).round()} %, reçue "
+        "${(perteRecue * 100).round()} %, aller-retour ${(allerRetour * 1000).round()} ms";
+
     final bool degrade;
     String raison;
     if (isVideo) {
@@ -660,18 +667,17 @@ class WebrtcPeerSession {
       final envoyeeFloue = limiteParLeDebit &&
           hauteurEnvoyee != null &&
           hauteurEnvoyee < hauteurCapture * _partDefinitionMin;
-      degrade = recueFloue || recueSaccadee || envoyeeFloue;
-      raison = recueFloue
+      degrade = recueFloue || recueSaccadee || envoyeeFloue || reseauMauvais;
+      raison = !(recueFloue || recueSaccadee || envoyeeFloue)
+          ? raisonReseau
+          : recueFloue
           ? "image reçue ${hRecue.round()}p sur ${_hauteurRecueMax.round()}p"
           : recueSaccadee
               ? "image reçue à ${cadenceRecue.round()} images/s"
               : "image envoyée réduite à ${hauteurEnvoyee?.round()}p faute de débit";
     } else {
-      degrade = perteEmise > _perteMax ||
-          perteRecue > _perteMax ||
-          allerRetour > _allerRetourMax;
-      raison = "perte émise ${(perteEmise * 100).round()} %, reçue "
-          "${(perteRecue * 100).round()} %, aller-retour ${(allerRetour * 1000).round()} ms";
+      degrade = reseauMauvais;
+      raison = raisonReseau;
     }
 
     if (degrade) {
