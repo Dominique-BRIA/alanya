@@ -1,6 +1,8 @@
 import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import 'appel_natif_prefs.dart';
+
 /// Stockage sécurisé des tokens JWT (Keychain iOS / Keystore Android).
 /// Persiste après fermeture / redémarrage de l'app.
 ///
@@ -120,6 +122,9 @@ class TokenStorage {
     _accesConnu = access;
     await _ecrire(_kAccess, access);
     await _ecrire(_kRefresh, refresh);
+    // Copie du SEUL jeton d'accès pour le refus natif, application fermée
+    // (voir PontNatifAppel). Le jeton de renouvellement reste ici.
+    await PontNatifAppel.publierJeton(access);
   }
 
   Future<String?> get accessToken async {
@@ -135,6 +140,7 @@ class TokenStorage {
 
   Future<void> clear() async {
     _accesConnu = null;
+    await PontNatifAppel.publierJeton(null);
     /*
      * ⚠️ `deleteAll` ET NON TROIS `delete` : depuis que cet espace de nom est
      * à nous seuls, il ne contient rien d'autre. Et une entrée devenue

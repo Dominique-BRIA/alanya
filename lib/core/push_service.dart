@@ -16,6 +16,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_local_notifications/src/platform_specifics/android/notification_sound.dart';
 
 import '../core/api_client.dart';
+import 'appel_natif_prefs.dart';
 import 'appel_pendant_communication.dart';
 import 'device_registry.dart';
 import 'refus_en_attente.dart';
@@ -883,9 +884,23 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
   // Appel annulé/terminé par l'appelant → retire la notif d'appel plein écran
   // (ciblée par le callId partagé WS/FCM).
   if (message.data['type'] == 'call_cancelled') {
+    final callId = message.data['callId']?.toString();
+    // Noté AVANT tout : si l'appel lui-même arrive après son annulation, il
+    // ne sonnera pas (voir AppelsTermines).
+    await AppelsTermines.marquer(callId);
     final plugin = FlutterLocalNotificationsPlugin();
-    await plugin
-        .cancel(PushService.callNotifId(message.data['callId']?.toString()));
+    await plugin.cancel(PushService.callNotifId(callId));
+    // 🔴 L'APPEL TELECOM AUSSI (06/11/2026). Seule la notification du repli
+    // était retirée : application fermée, l'écran d'appel natif et sa
+    // sonnerie continuaient jusqu'au filet des 90 s, alors que l'appelant
+    // avait raccroché — ou qu'un autre appareil avait décroché. Seul CET
+    // appel est terminé : l'annulation tardive ne coupe pas le suivant.
+    if (callId != null && callId.isNotEmpty) {
+      await AlanyaTelecom.endCall(missed: true, callId: callId);
+      try {
+        await FlutterCallkitIncoming.endCall(callId);
+      } catch (_) {}
+    }
     return;
   }
 
@@ -1107,15 +1122,27 @@ Future<void> refuserAppelDepuisIsolate(String callId) =>
 /// autre serveur : il ne part jamais chez nous. L'appelant sonnait jusqu'au
 /// bout, comme si l'on ne répondait pas.
 ///
-/// Cet isolate, lui, vit tant que Telecom tient le processus — toute la
-/// sonnerie. Si l'application est vivante aussi, les deux envoient : le second
-/// reçoit un 409 (appel déjà refusé), sans conséquence.
+/// Le refus part désormais du NATIF lui-même (`RefusNatif.kt`), sans attendre
+/// Flutter, comme dans l'application de référence. Cet isolate, qui vit tant
+/// que Telecom tient le processus, ne fait plus que REPRENDRE un refus que le
+/// natif n'a pas pu envoyer — jeton d'accès expiré, que seul Flutter sait
+/// renouveler. Le délai laisse au natif le temps de réussir : un refus parti
+/// n'est jamais renvoyé (il sort de la file commune).
+///
+/// L'expiration de la sonnerie, elle, n'a pas de pendant natif : elle reste
+/// envoyée d'ici, pour que l'appelant cesse de sonner tout de suite.
 void _ecouterRefusTelecom() {
   AlanyaTelecom.setListener((event, data) {
-    if (event != 'reject' && event != 'timeout') return;
     final callId = data['callId']?.toString();
     if (callId == null || callId.isEmpty) return;
-    unawaited(refuserAppelDepuisIsolate(callId));
+    if (event == 'reject') {
+      unawaited(Future<void>.delayed(
+        const Duration(seconds: 6),
+        () => RefusEnAttente.reprendre(callId, _envoyerRefusDirect),
+      ));
+    } else if (event == 'timeout') {
+      unawaited(refuserAppelDepuisIsolate(callId));
+    }
   });
 }
 

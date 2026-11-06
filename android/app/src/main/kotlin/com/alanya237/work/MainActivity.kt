@@ -90,7 +90,12 @@ class MainActivity : FlutterFragmentActivity() {
     }
 
     /**
-     * Un appel Telecom est-il en train de sonner ?
+     * Un appel Telecom sonne-t-il, ou vient-il d'être décroché ?
+     *
+     * DÉCROCHÉ AUSSI (06/11/2026) : c'est l'écran d'appel NATIF qui sonne
+     * désormais, et c'est son décroché qui lance l'application — l'appel n'est
+     * alors plus « en sonnerie ». Sans ce cas, l'application démarrait DERRIÈRE
+     * le verrouillage, et l'appel accepté restait invisible.
      *
      * Le contrôle de version est indispensable : `CallRegistry` manipule des
      * `Connection`, qui n'existent qu'à partir d'Android 8, alors que
@@ -99,7 +104,9 @@ class MainActivity : FlutterFragmentActivity() {
      */
     private fun unAppelSonne(): Boolean =
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-            runCatching { CallRegistry.ringingData() != null }.getOrDefault(false)
+            runCatching {
+                CallRegistry.ringingData() != null || CallRegistry.acceptedData() != null
+            }.getOrDefault(false)
 
     /**
      * Le moteur Flutter de CETTE activité — celui qui exécute l'appel. Retenu

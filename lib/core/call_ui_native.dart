@@ -5,7 +5,10 @@ import 'package:flutter_callkit_incoming/entities/entities.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 
 import '../l10n/app_localizations.dart';
+import 'appel_natif_prefs.dart';
 import 'push_service.dart';
+import 'server_config.dart';
+import 'token_storage.dart';
 
 /// Écran d'appel entrant NATIF, façon téléphone.
 ///
@@ -59,6 +62,8 @@ class CallUiNative {
     // pour choisir la sonnerie de la liste de l'appelant.
     Map<String, String> appelant = const {},
   }) async {
+    // Appel déjà terminé (annulation arrivée AVANT lui) : rien ne sonne.
+    if (await AppelsTermines.contient(callId)) return;
     // ── TELECOM D'ABORD, le paquet en repli ────────────────────────────────
     //
     // ⚠️ CE N'EST PAS UNE PRÉFÉRENCE D'ARCHITECTURE, C'EST LA CORRECTION D'UN
@@ -76,8 +81,16 @@ class CallUiNative {
     // Android LIE le processus et ne peut plus le geler. C'est la seule façon
     // de tenir une sonnerie sur Transsion ou Xiaomi, application tuée.
     if (Platform.isAndroid && !sansTelecom) {
+      // L'écran natif charge la photo lui-même, sans Flutter : il lui faut
+      // l'adresse COMPLÈTE (le serveur rend souvent un chemin relatif) et le
+      // jeton, la route des médias étant protégée. Le jeton est recopié au
+      // passage pour le refus natif (voir PontNatifAppel).
+      final jeton = await TokenStorage().accessToken ?? '';
+      await PontNatifAppel.publierJeton(jeton);
       final prisEnCharge = await AlanyaTelecom.reportIncomingCall({
         ...appelant,
+        'avatarComplet': _photoComplete(avatarUrl),
+        'jeton': jeton,
         // `callId` sert aussi de clé d'idempotence côté natif : le même appel
         // arrive par le socket ET par le push, et le module déduplique dessus.
         'callId': callId,
@@ -150,6 +163,17 @@ class CallUiNative {
 
   /// Vrai si [callId] est l'écho d'un décrochage que nous avons provoqué —
   /// l'événement doit alors être ignoré. La marque est consommée au passage.
+  /// L'adresse que l'écran natif peut charger seul — mêmes trois formes que
+  /// `AvatarSource` : base64 (gardée si raisonnable : elle voyage avec
+  /// l'appel), URL complète, ou chemin du serveur à compléter.
+  static String _photoComplete(String? brut) {
+    final v = brut?.trim() ?? '';
+    if (v.isEmpty) return '';
+    if (v.startsWith('data:')) return v.length <= 150000 ? v : '';
+    if (v.startsWith('http')) return v;
+    return '${ServerConfig.apiBase}${v.startsWith('/') ? v : '/$v'}';
+  }
+
   static bool consommerEchoLocal(String? callId) =>
       callId != null && _decrochesDepuisApp.remove(callId);
 
@@ -163,7 +187,7 @@ class CallUiNative {
     // drapeau `accepted` et sort immédiatement.
     if (Platform.isAndroid) {
       _decrochesDepuisApp.add(callId);
-      await AlanyaTelecom.answerRinging();
+      await AlanyaTelecom.answerRinging(callId: callId);
     }
     try {
       await FlutterCallkitIncoming.setCallConnected(callId);
@@ -181,7 +205,7 @@ class CallUiNative {
     // sonner ET retiendrait le processus indéfiniment.
     if (Platform.isAndroid) {
       _decrochesDepuisApp.remove(callId);
-      await AlanyaTelecom.endCall();
+      await AlanyaTelecom.endCall(callId: callId);
     }
     try {
       await FlutterCallkitIncoming.endCall(callId);

@@ -8,6 +8,12 @@ import 'package:provider/provider.dart';
 
 import '../../core/api_client.dart';
 import '../../core/app_snackbar.dart';
+import '../../core/appel_natif_prefs.dart';
+import '../../services/e2ee/e2ee_fournisseur.dart';
+import '../auth/auth_controller.dart';
+import '../chat/chat_repository.dart';
+import '../media/media_repository.dart';
+import '../status/reponse_statut.dart';
 import '../../core/call_ui_native.dart';
 import '../../core/debug_overlay.dart';
 import '../../core/diagnostic_chip.dart';
@@ -60,12 +66,12 @@ class _CallListenerState extends State<CallListener>
   /*
    * RETOUR AU PREMIER PLAN PENDANT UNE SONNERIE (06/11/2026).
    *
-   * Application en arrière-plan, l'appel s'annonce par la notification du
-   * système ; écran verrouillé, celle-ci LANCE l'application par-dessus le
-   * verrouillage. Dans les deux cas l'application arrive à l'écran avec un
-   * appel qui sonne — et n'affichait rien : son écran de sonnerie n'était
-   * ouvert qu'au premier plan, au moment où l'appel arrivait. Il s'ouvre
-   * désormais à ce retour, sauf si l'utilisateur l'avait lui-même réduit.
+   * Hors de l'écran, c'est l'écran d'appel NATIF qui porte l'appel. Mais on
+   * peut aussi ouvrir l'application soi-même pendant que ça sonne : elle
+   * n'affichait alors rien, son écran de sonnerie n'étant ouvert qu'au
+   * premier plan, au moment où l'appel arrivait. Il s'ouvre désormais à ce
+   * retour — sauf si l'utilisateur l'avait lui-même réduit, ou s'il vient de
+   * décrocher sur l'écran natif (c'est ce décroché qui ramène l'application).
    */
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -78,6 +84,11 @@ class _CallListenerState extends State<CallListener>
     // Refus restés en attente (réseau absent quand on a refusé) : le retour au
     // premier plan est souvent celui du réseau.
     unawaited(cc.rejouerRefusEnAttente());
+    unawaited(_envoyerReponseEnAttente());
+    // Décroché sur l'écran natif : l'acceptation est en cours, ouvrir l'écran
+    // de SONNERIE allumerait l'aperçu caméra au moment où l'appel la réclame.
+    if (await AlanyaTelecom.getAcceptedCall() != null) return;
+    if (!mounted) return;
     if (cc.incoming == null) await _adopterAppelQuiSonne(cc);
     if (!mounted) return;
     final inc = cc.incoming;
@@ -85,6 +96,89 @@ class _CallListenerState extends State<CallListener>
     if (cc.entrantReduit == inc.callId) return;
     _shownCallId = inc.callId;
     await ouvrirEcranSonnerie(cc);
+  }
+
+  /// « Désactiver la vidéo » choisi sur l'écran natif avant de décrocher :
+  /// l'appel démarre caméra coupée, comme depuis l'écran Flutter.
+  void _appliquerChoixCamera(Map<String, dynamic> data) {
+    if (data['cameraCoupee']?.toString() == 'true') {
+      context.read<CallController>().cameraEntranteActive = false;
+    }
+  }
+
+  /*
+   * LE MESSAGE CHOISI SUR L'ÉCRAN NATIF (06/11/2026).
+   *
+   * « Message » sur l'écran natif refuse l'appel et garde le texte choisi :
+   * seule l'application sait chiffrer la conversation. Elle l'envoie ici, dès
+   * qu'elle est là — l'écran natif l'ouvre après le déverrouillage. Rendu une
+   * seule fois par le natif : jamais deux envois du même message.
+   */
+  bool _envoiReponseEnCours = false;
+
+  Future<void> _envoyerReponseEnAttente() async {
+    if (_envoiReponseEnCours) return;
+    _envoiReponseEnCours = true;
+    try {
+      // La session peut n'être pas encore restaurée au démarrage à froid : on
+      // l'attend un moment AVANT de prendre le message, qui ne se rend qu'une
+      // fois.
+      for (var i = 0; i < 30; i++) {
+        if (!mounted) return;
+        if (context.read<AuthController>().user?.id != null) break;
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+      }
+      if (!mounted) return;
+      final moi = context.read<AuthController>().user?.id;
+      if (moi == null) return;
+      final reponse = await AlanyaTelecom.prendreReponseAppel();
+      final auteur = reponse?['callerId']?.toString() ?? '';
+      final texte = reponse?['texte']?.toString().trim() ?? '';
+      if (!mounted || auteur.isEmpty || texte.isEmpty) return;
+      final envoye = trLu(context, 'call_message_sent');
+      final echec = trLu(context, 'call_message_failed');
+      try {
+        await ReponseStatut.envoyer(
+          chat: context.read<ChatRepository>(),
+          medias: context.read<MediaRepository>(),
+          pile: context.e2ee,
+          moi: moi,
+          auteurId: auteur,
+          texte: texte,
+        );
+        showAppSnackBar(envoye);
+      } catch (_) {
+        showAppSnackBar(echec);
+      }
+    } finally {
+      _envoiReponseEnCours = false;
+    }
+  }
+
+  /// Les libellés de l'écran natif, dans la langue de l'application. Republiés
+  /// à chaque changement de langue : l'écran natif ne peut pas la demander.
+  void _publierLibellesNatifs() {
+    const cles = [
+      'call_minimize', 'call_message', 'call_video_off', 'call_video_on',
+      'decline', 'accept', 'incoming_call', 'incoming_video_call',
+      'call_quick_busy', 'call_quick_later', 'call_quick_on_way',
+      'call_quick_custom', 'send',
+    ];
+    final libelles = <String, String>{};
+    for (final cle in cles) {
+      try {
+        // `tr` et non `trLu` : il ABONNE à la langue, et c'est ce qui fait
+        // rappeler `didChangeDependencies` quand elle change.
+        libelles[cle] = tr(context, cle);
+      } catch (_) {}
+    }
+    unawaited(PontNatifAppel.publierLibelles(libelles));
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _publierLibellesNatifs();
   }
 
   /// Un appel sonne côté Telecom, inconnu de l'application (connexion pas
@@ -150,10 +244,20 @@ class _CallListenerState extends State<CallListener>
           // Écho de notre propre `answerRinging` : l'appel est déjà en cours
           // d'acceptation, le relancer ouvrirait un second écran d'appel.
           if (CallUiNative.consommerEchoLocal(callId)) return;
+          // « Désactiver la vidéo » choisi sur l'écran natif avant de décrocher.
+          _appliquerChoixCamera(data);
           _onCallAction('call_accept', callId);
+        // Refusé sur l'écran ou la notification natifs : le NATIF a déjà
+        // envoyé le refus (RefusNatif.kt). On nettoie sans le renvoyer, puis
+        // on reprend la file un peu plus tard au cas où il aurait échoué.
+        case 'reject':
+          _onCallAction('call_reject', callId, dejaTransmis: true);
+          unawaited(Future<void>.delayed(const Duration(seconds: 6), () {
+            if (mounted) context.read<CallController>().rejouerRefusEnAttente();
+          }));
         // Le délai de sonnerie compte comme un refus, pour que l'appelant cesse
         // de sonner tout de suite plutôt que d'attendre son propre minuteur.
-        case 'reject' || 'timeout':
+        case 'timeout':
           _onCallAction('call_reject', callId);
         case 'telecom_failed':
           unawaited(_replierSurPaquet(data));
@@ -205,6 +309,12 @@ class _CallListenerState extends State<CallListener>
       if (!mounted) return;
       final idAccepte = accepte?['callId']?.toString();
       if (idAccepte != null && idAccepte.isNotEmpty) {
+        // Décroché sur l'écran natif, application fermée : c'est lui qui l'a
+        // démarrée. L'état de la `Connection`, lu ici, ne souffre d'aucune
+        // course — même principe que la lecture de l'intention de lancement
+        // dans l'application de référence. Les gardes d'`acceptById` rendent
+        // sans effet un second décroché (événement `answer` reçu aussi).
+        _appliquerChoixCamera(accepte!);
         _onCallAction('call_accept', idAccepte);
         return;
       }
@@ -223,10 +333,10 @@ class _CallListenerState extends State<CallListener>
       // `call_controller` qui s'abstient de lancer la sonnerie interne quand
       // celle-ci tourne déjà — une seule source, et aucun trou.
       //
-      // L'appel n'est pas décroché mais il SONNE : l'application vient d'être
-      // lancée par l'écran d'appel du système, typiquement par-dessus le
-      // verrouillage. On affiche notre écran de sonnerie TOUT DE SUITE, avec
-      // ce que le push a confié à Telecom, au lieu d'attendre la connexion.
+      // L'appel n'est pas décroché mais il SONNE : on a ouvert l'application
+      // pendant la sonnerie (l'écran natif, lui, ne la démarre pas). On
+      // affiche notre écran de sonnerie TOUT DE SUITE, avec ce que le push a
+      // confié à Telecom, au lieu d'attendre la connexion.
       final cc = context.read<CallController>();
       await _adopterAppelQuiSonne(cc);
       if (!mounted) return;
@@ -280,26 +390,42 @@ class _CallListenerState extends State<CallListener>
     super.dispose();
   }
 
-  void _onCallAction(String actionId, String? callId) {
+  /// [dejaTransmis] : le refus est déjà parti au serveur, par le natif — on
+  /// ne fait que nettoyer l'état de l'application.
+  void _onCallAction(String actionId, String? callId,
+      {bool dejaTransmis = false}) {
     if (!mounted) return;
     final cc = context.read<CallController>();
     if (actionId == 'call_reject') {
-      if (cc.incoming != null) {
-        cc.rejectIncoming();
+      final inc = cc.incoming;
+      // Un refus ne vise que SON appel : arrivé en retard, il ne doit pas
+      // refuser l'appel suivant, qui sonne peut-être déjà (06/11/2026).
+      final memeAppel =
+          inc != null && (callId == null || callId.isEmpty || inc.callId == callId);
+      if (memeAppel) {
+        cc.rejectIncoming(transmettre: !dejaTransmis);
       } else if (callId != null && callId.isNotEmpty) {
         // Refus décidé avant que l'appel ne soit connu de l'application —
         // typiquement au démarrage, la trame WebSocket n'étant pas encore
         // arrivée. `rejectIncoming` ne ferait rien du tout dans ce cas : il
         // commence par lire `incoming`, qui vaut nul.
-        _refuseParId(callId);
+        if (dejaTransmis) {
+          unawaited(CallUiNative.masquer(callId));
+          unawaited(AppelsTermines.marquer(callId));
+        } else {
+          _refuseParId(callId);
+        }
       }
       InAppNotifier.instance.dismissCall();
     } else if (actionId == 'call_accept') {
-      if (cc.incoming != null) {
+      final inc = cc.incoming;
+      if (inc != null &&
+          (callId == null || callId.isEmpty || inc.callId == callId)) {
         cc.acceptIncoming().then((_) {
           if (mounted) _openCallScreen();
         });
       } else if (callId != null && callId.isNotEmpty) {
+        // Décroché d'un AUTRE appel que celui connu ici, ou :
         // Décrocher a DÉMARRÉ l'application : `incoming` est encore vide, la
         // trame WebSocket n'étant pas arrivée. On accepte avec le seul
         // identifiant plutôt que d'attendre — attendre laissait l'utilisateur

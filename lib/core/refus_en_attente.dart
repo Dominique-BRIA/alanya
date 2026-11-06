@@ -45,8 +45,34 @@ class RefusEnAttente {
     String callId,
     Future<bool> Function(String callId) envoyer,
   ) async {
-    if (await _essayer(callId, envoyer)) return;
+    if (await _essayer(callId, envoyer)) {
+      // Le natif a pu le mettre en file de son côté : il ne le renverra pas.
+      await _retirer(callId);
+      return;
+    }
     await _ajouter(callId);
+    await _reessayer(callId, envoyer);
+  }
+
+  /// Reprend un refus que le NATIF a mis en file (`RefusNatif.kt`) sans
+  /// parvenir à l'envoyer — jeton d'accès expiré, typiquement, que seul
+  /// Flutter sait renouveler. Sans effet si le refus est déjà parti.
+  static Future<void> reprendre(
+    String callId,
+    Future<bool> Function(String callId) envoyer,
+  ) async {
+    if (!await _toujoursEnAttente(callId)) return;
+    if (await _essayer(callId, envoyer)) {
+      await _retirer(callId);
+      return;
+    }
+    await _reessayer(callId, envoyer);
+  }
+
+  static Future<void> _reessayer(
+    String callId,
+    Future<bool> Function(String callId) envoyer,
+  ) async {
     for (final delai in _delais) {
       await Future<void>.delayed(delai);
       if (!await _toujoursEnAttente(callId)) return;

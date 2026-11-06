@@ -9,6 +9,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/alanya_id_formatter.dart';
+import '../../core/appel_natif_prefs.dart';
 import '../../core/api_client.dart';
 import '../../core/noms_donnes.dart';
 import '../../core/call_permissions.dart';
@@ -1451,11 +1452,26 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
   /// push, application fermée.
   Future<void> rejouerRefusEnAttente() => RefusEnAttente.rejouer(_envoyerRefus);
 
-  Future<void> rejectIncoming() async {
+  /// [transmettre] faux : le refus est DÉJÀ parti — pris sur l'écran ou la
+  /// notification natifs, qui l'envoient eux-mêmes (`RefusNatif.kt`). Seul
+  /// l'état local est nettoyé : un refus n'est jamais envoyé deux fois.
+  Future<void> rejectIncoming({bool transmettre = true}) async {
     final inc = incoming;
     if (inc == null) return;
     // Coupe la sonnerie entrante dès qu'on rejette.
     await RingtoneService.instance.stop();
+    if (!transmettre) {
+      _rt.callState(
+        inc.callId,
+        inc.isGroup ? "declined" : "rejected",
+        userId: myUserId,
+        displayName: myDisplayName,
+      );
+      _signalBuffer.remove(inc.callId);
+      _clear();
+      notifyListeners();
+      return;
+    }
 
     // ⚠️ L'ÉCHEC NE DOIT PAS INTERROMPRE LA SORTIE. Sans ce try/catch, une
     // coupure réseau ou un appel déjà expiré faisait remonter l'exception AVANT
@@ -1698,6 +1714,8 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
     // par-dessus le verrouillage alors que l'appelant a déjà raccroché : le
     // paquet ne sait pas que l'appel est terminé, personne ne le lui a dit.
     if (idAFermer != null) CallUiNative.masquer(idAFermer);
+    // Un push de cet appel encore en route ne le fera plus sonner.
+    unawaited(AppelsTermines.marquer(idAFermer));
     // Rend la main au verrouillage : sans ce retour, l'application resterait
     // accessible écran verrouillé bien après la fin de l'appel.
     LockScreenCall.desactiver();

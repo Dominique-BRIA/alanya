@@ -80,6 +80,11 @@ class AlanyaConnection(
 ) : Connection() {
 
     @Volatile var accepted = false
+    /// Refusé, annulé ou expiré : plus aucun geste ne compte (06/11/2026). Un
+    /// « Refuser » de la notification et un autre de l'écran natif, presque
+    /// simultanés, ne doivent envoyer qu'un refus ; un décroché arrivé après
+    /// un refus ne doit rien rouvrir.
+    @Volatile var termine = false
     private val timeoutHandler = Handler(Looper.getMainLooper())
     private val timeoutRunnable = Runnable {
         Log.d(TAG, "timeout 90s → appel manqué")
@@ -106,7 +111,7 @@ class AlanyaConnection(
     override fun onAnswer(videoState: Int) = onAnswer()
 
     override fun onAnswer() {
-        if (accepted) return
+        if (accepted || termine) return
         accepted = true
         Log.d(TAG, "onAnswer")
         cleanupUi()
@@ -127,12 +132,16 @@ class AlanyaConnection(
     }
 
     override fun onReject() {
+        if (accepted || termine) return
+        termine = true
         Log.d(TAG, "onReject")
         cleanupUi()
+        // Le refus part D'ICI, au serveur, sans attendre Flutter — application
+        // fermée comprise (voir RefusNatif). Dart n'en reçoit que l'avis, pour
+        // nettoyer son état sans renvoyer le refus. `DeclineHttp`, qui
+        // visait une route d'un autre serveur, ne partait jamais chez nous.
+        RefusNatif.refuser(ctx, CallRegistry.keyOf(data))
         AlanyaTelecomPlugin.emit("reject", data)
-        // Filet app TUÉE : POST /decline-call natif (token lu dans les
-        // SharedPreferences Flutter) — l'appelant est prévenu immédiatement.
-        DeclineHttp.declineAsync(ctx, data)
         close(DisconnectCause.REJECTED)
     }
 
@@ -166,9 +175,13 @@ class AlanyaConnection(
         // chip orphelin dans la barre d'état. Appelé aussi au décroché, juste
         // avant `start()` : sans effet, `stop()` est idempotent.
         OngoingCallChip.stop(ctx)
+        // L'écran d'appel natif se ferme avec la sonnerie, quelle qu'en soit
+        // la fin : décroché, refusé, annulé par l'appelant, expiré.
+        IncomingCallActivity.fermer()
     }
 
     private fun close(cause: Int) {
+        termine = true
         try { setDisconnected(DisconnectCause(cause)) } catch (_: Exception) {}
         try { destroy() } catch (_: Exception) {}
         if (CallRegistry.current === this) CallRegistry.current = null
@@ -225,13 +238,23 @@ object CallRegistry {
     }
 
     fun ringingData(): Map<String, String>? =
-        current?.takeIf { !it.accepted }?.data
+        current?.takeIf { !it.accepted && !it.termine }?.data
 
     fun acceptedData(): Map<String, String>? =
-        current?.takeIf { it.accepted }?.data
+        current?.takeIf { it.accepted && !it.termine }?.data
 
     fun endFromApp(missed: Boolean) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) current?.endFromApp(missed)
+    }
+
+    /**
+     * Termine l'appel [callId] — et lui seul (06/11/2026). Une annulation
+     * arrivée en retard ne doit pas couper l'appel SUIVANT, qui sonne déjà.
+     */
+    fun endIfCall(callId: String?, missed: Boolean) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val conn = current ?: return
+        if (callId.isNullOrEmpty() || keyOf(conn.data) == callId) conn.endFromApp(missed)
     }
 
     fun answerCurrent() {
@@ -240,6 +263,30 @@ object CallRegistry {
 
     fun rejectCurrent() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) current?.onReject()
+    }
+
+    /**
+     * Décroche l'appel [callId], depuis l'écran natif. Faux si ce n'est plus
+     * lui qui sonne — terminé entre-temps, ou remplacé : rien ne se passe
+     * alors, plutôt que de décrocher l'appel d'un autre. [supplement] rejoint
+     * les données transmises à Flutter (`cameraCoupee`).
+     */
+    fun answer(callId: String, supplement: Map<String, String> = emptyMap()): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
+        val conn = current ?: return false
+        if (keyOf(conn.data) != callId || conn.accepted || conn.termine) return false
+        conn.data.putAll(supplement)
+        conn.onAnswer()
+        return true
+    }
+
+    /** Refuse l'appel [callId], depuis l'écran natif — et lui seul. */
+    fun reject(callId: String): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
+        val conn = current ?: return false
+        if (keyOf(conn.data) != callId || conn.accepted || conn.termine) return false
+        conn.onReject()
+        return true
     }
 
     /**
