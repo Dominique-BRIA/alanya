@@ -6,6 +6,7 @@ import 'dart:ui';
 
 import 'package:http/http.dart' as http;
 
+import 'package:alanya_telecom/alanya_telecom.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
@@ -15,7 +16,9 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_local_notifications/src/platform_specifics/android/notification_sound.dart';
 
 import '../core/api_client.dart';
+import 'appel_pendant_communication.dart';
 import 'device_registry.dart';
+import 'refus_en_attente.dart';
 import 'geo_service.dart';
 // Préfixe : firebase_messaging exporte aussi un type `NotificationSettings`.
 import '../core/call_ui_native.dart';
@@ -521,6 +524,16 @@ class PushService {
   Future<void> cancelIncomingCall([String? callId]) =>
       _localPlugin.cancel(callNotifId(callId));
 
+  /// Appel reçu PENDANT une communication : une ligne discrète dans le tiroir,
+  /// ni plein écran ni sonnerie. Voir [CommunicationEnCours].
+  Future<void> afficherAppelPendantCommunication({
+    required String callId,
+    required String nom,
+    required String texte,
+  }) =>
+      CommunicationEnCours.afficher(_localPlugin,
+          callId: callId, nom: nom, texte: texte);
+
   /// Demande la permission (Android 13+ POST_NOTIFICATIONS + iOS).
   Future<void> _requestPermission() async {
     final settings = await FirebaseMessaging.instance.requestPermission(
@@ -900,6 +913,21 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
     }
 
     final callId = data['callId']?.toString();
+
+    // DÉJÀ EN COMMUNICATION (06/11/2026) : écran éteint en plein appel, c'est
+    // ce push-ci qui déclarait le nouvel appel au système — plein écran et
+    // sonnerie par-dessus la conversation. Une ligne discrète suffit.
+    if (await CommunicationEnCours.estEnCours()) {
+      debugPrint('[PushService] appel pendant une communication → sourdine');
+      await CommunicationEnCours.afficher(
+        await _greffonPourIsolate(),
+        callId: callId,
+        nom: data['callerName']?.toString() ?? 'Appel entrant',
+        texte: 'Vous appelle pendant votre communication',
+      );
+      return;
+    }
+
     if (callId != null && callId.isNotEmpty) {
       // Vrai écran d'appel — avatar, nom, deux gros boutons — posé par-dessus
       // le verrouillage. Remplace le bandeau de texte que produisait
@@ -911,7 +939,17 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
           nom: data['callerName']?.toString() ?? 'Appel entrant',
           avatarUrl: data['callerAvatarUrl']?.toString(),
           video: data['callType'] == 'VIDEO',
+          // Tout ce qu'il faut pour que l'application, lancée par l'écran
+          // d'appel, affiche SA sonnerie sans attendre la connexion — et pour
+          // que le natif choisisse la sonnerie de la liste de l'appelant.
+          appelant: {
+            'callerId': data['callerId']?.toString() ?? '',
+            'convId': data['convId']?.toString() ?? '',
+            'isGroup': data['isGroup']?.toString() ?? 'false',
+            'groupName': data['groupName']?.toString() ?? '',
+          },
         );
+        _ecouterRefusTelecom();
         return;
       } catch (e) {
         // ⚠️ NE PAS LAISSER REMONTER. Un échec ici — plugin indisponible,
@@ -1054,48 +1092,88 @@ Future<void> callkitBackgroundHandler(CallEvent event) async {
 /// cas : aucun état en mémoire, aucun `ApiClient`, et un jeton d'accès qui a
 /// toutes les chances d'être périmé.
 @pragma('vm:entry-point')
-Future<void> refuserAppelDepuisIsolate(String callId) async {
-  try {
-    final storage = TokenStorage();
-    var token = await storage.accessToken;
+Future<void> refuserAppelDepuisIsolate(String callId) =>
+    // Sans réseau, le refus est GARDÉ et renvoyé (06/11/2026) : voir
+    // `RefusEnAttente`. L'isolate peut être tué à tout moment ; ce qui n'a pas
+    // pu partir sera rejoué au prochain démarrage de l'application.
+    RefusEnAttente.refuser(callId, _envoyerRefusDirect);
 
-    // Le jeton d'accès est de courte durée et l'application peut être fermée
-    // depuis longtemps : sans ce rafraîchissement, le refus échouerait
-    // silencieusement dans le cas le plus courant.
-    if (token == null) {
-      final refresh = await storage.refreshToken;
-      if (refresh == null) return;
-      final r = await http.post(
-        Uri.parse('${ServerConfig.apiBase}/api/auth/refresh'),
-        headers: const {'Content-Type': 'application/json'},
-        body: jsonEncode({'refreshToken': refresh}),
-      );
-      if (r.statusCode != 200) return;
-      final data = jsonDecode(r.body) as Map<String, dynamic>;
-      token = data['accessToken'] as String?;
-      final nouveauRefresh = data['refreshToken'] as String?;
-      if (token == null || nouveauRefresh == null) return;
-      await storage.saveTokens(access: token, refresh: nouveauRefresh);
-    }
+/// Le « Refuser » de la notification Telecom, application FERMÉE (06/11/2026).
+///
+/// 🔴 IL N'ARRIVAIT JAMAIS AU SERVEUR. Le module natif diffuse `reject` à tous
+/// les moteurs Flutter du processus, mais seul `CallListener` l'écoutait — un
+/// widget, donc absent quand l'application est fermée. Le refus natif de
+/// secours (`DeclineHttp`) attend un numéro d'appelant et une route d'un
+/// autre serveur : il ne part jamais chez nous. L'appelant sonnait jusqu'au
+/// bout, comme si l'on ne répondait pas.
+///
+/// Cet isolate, lui, vit tant que Telecom tient le processus — toute la
+/// sonnerie. Si l'application est vivante aussi, les deux envoient : le second
+/// reçoit un 409 (appel déjà refusé), sans conséquence.
+void _ecouterRefusTelecom() {
+  AlanyaTelecom.setListener((event, data) {
+    if (event != 'reject' && event != 'timeout') return;
+    final callId = data['callId']?.toString();
+    if (callId == null || callId.isEmpty) return;
+    unawaited(refuserAppelDepuisIsolate(callId));
+  });
+}
 
-    // `http` directement et non ApiClient : celui-ci dépend de l'arborescence
-    // de widgets et de Provider, absents de cet isolate.
-    await http.post(
-      Uri.parse('${ServerConfig.apiBase}/api/calls/$callId/reject'),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token',
-      },
-    );
-    // Aucun traitement de la réponse : un 409 signifie que l'appel était déjà
-    // clos — raccroché en face, ou refusé depuis un autre appareil. C'est un
-    // résultat acceptable, l'objectif étant seulement que l'appelant cesse de
-    // sonner.
-  } catch (_) {
-    // L'isolate peut être tué à tout moment par le système. Échouer en silence
-    // est le seul comportement possible : il n'y a ni interface où signaler
-    // l'erreur, ni contexte où réessayer.
+/// Un essai d'envoi du refus, par requête directe. Rend [RefusEnAttente.envoye]
+/// dès que le serveur a répondu quelque chose de définitif, et lève (donc « à
+/// refaire ») sur une erreur réseau.
+///
+/// `http` directement et non ApiClient : celui-ci dépend de l'arborescence de
+/// widgets et de Provider, absents de cet isolate.
+Future<bool> _envoyerRefusDirect(String callId) async {
+  final storage = TokenStorage();
+
+  // Le jeton d'accès est de courte durée et l'application peut être fermée
+  // depuis longtemps : il se renouvelle quand il manque, ET quand le serveur le
+  // refuse (401) — un jeton présent mais expiré faisait échouer le refus en
+  // silence.
+  Future<String?> renouveler() async {
+    final refresh = await storage.refreshToken;
+    if (refresh == null) return null;
+    final r = await http
+        .post(
+          Uri.parse('${ServerConfig.apiBase}/api/auth/refresh'),
+          headers: const {'Content-Type': 'application/json'},
+          body: jsonEncode({'refreshToken': refresh}),
+        )
+        .timeout(const Duration(seconds: 10));
+    if (r.statusCode != 200) return null;
+    final data = jsonDecode(r.body) as Map<String, dynamic>;
+    final acces = data['accessToken'] as String?;
+    final nouveauRefresh = data['refreshToken'] as String?;
+    if (acces == null || nouveauRefresh == null) return null;
+    await storage.saveTokens(access: acces, refresh: nouveauRefresh);
+    return acces;
   }
+
+  Future<http.Response> poster(String jeton) => http
+      .post(
+        Uri.parse('${ServerConfig.apiBase}/api/calls/$callId/reject'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $jeton',
+        },
+      )
+      .timeout(const Duration(seconds: 10));
+
+  var jeton = await storage.accessToken ?? await renouveler();
+  // Session perdue : aucun essai ne pourra réussir, inutile d'insister.
+  if (jeton == null) return RefusEnAttente.envoye;
+  var r = await poster(jeton);
+  if (r.statusCode == 401) {
+    jeton = await renouveler();
+    if (jeton == null) return RefusEnAttente.envoye;
+    r = await poster(jeton);
+  }
+  // Serveur en panne : à refaire. Tout le reste est une réponse définitive —
+  // un 409 dit que l'appel était déjà clos (raccroché en face, refusé depuis un
+  // autre appareil), ce qui suffit : l'appelant a cessé de sonner.
+  return r.statusCode >= 500 ? RefusEnAttente.aRefaire : RefusEnAttente.envoye;
 }
 
 /// Le greffon de notifications, vu depuis un isolate SANS INTERFACE.

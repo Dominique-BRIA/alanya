@@ -10,6 +10,7 @@ import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
 import android.media.AudioManager
+import android.media.MediaPlayer
 import android.media.Ringtone
 import android.media.RingtoneManager
 import android.net.Uri
@@ -18,6 +19,8 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.util.Log
+import org.json.JSONObject
+import java.io.File
 import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
@@ -29,9 +32,65 @@ private const val TAG = "AlanyaTelecom"
 /// Fiable car le processus est LIÉ par Telecom pendant la sonnerie.
 object IncomingRinger {
     private var ringtone: Ringtone? = null
+    private var lecteurListe: MediaPlayer? = null
     private var vibrator: Vibrator? = null
 
-    fun start(ctx: Context) {
+    /**
+     * La sonnerie de la LISTE de l'appelant (06/11/2026), ou faux.
+     *
+     * La table est écrite par Dart (`SonneriesDeListes`, clé
+     * `sonneries_listes_natives`) : identifiant de membre → `asset:<chemin>`
+     * pour un son livré dans l'application, `file:<chemin>` pour un son
+     * importé, déjà téléchargé. L'arbitrage entre listes est fait là-bas ; ici
+     * on ne fait que lire la réponse.
+     *
+     * `MediaPlayer` et non `Ringtone` : un asset Flutter n'a pas d'URI que
+     * `RingtoneManager` saurait ouvrir. Tout échec rend faux, et l'appelant
+     * joue la sonnerie générale — jamais le silence.
+     */
+    private fun demarrerSonnerieDeListe(ctx: Context, callerId: String?): Boolean {
+        if (callerId.isNullOrEmpty()) return false
+        return try {
+            val brut = ctx.getSharedPreferences(
+                "FlutterSharedPreferences", Context.MODE_PRIVATE
+            ).getString("flutter.sonneries_listes_natives", null) ?: return false
+            val choix = JSONObject(brut).optString(callerId.lowercase(), "")
+            if (choix.isEmpty()) return false
+            val lecteur = MediaPlayer()
+            lecteur.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+            )
+            when {
+                choix.startsWith("asset:") -> {
+                    // Les assets Flutter sont rangés sous `flutter_assets/`
+                    // dans le paquet, et l'mp3 n'y est pas compressé.
+                    ctx.assets.openFd("flutter_assets/" + choix.removePrefix("asset:")).use {
+                        lecteur.setDataSource(it.fileDescriptor, it.startOffset, it.length)
+                    }
+                }
+                choix.startsWith("file:") -> {
+                    val f = File(choix.removePrefix("file:"))
+                    if (!f.exists()) { lecteur.release(); return false }
+                    lecteur.setDataSource(f.path)
+                }
+                else -> { lecteur.release(); return false }
+            }
+            lecteur.isLooping = true
+            lecteur.prepare()
+            lecteur.start()
+            lecteurListe = lecteur
+            Log.d(TAG, "sonnerie de liste démarrée ($choix)")
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "sonnerie de liste: $e")
+            false
+        }
+    }
+
+    fun start(ctx: Context, data: Map<String, String> = emptyMap()) {
         stop()
         val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
@@ -54,7 +113,9 @@ object IncomingRinger {
         }
 
         // Sonnerie (uniquement en mode normal)
-        if (am.ringerMode == AudioManager.RINGER_MODE_NORMAL) {
+        if (am.ringerMode == AudioManager.RINGER_MODE_NORMAL &&
+            !demarrerSonnerieDeListe(ctx, data["callerId"])
+        ) {
             try {
                 // Sonnerie CHOISIE par l'utilisateur dans les réglages de
                 // l'app (SharedPreferences Flutter, clé `flutter.ringtone`).
@@ -102,6 +163,9 @@ object IncomingRinger {
     fun stop() {
         try { ringtone?.stop() } catch (_: Exception) {}
         ringtone = null
+        try { lecteurListe?.stop() } catch (_: Exception) {}
+        try { lecteurListe?.release() } catch (_: Exception) {}
+        lecteurListe = null
         try { vibrator?.cancel() } catch (_: Exception) {}
         vibrator = null
     }
@@ -182,6 +246,32 @@ object IncomingNotifier {
     fun cancel(ctx: Context) {
         (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
             .cancel(NOTIF_ID)
+    }
+
+    /**
+     * La notification d'appel, postée à l'instant, est-elle réellement
+     * visible ? (06/11/2026)
+     *
+     * `notify()` ne dit rien quand les notifications de l'application sont
+     * refusées, ou quand ce canal est coupé : il ne se passe simplement rien.
+     * La sonnerie, elle, partait sans condition — le téléphone sonnait écran
+     * vide, sans écran d'appel ni bouton pour décrocher ou faire taire. Sans
+     * notification visible, on ne sonne donc pas.
+     *
+     * Le moindre doute rend VRAI : mieux vaut une sonnerie de trop qu'un appel
+     * manqué parce qu'on s'est trompé sur la permission.
+     */
+    fun estVisible(ctx: Context): Boolean = try {
+        val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        when {
+            !nm.areNotificationsEnabled() -> false
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ->
+                nm.getNotificationChannel(CHANNEL)?.importance !=
+                    NotificationManager.IMPORTANCE_NONE
+            else -> true
+        }
+    } catch (_: Exception) {
+        true
     }
 }
 

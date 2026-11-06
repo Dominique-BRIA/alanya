@@ -6,12 +6,14 @@ import 'package:flutter_callkit_incoming/entities/call_event.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/api_client.dart';
 import '../../core/app_snackbar.dart';
 import '../../core/call_ui_native.dart';
 import '../../core/debug_overlay.dart';
 import '../../core/diagnostic_chip.dart';
 import '../../core/in_app_notifier.dart';
 import '../../core/push_service.dart';
+import 'appel_entrant_reduit.dart';
 import 'call_controller.dart';
 import 'widgets/feuille_repondeur.dart';
 import 'calls_repository.dart';
@@ -39,7 +41,8 @@ class CallListener extends StatefulWidget {
   State<CallListener> createState() => _CallListenerState();
 }
 
-class _CallListenerState extends State<CallListener> {
+class _CallListenerState extends State<CallListener>
+    with WidgetsBindingObserver {
   /// L'appel dont la feuille de repondeur est deja ouverte, ou `null`.
   String? _repondeurAffiche;
 
@@ -47,9 +50,56 @@ class _CallListenerState extends State<CallListener> {
   bool _pendingAccept = false;
   StreamSubscription<CallEvent?>? _natifSub;
 
+  /// L'application est-elle à l'écran ? `null` au tout premier démarrage,
+  /// avant le premier état : l'activité vient d'être lancée, donc visible.
+  bool get _auPremierPlan {
+    final etat = WidgetsBinding.instance.lifecycleState;
+    return etat == null || etat == AppLifecycleState.resumed;
+  }
+
+  /*
+   * RETOUR AU PREMIER PLAN PENDANT UNE SONNERIE (06/11/2026).
+   *
+   * Application en arrière-plan, l'appel s'annonce par la notification du
+   * système ; écran verrouillé, celle-ci LANCE l'application par-dessus le
+   * verrouillage. Dans les deux cas l'application arrive à l'écran avec un
+   * appel qui sonne — et n'affichait rien : son écran de sonnerie n'était
+   * ouvert qu'au premier plan, au moment où l'appel arrivait. Il s'ouvre
+   * désormais à ce retour, sauf si l'utilisateur l'avait lui-même réduit.
+   */
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed || !mounted) return;
+    unawaited(_presenterSonnerieEnAttente());
+  }
+
+  Future<void> _presenterSonnerieEnAttente() async {
+    final cc = context.read<CallController>();
+    // Refus restés en attente (réseau absent quand on a refusé) : le retour au
+    // premier plan est souvent celui du réseau.
+    unawaited(cc.rejouerRefusEnAttente());
+    if (cc.incoming == null) await _adopterAppelQuiSonne(cc);
+    if (!mounted) return;
+    final inc = cc.incoming;
+    if (inc == null || cc.callScreenVisible) return;
+    if (cc.entrantReduit == inc.callId) return;
+    _shownCallId = inc.callId;
+    await ouvrirEcranSonnerie(cc);
+  }
+
+  /// Un appel sonne côté Telecom, inconnu de l'application (connexion pas
+  /// encore établie) : on l'adopte, voir [CallController.adopterAppelNatif].
+  Future<void> _adopterAppelQuiSonne(CallController cc) async {
+    try {
+      final sonne = await AlanyaTelecom.getRingingCall();
+      if (sonne != null && mounted) cc.adopterAppelNatif(sonne);
+    } catch (_) {}
+  }
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // Actions de la notification système d'appel (Répondre / Refuser).
     PushService.onCallAction = _onCallAction;
 
@@ -125,6 +175,8 @@ class _CallListenerState extends State<CallListener> {
     // s'il arrivait à l'instant. Un écran vraiment orphelin disparaît seul au
     // bout des 60 s de sonnerie.
     _reprendreAppelNatif();
+    // Refus gardés sans réseau, ici ou application fermée (RefusEnAttente).
+    unawaited(context.read<CallController>().rejouerRefusEnAttente());
 
     // ── DIAGNOSTIC DU CHIP VERT ────────────────────────────────────────────
     // Trace-témoin : elle PROUVE que l'APK installé contient bien cette
@@ -170,6 +222,15 @@ class _CallListenerState extends State<CallListener> {
       // On laisse donc le natif sonner sans interruption. C'est
       // `call_controller` qui s'abstient de lancer la sonnerie interne quand
       // celle-ci tourne déjà — une seule source, et aucun trou.
+      //
+      // L'appel n'est pas décroché mais il SONNE : l'application vient d'être
+      // lancée par l'écran d'appel du système, typiquement par-dessus le
+      // verrouillage. On affiche notre écran de sonnerie TOUT DE SUITE, avec
+      // ce que le push a confié à Telecom, au lieu d'attendre la connexion.
+      final cc = context.read<CallController>();
+      await _adopterAppelQuiSonne(cc);
+      if (!mounted) return;
+      if (cc.incoming != null) return;
     } catch (_) {}
 
     try {
@@ -210,6 +271,7 @@ class _CallListenerState extends State<CallListener> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     PushService.onCallAction = null;
     AlanyaTelecom.setListener(null);
     _natifSub?.cancel();
@@ -264,14 +326,19 @@ class _CallListenerState extends State<CallListener> {
     // Dépôt capturé AVANT tout await : le lire après reviendrait à toucher un
     // BuildContext qui peut avoir été démonté entre-temps.
     final repo = context.read<CallsRepository>();
+    final cc = context.read<CallController>();
     await CallUiNative.masquer(callId);
     try {
       await repo.reject(callId);
       DebugOverlay.log("CL ✅ refus transmis ($callId)");
     } catch (e) {
-      // L'appelant continuera de sonner jusqu'à expiration. On le trace pour
-      // que le journal de débogage le montre au lieu d'un silence.
+      // Tracé pour que le journal de débogage le montre au lieu d'un silence.
       DebugOverlay.log("CL ❌ refus NON transmis : $e");
+      // Pas de réseau : le refus est gardé et renvoyé tant que l'appel peut
+      // encore sonner (06/11/2026), au lieu de laisser l'appelant sonner.
+      if (e is! ApiException || e.statusCode >= 500) {
+        unawaited(cc.refuserPlusTard(callId));
+      }
     }
   }
 
@@ -330,7 +397,12 @@ class _CallListenerState extends State<CallListener> {
   }
 
   Future<void> _openCallScreen() async {
+    final cc = context.read<CallController>();
     for (var essai = 0; essai < 10; essai++) {
+      // Déjà affiché — décroché depuis la notification du système alors que
+      // notre écran de sonnerie était ouvert : l'écran se met à jour seul, un
+      // second par-dessus demanderait deux retours pour en sortir.
+      if (cc.callScreenVisible) return;
       final nav = PushService.navigatorKey.currentState;
       if (nav != null) {
         nav.push(MaterialPageRoute(
@@ -344,26 +416,6 @@ class _CallListenerState extends State<CallListener> {
     // Navigateur toujours absent : l'appel reste actif et le bandeau global
     // permet d'y revenir. Mieux vaut ça qu'une exception qui coupe tout.
     DebugOverlay.log("CL ⚠️ navigateur indisponible, écran d'appel non ouvert");
-  }
-
-  void _showHeadsUp(CallController cc, String callId, String title, bool isVideo,
-      {String? avatarUrl}) {
-    InAppNotifier.instance.showCall(
-      title: title,
-      avatarUrl: avatarUrl,
-      isVideo: isVideo,
-      onTap: () {
-        InAppNotifier.instance.dismissCall();
-        if (mounted) _openCallScreen();
-      },
-      onAccept: () async {
-        await cc.acceptIncoming();
-        if (mounted) _openCallScreen();
-      },
-      onReject: () {
-        cc.rejectIncoming();
-      },
-    );
   }
 
   @override
@@ -384,19 +436,19 @@ class _CallListenerState extends State<CallListener> {
           // Accepté depuis le bouton « Répondre » de la notification système.
           await cc.acceptIncoming();
           if (mounted) _openCallScreen();
-        } else if (!cc.ecranNatifAffiche) {
-          // Repli seulement : quand l'écran natif porte l'appel, ce bandeau
-          // ferait doublon — et c'est lui qu'on prenait pour une notification
-          // de message, faute de sonnerie et de plein écran.
+        } else if (_auPremierPlan) {
+          // L'ÉCRAN PLEIN, AUDIO COMME VIDÉO (06/11/2026). L'appel audio
+          // n'avait qu'un bandeau en haut de l'écran, qu'on prenait pour une
+          // notification de message. Le bandeau reste, mais comme forme
+          // RÉDUITE de cet écran (flèche ou bouton retour).
           //
-          // Un appel VIDÉO s'ouvre en plein écran, comme WhatsApp (06/11/2026) :
-          // la caméra active et les boutons sont sur cet écran.
-          if (isVideo) {
-            _openCallScreen();
-          } else {
-            _showHeadsUp(cc, inc.callId, title, isVideo,
-                avatarUrl: inc.callerAvatarUrl);
-          }
+          // Application hors de l'écran : rien ici. L'écran natif porte
+          // l'appel, et le nôtre s'ouvrira au retour au premier plan
+          // (`didChangeAppLifecycleState`) — l'ouvrir en arrière-plan
+          // allumerait la caméra de l'aperçu sans personne pour la voir.
+          DebugOverlay.log(
+              "CL 📞 écran de sonnerie (${isVideo ? 'vidéo' : 'audio'})");
+          await ouvrirEcranSonnerie(cc);
         }
       });
     }

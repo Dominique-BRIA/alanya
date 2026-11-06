@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
+
+import 'appel_pendant_communication.dart';
 
 /// Service Android qui maintient l'appel vivant hors du premier plan.
 ///
@@ -38,8 +41,19 @@ class CallForegroundService {
   /// Oublier cet appel laisse les verrous pris et la notification affichée.
   static Future<void> arreter() => _regler(false, null);
 
+  /// Une communication (appel ou réunion) est-elle active ? Indépendant du
+  /// sort du service natif, qui peut être refusé sans que l'appel s'arrête.
+  static bool get communicationActive => _communication;
+  static bool _communication = false;
+
   static Future<void> _regler(bool actif, String? titre,
       {bool video = false}) async {
+    // Marque lue par le push en arrière-plan : un appel qui arrive pendant
+    // cette communication s'affichera en sourdine (voir CommunicationEnCours).
+    if (_communication != actif) {
+      _communication = actif;
+      unawaited(CommunicationEnCours.marquer(actif));
+    }
     if (!Platform.isAndroid) return;
     // L'état est suivi ici pour ne pas traverser le pont natif inutilement :
     // `demarrer` peut être appelé plusieurs fois pour un même appel, au fil des

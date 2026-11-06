@@ -1,4 +1,11 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../features/contacts/contact_lists_repository.dart';
 import '../models/contact_list.dart';
@@ -51,6 +58,74 @@ class SonneriesDeListes extends ChangeNotifier {
     _cache = listes;
     _chargementLance = true;
     notifyListeners();
+    unawaited(_publierPourLeNatif());
+  }
+
+  /*
+   * LA SONNERIE DE LISTE, APPLICATION FERMÉE (06/11/2026).
+   *
+   * 🔴 SANS CETTE TABLE, ELLE NE SONNAIT QU'APPLICATION OUVERTE. Application
+   * fermée ou en arrière-plan, c'est le module natif qui sonne, et il ne lisait
+   * que la sonnerie générale : les listes vivent en mémoire Dart, dans un
+   * isolate qui n'existe pas encore quand l'appel arrive.
+   *
+   * On lui laisse donc, dans les préférences, la réponse toute faite : pour
+   * chaque membre d'une liste sonnée, ce qu'il faut jouer. Le natif n'a ni à
+   * connaître les listes, ni à arbitrer leur priorité — l'arbitrage reste ici,
+   * dans [listePourAppelant], seul endroit où il existe.
+   *
+   * ⚠️ UNE SONNERIE IMPORTÉE EST TÉLÉCHARGÉE D'AVANCE. Elle vit derrière
+   * `/api/media/<id>` avec un jeton : impossible à lire au moment de l'appel,
+   * hors réseau, ou jeton périmé. Le fichier est rangé dans le dossier privé de
+   * l'application, une fois pour toutes. Un téléchargement raté fait sonner la
+   * sonnerie générale, jamais le silence.
+   */
+  static const cleNative = 'sonneries_listes_natives';
+
+  Future<void> _publierPourLeNatif() async {
+    if (kIsWeb || !Platform.isAndroid) return;
+    try {
+      final table = <String, String>{};
+      final ids = <String>{
+        for (final l in _cache)
+          for (final m in l.members) m.id.toLowerCase(),
+      };
+      for (final id in ids) {
+        final brut = listePourAppelant(callerId: id)?.ringtone;
+        if (brut == null || brut.isEmpty) continue;
+        final asset = assetDeSonnerie(brut);
+        if (asset != null) {
+          table[id] = 'asset:assets/$asset';
+          continue;
+        }
+        final fichier = await _telechargerPourLeNatif(brut);
+        if (fichier != null) table[id] = 'file:$fichier';
+      }
+      final p = await SharedPreferences.getInstance();
+      await p.setString(cleNative, jsonEncode(table));
+    } catch (e) {
+      debugPrint('[SonneriesDeListes] table native non publiée : $e');
+    }
+  }
+
+  /// Le chemin local d'une sonnerie importée, téléchargée au besoin.
+  Future<String?> _telechargerPourLeNatif(String brut) async {
+    final dossier = Directory(
+        '${(await getApplicationSupportDirectory()).path}/sonneries_listes');
+    final fichier =
+        File('${dossier.path}/${brut.hashCode & 0x7fffffff}.audio');
+    if (await fichier.exists() && await fichier.length() > 0) {
+      return fichier.path;
+    }
+    final source = await _resoudre(brut);
+    if (source == null || source.estLivree) return null;
+    final reponse = await http
+        .get(Uri.parse(source.valeur))
+        .timeout(const Duration(seconds: 30));
+    if (reponse.statusCode != 200 || reponse.bodyBytes.isEmpty) return null;
+    await dossier.create(recursive: true);
+    await fichier.writeAsBytes(reponse.bodyBytes, flush: true);
+    return fichier.path;
   }
 
   /// Recharge depuis le serveur. Rend `false` en cas d'échec, sans lever.

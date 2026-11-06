@@ -90,7 +90,14 @@ class AlanyaConnection(
     override fun onShowIncomingCallUi() {
         Log.d(TAG, "onShowIncomingCallUi (${data["callerName"]})")
         IncomingNotifier.show(ctx, data)
-        IncomingRinger.start(ctx)
+        // Notifications refusées : rien ne s'affiche, donc rien ne sonne (voir
+        // `IncomingNotifier.estVisible`). L'appel reste déclaré : ouvrir
+        // l'application le montre, avec ses boutons.
+        if (IncomingNotifier.estVisible(ctx)) {
+            IncomingRinger.start(ctx, data)
+        } else {
+            Log.w(TAG, "notification d'appel invisible (refusée) → pas de sonnerie")
+        }
         // Filet local : le serveur émet aussi un timeout (90 s), mais si le
         // réseau est coupé entre-temps la sonnerie s'arrêterait jamais.
         timeoutHandler.postDelayed(timeoutRunnable, 90_000)

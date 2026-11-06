@@ -19,6 +19,7 @@ import '../../core/lock_screen_call.dart';
 import '../../core/proximite_appel.dart';
 import '../../core/push_service.dart';
 import '../../core/realtime_client.dart';
+import '../../core/refus_en_attente.dart';
 import '../../core/enregistreur_appel.dart';
 import '../../core/ringtone_service.dart';
 import '../../core/sonneries_listes.dart';
@@ -707,6 +708,70 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
   }
 
+  /// Éteint l'aperçu quand on RÉDUIT l'écran de sonnerie (06/11/2026). Le
+  /// choix « caméra coupée » est gardé ; l'aperçu se rouvre au retour.
+  Future<void> suspendreApercuEntrant() async {
+    final apercu = _apercuEntrant;
+    if (apercu == null) return;
+    _apercuEntrant = null;
+    notifyListeners();
+    await _arreterFlux(apercu);
+  }
+
+  /// L'appel dont l'utilisateur a RÉDUIT l'écran de sonnerie, ou `null`. Le
+  /// retour au premier plan ne le rouvre pas en grand : il l'a mis de côté.
+  String? entrantReduit;
+
+  /*
+   * L'APPEL QUI SONNE DÉJÀ CÔTÉ SYSTÈME, ADOPTÉ AVANT LA CONNEXION (06/11/2026).
+   *
+   * 🔴 LE CAS DE L'ÉCRAN VERROUILLÉ. Le push déclare l'appel à Telecom, dont la
+   * notification lance l'application par-dessus le verrouillage. Or `incoming`
+   * n'était posé que par la trame WebSocket — une dizaine de secondes après un
+   * démarrage à froid. Pendant tout ce temps : la sonnerie, l'accueil de
+   * l'application, et aucun bouton pour décrocher.
+   *
+   * Telecom garde tout ce que le push a transmis (identifiant de l'appel et
+   * de l'appelant, nom, photo, type) : c'est assez pour afficher l'écran de
+   * sonnerie tout de suite. La trame WebSocket, à son arrivée, remplace ces
+   * informations par les siennes — même `callId`, donc même écran.
+   *
+   * ⚠️ SANS `callerId`, ON N'ADOPTE PAS : c'est lui qui désigne la
+   * conversation, la sonnerie de liste et le nom donné à l'appelant. Un push
+   * d'un ancien serveur qui ne le porterait pas garde l'ancien chemin.
+   */
+  bool adopterAppelNatif(Map<String, dynamic> data) {
+    if (incoming != null || activeCallId != null || enPreparation) {
+      return false;
+    }
+    String? texte(String cle) {
+      final v = data[cle]?.toString().trim() ?? '';
+      return v.isEmpty ? null : v;
+    }
+
+    final callId = texte('callId');
+    final callerId = texte('callerId');
+    if (callId == null || callerId == null) return false;
+    incoming = IncomingCallInfo(
+      callId: callId,
+      convId: texte('convId'),
+      callType: texte('callType')?.toLowerCase() == 'video' ? "VIDEO" : "AUDIO",
+      callerId: callerId,
+      callerName: NomsDonnes.nomPour(callerId,
+          texte('callerName') ?? _trAppel('call_word', "Appel")),
+      callerAvatarUrl: texte('callerAvatar'),
+      isGroup: texte('isGroup') == 'true',
+      groupName: texte('groupName'),
+      memberCount: 2,
+    );
+    // Le natif sonne déjà : pas de sonnerie interne (voir `_onEvent`).
+    ecranNatifAffiche = true;
+    LockScreenCall.activer();
+    traceAppel("appel $callId adopté depuis Telecom, avant la connexion");
+    notifyListeners();
+    return true;
+  }
+
   Future<void> _arreterFlux(MediaStream flux) async {
     for (final t in flux.getTracks()) {
       await t.stop();
@@ -1367,6 +1432,25 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
+  /// Un essai d'envoi de refus, pour [RefusEnAttente] : vrai dès que le
+  /// serveur a tranché, faux (ou exception) quand il faudra réessayer.
+  Future<bool> _envoyerRefus(String callId) async {
+    try {
+      await _calls.reject(callId);
+      return RefusEnAttente.envoye;
+    } on ApiException catch (e) {
+      return e.statusCode >= 500 ? RefusEnAttente.aRefaire : RefusEnAttente.envoye;
+    }
+  }
+
+  /// Garde le refus de [callId] et le renvoie tant que l'appel peut sonner.
+  Future<void> refuserPlusTard(String callId) =>
+      RefusEnAttente.refuser(callId, _envoyerRefus);
+
+  /// Renvoie les refus restés en attente — dans cet isolate ou dans celui du
+  /// push, application fermée.
+  Future<void> rejouerRefusEnAttente() => RefusEnAttente.rejouer(_envoyerRefus);
+
   Future<void> rejectIncoming() async {
     final inc = incoming;
     if (inc == null) return;
@@ -1383,6 +1467,11 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
       await _calls.reject(inc.callId);
     } catch (e) {
       DebugOverlay.log("CC ❌ refus non transmis : $e");
+      // Pas de réseau, ou serveur en panne : le refus est gardé et renvoyé
+      // (06/11/2026). Une réponse 4xx, elle, est définitive (appel déjà clos).
+      if (e is! ApiException || e.statusCode >= 500) {
+        unawaited(refuserPlusTard(inc.callId));
+      }
     }
     _rt.callState(
       inc.callId,
@@ -2371,6 +2460,26 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
       final callId = e["callId"] as String;
       DebugOverlay.log("CC 📞 APPEL: ${e["callerName"]}");
       debugPrint("[CallController] 📞 APPEL ENTRANT de ${e["callerName"]} !");
+      // DÉJÀ EN COMMUNICATION (06/11/2026) : ni plein écran ni sonnerie par-
+      // dessus la conversation en cours — une ligne discrète dans le tiroir.
+      // `incoming` n'est PAS posé : il remplacerait l'état de l'appel en cours
+      // et ferait ouvrir l'écran de sonnerie. Le même appel rejoué (reprise
+      // après coupure) garde son chemin : `activeCallId == callId`.
+      final enCommunication = activeCallId != null ||
+          enPreparation ||
+          CallForegroundService.communicationActive;
+      if (enCommunication && activeCallId != callId) {
+        final nom = NomsDonnes.nomPour(e["callerId"] as String?,
+            e["callerName"] as String? ?? _trAppel('call_word', "Appel"));
+        traceAppel("appel de $nom pendant une communication — en sourdine");
+        unawaited(PushService.instance.afficherAppelPendantCommunication(
+          callId: callId,
+          nom: nom,
+          texte: _trAppel('call_during_communication',
+              "Vous appelle pendant votre communication"),
+        ));
+        return;
+      }
       incoming = IncomingCallInfo(
         callId: callId,
         convId: e["convId"] as String?,
@@ -2408,6 +2517,12 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
             nom: incoming!.displayTitle,
             avatarUrl: incoming!.callerAvatarUrl,
             video: incoming!.callType == "VIDEO",
+            appelant: {
+              'callerId': incoming!.callerId,
+              'convId': incoming!.convId ?? '',
+              'isGroup': '${incoming!.isGroup}',
+              'groupName': incoming!.groupName ?? '',
+            },
           );
           natifAffiche = true;
         } catch (e) {

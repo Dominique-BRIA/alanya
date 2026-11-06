@@ -53,6 +53,11 @@ class CallUiNative {
     // Telecom a accepté la déclaration puis échoué à créer la `Connection` :
     // repasser par lui ne ferait qu'échouer une seconde fois.
     bool sansTelecom = false,
+    // Identité complète de l'appelant (callerId, convId, isGroup, groupName),
+    // confiée à Telecom avec l'appel. Lue par l'application à son lancement
+    // pour afficher SON écran de sonnerie avant la connexion, et par le natif
+    // pour choisir la sonnerie de la liste de l'appelant.
+    Map<String, String> appelant = const {},
   }) async {
     // ── TELECOM D'ABORD, le paquet en repli ────────────────────────────────
     //
@@ -72,6 +77,7 @@ class CallUiNative {
     // de tenir une sonnerie sur Transsion ou Xiaomi, application tuée.
     if (Platform.isAndroid && !sansTelecom) {
       final prisEnCharge = await AlanyaTelecom.reportIncomingCall({
+        ...appelant,
         // `callId` sert aussi de clé d'idempotence côté natif : le même appel
         // arrive par le socket ET par le push, et le module déduplique dessus.
         'callId': callId,

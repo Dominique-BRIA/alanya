@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../core/app_snackbar.dart';
 import '../../../core/authed_api.dart';
+import '../../../core/in_app_notifier.dart';
 import '../../../core/push_service.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
@@ -18,6 +19,7 @@ import '../../chat/chat_repository.dart';
 import '../../chat/screens/chat_screen.dart';
 import '../../media/media_repository.dart';
 import '../../status/reponse_statut.dart';
+import '../appel_entrant_reduit.dart';
 import '../call_controller.dart';
 import '../disposition_vignettes.dart';
 import '../widgets/call_avatar_waves.dart';
@@ -108,6 +110,8 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
     // Lot 2 : prévient l'appelant que l'écran d'appel est affiché ici
     // (→ « En train de sonner… » chez lui).
     if (widget.incoming) {
+      // L'écran plein remplace le bandeau réduit : jamais les deux à la fois.
+      InAppNotifier.instance.dismissCall();
       _calls!.notifyRingingDisplayed();
       // La caméra déjà active pendant que ça sonne, comme sur WhatsApp.
       unawaited(_calls!.ouvrirApercuEntrant());
@@ -211,6 +215,19 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
       _popping = true;
       nav.removeRoute(route);
     }
+  }
+
+  /// Réduit un appel QUI SONNE : l'écran se ferme, la sonnerie continue, et le
+  /// bandeau d'appel entrant (Refuser / Répondre) apparaît en haut — la forme
+  /// « en petit » de cet écran, comme le bandeau d'un appel en cours.
+  ///
+  /// La caméra de l'aperçu s'éteint : personne ne la regarde, et un voyant
+  /// allumé sans écran inquiète à juste titre. Elle se rallume si l'on revient.
+  void _reduireEntrant(CallController cc) {
+    if (_popping) return;
+    unawaited(cc.suspendreApercuEntrant());
+    _popScreen();
+    afficherAppelEntrantReduit(cc);
   }
 
   Future<void> _reject(CallController cc) async {
@@ -584,16 +601,17 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
       canPop: false,
       onPopInvokedWithResult: (didPop, _) async {
         if (didPop) return;
-        // Le retour RÉDUIT l'appel, il ne le coupe plus : l'écran se ferme,
-        // l'appel continue et le bandeau global prend le relais pour y revenir
-        // — exactement ce que fait déjà le bouton « chat ». Pour raccrocher, il
-        // reste le bouton rouge, qui est le seul geste explicite.
+        // Le retour RÉDUIT l'appel, il ne le coupe jamais : l'écran se ferme,
+        // l'appel continue et le bandeau prend le relais pour y revenir —
+        // exactement ce que fait déjà le bouton « chat ». Pour raccrocher ou
+        // refuser, il reste le bouton rouge, seul geste explicite.
         //
-        // Un appel ENTRANT fait exception : il n'y a rien à réduire tant qu'on
-        // n'a pas décroché, et laisser sonner un écran fermé serait pire que
-        // refuser. Le retour continue donc d'y valoir refus.
+        // ⚠️ UN APPEL QUI SONNE AUSSI (06/11/2026, demande du user). Le retour
+        // y valait refus : un geste machinal pour revenir à ce qu'on faisait
+        // raccrochait au nez de l'appelant. L'appel continue désormais de
+        // sonner dans le bandeau d'appel entrant, Refuser et Répondre compris.
         if (showIncoming) {
-          await _reject(cc);
+          _reduireEntrant(cc);
         } else {
           _popScreen();
         }
@@ -663,20 +681,18 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           // Aligné sur le bouton retour : ce bouton RÉDUIT
-                          // l'appel au lieu de le couper. Une croix « Fermer »
-                          // qui raccroche, à côté d'un retour qui réduit, disait
-                          // deux choses différentes du même geste.
+                          // l'appel au lieu de le couper — y compris pendant la
+                          // sonnerie, où il portait une croix qui refusait,
+                          // doublon du bouton rouge Refuser (06/11/2026).
                           IconButton(
-                            icon: Icon(
-                              showIncoming
-                                  ? Icons.close
-                                  : Icons.keyboard_arrow_down,
+                            icon: const Icon(
+                              Icons.keyboard_arrow_down,
                               color: Colors.white70,
                             ),
-                            tooltip: showIncoming ? tr(context, 'decline') : tr(context, 'call_minimize'),
-                            onPressed: () async {
+                            tooltip: tr(context, 'call_minimize'),
+                            onPressed: () {
                               if (showIncoming) {
-                                await _reject(cc);
+                                _reduireEntrant(cc);
                               } else {
                                 _popScreen();
                               }
@@ -1510,54 +1526,73 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
     }
   }
 
+  /*
+   * LES BOUTONS DE LA SONNERIE, EN GRILLE (06/11/2026).
+   *
+   * 🔴 DEUX COLONNES DE MÊME LARGEUR, pas un `spaceEvenly` par rangée. Avec
+   * `spaceEvenly`, chaque bouton occupait la largeur de SON libellé : le centre
+   * de « Désactiver la vidéo » tombait loin de celui d'« Accepter », celui de
+   * « Message » loin de celui de « Refuser », et la grille penchait (capture
+   * du user). Chaque bouton est maintenant centré dans une moitié d'écran :
+   * les deux rangées partagent exactement les mêmes axes.
+   *
+   * Les rangées s'alignent par le HAUT : un libellé qui passe sur deux lignes
+   * allonge sa colonne vers le bas sans décaler les cercles de la rangée.
+   */
   Widget _incomingActions(CallController cc) {
-    final principaux = Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      children: [
-        _roundBtn(
-          icon: Icons.call_end,
-          color: Colors.red,
-          label: tr(context, 'decline'),
-          onPressed: () => _reject(cc),
-        ),
-        _roundBtn(
-          icon: _estVideo(cc) ? Icons.videocam : Icons.call,
-          color: AlanyaColors.forest,
-          label: tr(context, 'accept'),
-          onPressed: () => _accept(cc),
-        ),
-      ],
+    final video = _estVideo(cc);
+    Widget cellule(Widget bouton) => Expanded(child: Center(child: bouton));
+    Widget rangee(List<Widget> boutons) => Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [for (final b in boutons) cellule(b)],
+        );
+    final message = _controlBtn(
+      icon: Icons.chat_bubble_outline,
+      active: false,
+      label: tr(context, 'call_message'),
+      onPressed: () => _refuserAvecMessage(cc),
     );
-    if (!_estVideo(cc)) return principaux;
-    // Appel vidéo : Message et Désactiver la vidéo, comme WhatsApp.
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-            _controlBtn(
-              icon: Icons.chat_bubble_outline,
-              active: false,
-              label: tr(context, 'call_message'),
-              onPressed: () => _refuserAvecMessage(cc),
-            ),
-            _controlBtn(
-              icon: cc.cameraEntranteActive
-                  ? Icons.videocam_off_outlined
-                  : Icons.videocam_outlined,
-              active: !cc.cameraEntranteActive,
-              label: tr(
-                context,
-                cc.cameraEntranteActive ? 'call_video_off' : 'call_video_on',
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Vidéo : Message et Désactiver la vidéo, comme WhatsApp. Audio :
+          // Message seul, centré — un bouton seul au milieu reste symétrique.
+          if (video)
+            rangee([
+              message,
+              _controlBtn(
+                icon: cc.cameraEntranteActive
+                    ? Icons.videocam_off_outlined
+                    : Icons.videocam_outlined,
+                active: !cc.cameraEntranteActive,
+                label: tr(
+                  context,
+                  cc.cameraEntranteActive ? 'call_video_off' : 'call_video_on',
+                ),
+                onPressed: cc.basculerCameraEntrante,
               ),
-              onPressed: cc.basculerCameraEntrante,
+            ])
+          else
+            rangee([message]),
+          const SizedBox(height: 28),
+          rangee([
+            _roundBtn(
+              icon: Icons.call_end,
+              color: Colors.red,
+              label: tr(context, 'decline'),
+              onPressed: () => _reject(cc),
             ),
-          ],
-        ),
-        const SizedBox(height: 24),
-        principaux,
-      ],
+            _roundBtn(
+              icon: video ? Icons.videocam : Icons.call,
+              color: AlanyaColors.forest,
+              label: tr(context, 'accept'),
+              onPressed: () => _accept(cc),
+            ),
+          ]),
+        ],
+      ),
     );
   }
 
@@ -1896,6 +1931,10 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
         const SizedBox(height: 6),
         Text(
           label,
+          // Centré sous le cercle, même sur deux lignes : la grille de la
+          // sonnerie repose sur ces axes.
+          textAlign: TextAlign.center,
+          maxLines: 2,
           style: const TextStyle(color: Colors.white70, fontSize: 12),
         ),
       ],
@@ -1929,6 +1968,8 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
         const SizedBox(height: 8),
         Text(
           label,
+          textAlign: TextAlign.center,
+          maxLines: 2,
           style: const TextStyle(color: Colors.white70, fontSize: 13),
         ),
       ],
