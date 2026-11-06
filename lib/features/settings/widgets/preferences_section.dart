@@ -323,8 +323,14 @@ class _PreferencesSectionState extends State<PreferencesSection> {
   void _choisirTheme(ThemeController themeCtrl) {
     showModalBottomSheet(
       context: context,
+      // 🐛 « NOIR » ÉTAIT COUPÉ (user, 06/11/2026) : sans ceci, la feuille ne
+      // dépasse pas 9/16 de l'écran, et cinq thèmes avec leur description n'y
+      // tiennent pas. Elle prend désormais la hauteur de son contenu, et
+      // défile si l'écran est trop petit.
+      isScrollControlled: true,
       builder: (ctx) => SafeArea(
-        child: Column(
+        child: SingleChildScrollView(
+         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Padding(
@@ -357,6 +363,7 @@ class _PreferencesSectionState extends State<PreferencesSection> {
             }),
             const SizedBox(height: 8),
           ],
+         ),
         ),
       ),
     );

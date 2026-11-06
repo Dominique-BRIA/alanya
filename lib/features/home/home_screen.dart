@@ -13,6 +13,7 @@ import '../../core/codes_connexion_web.dart';
 import '../../core/whatsapp_text.dart';
 
 import '../../core/connectivity_service.dart';
+import '../../widgets/offline_banner.dart';
 import '../../core/conversation_cache.dart';
 import '../../core/message_cache.dart';
 import '../../core/messages_systeme.dart';
@@ -396,6 +397,8 @@ class _HomeScreenState extends State<HomeScreen> {
         // caractères, et l'AppBar porte aussi des actions.
         title: const AlanyaWordmark(fontSize: 22, letterSpacing: 2, height: 1),
         actions: [
+          // Hors ligne : la pastille rouge s'est repliée ici (06/11/2026).
+          const IndicateurHorsLigne(),
           IconButton(
             icon: Icon(
               Theme.of(context).brightness == Brightness.dark
