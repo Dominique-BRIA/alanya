@@ -15,10 +15,32 @@ class WebrtcGroupMesh {
     required this.onSendSignal,
     required this.onUpdated,
     this.qualite = QualiteVideo.standard,
+    MediaStream? fluxInitial,
     this.onPeerLost,
     this.onPeerReconnecting,
     this.onPeerReconnected,
-  });
+  }) : _local = fluxInitial;
+
+  /// La capture de la qualité choisie, et rien au-delà (procédure du patron,
+  /// 01/11/2026). Le téléphone ne filme pas plus que ce qu'on enverra ; WebRTC
+  /// baisse ensuite lui-même la qualité si le réseau faiblit.
+  ///
+  /// ⚠️ DES NOMBRES, PAS `{min, ideal, max}`. Sur Android, `flutter_webrtc`
+  /// 0.12.12 ne lit cette forme qu'à moitié (il cherche `ideal` au mauvais
+  /// niveau) et retombe sur 1280×720 à 30 images/s. Il ignore aussi `min` et
+  /// `max`.
+  static Map<String, dynamic> contraintesVideo(QualiteVideo q) => {
+        "facingMode": "user",
+        "width": q.largeur,
+        "height": q.hauteur,
+        "frameRate": q.cadence,
+      };
+
+  static const _contraintesAudio = {
+    "echoCancellation": true,
+    "noiseSuppression": true,
+    "autoGainControl": true,
+  };
 
   final String myUserId;
   final bool isVideo;
@@ -148,30 +170,32 @@ class WebrtcGroupMesh {
 
   Future<void> ensureLocal() async {
     /*
-     * 🔴 LA CAPTURE DE LA QUALITÉ CHOISIE, ET RIEN AU-DELÀ (procédure du
-     * patron, 01/11/2026) : 1280×720, 640×480 ou 640×360, 24 images/s. Le
-     * téléphone ne filme pas plus que ce qu'on enverra ; WebRTC baisse
-     * ensuite lui-même la qualité si le réseau faiblit.
-     *
-     * ⚠️ DES NOMBRES, PAS `{min, ideal, max}`. Sur Android, `flutter_webrtc`
-     * 0.12.12 ne lit cette forme qu'à moitié (il cherche `ideal` au mauvais
-     * niveau) et retombe sur 1280×720 à 30 images/s : exactement ce qu'on veut
-     * éviter. Il ignore aussi `min` et `max`.
+     * L'APERÇU DE L'APPEL ENTRANT (06/11/2026) a déjà ouvert la caméra, sans le
+     * micro : ouvert pendant la sonnerie, il aurait basculé l'audio du téléphone
+     * en mode communication. On lui ajoute le micro au décrochage, sans rouvrir
+     * la caméra — une réouverture ferait clignoter l'image, et échoue sur
+     * certains téléphones. Si l'ajout échoue, on rouvre tout.
      */
+    final deja = _local;
+    if (deja != null && deja.getAudioTracks().isEmpty) {
+      try {
+        final audio = await navigator.mediaDevices
+            .getUserMedia({"audio": _contraintesAudio, "video": false});
+        for (final t in audio.getAudioTracks()) {
+          await deja.addTrack(t);
+        }
+      } catch (e) {
+        traceAppel("micro non ajouté à l'aperçu ($e) → flux rouvert");
+        for (final t in deja.getTracks()) {
+          await t.stop();
+        }
+        await deja.dispose();
+        _local = null;
+      }
+    }
     _local ??= await navigator.mediaDevices.getUserMedia({
-      "audio": {
-        "echoCancellation": true,
-        "noiseSuppression": true,
-        "autoGainControl": true,
-      },
-      "video": isVideo
-          ? {
-              "facingMode": "user",
-              "width": qualite.largeur,
-              "height": qualite.hauteur,
-              "frameRate": QualiteVideo.cadence,
-            }
-          : false,
+      "audio": _contraintesAudio,
+      "video": isVideo ? contraintesVideo(qualite) : false,
     });
     onUpdated();
   }
@@ -197,6 +221,7 @@ class WebrtcGroupMesh {
       onSendSignal: (sig) => onSendSignal(peerId, sig),
       onUpdated: onUpdated,
       debitVideoMax: qualite.debitMax,
+      cadenceVideoMax: qualite.cadence,
       hauteurCapture: qualite.hauteur,
       onConnectionLost: () => onPeerLost?.call(peerId),
       onReconnecting: () => onPeerReconnecting?.call(peerId),
@@ -215,6 +240,9 @@ class WebrtcGroupMesh {
     }
 
     await session.start();
+    // Décroché caméra coupée : le pair qui arrive doit le savoir tout de suite,
+    // sinon il attend une image qui ne viendra pas (06/11/2026).
+    if (isVideo && !_cameraEnabled) session.envoyerEtatCamera(false);
   }
 
   Future<void> handleSignal(String fromPeerId, Map<String, dynamic> signal) async {

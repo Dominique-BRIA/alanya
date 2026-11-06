@@ -12,19 +12,27 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// L'utilisateur choisit dans son profil, « Réglage appel vidéo ». Le choix
 /// est propre à CET appareil : un téléphone n'a pas les contraintes d'un PC.
 enum QualiteVideo {
-  /// Haute définition : 1280 × 720, 2 Mbit/s.
-  haute(1280, 720, 2000000, 'video_quality_high'),
+  /// Full HD : 1920 × 1080, 30 images/s, 5 Mbit/s.
+  fullHd(1920, 1080, 30, 5000000, 'video_quality_full_hd'),
 
-  /// Standard : 640 × 480, 1 Mbit/s. La qualité par défaut.
-  standard(640, 480, 1000000, 'video_quality_standard'),
+  /// Haute définition : 1280 × 720, 30 images/s, 2,5 Mbit/s.
+  haute(1280, 720, 30, 2500000, 'video_quality_high'),
 
-  /// Basse résolution : 640 × 360, 0,4 Mbit/s.
-  basse(640, 360, 400000, 'video_quality_low');
+  /// Standard : 854 × 480, 30 images/s, 1,2 Mbit/s. La qualité par défaut.
+  standard(854, 480, 30, 1200000, 'video_quality_standard'),
 
-  const QualiteVideo(this.largeur, this.hauteur, this.debitMax, this.cleLibelle);
+  /// Basse résolution : 640 × 360, 20 images/s, 0,6 Mbit/s.
+  basse(640, 360, 20, 600000, 'video_quality_low');
+
+  const QualiteVideo(
+      this.largeur, this.hauteur, this.cadence, this.debitMax, this.cleLibelle);
 
   final int largeur;
   final int hauteur;
+
+  /// Images par seconde : WebRTC la baisse lui-même si le réseau ou le
+  /// processeur ne suivent pas.
+  final int cadence;
 
   /// En bits par seconde.
   final int debitMax;
@@ -40,10 +48,6 @@ enum QualiteVideo {
         : mbit.toString().replaceAll('.', ',');
     return '${hauteur}p — $texte Mbit/s';
   }
-
-  /// Cadence visée : WebRTC la baisse lui-même si le réseau ou le processeur
-  /// ne suivent pas.
-  static const cadence = 24;
 }
 
 /// Le choix de l'utilisateur, gardé sur l'appareil.
@@ -88,8 +92,10 @@ class ReglageQualiteVideo extends ChangeNotifier {
   /// La qualité d'un appel donné.
   ///
   /// ⚠️ EN GROUPE, PAS AU-DELÀ DE « STANDARD » : chaque téléphone y envoie
-  /// sa vidéo à chacun des autres. En haute définition à quatre, cela ferait
-  /// 3 × 2 Mbit/s à envoyer, ce qu'un réseau mobile ne tient pas.
+  /// sa vidéo à chacun des autres. En Full HD à quatre, cela ferait 3 × 5 Mbit/s
+  /// à envoyer, ce qu'un réseau mobile ne tient pas.
   static QualiteVideo pourAppel(QualiteVideo choisie, {required bool groupe}) =>
-      groupe && choisie == QualiteVideo.haute ? QualiteVideo.standard : choisie;
+      groupe && choisie.hauteur > QualiteVideo.standard.hauteur
+          ? QualiteVideo.standard
+          : choisie;
 }

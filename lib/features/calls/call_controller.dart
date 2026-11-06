@@ -6,6 +6,7 @@ import 'dart:async';
 import 'package:alanya_telecom/alanya_telecom.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/alanya_id_formatter.dart';
 import '../../core/api_client.dart';
@@ -543,6 +544,74 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   MediaStream? get localStream => _mesh?.localStream;
+
+  /*
+   * L'ÉCRAN D'APPEL VIDÉO ENTRANT, COMME WHATSAPP (06/11/2026) : la caméra est
+   * déjà active pendant que ça sonne, et « Désactiver la vidéo » permet de
+   * décrocher sans se montrer. Ce flux, sans micro, passe tel quel au maillage
+   * au décrochage (voir `_ensureMesh`).
+   */
+  MediaStream? _apercuEntrant;
+  MediaStream? get apercuEntrant => _apercuEntrant;
+  bool _apercuEnCours = false;
+
+  /// La caméra sera-t-elle allumée au décrochage ?
+  bool cameraEntranteActive = true;
+
+  /// Ouvre l'aperçu. ⚠️ SANS DEMANDER LA PERMISSION : une fenêtre système
+  /// surgissant pendant la sonnerie gênerait le décrochage. Sans permission,
+  /// pas d'aperçu ; elle sera demandée au décrochage, comme avant.
+  Future<void> ouvrirApercuEntrant() async {
+    final inc = incoming;
+    if (inc == null ||
+        inc.callType != "VIDEO" ||
+        _apercuEntrant != null ||
+        _apercuEnCours) {
+      return;
+    }
+    _apercuEnCours = true;
+    try {
+      if (!await Permission.camera.isGranted) return;
+      await ReglageQualiteVideo.instance.charger();
+      final qualite = ReglageQualiteVideo.pourAppel(
+        ReglageQualiteVideo.instance.qualite,
+        groupe: inc.isGroup,
+      );
+      final flux = await navigator.mediaDevices.getUserMedia({
+        "audio": false,
+        "video": WebrtcGroupMesh.contraintesVideo(qualite),
+      });
+      // L'appel a pu prendre fin, ou être décroché, pendant l'ouverture.
+      if (incoming?.callId != inc.callId) {
+        await _arreterFlux(flux);
+        return;
+      }
+      for (final t in flux.getVideoTracks()) {
+        t.enabled = cameraEntranteActive;
+      }
+      _apercuEntrant = flux;
+      notifyListeners();
+    } catch (e) {
+      traceAppel("aperçu de l'appel entrant impossible : $e");
+    } finally {
+      _apercuEnCours = false;
+    }
+  }
+
+  void basculerCameraEntrante() {
+    cameraEntranteActive = !cameraEntranteActive;
+    for (final t in _apercuEntrant?.getVideoTracks() ?? <MediaStreamTrack>[]) {
+      t.enabled = cameraEntranteActive;
+    }
+    notifyListeners();
+  }
+
+  Future<void> _arreterFlux(MediaStream flux) async {
+    for (final t in flux.getTracks()) {
+      await t.stop();
+    }
+    await flux.dispose();
+  }
   Map<String, MediaStream> get remoteStreams => _mesh?.remoteStreams ?? {};
   int get connectedPeerCount => _mesh?.connectedCount ?? 0;
   bool get mediaConnected => connectedPeerCount > 0;
@@ -1336,6 +1405,11 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
      * un forfait mobile.
      */
     PrechargementAccueil.instance.annuler();
+    // L'appel refusé ou annulé coupe l'aperçu : la caméra ne reste pas allumée.
+    final apercu = _apercuEntrant;
+    _apercuEntrant = null;
+    if (apercu != null) unawaited(_arreterFlux(apercu));
+    cameraEntranteActive = true;
     _ringTimeout?.cancel();
     _ringTimeout = null;
     _finIvr?.cancel();
@@ -1805,10 +1879,14 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
         groupe: isGroupCall,
       );
       traceAppel("qualité vidéo : ${qualite.name} (${qualite.detail})");
+      // L'aperçu de l'appel entrant devient le flux de l'appel.
+      final apercu = _apercuEntrant;
+      _apercuEntrant = null;
       _mesh = WebrtcGroupMesh(
         myUserId: myUserId!,
         isVideo: isVideo,
         qualite: qualite,
+        fluxInitial: apercu,
         iceServers: ice,
         onSendSignal: (peerId, sig) => _rt.callSignal(callId, peerId, sig),
         onUpdated: _onMeshUpdated,
@@ -1820,6 +1898,9 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
 
     try {
       await _mesh!.ensureLocal();
+      // Décroché avec « Désactiver la vidéo » : la caméra reste coupée.
+      if (!cameraEntranteActive) _mesh!.setCamera(false);
+      cameraEntranteActive = true;
       notifyListeners();
     } catch (e) {
       lastError = _trAppel('call_webrtc_failed', "Connexion WebRTC impossible : micro/caméra inaccessible");

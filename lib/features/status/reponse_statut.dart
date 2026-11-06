@@ -29,7 +29,9 @@ class ReponseStatut {
     required PileE2ee? pile,
     required String? moi,
     required String auteurId,
-    required String statutId,
+    /// Le statut cité ; `null` pour un message simple au même destinataire
+    /// (réponse rapide à un appel, 06/11/2026).
+    String? statutId,
     String? texte,
     ({Uint8List octets, int dureeMs})? vocal,
   }) async {

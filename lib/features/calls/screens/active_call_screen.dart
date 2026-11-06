@@ -12,7 +12,12 @@ import '../../../theme/alanya_theme.dart';
 import '../../../widgets/avatar_circle.dart';
 import '../../../widgets/call_rating_sheet.dart';
 import '../../../widgets/contact_picker_sheet.dart';
+import '../../../services/e2ee/e2ee_fournisseur.dart';
+import '../../auth/auth_controller.dart';
+import '../../chat/chat_repository.dart';
 import '../../chat/screens/chat_screen.dart';
+import '../../media/media_repository.dart';
+import '../../status/reponse_statut.dart';
 import '../call_controller.dart';
 import '../disposition_vignettes.dart';
 import '../widgets/call_avatar_waves.dart';
@@ -102,7 +107,11 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
     _calls!.addListener(_onCallChanged);
     // Lot 2 : prévient l'appelant que l'écran d'appel est affiché ici
     // (→ « En train de sonner… » chez lui).
-    if (widget.incoming) _calls!.notifyRingingDisplayed();
+    if (widget.incoming) {
+      _calls!.notifyRingingDisplayed();
+      // La caméra déjà active pendant que ça sonne, comme sur WhatsApp.
+      unawaited(_calls!.ouvrirApercuEntrant());
+    }
     // Lot 2b : l'écran plein-écran est visible → masque le bandeau global.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _calls?.setCallScreenVisible(true);
@@ -157,7 +166,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
     if (!_renderersReady || !mounted) return;
     final cc = _calls;
     if (cc == null) return;
-    final local = cc.localStream;
+    final local = cc.localStream ?? cc.apercuEntrant;
     if (_localRenderer.srcObject != local) {
       _localRenderer.srcObject = local;
     }
@@ -520,6 +529,11 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
         remotes.isNotEmpty;
     final showIncoming = widget.incoming && cc.incoming != null;
     final showActive = cc.activeCallId != null && cc.activeRole != null;
+    // Appel vidéo qui sonne : ma caméra en grand, derrière les boutons.
+    final apercuPlein = showIncoming &&
+        isVideo &&
+        cc.apercuEntrant != null &&
+        cc.cameraEntranteActive;
 
     // Lot 3 : appel vidéo 1-1 actif → plein écran dynamique (principal + PiP).
     // Les appels de groupe gardent la grille ; l'audio garde l'avatar.
@@ -587,6 +601,14 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
         body: SafeArea(
           child: Stack(
             children: [
+              if (apercuPlein)
+                Positioned.fill(
+                  child: RTCVideoView(
+                    _localRenderer,
+                    mirror: true,
+                    objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                  ),
+                ),
               if (useDynamic && dynMain != null)
                 Positioned.fill(
                   child: RTCVideoView(
@@ -626,7 +648,8 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
                 ),
               ),
               // Lot 6 : dégradés sombres haut/bas pour la lisibilité en vidéo.
-              if (isVideo && (showVideo || useDynamic)) _scrims(showControls),
+              if (isVideo && (showVideo || useDynamic || apercuPlein))
+                _scrims(showControls),
               AnimatedOpacity(
                 opacity: showControls ? 1 : 0,
                 duration: const Duration(milliseconds: 250),
@@ -679,7 +702,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
                         ],
                       ),
                       const SizedBox(height: 8),
-                      if (!showVideo && !useDynamic)
+                      if (!showVideo && !useDynamic && !apercuPlein)
                         // ⚠️ AVATAR RÉDUIT PENDANT LE MENU DU STANDARD, et lui
                         // seul. Le pavé n'occupe que la place que l'en-tête lui
                         // laisse : à 104 px d'avatar, il ne restait pas de quoi
@@ -1383,8 +1406,42 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
     );
   }
 
+  /// Répondre par un message au lieu de décrocher (06/11/2026, comme
+  /// WhatsApp) : l'appel est refusé, et le message part dans le tête-à-tête
+  /// avec l'appelant — chiffré si le fil l'est.
+  Future<void> _refuserAvecMessage(CallController cc) async {
+    final inc = cc.incoming;
+    if (inc == null) return;
+    final chat = context.read<ChatRepository>();
+    final medias = context.read<MediaRepository>();
+    final pile = context.e2ee;
+    final moi = context.read<AuthController>().user?.id;
+    final envoye = trLu(context, 'call_message_sent');
+    final echec = trLu(context, 'call_message_failed');
+    final texte = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => const _FeuilleMessageRapide(),
+    );
+    if (texte == null || texte.trim().isEmpty || !mounted) return;
+    await _reject(cc);
+    try {
+      await ReponseStatut.envoyer(
+        chat: chat,
+        medias: medias,
+        pile: pile,
+        moi: moi,
+        auteurId: inc.callerId,
+        texte: texte.trim(),
+      );
+      showAppSnackBar(envoye);
+    } catch (_) {
+      showAppSnackBar(echec);
+    }
+  }
+
   Widget _incomingActions(CallController cc) {
-    return Row(
+    final principaux = Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
         _roundBtn(
@@ -1394,11 +1451,42 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
           onPressed: () => _reject(cc),
         ),
         _roundBtn(
-          icon: Icons.call,
+          icon: _estVideo(cc) ? Icons.videocam : Icons.call,
           color: AlanyaColors.forest,
           label: tr(context, 'accept'),
           onPressed: () => _accept(cc),
         ),
+      ],
+    );
+    if (!_estVideo(cc)) return principaux;
+    // Appel vidéo : Message et Désactiver la vidéo, comme WhatsApp.
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            _controlBtn(
+              icon: Icons.chat_bubble_outline,
+              active: false,
+              label: tr(context, 'call_message'),
+              onPressed: () => _refuserAvecMessage(cc),
+            ),
+            _controlBtn(
+              icon: cc.cameraEntranteActive
+                  ? Icons.videocam_off_outlined
+                  : Icons.videocam_outlined,
+              active: !cc.cameraEntranteActive,
+              label: tr(
+                context,
+                cc.cameraEntranteActive ? 'call_video_off' : 'call_video_on',
+              ),
+              onPressed: cc.basculerCameraEntrante,
+            ),
+          ],
+        ),
+        const SizedBox(height: 24),
+        principaux,
       ],
     );
   }
@@ -1673,6 +1761,66 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
           style: const TextStyle(color: Colors.white70, fontSize: 13),
         ),
       ],
+    );
+  }
+}
+
+/// Les messages rapides d'un appel refusé, et un message libre. Rend le texte
+/// choisi, ou `null` si l'on ferme.
+class _FeuilleMessageRapide extends StatefulWidget {
+  const _FeuilleMessageRapide();
+
+  @override
+  State<_FeuilleMessageRapide> createState() => _FeuilleMessageRapideState();
+}
+
+class _FeuilleMessageRapideState extends State<_FeuilleMessageRapide> {
+  final _champ = TextEditingController();
+
+  @override
+  void dispose() {
+    _champ.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final cle in const ['call_quick_busy', 'call_quick_later', 'call_quick_on_way'])
+              ListTile(
+                title: Text(tr(context, cle)),
+                onTap: () => Navigator.of(context).pop(trLu(context, cle)),
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 8, 12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _champ,
+                      minLines: 1,
+                      maxLines: 3,
+                      textInputAction: TextInputAction.send,
+                      decoration: InputDecoration(hintText: tr(context, 'call_quick_custom')),
+                      onSubmitted: (v) => Navigator.of(context).pop(v),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.send),
+                    tooltip: tr(context, 'send'),
+                    onPressed: () => Navigator.of(context).pop(_champ.text),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

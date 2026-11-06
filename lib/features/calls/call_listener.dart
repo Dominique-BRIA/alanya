@@ -388,8 +388,15 @@ class _CallListenerState extends State<CallListener> {
           // Repli seulement : quand l'écran natif porte l'appel, ce bandeau
           // ferait doublon — et c'est lui qu'on prenait pour une notification
           // de message, faute de sonnerie et de plein écran.
-          _showHeadsUp(cc, inc.callId, title, isVideo,
-              avatarUrl: inc.callerAvatarUrl);
+          //
+          // Un appel VIDÉO s'ouvre en plein écran, comme WhatsApp (06/11/2026) :
+          // la caméra active et les boutons sont sur cet écran.
+          if (isVideo) {
+            _openCallScreen();
+          } else {
+            _showHeadsUp(cc, inc.callId, title, isVideo,
+                avatarUrl: inc.callerAvatarUrl);
+          }
         }
       });
     }

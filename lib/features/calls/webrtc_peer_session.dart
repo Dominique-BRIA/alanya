@@ -16,7 +16,8 @@ class WebrtcPeerSession {
     required this.iceServers,
     required this.onSendSignal,
     required this.onUpdated,
-    this.debitVideoMax = 1000000,
+    this.debitVideoMax = 1200000,
+    this.cadenceVideoMax = 30,
     this.hauteurCapture = 480,
     this.onConnectionLost,
     this.onReconnecting,
@@ -32,8 +33,11 @@ class WebrtcPeerSession {
   final VoidCallback onUpdated;
 
   /// Le débit maximal de la vidéo, selon la qualité choisie (voir
-  /// `QualiteVideo`) : 2, 1 ou 0,4 Mbit/s.
+  /// `QualiteVideo`) : de 0,6 à 5 Mbit/s.
   final int debitVideoMax;
+
+  /// Les images par seconde de la qualité choisie : 20 ou 30.
+  final int cadenceVideoMax;
 
   /// La hauteur de capture de la qualité choisie : sert à voir si WebRTC a
   /// réduit l'image envoyée.
@@ -123,7 +127,6 @@ class WebrtcPeerSession {
    * - « BALANCED » : sous contrainte, WebRTC baisse à la fois la définition et
    *   la cadence, plutôt que de figer l'une pour garder l'autre.
    */
-  static const _cadenceVideoMax = 30;
   bool _emissionReglee = false;
 
   /*
@@ -529,7 +532,7 @@ class WebrtcPeerSession {
             e.networkPriority = RTCPriorityType.high;
           } else {
             e.maxBitrate = debitVideoMax;
-            e.maxFramerate = _cadenceVideoMax;
+            e.maxFramerate = cadenceVideoMax;
             e.priority = RTCPriorityType.low;
             e.networkPriority = RTCPriorityType.low;
           }
