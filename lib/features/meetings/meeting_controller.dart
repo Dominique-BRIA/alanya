@@ -11,6 +11,7 @@ import '../../core/realtime_client.dart';
 import '../../core/ringtone_service.dart';
 import '../../models/meeting.dart';
 import '../calls/calls_repository.dart';
+import '../calls/detecteur_parole.dart';
 import '../calls/webrtc_group_mesh.dart';
 import '../calls/webrtc_peer_session.dart';
 import 'meetings_repository.dart';
@@ -228,6 +229,17 @@ class MeetingController extends ChangeNotifier {
 
   // WebRTC
   WebrtcGroupMesh? _mesh;
+
+  /// Qui parle (06/11/2026) : la vignette de celui qui parle s'encadre, comme
+  /// sur WhatsApp. Même sonde que les appels de groupe.
+  late final DetecteurParole _parole =
+      DetecteurParole(onChange: notifyListeners);
+
+  /// [peerId] parle-t-il en ce moment ?
+  bool parle(String peerId) => _parole.parle(peerId);
+
+  /// Est-ce moi qui parle ?
+  bool get jeParle => !isMuted && _parole.parle(DetecteurParole.moi);
   List<Map<String, dynamic>>? _iceServers;
   String? myUserId;
   String? myDisplayName;
@@ -479,6 +491,7 @@ class MeetingController extends ChangeNotifier {
       onPeerLost: _onPeerLost,
     );
     await _mesh!.ensureLocal();
+    _parole.demarrer(() => _mesh?.connexions ?? const {});
 
     /*
      * 🔴 LA ROUTE AUDIO EST POSÉE ICI, ET C'EST CE QUI MANQUAIT.
@@ -830,6 +843,7 @@ class MeetingController extends ChangeNotifier {
   }
 
   Future<void> _stopMesh() async {
+    _parole.arreter();
     await _mesh?.close();
     _mesh = null;
     _iceServers = null;

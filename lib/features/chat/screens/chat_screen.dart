@@ -2714,7 +2714,9 @@ class _ChatScreenState extends State<ChatScreen>
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
       child: InkWell(
-        onTap: () => _showCallChoice(c),
+        // Pas d'appel dans un groupe pour l'instant (06/11/2026) : un groupe
+        // se retrouve en réunion. La bulle reste, elle ne rappelle plus.
+        onTap: widget.isGroup ? null : () => _showCallChoice(c),
         borderRadius: BorderRadius.only(
           topLeft: Radius.circular(mine ? 10 : 0),
           topRight: Radius.circular(mine ? 0 : 10),

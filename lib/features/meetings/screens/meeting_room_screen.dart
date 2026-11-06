@@ -986,6 +986,12 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                       radius: 44,
                       backgroundColor:
                           e.me ? AlanyaColors.terracotta : AlanyaColors.forest,
+                      // Il parle : un anneau vert (06/11/2026).
+                      borderColor: (e.me ? ctrl.jeParle : ctrl.parle(e.id))
+                          ? _vertParole
+                          : null,
+                      borderWidth:
+                          (e.me ? ctrl.jeParle : ctrl.parle(e.id)) ? 3 : 0,
                     ),
                     if (e.muted)
                       Positioned(
@@ -1072,6 +1078,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       fit: StackFit.expand,
       children: [
         child,
+        _cadreParole(ctrl.jeParle, isLarge ? 16 : 12),
         if (ctrl.myHandRaised)
           Positioned(
             left: 6,
@@ -1124,6 +1131,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
           ] else
             _avatarPlaceholder(
                 name: name, isLarge: false, avatarUrl: avatarUrl),
+          _cadreParole(ctrl.parle(peerId), 12),
           // Bandeau nom + état muet
           Positioned(
             left: 8,
@@ -1187,6 +1195,28 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// Vert vif, le même que dans les appels.
+  static const _vertParole = Color(0xFF34C759);
+
+  /// Le cadre de la vignette de celui qui parle (06/11/2026), posé
+  /// PAR-DESSUS l'image sans la réduire ni la décaler.
+  Widget _cadreParole(bool parle, double rayon) {
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(rayon),
+            border: Border.all(
+              color: parle ? _vertParole : Colors.transparent,
+              width: 3,
+            ),
+          ),
+        ),
       ),
     );
   }
