@@ -52,7 +52,13 @@ class _CallBannerState extends State<CallBanner> {
   @override
   Widget build(BuildContext context) {
     final cc = context.watch<CallController>();
-    final visible = cc.activeRole != null && !cc.callScreenVisible;
+    // Appel vidéo établi : c'est la petite fenêtre vidéo (`FenetreVideoAppel`)
+    // qui ramène à l'appel, et non plus le bandeau.
+    final videoEtablie = cc.activeCallId != null &&
+        cc.activeType == "VIDEO" &&
+        cc.activeRole == ActiveCallRole.ongoing;
+    final visible =
+        cc.activeRole != null && !cc.callScreenVisible && !videoEtablie;
     if (!visible) return const SizedBox.shrink();
 
     // Le libellé suit la PHASE réelle de l'appel.

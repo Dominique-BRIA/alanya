@@ -31,6 +31,8 @@ import 'repondeur_repository.dart';
 import '../../core/server_config.dart';
 import '../../core/token_storage.dart';
 import 'qualite_video.dart';
+import 'detecteur_parole.dart';
+import 'fenetre_video.dart';
 import 'webrtc_group_mesh.dart';
 import 'webrtc_peer_session.dart';
 
@@ -298,6 +300,8 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden) {
       if (_videoSuspendue || !m.cameraEnabled) return;
+      // Fenêtre flottante du système : on reste vu, la caméra continue.
+      if (FenetrePip.instance.enFenetre) return;
       _videoSuspendue = true;
       m.suspendreVideoLocale(true);
       m.envoyerEtatCamera(false);
@@ -312,6 +316,17 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
       traceAppel("premier plan → vidéo reprise");
       notifyListeners();
     }
+  }
+
+  /// Chaque changement d'état dit au système si quitter l'application doit
+  /// ouvrir la fenêtre flottante : seulement pendant un appel vidéo établi.
+  /// Android exige de le savoir AVANT l'appui sur Accueil — voir [FenetrePip].
+  @override
+  void notifyListeners() {
+    unawaited(FenetrePip.instance.definirEligible(activeCallId != null &&
+        activeType == "VIDEO" &&
+        activeRole == ActiveCallRole.ongoing));
+    super.notifyListeners();
   }
 
   /// Une liaison est dégradée : l'écran affiche « Connexion faible ».
@@ -468,6 +483,92 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
   bool get isMuted => _mesh != null && !_mesh!.micEnabled;
   bool get isVideoEnabled => _mesh?.cameraEnabled ?? (activeType == "VIDEO");
   bool isSpeakerOn = false;
+
+  /*
+   * 🔴 LA SORTIE AUDIO AU CHOIX (06/11/2026), comme WhatsApp et comme
+   * l'application de référence.
+   *
+   * Le bouton ne connaissait que haut-parleur allumé ou éteint : avec un casque
+   * Bluetooth, on ne savait ni où sortait le son, ni comment le ramener dans le
+   * téléphone. `flutter_webrtc` liste les sorties présentes — écouteur,
+   * haut-parleur, casque filaire, Bluetooth — et sait en choisir une.
+   *
+   * Sans casque, le bouton reste une bascule. Avec un casque, il ouvre la liste.
+   *
+   * ⚠️ UN CASQUE QUI SE CONNECTE PREND LE SON, comme sur tous les téléphones :
+   * c'est ce que fait déjà la bibliothèque (Bluetooth, puis filaire, en tête de
+   * ses préférences). [sortieAudio] suit donc ce choix au lieu de mentir.
+   */
+  List<SortieAudio> sortiesAudio = const [];
+
+  /// La sortie choisie. Nulle : celle du haut-parleur ([isSpeakerOn]) ou, à
+  /// défaut, l'écouteur.
+  String? sortieAudio;
+
+  bool _ecouteSortiesBranchee = false;
+
+  /// Un casque (filaire ou Bluetooth) est-il là ? Le bouton ouvre alors la liste.
+  bool get aUnCasque => sortiesAudio.any((s) => s.estUnCasque);
+
+  /// La sortie actuelle, pour l'icône et la coche de la liste.
+  String get sortieCourante =>
+      sortieAudio ?? (isSpeakerOn ? SortieAudio.hautParleur : SortieAudio.ecouteur);
+
+  Future<void> rafraichirSortiesAudio() async {
+    if (!_ecouteSortiesBranchee) {
+      _ecouteSortiesBranchee = true;
+      try {
+        navigator.mediaDevices.ondevicechange = (_) {
+          if (activeCallId != null || enPreparation) {
+            unawaited(rafraichirSortiesAudio());
+          }
+        };
+      } catch (_) {}
+    }
+    final List<SortieAudio> lues;
+    try {
+      final peripheriques = await Helper.audiooutputs;
+      final vus = <String>{};
+      lues = [
+        for (final p in peripheriques)
+          if (SortieAudio.connues.contains(p.deviceId) && vus.add(p.deviceId))
+            SortieAudio(p.deviceId, p.label),
+      ];
+    } catch (_) {
+      return;
+    }
+    final avant = sortiesAudio.map((s) => s.id).toSet();
+    final nouveauCasque = lues
+        .where((s) => s.estUnCasque && !avant.contains(s.id))
+        .map((s) => s.id)
+        .firstOrNull;
+    sortiesAudio = lues;
+    if (nouveauCasque != null && avant.isNotEmpty) {
+      // Branché pendant l'appel : la bibliothèque y a déjà basculé le son.
+      sortieAudio = nouveauCasque;
+      isSpeakerOn = false;
+      _majProximite();
+    } else if (sortieAudio != null && !lues.any((s) => s.id == sortieAudio)) {
+      // Casque retiré : le son retombe sur l'appareil.
+      sortieAudio = null;
+    }
+    notifyListeners();
+  }
+
+  /// Envoie le son vers [id] — un des identifiants de [SortieAudio].
+  Future<void> choisirSortieAudio(String id) async {
+    sortieAudio = id;
+    isSpeakerOn = id == SortieAudio.hautParleur;
+    try {
+      await Helper.selectAudioOutput(id);
+    } catch (_) {}
+    // Telecom APRÈS, comme pour le haut-parleur : quand il porte l'appel,
+    // c'est lui qui doit avoir le dernier mot.
+    await AlanyaTelecom.setRoute(id);
+    unawaited(RingtoneService.instance.reglerHautParleurIvr(isSpeakerOn));
+    _majProximite();
+    notifyListeners();
+  }
   // Passe à true quand l'écran d'appel s'affiche chez le correspondant (Lot 2).
   bool remoteRinging = false;
 
@@ -619,7 +720,54 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
   /// FIX: activeRole est inclus pour éviter que isBusy == false
   /// pendant la transition incoming → activeCallId dans acceptIncoming().
   bool get isBusy =>
-      activeCallId != null || incoming != null || activeRole != null;
+      activeCallId != null ||
+      incoming != null ||
+      activeRole != null ||
+      enPreparation;
+
+  /*
+   * 🔴 L'ÉCRAN D'APPEL S'OUVRE AVANT LA RÉPONSE DU SERVEUR (06/11/2026), comme
+   * WhatsApp et comme l'application de référence.
+   *
+   * Il s'ouvrait APRÈS `createDirect` puis `_calls.start` : deux allers-retours
+   * réseau pendant lesquels rien ne bougeait après l'appui sur « Appeler ». Sur
+   * un réseau lent, on croyait l'appui perdu et on appuyait de nouveau.
+   *
+   * [enPreparation] tient l'écran ouvert (`isBusy`) tant que le serveur n'a
+   * pas répondu. Raccrocher pendant ce temps ne peut rien terminer côté
+   * serveur — l'appel n'existe pas encore : [_preparationAbandonnee] le note,
+   * et `startOutgoing` termine l'appel dès sa création, sans le faire sonner.
+   */
+  bool enPreparation = false;
+  bool _preparationAbandonnee = false;
+
+  /// Ouvre l'appel côté écran, avant toute requête. Faux si un appel occupe
+  /// déjà l'appareil : l'appelant laisse alors `startOutgoing` refuser.
+  bool preparerAppelSortant({
+    required String type,
+    required String titre,
+    String? avatarUrl,
+  }) {
+    if (isBusy) return false;
+    _preparationAbandonnee = false;
+    enPreparation = true;
+    activeType = type;
+    activePeerName = titre;
+    activePeerAvatarUrl = avatarUrl;
+    activeRole = ActiveCallRole.outgoing;
+    isCallInitiator = true;
+    lastError = null;
+    notifyListeners();
+    return true;
+  }
+
+  /// La préparation a échoué (conversation ou appel refusés) : l'écran se ferme.
+  void annulerPreparation() {
+    if (!enPreparation) return;
+    enPreparation = false;
+    _preparationAbandonnee = false;
+    _clear();
+  }
 
   void bindUser(String userId, String displayName) {
     myUserId = userId;
@@ -640,13 +788,26 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> startOutgoing(String convId, String type, String title) async {
-    if (isBusy) {
+    // Écran déjà ouvert par `preparerAppelSortant` : c'est NOTRE préparation
+    // qui rend l'appareil « occupé », elle ne doit pas se refuser elle-même.
+    final occupe = enPreparation
+        ? (activeCallId != null || incoming != null)
+        : isBusy;
+    if (occupe) {
       lastError = _trAppel('call_busy_start', "Termine l'appel en cours avant d'en lancer un autre");
       notifyListeners();
       throw StateError("BUSY");
     }
     lastError = null;
     final started = await _calls.start(convId, type);
+    if (_preparationAbandonnee) {
+      // Raccroché pendant que le serveur créait l'appel : on le termine aussitôt,
+      // avant qu'il ne fasse sonner qui que ce soit.
+      _preparationAbandonnee = false;
+      unawaited(_calls.end(started.id).catchError((_) {}));
+      return;
+    }
+    enPreparation = false;
     debugPrint(
         "[CallController] Appel créé sur le backend, envoi du signal call_ring...");
     traceAppel("APPEL SORTANT cree ${started.id} — moi=$myUserId");
@@ -1241,6 +1402,13 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> hangUp() async {
+    if (enPreparation && activeCallId == null) {
+      // L'appel n'existe pas encore côté serveur : voir [enPreparation].
+      _preparationAbandonnee = true;
+      enPreparation = false;
+      _clear();
+      return;
+    }
     final id = activeCallId ?? incoming?.callId;
     // Coupe TOUTE sonnerie (sortante ou entrante) : on raccroche.
     await RingtoneService.instance.stop();
@@ -1397,6 +1565,11 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void _clear({String? idAppel}) {
+    enPreparation = false;
+    _paroleSuivie = false;
+    _parole.arreter();
+    sortieAudio = null;
+    passageVideoPar = null;
     /*
      * ⚠️ LE PRÉCHARGEMENT S'ARRÊTE ICI, et c'est sans danger pour la feuille :
      * `attendre` lui a déjà transféré le fichier, qui ne dépend plus de ce
@@ -1501,7 +1674,35 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   // Démarre le minuteur dès que le média est réellement connecté.
+  /*
+   * QUI PARLE, EN GROUPE (06/11/2026) : la vignette de celui qui parle est
+   * encadrée, comme sur WhatsApp. En tête-à-tête, l'information n'apporte
+   * rien — on sait qui parle — et la sonde coûterait de la batterie pour rien.
+   */
+  late final DetecteurParole _parole =
+      DetecteurParole(onChange: notifyListeners);
+
+  /// [id] parle-t-il en ce moment ? (appel de groupe seulement)
+  bool parle(String id) => _parole.parle(id);
+
+  /// Est-ce moi qui parle ? (appel de groupe seulement)
+  bool get jeParle => _parole.parle(DetecteurParole.moi) && !isMuted;
+
+  bool _paroleSuivie = false;
+
+  void _majDetecteurParole() {
+    final suivre = isGroupCall && _mesh != null && activeCallId != null;
+    if (suivre == _paroleSuivie) return;
+    _paroleSuivie = suivre;
+    if (suivre) {
+      _parole.demarrer(() => _mesh?.connexions ?? const {});
+    } else {
+      _parole.arreter();
+    }
+  }
+
   void _onMeshUpdated() {
+    _majDetecteurParole();
     if (mediaConnected && connectedSince == null) {
       connectedSince = DateTime.now();
       // Le média circule : la négociation a abouti, le délai n'a plus lieu d'être.
@@ -1571,6 +1772,7 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
   /// ⚠️ Appelée APRÈS que `activeType` est posé, jamais avant : c'est lui qui
   /// décide.
   Future<void> _routeAudioInitiale() async {
+    unawaited(rafraichirSortiesAudio());
     final vise = activeType == "VIDEO";
     if (isSpeakerOn == vise) {
       // Le drapeau est déjà bon, mais la ROUTE SYSTÈME, elle, appartient à
@@ -1589,6 +1791,11 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> _appliqueHautParleur(bool actif) async {
     isSpeakerOn = actif;
+    // La bascule rend la main au choix automatique : haut-parleur, ou à défaut
+    // le meilleur casque présent puis l'écouteur.
+    sortieAudio = actif
+        ? SortieAudio.hautParleur
+        : sortiesAudio.where((s) => s.estUnCasque).map((s) => s.id).firstOrNull;
     try {
       await Helper.setSpeakerphoneOn(actif);
     } catch (_) {}
@@ -1692,8 +1899,104 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
   void toggleVideo() {
     final m = _mesh;
     if (m == null) return;
+    // Passé en vidéo par le correspondant, sans caméra encore ouverte : la
+    // rallumer, c'est l'ouvrir — et l'ajouter à la liaison.
+    if (!m.cameraEnabled && !m.aUneCamera) {
+      unawaited(passerEnVideo());
+      return;
+    }
     m.setCamera(!m.cameraEnabled);
     notifyListeners();
+  }
+
+  /*
+   * 🔴 PASSER EN VIDÉO PENDANT UN APPEL AUDIO (06/11/2026), comme WhatsApp et
+   * comme l'application de référence.
+   *
+   * Celui qui appuie ouvre sa caméra, l'ajoute à la liaison et envoie une
+   * nouvelle offre, précédée d'un signal `video_upgrade`. Le correspondant
+   * bascule alors en vidéo CAMÉRA COUPÉE — il voit l'autre sans être vu — et
+   * l'écran lui propose « Activer ma caméra ». Rien ne s'allume chez lui sans
+   * son accord.
+   *
+   * ⚠️ EN TÊTE-À-TÊTE SEULEMENT : pas en groupe (chacun renégocierait avec
+   * chacun), ni avec un standard, qui n'a pas de caméra.
+   */
+
+  /// Nom du correspondant qui vient de passer en vidéo, tant qu'on n'a pas
+  /// répondu : l'écran propose d'allumer sa caméra.
+  String? passageVideoPar;
+
+  bool get peutPasserEnVideo =>
+      activeCallId != null &&
+      activeRole == ActiveCallRole.ongoing &&
+      activeType != "VIDEO" &&
+      !isGroupCall &&
+      ivr == null &&
+      _mesh != null &&
+      _mesh!.peerIds.length == 1;
+
+  /// Allume notre caméra : passe l'appel en vidéo, ou répond au correspondant
+  /// qui l'a fait.
+  Future<void> passerEnVideo() async {
+    final m = _mesh;
+    if (m == null || activeCallId == null) return;
+    final perms = await ensureCallPermissions(video: true);
+    if (!perms) {
+      lastError = _trAppel('call_perms_video', "Micro et caméra requis pour l'appel");
+      notifyListeners();
+      return;
+    }
+    final avant = activeType;
+    activeType = "VIDEO";
+    passageVideoPar = null;
+    try {
+      await m.passerEnVideo(camera: true, annoncer: avant != "VIDEO");
+    } catch (e) {
+      traceAppel("passage en vidéo impossible : $e");
+      activeType = avant;
+      lastError = _trAppel('call_webrtc_failed',
+          "Connexion WebRTC impossible : micro/caméra inaccessible");
+      notifyListeners();
+      return;
+    }
+    traceAppel("appel passé en vidéo (caméra allumée)");
+    if (connectedSince != null) {
+      // Type « caméra » ajouté au service : sans lui, Android retire l'accès
+      // à la caméra dès qu'on quitte l'écran (fenêtre flottante comprise).
+      CallForegroundService.demarrer(
+        titre: activePeerName ?? _trAppel('call_ongoing', "Appel en cours"),
+        video: true,
+      );
+    }
+    await _sortiePourVideo();
+    _majProximite();
+    notifyListeners();
+  }
+
+  void _onPassageVideoDistant(String peerId) {
+    final m = _mesh;
+    if (m == null || activeType == "VIDEO") return;
+    activeType = "VIDEO";
+    passageVideoPar = participantNames[peerId] ?? activePeerName;
+    unawaited(m.passerEnVideo(camera: false));
+    m.envoyerEtatCamera(false);
+    traceAppel("le correspondant passe en vidéo → caméra proposée");
+    unawaited(_sortiePourVideo());
+    _majProximite();
+    notifyListeners();
+  }
+
+  /// « Plus tard » : on regarde sans être vu, la caméra reste coupée.
+  void ignorerPassageVideo() {
+    passageVideoPar = null;
+    notifyListeners();
+  }
+
+  /// La vidéo ne s'écoute pas à l'oreille : au haut-parleur, sauf casque.
+  Future<void> _sortiePourVideo() async {
+    if (isSpeakerOn || aUnCasque) return;
+    await _appliqueHautParleur(true);
   }
 
   Future<void> switchCamera() async {
@@ -1893,6 +2196,7 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
         onPeerLost: _onPeerConnectionLost,
         onPeerReconnecting: (peerId) => _marqueEnReconnexion(peerId, true),
         onPeerReconnected: (peerId) => _marqueEnReconnexion(peerId, false),
+        onPeerPassageVideo: _onPassageVideoDistant,
       );
     }
 
@@ -2785,4 +3089,22 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
     _stopMesh();
     super.dispose();
   }
+}
+
+/// Une sortie audio d'appel, telle que `flutter_webrtc` la nomme sur Android.
+class SortieAudio {
+  const SortieAudio(this.id, this.nom);
+
+  static const hautParleur = 'speaker';
+  static const ecouteur = 'earpiece';
+  static const casqueFilaire = 'wired-headset';
+  static const bluetooth = 'bluetooth';
+  static const connues = {hautParleur, ecouteur, casqueFilaire, bluetooth};
+
+  final String id;
+
+  /// Nom donné par le système — pour le Bluetooth, celui du casque.
+  final String nom;
+
+  bool get estUnCasque => id == casqueFilaire || id == bluetooth;
 }

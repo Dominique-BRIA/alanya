@@ -178,17 +178,18 @@ class _DialerScreenState extends State<DialerScreen> {
       }
 
       final title = user.pseudo ?? formatAlanyaId(user.publicNumber);
-      final convId =
-          await context.read<ChatRepository>().createDirect(user.publicNumber);
-      if (!mounted) return;
-
+      final chats = context.read<ChatRepository>();
       final cc = context.read<CallController>();
-      await cc.startOutgoing(convId, type, title);
-      // ⚠️ PAS DE `if (!mounted) return;` AVANT D'OUVRIR. L'appel est parti :
-      // renoncer ici le laissait tourner sans écran. Voir
-      // `ouvrirEcranAppelLance`.
-      await ouvrirEcranAppelLance(cc);
+      // L'écran s'ouvre AVANT la réponse du serveur (06/11/2026).
+      await lancerAppelSortant(
+        cc,
+        type: type,
+        titre: title,
+        avatarUrl: user.avatarUrl,
+        conversation: () => chats.createDirect(user.publicNumber),
+      );
     } catch (e) {
+      if (!mounted) return;
       // Le 404 est propre à cet écran : on y cherche un compte par son Alanya
       // ID, et son absence n'a pas le même sens depuis une conversation.
       showAppSnackBar(messageErreurAppel(e,

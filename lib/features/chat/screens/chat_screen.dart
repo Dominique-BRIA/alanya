@@ -5033,17 +5033,17 @@ class _ChatScreenState extends State<ChatScreen>
     final id = contact.alanyaId;
     if (id == null) return;
     final cc = context.read<CallController>();
+    final chats = context.read<ChatRepository>();
     try {
-      final convId = await context.read<ChatRepository>().createDirect(id);
-      if (!mounted) return;
-      await cc.startOutgoing(convId, "AUDIO", contact.displayName);
-      // Sans cette ouverture, l'appel démarre sans que rien ne s'affiche —
-      // seul le bandeau global le signale (même enchaînement que la fiche
-      // contact et le clavier d'appel).
-      //
-      // ⚠️ PAS DE `if (!mounted) return;` : l'appel est déjà parti.
-      await ouvrirEcranAppelLance(cc);
+      // L'écran s'ouvre tout de suite, la conversation se cherche derrière.
+      await lancerAppelSortant(
+        cc,
+        type: "AUDIO",
+        titre: contact.displayName,
+        conversation: () => chats.createDirect(id),
+      );
     } catch (e) {
+      if (!mounted) return;
       // `messageErreurAppel` traite déjà l'ApiException : le message du serveur
       // passe tel quel (« Le correspondant est déjà en appel »), et c'est le
       // point unique des trois écrans qui lancent un appel.
@@ -6217,10 +6217,16 @@ class _ChatScreenState extends State<ChatScreen>
   Future<void> _startCall(String type) async {
     final cc = context.read<CallController>();
     try {
-      await cc.startOutgoing(widget.convId, type, widget.title);
-      // ⚠️ PAS DE `if (!mounted) return;` : l'appel est déjà parti.
-      await ouvrirEcranAppelLance(cc);
+      // L'écran s'ouvre AVANT la réponse du serveur (06/11/2026).
+      await lancerAppelSortant(
+        cc,
+        type: type,
+        titre: widget.title,
+        avatarUrl: widget.isGroup ? null : widget.avatarUrl,
+        conversation: () async => widget.convId,
+      );
     } catch (e) {
+      if (!mounted) return;
       // Le message vient de `messageErreurAppel`, partagé avec le clavier et la
       // fiche de contact. Ici manquait la clause `on ApiException` : appeler
       // quelqu'un déjà en ligne affichait « vérifie ta connexion » au lieu du

@@ -36,6 +36,7 @@ import 'features/ai/ai_repository.dart';
 import 'features/calls/call_banner.dart';
 import 'features/calls/call_controller.dart';
 import 'features/calls/call_listener.dart';
+import 'features/calls/fenetre_video.dart';
 import 'features/calls/calls_repository.dart';
 import 'features/calls/repondeur_repository.dart';
 import 'features/calls/enregistrements_repository.dart';
@@ -382,6 +383,9 @@ class AlanyaApp extends StatelessWidget {
           children: [
             if (child != null) Positioned.fill(child: child),
             const CallBanner(),
+            // Appel vidéo hors de son écran : petite fenêtre dans l'application,
+            // ou l'image seule dans la fenêtre du système (06/11/2026).
+            const FenetreVideoAppel(),
             const MeetingBanner(),
             // Par-dessus tout : le serveur est en maintenance.
             const EcranMaintenance(),

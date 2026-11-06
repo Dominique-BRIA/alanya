@@ -22,10 +22,14 @@ class WebrtcPeerSession {
     this.onConnectionLost,
     this.onReconnecting,
     this.onReconnected,
+    this.onPassageVideo,
   });
 
   final String peerId;
-  final bool isVideo;
+
+  /// Non `final` : un appel audio peut passer en vidéo en cours de route
+  /// (06/11/2026). Voir [ajouterVideo].
+  bool isVideo;
   final bool isOfferer;
   final MediaStream localStream;
   final List<Map<String, dynamic>> iceServers;
@@ -57,6 +61,52 @@ class WebrtcPeerSession {
 
   /// Le média est repassé : l'appel reprend son cours ordinaire.
   final VoidCallback? onReconnected;
+
+  /// Le pair passe l'appel en vidéo (signal `video_upgrade`).
+  final VoidCallback? onPassageVideo;
+
+  /// L'offre qui ajoute la vidéo attend sa réponse : le débit de la nouvelle
+  /// piste se règle à son arrivée — la liaison, déjà « connected », ne repasse
+  /// pas par le changement d'état ICE qui le fait d'ordinaire.
+  bool _reglageApresReponse = false;
+
+  /// Une renégociation est demandée alors qu'une autre est en cours : elle
+  /// repart dès la réponse reçue.
+  bool _renegociationEnAttente = false;
+
+  /// PASSAGE EN VIDÉO (06/11/2026) : la caméra rejoint une liaison ouverte en
+  /// audio, et une nouvelle offre la porte jusqu'au pair.
+  ///
+  /// Cette offre part même quand c'est le PAIR qui avait offert le premier —
+  /// le web fait de même (`renegocier`). `addTrack` reprend d'abord la ligne
+  /// vidéo ouverte en réception seule si le pair est passé en vidéo avant nous.
+  Future<void> ajouterVideo(MediaStreamTrack piste) async {
+    final pc = _pc;
+    if (pc == null) return;
+    isVideo = true;
+    await pc.addTrack(piste, localStream);
+    await _preferH264();
+    _reglageApresReponse = true;
+    await _renegocier();
+  }
+
+  /// Prévient le pair que l'appel passe en vidéo : son écran bascule, et lui
+  /// propose d'allumer sa caméra.
+  void annoncerPassageVideo() {
+    if (_pc == null) return;
+    onSendSignal({"kind": "video_upgrade"});
+  }
+
+  Future<void> _renegocier() async {
+    final pc = _pc;
+    if (pc == null) return;
+    if (pc.signalingState != null &&
+        pc.signalingState != RTCSignalingState.RTCSignalingStateStable) {
+      _renegociationEnAttente = true;
+      return;
+    }
+    await _createOffer();
+  }
 
   /// Sursis accordé à un `disconnected` avant de tenter quoi que ce soit.
   ///
@@ -195,6 +245,9 @@ class WebrtcPeerSession {
   final _iceQueue = <RTCIceCandidate>[];
 
   MediaStream? get remoteStream => _remote;
+
+  /// La connexion elle-même, pour lire qui parle (`DetecteurParole`).
+  RTCPeerConnection? get connexion => _pc;
   bool get mediaConnected => _remote != null;
 
   Future<void> start() async {
@@ -766,6 +819,15 @@ class WebrtcPeerSession {
       _offreEnvoyeeLe = null;
       traceAppel("ANSWER recue de $peerId → negociation complete");
       await _flushIceQueue();
+      if (_reglageApresReponse) {
+        _reglageApresReponse = false;
+        _emissionReglee = false;
+        unawaited(_reglerEmission());
+      }
+      if (_renegociationEnAttente) {
+        _renegociationEnAttente = false;
+        unawaited(_renegocier());
+      }
       /*
        * ⚠️ UNE REPRISE SUR UNE LIAISON QUI ALLAIT BIEN n'émet pas toujours de
        * nouvel état ICE : elle reste « connected », et sans ce contrôle la
@@ -789,6 +851,10 @@ class WebrtcPeerSession {
         traceAppel("$peerId : demande de reprise reçue");
         _demarreLaReprise(immediat: true, annoncer: false);
       }
+    } else if (kind == "video_upgrade") {
+      // Le pair passe l'appel en vidéo (06/11/2026) : son offre suit.
+      isVideo = true;
+      onPassageVideo?.call();
     } else if (kind == "camera_state") {
       // Caméra du pair coupée ou rallumée (31/10/2026) : l'écran montre son
       // avatar plutôt qu'une image figée.
@@ -840,6 +906,8 @@ class WebrtcPeerSession {
     _offreRepriseEnVol = false;
     _offreEnvoyeeLe = null;
     _emissionReglee = false;
+    _reglageApresReponse = false;
+    _renegociationEnAttente = false;
     _repriseDepuis = null;
     _remote = null;
     await _pc?.close();

@@ -71,6 +71,10 @@ class AlanyaTelecomPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 CallRegistry.setSpeaker(on)
                 result.success(true)
             }
+            "setRoute" -> {
+                CallRegistry.setRoute(call.argument<String>("route") ?: "")
+                result.success(true)
+            }
             "getRingingCall" -> result.success(CallRegistry.ringingData())
             "getAcceptedCall" -> result.success(CallRegistry.acceptedData())
             // ── Chip vert de la barre d'état, piloté depuis Dart ────────────

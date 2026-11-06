@@ -391,6 +391,8 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
       return ivr.nomServiceChoisi ?? "";
     }
     if (cc.activeRole == ActiveCallRole.outgoing) {
+      // Le serveur n'a pas encore créé l'appel : rien ne sonne encore.
+      if (cc.enPreparation) return tr(context, 'call_calling');
       if (cc.isGroupCall) return tr(context, 'call_group_ringing');
       return cc.remoteRinging
           ? tr(context, 'call_ringing_remote')
@@ -862,6 +864,13 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
                       if (invitedChipIds.isNotEmpty &&
                           cc.activeRole == ActiveCallRole.ongoing)
                         _invitedChips(cc, invitedChipIds),
+                      // Qui parle, en groupe audio (06/11/2026). En vidéo, ce
+                      // sont les vignettes qui s'encadrent.
+                      if (afficheCommeGroupe &&
+                          !showVideo &&
+                          cc.activeRole == ActiveCallRole.ongoing &&
+                          cc.remoteStreams.isNotEmpty)
+                        _presentsGroupe(cc),
                       // SERVEUR VOCAL — affiché DANS l'écran d'appel, et non sur
                       // un écran à part.
                       //
@@ -1228,6 +1237,66 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
               ),
             ),
           ),
+          _cadreParole(cc.parle(id)),
+        ],
+      ),
+    );
+  }
+
+  /// Vert vif : il se voit sur une image comme sur le fond sombre de l'appel.
+  static const _vertParole = Color(0xFF34C759);
+
+  /// Le cadre de la vignette de celui qui parle (06/11/2026), comme WhatsApp.
+  /// Posé PAR-DESSUS l'image, sans la réduire ni la décaler.
+  Widget _cadreParole(bool parle) {
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: parle ? _vertParole : Colors.transparent,
+              width: 3,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Appel de groupe AUDIO : les présents, et qui parle (06/11/2026).
+  Widget _presentsGroupe(CallController cc) {
+    Widget puce(String nom, bool parle) => AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.fromLTRB(10, 5, 12, 5),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.10),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: parle ? _vertParole : Colors.transparent,
+              width: 2,
+            ),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(parle ? Icons.graphic_eq : Icons.person,
+                size: 15, color: parle ? _vertParole : Colors.white60),
+            const SizedBox(width: 6),
+            Text(nom,
+                style: const TextStyle(color: Colors.white, fontSize: 13)),
+          ]),
+        );
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        alignment: WrapAlignment.center,
+        children: [
+          for (final id in cc.remoteStreams.keys)
+            puce(cc.participantNames[id] ?? tr(context, 'meet_participant'),
+                cc.parle(id)),
+          puce(tr(context, 'you'), cc.jeParle),
         ],
       ),
     );
@@ -1277,6 +1346,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
               ),
             ),
           ),
+          _cadreParole(context.read<CallController>().jeParle),
         ],
       ),
     );
@@ -1542,13 +1612,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
               taille: 64,
             ),
             const SizedBox(width: 22),
-            _controlBtn(
-              icon: cc.isSpeakerOn ? Icons.volume_up : Icons.hearing,
-              active: cc.isSpeakerOn,
-              label: tr(context, 'speaker'),
-              onPressed: () => cc.toggleSpeaker(),
-              taille: 52,
-            ),
+            _boutonSortie(cc, taille: 52),
           ],
         );
       }
@@ -1566,6 +1630,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
+        if (cc.passageVideoPar != null) _invitationVideo(cc),
         Wrap(
           alignment: WrapAlignment.center,
           spacing: 10,
@@ -1577,12 +1642,15 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
               label: cc.isMuted ? tr(context, 'muted') : tr(context, 'microphone'),
               onPressed: cc.toggleMute,
             ),
-            _controlBtn(
-              icon: cc.isSpeakerOn ? Icons.volume_up : Icons.hearing,
-              active: cc.isSpeakerOn,
-              label: tr(context, 'speaker'),
-              onPressed: () => cc.toggleSpeaker(),
-            ),
+            _boutonSortie(cc),
+            // Appel audio : passer en vidéo (06/11/2026).
+            if (!isVideo && cc.peutPasserEnVideo)
+              _controlBtn(
+                icon: Icons.videocam_outlined,
+                active: false,
+                label: tr(context, 'video'),
+                onPressed: () => cc.passerEnVideo(),
+              ),
             if (isVideo)
               _controlBtn(
                 icon: cc.isVideoEnabled ? Icons.videocam : Icons.videocam_off,
@@ -1637,6 +1705,109 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
 
   /// Invite un ou plusieurs contacts dans l'appel (appel de groupe dynamique).
   /// L'appelant reste dans l'appel ; chaque invité rejoint quand il décroche.
+  static IconData _iconeSortie(String id) => switch (id) {
+        SortieAudio.hautParleur => Icons.volume_up,
+        SortieAudio.casqueFilaire => Icons.headset,
+        SortieAudio.bluetooth => Icons.bluetooth_audio,
+        _ => Icons.hearing,
+      };
+
+  String _nomSortie(SortieAudio s) => switch (s.id) {
+        SortieAudio.hautParleur => tr(context, 'speaker'),
+        SortieAudio.ecouteur => tr(context, 'audio_out_phone'),
+        SortieAudio.casqueFilaire => tr(context, 'audio_out_wired'),
+        // Le nom du casque, quand le système le donne.
+        _ => s.nom.trim().isEmpty || s.nom.toLowerCase() == 'bluetooth'
+            ? tr(context, 'audio_out_bluetooth')
+            : s.nom,
+      };
+
+  /// Sortie audio (06/11/2026) : une bascule sans casque, une liste avec.
+  Widget _boutonSortie(CallController cc, {double taille = 56}) {
+    final courante = cc.sortieCourante;
+    final libelle = cc.aUnCasque
+        ? _nomSortie(cc.sortiesAudio.firstWhere(
+            (s) => s.id == courante,
+            orElse: () => SortieAudio(courante, ''),
+          ))
+        : tr(context, 'speaker');
+    final btn = _controlBtn(
+      icon: _iconeSortie(courante),
+      active: courante != SortieAudio.ecouteur,
+      label: libelle,
+      onPressed: () => cc.aUnCasque ? _choisirSortie(cc) : cc.toggleSpeaker(),
+      taille: taille,
+    );
+    return btn;
+  }
+
+  Future<void> _choisirSortie(CallController cc) async {
+    final choix = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(tr(context, 'audio_out_title'),
+                    style: Theme.of(ctx).textTheme.titleMedium),
+              ),
+            ),
+            for (final s in cc.sortiesAudio)
+              ListTile(
+                leading: Icon(_iconeSortie(s.id)),
+                title: Text(_nomSortie(s)),
+                trailing: s.id == cc.sortieCourante
+                    ? const Icon(Icons.check, color: AlanyaColors.forest)
+                    : null,
+                onTap: () => Navigator.of(ctx).pop(s.id),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (choix != null) await cc.choisirSortieAudio(choix);
+  }
+
+  /// Le correspondant est passé en vidéo : on le voit, il ne nous voit pas
+  /// encore. Comme WhatsApp, l'écran propose d'allumer sa caméra.
+  Widget _invitationVideo(CallController cc) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 18),
+      padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.videocam, color: Colors.white),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              tr(context, 'call_peer_switched_video',
+                  {'name': cc.passageVideoPar ?? ''}),
+              style: const TextStyle(color: Colors.white, fontSize: 14),
+            ),
+          ),
+          TextButton(
+            onPressed: cc.ignorerPassageVideo,
+            child: Text(tr(context, 'call_not_now'),
+                style: const TextStyle(color: Colors.white70)),
+          ),
+          FilledButton(
+            onPressed: () => cc.passerEnVideo(),
+            child: Text(tr(context, 'call_turn_on_camera')),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _invite(CallController cc) async {
     final numbers = await ContactPickerSheet.show(
       context,

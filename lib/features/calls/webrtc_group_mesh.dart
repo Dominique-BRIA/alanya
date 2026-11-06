@@ -19,6 +19,7 @@ class WebrtcGroupMesh {
     this.onPeerLost,
     this.onPeerReconnecting,
     this.onPeerReconnected,
+    this.onPeerPassageVideo,
   }) : _local = fluxInitial;
 
   /// La capture de la qualité choisie, et rien au-delà (procédure du patron,
@@ -43,7 +44,12 @@ class WebrtcGroupMesh {
   };
 
   final String myUserId;
-  final bool isVideo;
+
+  /// Non `final` : voir [passerEnVideo].
+  bool isVideo;
+
+  /// Le pair [peerId] vient de passer l'appel en vidéo.
+  final void Function(String peerId)? onPeerPassageVideo;
   final List<Map<String, dynamic>> iceServers;
   final void Function(String peerId, Map<String, dynamic> signal) onSendSignal;
   final VoidCallback onUpdated;
@@ -205,6 +211,50 @@ class WebrtcGroupMesh {
   /// [asOfferer] dit qui émet l'offre, et ce choix appartient à l'appelant :
   /// `false` quand je découvre quelqu'un déjà présent (il m'offrira), `true`
   /// quand je le vois arriver après moi.
+  /// PASSE L'APPEL EN VIDÉO (06/11/2026).
+  ///
+  /// [camera] : allumer la nôtre et l'ajouter à chaque liaison — une nouvelle
+  /// offre la porte. Sinon on se contente de RECEVOIR celle du pair, caméra
+  /// coupée : c'est l'état de celui qui voit l'autre passer en vidéo et n'a
+  /// pas encore répondu. [annoncer] : prévenir le pair, qui basculera à son
+  /// tour — seulement pour celui qui prend l'initiative.
+  Future<void> passerEnVideo({required bool camera, bool annoncer = false}) async {
+    isVideo = true;
+    for (final s in _peers.values) {
+      s.isVideo = true;
+    }
+    final local = _local;
+    if (!camera || local == null) {
+      _cameraEnabled = false;
+      onUpdated();
+      return;
+    }
+    var piste = local.getVideoTracks().isEmpty ? null : local.getVideoTracks().first;
+    if (piste == null) {
+      final fluxCamera = await navigator.mediaDevices
+          .getUserMedia({"audio": false, "video": contraintesVideo(qualite)});
+      piste = fluxCamera.getVideoTracks().first;
+      await local.addTrack(piste);
+      for (final s in _peers.values) {
+        if (annoncer) s.annoncerPassageVideo();
+        await s.ajouterVideo(piste);
+      }
+    }
+    piste.enabled = true;
+    _cameraEnabled = true;
+    envoyerEtatCamera(true);
+    onUpdated();
+  }
+
+  /// Les connexions ouvertes, par participant.
+  Map<String, RTCPeerConnection> get connexions => {
+        for (final e in _peers.entries)
+          if (e.value.connexion != null) e.key: e.value.connexion!,
+      };
+
+  /// Une caméra existe-t-elle déjà dans le flux local ?
+  bool get aUneCamera => _local?.getVideoTracks().isNotEmpty ?? false;
+
   Future<void> connectToPeer(String peerId, {required bool asOfferer}) async {
     if (peerId == myUserId || _peers.containsKey(peerId)) {
       traceAppel("connectToPeer($peerId) IGNORE — moi=${peerId == myUserId} dejaConnu=${_peers.containsKey(peerId)}");
@@ -226,6 +276,7 @@ class WebrtcGroupMesh {
       onConnectionLost: () => onPeerLost?.call(peerId),
       onReconnecting: () => onPeerReconnecting?.call(peerId),
       onReconnected: () => onPeerReconnected?.call(peerId),
+      onPassageVideo: () => onPeerPassageVideo?.call(peerId),
     );
     _peers[peerId] = session;
 

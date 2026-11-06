@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -35,8 +37,9 @@ import 'screens/active_call_screen.dart';
 /// contexte d'appel peut justement être mort. Les appelants le saisissent avant
 /// leurs `await`, ce que la plupart faisaient déjà.
 Future<void> ouvrirEcranAppelLance(CallController cc) async {
-  // L'appel n'a pas démarré (exception attrapée plus haut) : rien à montrer.
-  if (cc.activeCallId == null) return;
+  // L'appel n'a pas démarré (exception attrapée plus haut) : rien à montrer —
+  // sauf pendant sa préparation, où l'écran s'ouvre justement AVANT lui.
+  if (cc.activeCallId == null && !cc.enPreparation) return;
   // Déjà à l'écran — en empiler un second obligerait à deux retours pour en
   // sortir. Même garde-fou que `_rouvrirEcranAppel` dans `CallListener`.
   if (cc.callScreenVisible) return;
@@ -57,6 +60,42 @@ Future<void> ouvrirEcranAppelLance(CallController cc) async {
   // Navigateur introuvable : l'appel reste actif et le bandeau global permet
   // d'y revenir. Mieux vaut ça qu'une exception qui coupe tout.
   debugPrint("[appel] navigateur global indisponible, écran non ouvert");
+}
+
+/// Lance un appel en ouvrant son écran TOUT DE SUITE, comme WhatsApp
+/// (06/11/2026) : avant la conversation, avant la création de l'appel.
+///
+/// [conversation] rend l'identifiant de la conversation qui porte l'appel —
+/// souvent un `createDirect`, parfois une valeur déjà connue. En cas d'échec,
+/// l'écran se referme et l'erreur remonte à l'appelant, qui l'affiche.
+///
+/// ⚠️ [cc] ET LES DÉPÔTS SONT SAISIS PAR L'APPELANT AVANT TOUT `await` : le
+/// widget qui lance l'appel peut disparaître pendant la préparation, son
+/// `BuildContext` avec lui. Voir [ouvrirEcranAppelLance].
+Future<void> lancerAppelSortant(
+  CallController cc, {
+  required String type,
+  required String titre,
+  String? avatarUrl,
+  required Future<String> Function() conversation,
+}) async {
+  final prepare = cc.preparerAppelSortant(
+    type: type,
+    titre: titre,
+    avatarUrl: avatarUrl,
+  );
+  if (prepare) unawaited(ouvrirEcranAppelLance(cc));
+  try {
+    final convId = await conversation();
+    // Raccroché pendant la recherche de la conversation : on s'arrête là.
+    if (prepare && !cc.enPreparation) return;
+    await cc.startOutgoing(convId, type, titre);
+  } catch (_) {
+    cc.annulerPreparation();
+    rethrow;
+  }
+  // Sans préparation (appareil occupé), `startOutgoing` a refusé plus haut ;
+  // sinon l'écran est déjà là.
 }
 
 /// Ouvre l'écran d'appel si [callId] désigne l'appel auquel CET appareil

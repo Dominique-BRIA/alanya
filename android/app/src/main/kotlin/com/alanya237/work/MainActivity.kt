@@ -3,6 +3,7 @@ package com.alanya237.work
 import android.app.KeyguardManager
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
@@ -114,6 +115,8 @@ class MainActivity : FlutterFragmentActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         moteurFlutter = flutterEngine
+        // Fenetre flottante du systeme pendant un appel video (06/11/2026).
+        PipBridge.attach(flutterEngine.dartExecutor.binaryMessenger, this)
 
         detecteurCapture = DetecteurCapture(
             this,
@@ -423,7 +426,24 @@ class MainActivity : FlutterFragmentActivity() {
 
     override fun onDestroy() {
         runCatching { reglerCapteurProximite(false) }
+        PipBridge.detach()
         super.onDestroy()
+    }
+
+    // Bouton Accueil pendant un appel video : la fenetre flottante s'ouvre.
+    override fun onUserLeaveHint() {
+        PipBridge.onUserLeaveHint(this)
+        super.onUserLeaveHint()
+    }
+
+    // Flutter ne peut pas le deduire du cycle de vie : dans la fenetre,
+    // l'activite est en pause tout en restant visible.
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration,
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        PipBridge.notifierChangement(isInPictureInPictureMode)
     }
 
     private fun afficherParDessusVerrouillage(actif: Boolean) {

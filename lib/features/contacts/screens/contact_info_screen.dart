@@ -352,22 +352,22 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
   Future<void> _startCall(String type) async {
     if (_callStarting) return;
     final cc = context.read<CallController>();
+    final chats = context.read<ChatRepository>();
     setState(() => _callStarting = true);
     try {
-      var convId = widget.convId;
-      convId ??= await context
-          .read<ChatRepository>()
-          .createDirect(widget.publicNumber);
-      if (!mounted) return;
-      await cc.startOutgoing(convId, type, widget.name);
-      // Sans cette ouverture, l'appel démarrait sans que rien ne s'affiche,
-      // seul le bandeau global le signalait.
-      //
-      // ⚠️ PAS DE `if (!mounted) return;` ICI. L'appel est déjà parti :
-      // renoncer parce que CETTE fiche a disparu laissait sonner le
-      // correspondant devant un appelant qui ne voit rien.
-      await ouvrirEcranAppelLance(cc);
+      // L'écran s'ouvre AVANT la réponse du serveur (06/11/2026) ; la fiche
+      // peut disparaître pendant ce temps, d'où les dépôts saisis plus haut.
+      final convIdConnu = widget.convId;
+      await lancerAppelSortant(
+        cc,
+        type: type,
+        titre: widget.name,
+        avatarUrl: widget.avatarUrl,
+        conversation: () async =>
+            convIdConnu ?? await chats.createDirect(widget.publicNumber),
+      );
     } catch (e) {
+      if (!mounted) return;
       showAppSnackBar(messageErreurAppel(e, context: context));
     } finally {
       if (mounted) setState(() => _callStarting = false);

@@ -74,15 +74,16 @@ class _TuileCollegueState extends State<TuileCollegue> {
     // tuile de liste se démonte dès que sa liste se reconstruit — un simple
     // événement WebSocket suffit. Relire le contexte après coup échouerait.
     final cc = context.read<CallController>();
+    final chats = context.read<ChatRepository>();
+    final numero = widget.collegue.publicNumber;
     try {
-      final convId = await context
-          .read<ChatRepository>()
-          .createDirect(widget.collegue.publicNumber);
-      if (!mounted) return;
-      await cc.startOutgoing(convId, "AUDIO", widget.collegue.nom);
-      // Plus de `if (!mounted) return;` : l'appel est parti, l'écran doit
-      // suivre même si cette tuile n'existe plus.
-      await ouvrirEcranAppelLance(cc);
+      // L'écran s'ouvre AVANT la réponse du serveur (06/11/2026).
+      await lancerAppelSortant(
+        cc,
+        type: "AUDIO",
+        titre: widget.collegue.nom,
+        conversation: () => chats.createDirect(numero),
+      );
     } catch (_) {
       showAppSnackBar(tr(context, 'server_unreachable'));
     } finally {

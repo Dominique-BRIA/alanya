@@ -43,15 +43,16 @@ class _CarteCentreState extends State<CarteCentre> {
     // qui se reconstruit démonte ses cartes. C'est le cas le plus exposé au
     // défaut « parfois l'écran d'appel ne s'ouvre pas ».
     final cc = context.read<CallController>();
+    final chats = context.read<ChatRepository>();
+    final numero = widget.centre.alanyaId;
     try {
-      final convId = await context
-          .read<ChatRepository>()
-          .createDirect(widget.centre.alanyaId);
-      if (!mounted) return;
-      await cc.startOutgoing(convId, "AUDIO", widget.centre.nom);
-      // Plus de `if (!mounted) return;` : l'appel est parti, l'écran doit
-      // suivre même si cette carte n'existe plus.
-      await ouvrirEcranAppelLance(cc);
+      // L'écran s'ouvre AVANT la réponse du serveur (06/11/2026).
+      await lancerAppelSortant(
+        cc,
+        type: "AUDIO",
+        titre: widget.centre.nom,
+        conversation: () => chats.createDirect(numero),
+      );
     } on ApiException catch (e) {
       showAppSnackBar(e.message);
     } catch (_) {

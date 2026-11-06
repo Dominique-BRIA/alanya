@@ -279,4 +279,26 @@ object CallRegistry {
         }
         conn.setAudioRoute(route)
     }
+
+    /**
+     * Pose LA sortie choisie par l'utilisateur (06/11/2026) : haut-parleur,
+     * ecouteur, casque filaire ou Bluetooth — les noms de `flutter_webrtc`.
+     *
+     * Une route absente du masque est ignoree : Telecom la refuserait, et
+     * mieux vaut garder la sortie actuelle qu'en demander une introuvable.
+     */
+    fun setRoute(nom: String) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val conn = current ?: return
+        val route = when (nom) {
+            "speaker" -> android.telecom.CallAudioState.ROUTE_SPEAKER
+            "earpiece" -> android.telecom.CallAudioState.ROUTE_EARPIECE
+            "wired-headset" -> android.telecom.CallAudioState.ROUTE_WIRED_HEADSET
+            "bluetooth" -> android.telecom.CallAudioState.ROUTE_BLUETOOTH
+            else -> return
+        }
+        val dispo = conn.callAudioState?.supportedRouteMask ?: 0
+        if (dispo != 0 && dispo and route == 0) return
+        conn.setAudioRoute(route)
+    }
 }

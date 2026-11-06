@@ -75,6 +75,14 @@ class AlanyaTelecom {
     } catch (_) {}
   }
 
+  /// Pose une sortie précise : 'speaker', 'earpiece', 'wired-headset' ou
+  /// 'bluetooth'. Sans effet si aucun appel natif n'est ouvert.
+  static Future<void> setRoute(String route) async {
+    try {
+      await _ch.invokeMethod('setRoute', {'route': route});
+    } catch (_) {}
+  }
+
   /// Pose le chip vert « appel en cours » dans la barre d'état (Android 12+).
   ///
   /// À appeler quand l'appel est ÉTABLI. Sans effet en dessous d'Android 12,
