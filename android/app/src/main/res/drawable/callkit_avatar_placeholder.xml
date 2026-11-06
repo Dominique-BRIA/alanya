@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Avatar par défaut. `AppAvatar` compose des initiales sur `brandPrimary`
+  quand la photo manque ; un layout natif ne sait pas dessiner de texte, on
+  garde donc le fond de marque et une silhouette.
+
+  Sert aussi de `src` initial : le plugin ne rend `ivAvatar` visible que
+  lorsqu'une URL d'avatar est fournie, alors que notre écran affiche toujours
+  quelque chose — le layout part donc de `visible`.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="148dp"
+    android:height="148dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+    <path
+        android:fillColor="@color/callkit_avatar_bg"
+        android:pathData="M0,0h512v512h-512z" />
+    <path
+        android:fillColor="#8CFFFFFF"
+        android:pathData="M256 246Q222 246 199 222Q176 198 176 163Q176 129 199 105Q222 81 256 81Q290 81 313 105Q336 129 336 163Q336 198 313 222Q290 246 256 246ZM120 431Q108 431 108 418Q108 366 148 328Q188 290 256 290Q324 290 364 328Q404 366 404 418Q404 431 392 431Z" />
+</vector>

@@ -83,7 +83,7 @@ dependencies:
   # « appel » (Notification.CallStyle d'Android 12+), celle qui affiche l'avatar
   # et les deux gros boutons. L'écrire en Kotlin aurait demandé de reprendre la
   # construction de la notification et sa réception dans l'isolate d'arrière-plan.
-  flutter_callkit_incoming: ^3.1.3
+  flutter_callkit_incoming: 3.1.5
   # Module natif local : ConnectionService Telecom « self-managed ».
   #
   # ⚠️ C'EST LUI QUI REND LA SONNERIE FIABLE, et flutter_callkit_incoming n'est

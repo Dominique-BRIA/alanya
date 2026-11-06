@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  CupertinoIcons.phone_fill (U+F4B9), contour extrait de CupertinoIcons.ttf.
+  Repère identique à celui du widget `Icon` : boîte em de 512 unités, ligne de
+  base à 446 du haut (height: 1.0 + leadingDistribution: even), glyphe centré
+  sur son advance. Rendu à 34 dp, il est au pixel près celui de
+  `CallActionButton` / `CallIncomingHeaderPill`.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="34dp"
+    android:height="34dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M166.5 343Q57.5 234 57.5 145Q57.5 103 87.5 74Q106.5 55 128.5 55Q146.5 55 158.5 70L204.5 135Q215.5 151 215.5 161Q215.5 173 199.5 189L184.5 205Q181.5 208 181.5 213Q181.5 217 183.5 221Q193.5 240 231.5 278Q269.5 316 288.5 326Q292.5 328 297.5 328Q302.5 328 305.5 325L320.5 310Q335.5 295 348.5 295Q360.5 295 374.5 305L440.5 352Q454.5 362 454.5 380Q454.5 401 436.5 422Q406.5 453 365.5 453Q321.5 453 268.5 422.5Q215.5 392 166.5 343Z" />
+</vector>

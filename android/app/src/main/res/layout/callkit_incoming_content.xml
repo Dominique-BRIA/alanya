@@ -1,0 +1,296 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Écran d'appel entrant natif — réplique de `IncomingCallScreen`
+  (lib/screens/calls/incoming_call_screen.dart).
+
+  `CallkitIncomingActivity.setContentView(R.layout.activity_callkit_incoming)`
+  gonfle ce fichier : les alias de values/callkit_layout_alias.xml redirigent
+  ce nom de la librairie vers le nôtre, le module applicatif primant sur elle
+  à la fusion des ressources. Ni fork, ni patch du plugin.
+
+  CONTRAT À TENIR : l'Activity fait un `findViewById` non nul, avec un type
+  imposé, sur ivBackground, llBackgroundAnimation (RippleRelativeLayout),
+  tvNameCaller, tvNumber, ivLogo, ivAvatar (CircleImageView), llAction
+  (LinearLayout), ivAcceptCall, tvAccept, ivDeclineCall et tvDecline. Retirer
+  ou retyper l'un d'eux fait planter l'écran d'appel. Les vues dont notre
+  maquette n'a pas l'usage (ivLogo, tvNumber) sont gardées en 0 dp — le code
+  les repasse à INVISIBLE, qui conserverait leur place.
+
+  L'Activity impose par ailleurs, après inflation :
+    · llBackgroundAnimation.height = largeur écran + hauteur barre d'état ;
+    · les marges de llAction, remplacées par (0, 0, 0, hauteur barre système) —
+      d'où le retrait bas en `padding` ici, pas en `layout_margin` ;
+    · le fond de ivBackground, les couleurs de texte et les pastilles des deux
+      boutons (voir callkit_action_circle.xml).
+-->
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/callkit_bg_gradient"
+    android:clipChildren="false">
+
+    <!--
+      Fond du plugin. `showIncoming` lui passe #00000000 : le dégradé de la
+      maquette est celui du RelativeLayout, qu'aucun aplat ne doit masquer.
+      La vue reste pleine taille pour qu'un éventuel `backgroundUrl` continue
+      de fonctionner.
+    -->
+    <ImageView
+        android:id="@+id/ivBackground"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        tools:ignore="ContentDescription" />
+
+    <!--
+      Pilule « APPEL ENTRANT » (CallIncomingHeaderPill).
+
+      48 dp de marge haute : l'Activity dessine sous une barre d'état
+      transparente et le plugin n'expose pas ses insets, on ne peut donc pas
+      reproduire le SafeArea de Flutter (barre d'état + AppSpacing.xl = 44 dp
+      sur un écran classique). 48 dp dégage toutes les hauteurs de barre
+      courantes, encoches comprises.
+    -->
+    <LinearLayout
+        android:id="@+id/llCallkitPill"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignParentTop="true"
+        android:layout_centerHorizontal="true"
+        android:layout_marginTop="48dp"
+        android:background="@drawable/callkit_pill_bg"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingLeft="14dp"
+        android:paddingTop="8dp"
+        android:paddingRight="14dp"
+        android:paddingBottom="8dp">
+
+        <ImageView
+            android:layout_width="14dp"
+            android:layout_height="14dp"
+            android:alpha="0.65"
+            android:src="@drawable/callkit_ic_phone"
+            android:tint="@color/callkit_pill_on"
+            tools:ignore="ContentDescription,UseAppTint" />
+
+        <Space
+            android:layout_width="8dp"
+            android:layout_height="0dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:alpha="0.85"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.0923"
+            android:text="@string/callkit_incoming_label"
+            android:textColor="@color/callkit_pill_on"
+            android:textSize="13sp" />
+
+    </LinearLayout>
+
+    <!--
+      Halo + avatar + nom (CallIncomingAvatarPulse).
+
+      La hauteur est écrasée par l'Activity (largeur écran + barre d'état) ;
+      l'avatar étant centré dans le bloc et le bloc accroché sous la pilule,
+      son centre retombe à ~3 dp près sur celui de la maquette Flutter.
+
+      Le battement du halo n'est pas reproductible en XML — aucune animation
+      ne démarre seule. On détourne l'onde du RippleRelativeLayout, que
+      l'Activity lance elle-même : deux cercles de 200 dp qui enflent de 22 %
+      en 3,6 s, soit la période et l'amplitude du `_pulseCtrl` de l'écran
+      Flutter (1,8 s aller-retour, 0,96 → 1,04).
+    -->
+    <com.hiennv.flutter_callkit_incoming.widgets.RippleRelativeLayout
+        android:id="@+id/llBackgroundAnimation"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_below="@id/llCallkitPill"
+        android:clipChildren="false"
+        app:ripple_amount="2"
+        app:ripple_color="@color/callkit_halo_ripple"
+        app:ripple_duration="3600"
+        app:ripple_radius="100dp"
+        app:ripple_scale="1.22">
+
+        <!-- Gardé pour le findViewById ; isShowLogo est à false. -->
+        <ImageView
+            android:id="@+id/ivLogo"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:visibility="invisible"
+            tools:ignore="ContentDescription" />
+
+        <View
+            android:layout_width="240dp"
+            android:layout_height="240dp"
+            android:layout_centerInParent="true"
+            android:background="@drawable/callkit_halo_ring" />
+
+        <View
+            android:layout_width="200dp"
+            android:layout_height="200dp"
+            android:layout_centerInParent="true"
+            android:background="@drawable/callkit_halo_inner" />
+
+        <!--
+          `visible` et non `invisible` comme chez le plugin : celui-ci ne
+          révèle l'avatar que si une URL est fournie, alors que notre écran
+          affiche toujours quelque chose. Le code ne fait jamais l'inverse.
+        -->
+        <de.hdodenhof.circleimageview.CircleImageView
+            android:id="@+id/ivAvatar"
+            android:layout_width="148dp"
+            android:layout_height="148dp"
+            android:layout_centerInParent="true"
+            android:background="@drawable/callkit_avatar_circle"
+            android:elevation="3dp"
+            android:src="@drawable/callkit_avatar_placeholder"
+            android:visibility="visible"
+            app:civ_border_width="0dp"
+            app:civ_circle_background_color="@color/callkit_avatar_bg" />
+
+        <!-- context.text.headlineMedium : 26 sp, w700, letterSpacing -0.3 px. -->
+        <TextView
+            android:id="@+id/tvNameCaller"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_below="@id/ivAvatar"
+            android:layout_marginTop="24dp"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:letterSpacing="-0.0115"
+            android:maxLines="2"
+            android:paddingLeft="32dp"
+            android:paddingRight="32dp"
+            android:textColor="@color/callkit_on_background"
+            android:textSize="26sp"
+            android:textStyle="bold"
+            tools:text="Prénom Nom" />
+
+        <!-- Gardé pour le findViewById ; isShowCallID est à false. -->
+        <TextView
+            android:id="@+id/tvNumber"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:visibility="invisible" />
+
+    </com.hiennv.flutter_callkit_incoming.widgets.RippleRelativeLayout>
+
+    <!--
+      Barre Refuser / Accepter. Les quatre `Space` pondérés reproduisent le
+      `MainAxisAlignment.spaceEvenly` de la Row Flutter, dont l'écart fixe de
+      64 dp compte comme un troisième enfant.
+    -->
+    <LinearLayout
+        android:id="@+id/llAction"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:baselineAligned="false"
+        android:clipChildren="false"
+        android:clipToPadding="false"
+        android:orientation="horizontal"
+        android:paddingLeft="40dp"
+        android:paddingRight="40dp"
+        android:paddingBottom="48dp">
+
+        <Space
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:clipChildren="false"
+            android:gravity="center_horizontal"
+            android:orientation="vertical">
+
+            <ImageView
+                android:id="@+id/ivDeclineCall"
+                android:layout_width="80dp"
+                android:layout_height="80dp"
+                android:background="@drawable/callkit_action_circle"
+                android:backgroundTint="@color/callkit_action_reject"
+                android:elevation="8dp"
+                android:outlineAmbientShadowColor="@color/callkit_action_reject"
+                android:outlineSpotShadowColor="@color/callkit_action_reject"
+                android:padding="23dp"
+                android:src="@drawable/callkit_ic_phone_down"
+                tools:ignore="ContentDescription"
+                tools:targetApi="p" />
+
+            <TextView
+                android:id="@+id/tvDecline"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:alpha="0.75"
+                android:fontFamily="sans-serif-medium"
+                android:text="@string/text_decline"
+                android:textColor="@color/callkit_on_background"
+                android:textSize="14sp" />
+
+        </LinearLayout>
+
+        <Space
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <Space
+            android:layout_width="64dp"
+            android:layout_height="0dp" />
+
+        <Space
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:clipChildren="false"
+            android:gravity="center_horizontal"
+            android:orientation="vertical">
+
+            <ImageView
+                android:id="@+id/ivAcceptCall"
+                android:layout_width="80dp"
+                android:layout_height="80dp"
+                android:background="@drawable/callkit_action_circle"
+                android:backgroundTint="@color/callkit_action_accept"
+                android:elevation="8dp"
+                android:outlineAmbientShadowColor="@color/callkit_action_accept"
+                android:outlineSpotShadowColor="@color/callkit_action_accept"
+                android:padding="23dp"
+                android:src="@drawable/callkit_ic_phone"
+                tools:ignore="ContentDescription"
+                tools:targetApi="p" />
+
+            <TextView
+                android:id="@+id/tvAccept"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:alpha="0.75"
+                android:fontFamily="sans-serif-medium"
+                android:text="@string/text_accept"
+                android:textColor="@color/callkit_on_background"
+                android:textSize="14sp" />
+
+        </LinearLayout>
+
+        <Space
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+    </LinearLayout>
+
+</RelativeLayout>

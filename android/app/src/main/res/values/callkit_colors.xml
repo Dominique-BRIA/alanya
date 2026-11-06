@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Écran d'appel entrant natif (res/layout/callkit_incoming_content.xml,
+      repris de l'application de référence).
+
+      Même maquette qu'elle, aux couleurs d'Alanya Work : celles de notre écran
+      de sonnerie Flutter (`ActiveCallScreen`, AlanyaColors). Pas de variante
+      `values-night` : notre écran d'appel est sombre dans les deux thèmes.
+    -->
+    <!-- Fond : chocolat, légèrement assombri vers le bas -->
+    <color name="callkit_gradient_start">#FF5C3D2E</color>
+    <color name="callkit_gradient_center">#FF4F3326</color>
+    <color name="callkit_gradient_end">#FF3A251B</color>
+
+    <color name="callkit_on_background">#FFFFFFFF</color>
+
+    <!-- Halo de la photo : blanc translucide, comme CallAvatarWaves -->
+    <color name="callkit_halo_ring">#26FFFFFF</color>
+    <color name="callkit_halo_inner">#33FFFFFF</color>
+    <color name="callkit_halo_ripple">#14FFFFFF</color>
+
+    <!-- Pilule « APPEL ENTRANT » -->
+    <color name="callkit_pill_bg">#33FFFFFF</color>
+    <color name="callkit_pill_on">#FFFFFFFF</color>
+
+    <!-- Accepter : vert forêt ; Refuser : rouge (Colors.red de Flutter) -->
+    <color name="callkit_action_accept">#FF2D6A4F</color>
+    <color name="callkit_action_reject">#FFF44336</color>
+
+    <!-- Fond de la photo absente : terre cuite -->
+    <color name="callkit_avatar_bg">#FFB85C38</color>
+</resources>

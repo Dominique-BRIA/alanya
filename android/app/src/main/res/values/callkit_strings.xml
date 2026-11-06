@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Pilule de l'écran d'appel natif (callkit_incoming_content.xml). -->
+    <string name="callkit_incoming_label">APPEL ENTRANT</string>
+</resources>

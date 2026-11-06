@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:alanya_telecom/alanya_telecom.dart';
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -54,12 +54,11 @@ class CommunicationEnCours {
       await p.reload();
       if (p.getString(_cle) == '$pid') return true;
     } catch (_) {}
-    // Un appel décroché depuis l'écran natif est en cours côté Telecom avant
+    // Un appel décroché depuis l'écran natif est en cours côté CallKit avant
     // même que l'application n'ait démarré son service.
     try {
-      if (Platform.isAndroid && await AlanyaTelecom.getAcceptedCall() != null) {
-        return true;
-      }
+      final appels = await FlutterCallkitIncoming.activeCalls();
+      if (appels.any((c) => c.isAccepted)) return true;
     } catch (_) {}
     return false;
   }

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Fond de l'écran d'appel entrant : report du
+  `callUi.backgroundGradientDecoration` (topLeft → bottomRight, trois arrêts).
+  L'angle 315° d'un GradientDrawable va bien de coin haut-gauche à coin
+  bas-droit, comme le LinearGradient de Flutter.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:angle="315"
+        android:centerColor="@color/callkit_gradient_center"
+        android:endColor="@color/callkit_gradient_end"
+        android:startColor="@color/callkit_gradient_start"
+        android:type="linear" />
+</shape>

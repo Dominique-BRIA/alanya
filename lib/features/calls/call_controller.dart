@@ -709,6 +709,103 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
   }
 
+  /// L'appel dont la sonnerie INTERNE joue déjà : jamais deux fois.
+  String? _sonnerieInternePour;
+
+  /*
+   * L'ÉCRAN FLUTTER PREND LA SONNERIE (06/11/2026), comme le « passage de
+   * relais vers Flutter » de l'application de référence.
+   *
+   * Hors de l'écran, l'appel sonne sur l'écran natif CallKit. Quand
+   * l'application revient au premier plan pendant la sonnerie, son écran
+   * Flutter s'ouvre : l'écran natif est alors retiré SILENCIEUSEMENT — ni fin
+   * d'appel, ni refus (retrait signalé programmatique au natif) — et la
+   * sonnerie interne prend la suite, sans trou : les deux gestes se suivent.
+   *
+   * ⚠️ JAMAIS DE COUPURE SANS RELAIS IMMÉDIAT. Mesuré sur TECNO KL5 : couper
+   * la sonnerie native au démarrage, en attendant la trame socket, laissait
+   * huit secondes de silence. Ici le relais suit le retrait dans la foulée.
+   */
+  Future<void> prendreLaSonnerie(String callId) async {
+    final inc = incoming;
+    if (inc == null || inc.callId != callId) return;
+    if (_sonnerieInternePour == callId) return;
+    _sonnerieInternePour = callId;
+    final natif = await CallUiNative.appelActif();
+    if (natif != null &&
+        natif['callId'] == callId &&
+        natif['isAccepted'] != true) {
+      traceAppel("écran natif repris par l'écran Flutter ($callId)");
+      await CallUiNative.masquerSilencieusement(callId);
+    }
+    if (incoming?.callId != callId) return;
+    // Sonnerie propre à la LISTE DE CONTACTS de l'appelant, s'il y en a une.
+    // ⚠️ Le délai est BORNÉ et l'échec vaut « pas de sonnerie personnalisée » :
+    // un appel ne doit jamais attendre le réseau pour sonner.
+    final sonnerieListe = await _sonneriesListes
+        .sonneriePourAppelant(callerId: inc.callerId)
+        .timeout(const Duration(milliseconds: 400), onTimeout: () => null)
+        .catchError((_) => null);
+    if (incoming?.callId != callId) return;
+    // Livrée : elle se joue depuis le paquet, sans réseau ni jeton.
+    RingtoneService.instance.startIncoming(
+      asset: sonnerieListe != null && sonnerieListe.estLivree
+          ? sonnerieListe.valeur
+          : null,
+      url: sonnerieListe != null && !sonnerieListe.estLivree
+          ? sonnerieListe.valeur
+          : null,
+    );
+  }
+
+  /// L'application QUITTE l'écran pendant que ça sonne : l'appel passe à
+  /// l'écran natif CallKit, seul visible hors de l'application et par-dessus
+  /// le verrouillage — le « passage de relais vers le natif » de la référence.
+  /// La sonnerie interne s'arrête : c'est le natif qui sonne désormais.
+  Future<void> confierAuNatif() async {
+    final inc = incoming;
+    if (inc == null || activeCallId != null || enPreparation) return;
+    // Acceptation en cours : l'appel n'est plus à présenter.
+    if (_acceptationEnCours == inc.callId) return;
+    await RingtoneService.instance.stop();
+    _sonnerieInternePour = null;
+    traceAppel("appel ${inc.callId} confié à l'écran natif (arrière-plan)");
+    try {
+      await CallUiNative.afficherAppelEntrant(
+        callId: inc.callId,
+        nom: inc.displayTitle,
+        avatarUrl: inc.callerAvatarUrl,
+        video: inc.callType == "VIDEO",
+        appelant: {
+          'callerId': inc.callerId,
+          'convId': inc.convId ?? '',
+          'isGroup': '${inc.isGroup}',
+          'groupName': inc.groupName ?? '',
+        },
+      );
+      ecranNatifAffiche = true;
+    } catch (e) {
+      debugPrint("[CallController] écran d'appel natif indisponible: $e");
+      // Pas d'écran natif : la sonnerie interne reprend plutôt que le silence.
+      unawaited(prendreLaSonnerie(inc.callId));
+    }
+  }
+
+  /// Fin d'appel signalée par le NATIF (`onCallEnded`, écouteur ACTIVE_CALLS) :
+  /// refusé, expiré, ou raccroché depuis la notification. L'état local suit ;
+  /// rien n'est renvoyé au serveur — le natif s'en est chargé, ou le minuteur
+  /// du serveur tranche (expiration).
+  Future<void> finSignaleeParLeNatif(String callId) async {
+    if (callId.isEmpty) return;
+    if (incoming?.callId == callId) {
+      _signalBuffer.remove(callId);
+      _clear();
+      notifyListeners();
+    } else if (activeCallId == callId) {
+      await hangUp();
+    }
+  }
+
   /// Éteint l'aperçu quand on RÉDUIT l'écran de sonnerie (06/11/2026). Le
   /// choix « caméra coupée » est gardé ; l'aperçu se rouvre au retour.
   Future<void> suspendreApercuEntrant() async {
@@ -724,22 +821,18 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
   String? entrantReduit;
 
   /*
-   * L'APPEL QUI SONNE DÉJÀ CÔTÉ SYSTÈME, ADOPTÉ AVANT LA CONNEXION (06/11/2026).
+   * L'APPEL QUI SONNE SUR L'ÉCRAN NATIF, REPRIS AVANT LA CONNEXION (06/11/2026).
    *
-   * 🔴 LE CAS DE L'ÉCRAN VERROUILLÉ. Le push déclare l'appel à Telecom, dont la
-   * notification lance l'application par-dessus le verrouillage. Or `incoming`
+   * On ouvre l'application pendant que l'écran CallKit sonne. Or `incoming`
    * n'était posé que par la trame WebSocket — une dizaine de secondes après un
    * démarrage à froid. Pendant tout ce temps : la sonnerie, l'accueil de
    * l'application, et aucun bouton pour décrocher.
    *
-   * Telecom garde tout ce que le push a transmis (identifiant de l'appel et
-   * de l'appelant, nom, photo, type) : c'est assez pour afficher l'écran de
-   * sonnerie tout de suite. La trame WebSocket, à son arrivée, remplace ces
-   * informations par les siennes — même `callId`, donc même écran.
-   *
-   * ⚠️ SANS `callerId`, ON N'ADOPTE PAS : c'est lui qui désigne la
-   * conversation, la sonnerie de liste et le nom donné à l'appelant. Un push
-   * d'un ancien serveur qui ne le porterait pas garde l'ancien chemin.
+   * L'entrée CallKit garde ce que le push a transmis (identifiant de l'appel,
+   * nom, photo, type) : c'est assez pour afficher l'écran de sonnerie tout de
+   * suite — comme l'application de référence au démarrage à froid. La trame
+   * WebSocket, à son arrivée, remplace ces informations par les siennes —
+   * même `callId`, donc même écran.
    */
   bool adopterAppelNatif(Map<String, dynamic> data) {
     if (incoming != null || activeCallId != null || enPreparation) {
@@ -750,25 +843,30 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
       return v.isEmpty ? null : v;
     }
 
+    // Entrée CallKit (`CallUiNative.appelActif`). L'identifiant de
+    // l'appelant peut manquer — le push du serveur ne le porte pas encore :
+    // l'appel s'affiche quand même, et la trame socket complète l'identité à
+    // son arrivée (même `callId`, même écran).
     final callId = texte('callId');
-    final callerId = texte('callerId');
-    if (callId == null || callerId == null) return false;
+    if (callId == null) return false;
+    final callerId = texte('callerId') ?? '';
     incoming = IncomingCallInfo(
       callId: callId,
       convId: texte('convId'),
-      callType: texte('callType')?.toLowerCase() == 'video' ? "VIDEO" : "AUDIO",
+      callType: data['isVideo'] == true || texte('isVideo') == 'true'
+          ? "VIDEO"
+          : "AUDIO",
       callerId: callerId,
-      callerName: NomsDonnes.nomPour(callerId,
+      callerName: NomsDonnes.nomPour(callerId.isEmpty ? null : callerId,
           texte('callerName') ?? _trAppel('call_word', "Appel")),
-      callerAvatarUrl: texte('callerAvatar'),
-      isGroup: texte('isGroup') == 'true',
+      callerAvatarUrl: texte('callerPhoto'),
+      isGroup: data['isGroup'] == true || texte('isGroup') == 'true',
       groupName: texte('groupName'),
       memberCount: 2,
     );
-    // Le natif sonne déjà : pas de sonnerie interne (voir `_onEvent`).
     ecranNatifAffiche = true;
     LockScreenCall.activer();
-    traceAppel("appel $callId adopté depuis Telecom, avant la connexion");
+    traceAppel("appel $callId repris de l'écran natif, avant la connexion");
     notifyListeners();
     return true;
   }
@@ -1671,6 +1769,7 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
 
   void _clear({String? idAppel}) {
     enPreparation = false;
+    _sonnerieInternePour = null;
     _paroleSuivie = false;
     _parole.arreter();
     sortieAudio = null;
@@ -2231,16 +2330,13 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
   /// c'est ce drapeau qui lui a fait annoncer « appel vidéo ». La donnée est
   /// donc déjà sur l'appareil — il suffit de la relire.
   ///
-  /// ⚠️ ON INTERROGE LES DEUX REGISTRES. Au moment où l'on arrive ici, le
-  /// natif a déjà basculé l'appel de « en sonnerie » à « accepté » : ne lire
-  /// que le premier le manquerait à tous les coups.
+  /// L'écran natif est celui de CallKit (06/11/2026) : son entrée, acceptée
+  /// ou non, porte `isVideo`.
   Future<String?> _typeSelonEcranNatif() async {
     try {
-      final natif = (await AlanyaTelecom.getAcceptedCall()) ??
-          (await AlanyaTelecom.getRingingCall());
-      final brut = natif?["callType"]?.toString().toLowerCase();
-      if (brut == null) return null;
-      return brut == "video" ? "VIDEO" : "AUDIO";
+      final natif = await CallUiNative.appelActif();
+      if (natif == null) return null;
+      return natif["isVideo"] == true ? "VIDEO" : "AUDIO";
     } catch (e) {
       // Le natif est indisponible sur ce téléphone : on ne sait pas, et on le
       // dit. L'appelant gardera la valeur qu'il avait.
@@ -2549,47 +2645,9 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
       }
       ecranNatifAffiche = natifAffiche;
 
-      // Sonnerie interne dès que l'écran natif ne porte pas l'appel : il joue
-      // la sienne, et les deux ensemble donneraient une double sonnerie.
-      //
-      // ⚠️ `natifAffiche` NE SUFFIT PAS À LE SAVOIR. Il ne dit que ceci : « ai-je
-      // déclaré l'appel à l'instant ? » Or au démarrage à froid, c'est le PUSH
-      // qui l'a déjà déclaré à Telecom, plusieurs secondes avant que la trame
-      // socket n'arrive ici — l'application est alors au premier plan, donc
-      // `natifAffiche` vaut faux, et une seconde sonnerie partirait par-dessus
-      // celle qui joue déjà.
-      //
-      // On interroge donc l'état RÉEL du natif. Mesuré sur TECNO KL5 : sans ce
-      // contrôle, la sonnerie native était coupée à 3,1 s pour laisser la place
-      // à l'interne, qui ne démarrait qu'à 16,0 s — huit secondes de silence.
-      if (!natifAffiche) {
-        final natifSonneDeja =
-            (await AlanyaTelecom.getRingingCall())?['callId']?.toString() ==
-                callId;
-        if (!natifSonneDeja) {
-          // Sonnerie propre à la LISTE DE CONTACTS de l'appelant, s'il y en a
-          // une. ⚠️ Le délai est BORNÉ et l'échec vaut « pas de sonnerie
-          // personnalisée » : un appel ne doit jamais attendre le réseau pour
-          // sonner. Le cache est en mémoire, donc la réponse est immédiate dans
-          // le cas normal ; la borne ne couvre que la lecture du jeton.
-          final sonnerieListe = await _sonneriesListes
-              .sonneriePourAppelant(callerId: incoming!.callerId)
-              .timeout(const Duration(milliseconds: 400),
-                  onTimeout: () => null)
-              .catchError((_) => null);
-          // Livrée : elle se joue depuis le paquet, sans réseau ni jeton.
-          RingtoneService.instance.startIncoming(
-            asset: sonnerieListe != null && sonnerieListe.estLivree
-                ? sonnerieListe.valeur
-                : null,
-            url: sonnerieListe != null && !sonnerieListe.estLivree
-                ? sonnerieListe.valeur
-                : null,
-          );
-        } else {
-          traceAppel("sonnerie interne ignorée — le natif sonne déjà");
-        }
-      }
+      // Application à l'écran : c'est l'écran Flutter qui porte l'appel, et
+      // donc la sonnerie interne (voir [prendreLaSonnerie]).
+      if (!natifAffiche) await prendreLaSonnerie(callId);
       // Autorise l'écran d'appel à passer par-dessus le verrouillage, et allume
       // l'écran. Activé ICI et non au montage de l'écran d'appel : quand le
       // téléphone est verrouillé, il faut que la fenêtre porte déjà l'attribut

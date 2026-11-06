@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Substitue notre maquette au plein écran du plugin.
+
+      Un alias plutôt qu'un fichier `layout/activity_callkit_incoming.xml` :
+      flutter_callkit_incoming livre CE nom dans deux configurations, `layout/`
+      et `layout-w600dp-land/` (tablette en paysage — l'Activity ne verrouille
+      le portrait que sur les téléphones). Un seul fichier n'en aurait couvert
+      qu'une, l'autre aurait continué d'afficher le fond bleu du plugin. Les
+      deux alias pointent sur le même contenu, sans duplication.
+    -->
+    <item name="activity_callkit_incoming" type="layout">@layout/callkit_incoming_content</item>
+</resources>

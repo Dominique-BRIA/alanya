@@ -205,28 +205,18 @@ object IncomingNotifier {
             "Appel $callType entrant…"
         val flags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
 
-        // Les boutons portent l'identifiant de L'APPEL : touchés en retard, ils
-        // ne décrochent ni ne refusent l'appel suivant (06/11/2026).
-        val callId = CallRegistry.keyOf(data).orEmpty()
         val answerPi = PendingIntent.getBroadcast(
             ctx, 1,
-            Intent(ctx, TelecomActionReceiver::class.java).setAction(ACTION_ANSWER)
-                .putExtra(IncomingCallActivity.EXTRA_CALL_ID, callId),
+            Intent(ctx, TelecomActionReceiver::class.java).setAction(ACTION_ANSWER),
             flags
         )
         val declinePi = PendingIntent.getBroadcast(
             ctx, 2,
-            Intent(ctx, TelecomActionReceiver::class.java).setAction(ACTION_DECLINE)
-                .putExtra(IncomingCallActivity.EXTRA_CALL_ID, callId),
+            Intent(ctx, TelecomActionReceiver::class.java).setAction(ACTION_DECLINE),
             flags
         )
-        // L'ÉCRAN D'APPEL NATIF, et non plus l'application entière (06/11/2026) :
-        // par-dessus le verrouillage, ou au toucher de la notification, il
-        // s'affiche sans attendre le démarrage de Flutter. Voir
-        // IncomingCallActivity.
-        val fullPi = PendingIntent.getActivity(
-            ctx, 3, IncomingCallActivity.intent(ctx, callId), flags
-        )
+        val launch = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)
+        val fullPi = PendingIntent.getActivity(ctx, 3, launch, flags)
 
         val builder: Notification.Builder =
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -289,14 +279,9 @@ object IncomingNotifier {
 class TelecomActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         Log.d(TAG, "action notification: ${intent.action}")
-        val callId = intent.getStringExtra(IncomingCallActivity.EXTRA_CALL_ID).orEmpty()
         when (intent.action) {
-            // Sans identifiant (notification d'une version précédente), on
-            // garde l'ancien comportement : l'appel courant.
-            IncomingNotifier.ACTION_ANSWER ->
-                if (callId.isEmpty()) CallRegistry.answerCurrent() else CallRegistry.answer(callId)
-            IncomingNotifier.ACTION_DECLINE ->
-                if (callId.isEmpty()) CallRegistry.rejectCurrent() else CallRegistry.reject(callId)
+            IncomingNotifier.ACTION_ANSWER -> CallRegistry.answerCurrent()
+            IncomingNotifier.ACTION_DECLINE -> CallRegistry.rejectCurrent()
         }
     }
 }

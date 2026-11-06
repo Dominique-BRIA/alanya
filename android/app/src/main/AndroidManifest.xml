@@ -91,7 +91,7 @@
 
     <application
         android:label="Alanya Work"
-        android:name="${applicationName}"
+        android:name=".AlanyaApplication"
         android:icon="@mipmap/ic_launcher"
         android:largeHeap="true"
         android:usesCleartextTraffic="true">
@@ -246,6 +246,24 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- Appels entrants : couche FCM native, comme l'application de
+             référence (AlanyaFirebaseMessagingService.kt). Elle affiche
+             l'écran d'appel CallKit sans démarrer Flutter. Les autres messages
+             continuent d'arriver à Flutter par le receiver du plugin. -->
+        <service
+            android:name=".AlanyaFirebaseMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+        <!-- Le SDK ne livre MESSAGING_EVENT qu'à UN service : celui du plugin
+             est désactivé, et notre service relaie le jeton à Flutter. -->
+        <service
+            android:name="io.flutter.plugins.firebase.messaging.FlutterFirebaseMessagingService"
+            tools:node="merge"
+            android:enabled="false" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

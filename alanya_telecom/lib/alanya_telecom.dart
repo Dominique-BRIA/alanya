@@ -54,12 +54,9 @@ class AlanyaTelecom {
 
   /// Termine l'appel Telecom courant (annulation appelant, fin de
   /// communication, nettoyage). [missed] = clôture « appel manqué ».
-  ///
-  /// Avec [callId], seul CET appel est terminé : une fin arrivée en retard ne
-  /// coupe pas l'appel suivant, qui sonne peut-être déjà.
-  static Future<void> endCall({bool missed = false, String? callId}) async {
+  static Future<void> endCall({bool missed = false}) async {
     try {
-      await _ch.invokeMethod('endCall', {'missed': missed, 'callId': callId});
+      await _ch.invokeMethod('endCall', {'missed': missed});
     } catch (_) {}
   }
 
@@ -113,23 +110,10 @@ class AlanyaTelecom {
   }
 
   /// Décroche l'appel qui sonne (équivalent au bouton de la notification).
-  /// Avec [callId], seul CET appel est décroché, s'il sonne encore.
-  static Future<void> answerRinging({String? callId}) async {
+  static Future<void> answerRinging() async {
     try {
-      await _ch.invokeMethod('answerRinging', {'callId': callId});
+      await _ch.invokeMethod('answerRinging');
     } catch (_) {}
-  }
-
-  /// Le message choisi sur l'écran d'appel natif (« Message »), à envoyer par
-  /// l'application : `{callId, callerId, texte}`, rendu UNE seule fois — ou
-  /// null s'il n'y en a pas.
-  static Future<Map<String, dynamic>?> prendreReponseAppel() async {
-    try {
-      final r = await _ch.invokeMethod('prendreReponseAppel');
-      return r is Map ? Map<String, dynamic>.from(r) : null;
-    } catch (_) {
-      return null;
-    }
   }
 
   /// Refuse l'appel qui sonne.

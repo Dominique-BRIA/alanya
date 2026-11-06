@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Fond de l'avatar. Opaque à dessein : `ViewOutlineProvider.BACKGROUND` tire
+  le contour de l'ombre du fond de la vue — sans fond, l'ombre d'`elevation`
+  serait rectangulaire derrière un avatar rond, et avec un fond transparent
+  elle disparaîtrait (`GradientDrawable.getOutline` en reprend l'alpha).
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="@color/callkit_avatar_bg" />
+</shape>

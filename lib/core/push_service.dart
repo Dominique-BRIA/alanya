@@ -6,7 +6,6 @@ import 'dart:ui';
 
 import 'package:http/http.dart' as http;
 
-import 'package:alanya_telecom/alanya_telecom.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
@@ -881,6 +880,18 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
   DartPluginRegistrant.ensureInitialized();
   debugPrint('[PushService] Message background: ${message.data['type']}');
 
+  // 🔴 SUR ANDROID, LES APPELS NE PASSENT PLUS PAR ICI (06/11/2026). Comme
+  // dans l'application de référence, c'est le service natif
+  // `AlanyaFirebaseMessagingService` qui affiche l'appel (écran CallKit,
+  // sans démarrer Flutter) et qui le retire à son annulation. Ce handler
+  // reçoit pourtant AUSSI chaque message, par le receiver du plugin : le
+  // traiter ici afficherait l'appel une seconde fois.
+  if (Platform.isAndroid &&
+      (message.data['type'] == 'incoming_call' ||
+          message.data['type'] == 'call_cancelled')) {
+    return;
+  }
+
   // Appel annulé/terminé par l'appelant → retire la notif d'appel plein écran
   // (ciblée par le callId partagé WS/FCM).
   if (message.data['type'] == 'call_cancelled') {
@@ -890,13 +901,7 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
     await AppelsTermines.marquer(callId);
     final plugin = FlutterLocalNotificationsPlugin();
     await plugin.cancel(PushService.callNotifId(callId));
-    // 🔴 L'APPEL TELECOM AUSSI (06/11/2026). Seule la notification du repli
-    // était retirée : application fermée, l'écran d'appel natif et sa
-    // sonnerie continuaient jusqu'au filet des 90 s, alors que l'appelant
-    // avait raccroché — ou qu'un autre appareil avait décroché. Seul CET
-    // appel est terminé : l'annulation tardive ne coupe pas le suivant.
     if (callId != null && callId.isNotEmpty) {
-      await AlanyaTelecom.endCall(missed: true, callId: callId);
       try {
         await FlutterCallkitIncoming.endCall(callId);
       } catch (_) {}
@@ -964,7 +969,6 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
             'groupName': data['groupName']?.toString() ?? '',
           },
         );
-        _ecouterRefusTelecom();
         return;
       } catch (e) {
         // ⚠️ NE PAS LAISSER REMONTER. Un échec ici — plugin indisponible,
@@ -1079,17 +1083,20 @@ Future<void> notificationBackgroundHandler(
 /// serveur n'apprenait jamais le refus. L'appelant continuait de sonner
 /// jusqu'au minuteur des 90 s alors que son correspondant avait dit non.
 ///
-/// C'est le chemin que le paquet prévoit exactement pour ce cas
-/// (`onBackgroundMessage`, « background or terminated ») : le pendant Dart du
-/// POST natif que fait le modèle de référence depuis Kotlin.
+/// Sur Android, comme dans l'application de référence, le refus part du
+/// NATIF (`AlanyaApplication.kt` → `CallRejectHelper.kt`), sans attendre
+/// Flutter. Cet isolate ne fait plus que REPRENDRE un refus que le natif n'a
+/// pas pu envoyer — jeton d'accès expiré, que seul Flutter sait renouveler.
+/// Le délai laisse au natif le temps de réussir : un refus parti sort de la
+/// file commune, et n'est jamais renvoyé.
 ///
-/// Le délai de sonnerie compte comme un refus, pour la même raison qu'au
-/// premier plan : mieux vaut que l'appelant cesse de sonner tout de suite.
+/// Une sonnerie EXPIRÉE n'est pas un refus (06/11/2026, comme la référence) :
+/// la poster écrivait « refusé » chez les deux correspondants pour un appel
+/// qu'on n'a pas entendu. Le minuteur du serveur la classe lui-même.
 @pragma('vm:entry-point')
 Future<void> callkitBackgroundHandler(CallEvent event) async {
   final String? callId = switch (event) {
     CallEventActionCallDecline(:final callKitParams) => callKitParams.id,
-    CallEventActionCallTimeout(:final id) => id,
     _ => null,
   };
   if (callId == null || callId.isEmpty) return;
@@ -1097,7 +1104,12 @@ Future<void> callkitBackgroundHandler(CallEvent event) async {
   WidgetsFlutterBinding.ensureInitialized();
   DartPluginRegistrant.ensureInitialized();
 
-  await refuserAppelDepuisIsolate(callId);
+  if (Platform.isAndroid) {
+    await Future<void>.delayed(const Duration(seconds: 6));
+    await RefusEnAttente.reprendre(callId, _envoyerRefusDirect);
+  } else {
+    await refuserAppelDepuisIsolate(callId);
+  }
 }
 
 /// Prévient le serveur qu'un appel est refusé, depuis un isolate SANS INTERFACE.
@@ -1112,39 +1124,6 @@ Future<void> refuserAppelDepuisIsolate(String callId) =>
     // `RefusEnAttente`. L'isolate peut être tué à tout moment ; ce qui n'a pas
     // pu partir sera rejoué au prochain démarrage de l'application.
     RefusEnAttente.refuser(callId, _envoyerRefusDirect);
-
-/// Le « Refuser » de la notification Telecom, application FERMÉE (06/11/2026).
-///
-/// 🔴 IL N'ARRIVAIT JAMAIS AU SERVEUR. Le module natif diffuse `reject` à tous
-/// les moteurs Flutter du processus, mais seul `CallListener` l'écoutait — un
-/// widget, donc absent quand l'application est fermée. Le refus natif de
-/// secours (`DeclineHttp`) attend un numéro d'appelant et une route d'un
-/// autre serveur : il ne part jamais chez nous. L'appelant sonnait jusqu'au
-/// bout, comme si l'on ne répondait pas.
-///
-/// Le refus part désormais du NATIF lui-même (`RefusNatif.kt`), sans attendre
-/// Flutter, comme dans l'application de référence. Cet isolate, qui vit tant
-/// que Telecom tient le processus, ne fait plus que REPRENDRE un refus que le
-/// natif n'a pas pu envoyer — jeton d'accès expiré, que seul Flutter sait
-/// renouveler. Le délai laisse au natif le temps de réussir : un refus parti
-/// n'est jamais renvoyé (il sort de la file commune).
-///
-/// L'expiration de la sonnerie, elle, n'a pas de pendant natif : elle reste
-/// envoyée d'ici, pour que l'appelant cesse de sonner tout de suite.
-void _ecouterRefusTelecom() {
-  AlanyaTelecom.setListener((event, data) {
-    final callId = data['callId']?.toString();
-    if (callId == null || callId.isEmpty) return;
-    if (event == 'reject') {
-      unawaited(Future<void>.delayed(
-        const Duration(seconds: 6),
-        () => RefusEnAttente.reprendre(callId, _envoyerRefusDirect),
-      ));
-    } else if (event == 'timeout') {
-      unawaited(refuserAppelDepuisIsolate(callId));
-    }
-  });
-}
 
 /// Un essai d'envoi du refus, par requête directe. Rend [RefusEnAttente.envoye]
 /// dès que le serveur a répondu quelque chose de définitif, et lève (donc « à

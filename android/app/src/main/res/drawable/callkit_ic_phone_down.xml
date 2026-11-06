@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  CupertinoIcons.phone_down_fill (U+F762) — voir callkit_ic_phone.xml pour le
+  repère. Icône du bouton « Refuser » de `IncomingCallScreen`.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="34dp"
+    android:height="34dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M256 159Q414 159 478 222Q509 253 508 294Q508 320 492 336Q478 350 460 347L382 334Q365 331 356 322Q347 313 347 292L346 270Q346 265 343 262L335 258Q309 251 256 251Q211 251 176 258Q170 261 169 262Q165 266 165 270V292Q165 313 156 322Q149 331 130 334L51 347Q33 350 20 337Q6 323 4 294Q3 251 32 222Q96 159 256 159Z" />
+</vector>

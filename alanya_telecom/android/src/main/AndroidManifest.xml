@@ -27,22 +27,6 @@
             </intent-filter>
         </service>
 
-        <!-- Écran d'appel entrant NATIF (IncomingCallActivity.kt) : s'affiche
-             par-dessus le verrouillage sans démarrer l'application Flutter.
-             Tâche à part et hors des applications récentes : il ne doit ni
-             ramener l'application avec lui, ni lui survivre dans la liste. -->
-        <activity
-            android:name="com.alanya.telecom.IncomingCallActivity"
-            android:exported="false"
-            android:excludeFromRecents="true"
-            android:launchMode="singleTask"
-            android:taskAffinity="com.alanya.telecom.appel_entrant"
-            android:showWhenLocked="true"
-            android:turnScreenOn="true"
-            android:screenOrientation="portrait"
-            android:configChanges="keyboard|keyboardHidden|screenSize|screenLayout|orientation"
-            android:theme="@android:style/Theme.Material.NoActionBar" />
-
         <!-- Boutons Décrocher/Refuser de la notification d'appel -->
         <receiver
             android:name="com.alanya.telecom.TelecomActionReceiver"

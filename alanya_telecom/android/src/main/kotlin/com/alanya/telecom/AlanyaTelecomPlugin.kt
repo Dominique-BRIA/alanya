@@ -54,28 +54,14 @@ class AlanyaTelecomPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 result.success(TelecomHelper.reportIncoming(ctx, data))
             }
             "endCall" -> {
-                // Avec un identifiant, seul CET appel est terminé : une fin
-                // arrivée en retard ne coupe pas l'appel suivant (06/11/2026).
-                val missed = call.argument<Boolean>("missed") ?: false
-                val id = call.argument<String>("callId")
-                mainHandler.post {
-                    if (id.isNullOrEmpty()) CallRegistry.endFromApp(missed)
-                    else CallRegistry.endIfCall(id, missed)
-                }
+                CallRegistry.endFromApp(call.argument<Boolean>("missed") ?: false)
                 result.success(true)
             }
             "silenceRinger" -> { IncomingRinger.stop(); result.success(true) }
             "answerRinging" -> {
-                val id = call.argument<String>("callId")
-                mainHandler.post {
-                    if (id.isNullOrEmpty()) CallRegistry.answerCurrent()
-                    else CallRegistry.answer(id)
-                }
+                mainHandler.post { CallRegistry.answerCurrent() }
                 result.success(true)
             }
-            // Message choisi sur l'écran natif, que l'application doit envoyer
-            // (elle seule chiffre la conversation). Rendu une seule fois.
-            "prendreReponseAppel" -> result.success(ReponseAppel.prendre(ctx))
             "rejectRinging" -> {
                 mainHandler.post { CallRegistry.rejectCurrent() }
                 result.success(true)

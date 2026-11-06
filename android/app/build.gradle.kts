@@ -116,6 +116,14 @@ dependencies {
     // Requis par flutter_local_notifications (core library desugaring)
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 
+    // Appels entrants natifs, comme l'application de référence
+    // (AlanyaFirebaseMessagingService, CallIncomingHelper). Même BOM que
+    // firebase_core (sa propriété FirebaseSDKVersion) : deux versions de
+    // Firebase sur le même classpath ne cohabitent pas.
+    implementation(platform("com.google.firebase:firebase-bom:33.16.0"))
+    implementation("com.google.firebase:firebase-messaging")
+    implementation("androidx.core:core-ktx:1.15.0")
+
     // ⚠️ MÊME ARTEFACT ET MÊME VERSION que ceux de `flutter_webrtc`
     // (android/build.gradle : io.github.webrtc-sdk:android:125.6422.03).
     //

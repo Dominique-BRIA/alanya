@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Pastille des boutons Accepter / Refuser.
+
+  Blanche à dessein : `CallkitIncomingActivity.incomingData` REMPLACE ce fond
+  par un cercle #4CAF50 / #F44336 codés en dur (les extras ACCEPT_COLOR et
+  DECLINE_COLOR ne sont jamais écrits par le plugin, donc impossibles à
+  piloter depuis Dart). C'est `android:backgroundTint`, posé sur l'ImageView
+  et réappliqué par `View.setBackgroundDrawable`, qui impose nos couleurs —
+  avant comme après la substitution.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="#FFFFFFFF" />
+</shape>

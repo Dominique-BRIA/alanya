@@ -2,18 +2,14 @@ import 'dart:async';
 
 import 'package:alanya_telecom/alanya_telecom.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_callkit_incoming/entities/call_event.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_callkit_incoming/entities/entities.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/api_client.dart';
 import '../../core/app_snackbar.dart';
 import '../../core/appel_natif_prefs.dart';
-import '../../services/e2ee/e2ee_fournisseur.dart';
-import '../auth/auth_controller.dart';
-import '../chat/chat_repository.dart';
-import '../media/media_repository.dart';
-import '../status/reponse_statut.dart';
 import '../../core/call_ui_native.dart';
 import '../../core/debug_overlay.dart';
 import '../../core/diagnostic_chip.dart';
@@ -64,19 +60,23 @@ class _CallListenerState extends State<CallListener>
   }
 
   /*
-   * RETOUR AU PREMIER PLAN PENDANT UNE SONNERIE (06/11/2026).
+   * PASSAGES DE RELAIS ENTRE L'ÉCRAN FLUTTER ET L'ÉCRAN NATIF (06/11/2026),
+   * comme `decideIncomingPresentation` dans l'application de référence.
    *
-   * Hors de l'écran, c'est l'écran d'appel NATIF qui porte l'appel. Mais on
-   * peut aussi ouvrir l'application soi-même pendant que ça sonne : elle
-   * n'affichait alors rien, son écran de sonnerie n'étant ouvert qu'au
-   * premier plan, au moment où l'appel arrivait. Il s'ouvre désormais à ce
-   * retour — sauf si l'utilisateur l'avait lui-même réduit, ou s'il vient de
-   * décrocher sur l'écran natif (c'est ce décroché qui ramène l'application).
+   * - L'application QUITTE l'écran pendant que ça sonne (verrouillage,
+   *   bouton Accueil) : l'appel est confié à l'écran natif CallKit, seul
+   *   visible hors de l'application et par-dessus le verrouillage.
+   * - Elle REVIENT : son écran de sonnerie reprend l'appel, l'écran natif est
+   *   retiré sans fin ni refus (voir `CallController.prendreLaSonnerie`).
    */
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed || !mounted) return;
-    unawaited(_presenterSonnerieEnAttente());
+    if (!mounted) return;
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_presenterSonnerieEnAttente());
+    } else if (state == AppLifecycleState.paused) {
+      unawaited(context.read<CallController>().confierAuNatif());
+    }
   }
 
   Future<void> _presenterSonnerieEnAttente() async {
@@ -84,86 +84,26 @@ class _CallListenerState extends State<CallListener>
     // Refus restés en attente (réseau absent quand on a refusé) : le retour au
     // premier plan est souvent celui du réseau.
     unawaited(cc.rejouerRefusEnAttente());
-    unawaited(_envoyerReponseEnAttente());
-    // Décroché sur l'écran natif : l'acceptation est en cours, ouvrir l'écran
-    // de SONNERIE allumerait l'aperçu caméra au moment où l'appel la réclame.
-    if (await AlanyaTelecom.getAcceptedCall() != null) return;
+    final natif = await CallUiNative.appelActif();
     if (!mounted) return;
-    if (cc.incoming == null) await _adopterAppelQuiSonne(cc);
-    if (!mounted) return;
+    // Décroché sur l'écran natif : c'est ce décroché qui ramène l'application,
+    // l'acceptation suit son propre chemin.
+    if (natif?['isAccepted'] == true) return;
+    if (cc.incoming == null && natif != null) cc.adopterAppelNatif(natif);
     final inc = cc.incoming;
-    if (inc == null || cc.callScreenVisible) return;
-    if (cc.entrantReduit == inc.callId) return;
-    _shownCallId = inc.callId;
-    await ouvrirEcranSonnerie(cc);
-  }
-
-  /// « Désactiver la vidéo » choisi sur l'écran natif avant de décrocher :
-  /// l'appel démarre caméra coupée, comme depuis l'écran Flutter.
-  void _appliquerChoixCamera(Map<String, dynamic> data) {
-    if (data['cameraCoupee']?.toString() == 'true') {
-      context.read<CallController>().cameraEntranteActive = false;
+    if (inc == null) return;
+    if (!cc.callScreenVisible && cc.entrantReduit != inc.callId) {
+      _shownCallId = inc.callId;
+      await ouvrirEcranSonnerie(cc);
     }
-  }
-
-  /*
-   * LE MESSAGE CHOISI SUR L'ÉCRAN NATIF (06/11/2026).
-   *
-   * « Message » sur l'écran natif refuse l'appel et garde le texte choisi :
-   * seule l'application sait chiffrer la conversation. Elle l'envoie ici, dès
-   * qu'elle est là — l'écran natif l'ouvre après le déverrouillage. Rendu une
-   * seule fois par le natif : jamais deux envois du même message.
-   */
-  bool _envoiReponseEnCours = false;
-
-  Future<void> _envoyerReponseEnAttente() async {
-    if (_envoiReponseEnCours) return;
-    _envoiReponseEnCours = true;
-    try {
-      // La session peut n'être pas encore restaurée au démarrage à froid : on
-      // l'attend un moment AVANT de prendre le message, qui ne se rend qu'une
-      // fois.
-      for (var i = 0; i < 30; i++) {
-        if (!mounted) return;
-        if (context.read<AuthController>().user?.id != null) break;
-        await Future<void>.delayed(const Duration(milliseconds: 500));
-      }
-      if (!mounted) return;
-      final moi = context.read<AuthController>().user?.id;
-      if (moi == null) return;
-      final reponse = await AlanyaTelecom.prendreReponseAppel();
-      final auteur = reponse?['callerId']?.toString() ?? '';
-      final texte = reponse?['texte']?.toString().trim() ?? '';
-      if (!mounted || auteur.isEmpty || texte.isEmpty) return;
-      final envoye = trLu(context, 'call_message_sent');
-      final echec = trLu(context, 'call_message_failed');
-      try {
-        await ReponseStatut.envoyer(
-          chat: context.read<ChatRepository>(),
-          medias: context.read<MediaRepository>(),
-          pile: context.e2ee,
-          moi: moi,
-          auteurId: auteur,
-          texte: texte,
-        );
-        showAppSnackBar(envoye);
-      } catch (_) {
-        showAppSnackBar(echec);
-      }
-    } finally {
-      _envoiReponseEnCours = false;
-    }
+    if (!mounted) return;
+    unawaited(cc.prendreLaSonnerie(inc.callId));
   }
 
   /// Les libellés de l'écran natif, dans la langue de l'application. Republiés
-  /// à chaque changement de langue : l'écran natif ne peut pas la demander.
+  /// à chaque changement de langue : le natif ne peut pas la demander.
   void _publierLibellesNatifs() {
-    const cles = [
-      'call_minimize', 'call_message', 'call_video_off', 'call_video_on',
-      'decline', 'accept', 'incoming_call', 'incoming_video_call',
-      'call_quick_busy', 'call_quick_later', 'call_quick_on_way',
-      'call_quick_custom', 'send',
-    ];
+    const cles = ['accept', 'decline', 'incoming_calls', 'missed_calls'];
     final libelles = <String, String>{};
     for (final cle in cles) {
       try {
@@ -181,13 +121,11 @@ class _CallListenerState extends State<CallListener>
     _publierLibellesNatifs();
   }
 
-  /// Un appel sonne côté Telecom, inconnu de l'application (connexion pas
-  /// encore établie) : on l'adopte, voir [CallController.adopterAppelNatif].
-  Future<void> _adopterAppelQuiSonne(CallController cc) async {
-    try {
-      final sonne = await AlanyaTelecom.getRingingCall();
-      if (sonne != null && mounted) cc.adopterAppelNatif(sonne);
-    } catch (_) {}
+  /// L'identifiant SERVEUR d'une entrée CallKit : `extra.callId`, à défaut
+  /// l'identifiant de l'entrée (ils coïncident aujourd'hui).
+  static String _idServeur(CallKitParams p) {
+    final metier = p.extra?['callId']?.toString().trim() ?? '';
+    return metier.isNotEmpty ? metier : p.id;
   }
 
   @override
@@ -197,186 +135,93 @@ class _CallListenerState extends State<CallListener>
     // Actions de la notification système d'appel (Répondre / Refuser).
     PushService.onCallAction = _onCallAction;
 
-    // Boutons de l'ÉCRAN D'APPEL NATIF. Ils n'arrivent pas par le même chemin
-    // que ceux de la notification locale : c'est un flux propre au paquet, et
-    // c'est lui qui compte désormais pour un appel reçu application fermée.
-    // `CallEvent` est une classe SCELLÉE : chaque action est une sous-classe
-    // distincte, avec ses propres champs. On filtre donc sur le TYPE et non sur
-    // une chaîne — le compilateur vérifie alors que les champs lus existent.
+    // Boutons de l'ÉCRAN D'APPEL NATIF (CallKit), application vivante.
+    // `CallEvent` est une classe SCELLÉE : on filtre sur le TYPE, le
+    // compilateur vérifie que les champs lus existent.
     _natifSub = FlutterCallkitIncoming.onEvent.listen((event) {
       if (!mounted || event == null) return;
       switch (event) {
         case CallEventActionCallAccept(:final callKitParams):
-          _onCallAction('call_accept', callKitParams.id);
+          _onCallAction('call_accept', _idServeur(callKitParams));
+        // Refus : le NATIF l'envoie lui-même (AlanyaApplication →
+        // CallRejectHelper). On nettoie sans le renvoyer, puis on reprend la
+        // file un peu plus tard au cas où il aurait échoué (jeton expiré).
         case CallEventActionCallDecline(:final callKitParams):
-          _onCallAction('call_reject', callKitParams.id);
-        // Fin du délai de sonnerie : l'appel n'a pas été pris. Traité comme un
-        // refus pour que l'appelant cesse de sonner tout de suite, plutôt que
-        // d'attendre son propre minuteur.
-        case CallEventActionCallTimeout(:final id):
-          _onCallAction('call_reject', id);
-        default:
-          break;
-      }
-    });
-
-    // Boutons de la notification TELECOM, portée par le module natif local.
-    //
-    // C'est désormais CE canal qui compte sur Android : `afficherAppelEntrant`
-    // passe par Telecom en priorité, et le flux du paquet juste au-dessus ne
-    // sert plus qu'au repli. Sans cet écouteur, Décrocher et Refuser seraient
-    // des boutons morts pour tout appel reçu application fermée.
-    AlanyaTelecom.setListener((event, data) {
-      if (!mounted) return;
-      final callId = data['callId']?.toString();
-      switch (event) {
-        case 'answer':
-          // Traces du chip, POSÉES AVANT la garde d'écho : sur le chemin de
-          // l'écho la branche sort tout de suite, et le diagnostic serait
-          // perdu justement quand on décroche depuis l'application.
-          // Deux relevés : le natif écrit en `apply()` (asynchrone) et le
-          // service ne pose sa notification qu'un instant plus tard — un seul
-          // relevé raterait la ligne décisive.
-          unawaited(Future.delayed(
-              const Duration(milliseconds: 1500), verserTracesChip));
-          unawaited(Future.delayed(
-              const Duration(seconds: 5), verserTracesChip));
-          // Écho de notre propre `answerRinging` : l'appel est déjà en cours
-          // d'acceptation, le relancer ouvrirait un second écran d'appel.
-          if (CallUiNative.consommerEchoLocal(callId)) return;
-          // « Désactiver la vidéo » choisi sur l'écran natif avant de décrocher.
-          _appliquerChoixCamera(data);
-          _onCallAction('call_accept', callId);
-        // Refusé sur l'écran ou la notification natifs : le NATIF a déjà
-        // envoyé le refus (RefusNatif.kt). On nettoie sans le renvoyer, puis
-        // on reprend la file un peu plus tard au cas où il aurait échoué.
-        case 'reject':
-          _onCallAction('call_reject', callId, dejaTransmis: true);
+          _onCallAction('call_reject', _idServeur(callKitParams),
+              dejaTransmis: true);
           unawaited(Future<void>.delayed(const Duration(seconds: 6), () {
             if (mounted) context.read<CallController>().rejouerRefusEnAttente();
           }));
-        // Le délai de sonnerie compte comme un refus, pour que l'appelant cesse
-        // de sonner tout de suite plutôt que d'attendre son propre minuteur.
-        case 'timeout':
-          _onCallAction('call_reject', callId);
-        case 'telecom_failed':
-          unawaited(_replierSurPaquet(data));
-        // Appui sur le chip vert de la barre d'état : on REVIENT à un appel
-        // déjà décroché, on n'en accepte aucun. D'où une branche à part et
-        // non un `call_accept`, qui relancerait une acceptation.
-        case 'reopen':
-          _rouvrirEcranAppel();
+        // Sonnerie expirée : PAS un refus, comme dans la référence — le
+        // minuteur du serveur la classe lui-même. État local seulement.
+        case CallEventActionCallTimeout(:final id):
+          unawaited(context.read<CallController>().finSignaleeParLeNatif(id));
+        case CallEventActionCallEnded(:final callKitParams):
+          unawaited(context
+              .read<CallController>()
+              .finSignaleeParLeNatif(_idServeur(callKitParams)));
         default:
           break;
       }
     });
 
-    // ⚠️ NE PAS effacer les appels natifs au démarrage. La version précédente
-    // appelait `endAllCalls()` ici pour nettoyer un écran orphelin — sauf que
-    // décrocher DÉMARRE l'application : cette ligne supprimait donc l'appel que
-    // l'utilisateur venait précisément d'accepter. L'écran se refermait, le
-    // WebSocket relivrait l'appel bufferisé, et tout repartait à zéro comme
-    // s'il arrivait à l'instant. Un écran vraiment orphelin disparaît seul au
-    // bout des 60 s de sonnerie.
+    // Fin d'appel vue par le NATIF (écouteur ACTIVE_CALLS d'AlanyaApplication)
+    // quand l'événement du paquet n'atteint pas Dart : refus ou raccroché
+    // depuis la notification, expiration.
+    _canalNatif.setMethodCallHandler((appel) async {
+      if (!mounted || appel.method != 'onCallEnded') return;
+      final args = appel.arguments;
+      final callId = args is Map ? (args['callId']?.toString() ?? '') : '';
+      await context.read<CallController>().finSignaleeParLeNatif(callId);
+    });
+
+    // Appui sur le chip vert de la barre d'état : on REVIENT à un appel déjà
+    // décroché, on n'en accepte aucun.
+    AlanyaTelecom.setListener((event, data) {
+      if (!mounted) return;
+      if (event == 'reopen') _rouvrirEcranAppel();
+    });
+
     _reprendreAppelNatif();
     // Refus gardés sans réseau, ici ou application fermée (RefusEnAttente).
     unawaited(context.read<CallController>().rejouerRefusEnAttente());
 
     // ── DIAGNOSTIC DU CHIP VERT ────────────────────────────────────────────
     // Trace-témoin : elle PROUVE que l'APK installé contient bien cette
-    // version. Sans elle, un overlay vide se lit de deux façons — « le natif
-    // n'a rien écrit » ou « ce n'est pas le bon APK » — et on a déjà perdu
-    // plusieurs allers-retours sur cette ambiguïté.
+    // version.
     DebugOverlay.log('CL ✅ diagnostic chip actif');
     unawaited(verserTracesChip());
   }
 
-  /// Récupère une action décidée AVANT que cet écouteur n'existe.
-  ///
-  /// Décrocher depuis l'écran natif démarre l'application : l'événement part
-  /// alors que rien ne l'écoute encore, et il n'est jamais rejoué. Les appels
-  /// actifs, eux, portent l'information — un appel marqué accepté signifie que
-  /// l'utilisateur a appuyé sur Répondre.
+  static const _canalNatif = MethodChannel('com.alanya/call_native');
+
+  /*
+   * DÉMARRAGE À FROID, comme `main.dart` dans l'application de référence.
+   *
+   * L'événement du paquet est parti avant que cet écouteur n'existe, et il
+   * n'est jamais rejoué : seule l'entrée CallKit en garde la trace. Le
+   * décrochage, lui, a été écrit avant même Flutter, par `MainActivity` qui l'a
+   * lu dans son intent de lancement (`CallAcceptFromIntent`) — aucune course.
+   *
+   * - Entrée acceptée et récente → on décroche.
+   * - Entrée qui sonne encore et récente → notre écran de sonnerie la reprend.
+   * - Rien de plausible → les débris d'un essai précédent sont retirés, sans
+   *   qu'aucun soit pris pour un refus.
+   */
   Future<void> _reprendreAppelNatif() async {
-    // ── TELECOM D'ABORD ────────────────────────────────────────────────────
-    // C'est lui qui porte l'appel sur Android ; le paquet n'intervient qu'en
-    // repli. Ces deux accesseurs existent précisément pour le démarrage à
-    // froid : l'événement `answer` est parti avant que cet écouteur n'existe,
-    // et il n'est jamais rejoué — seul l'état de la `Connection` en garde la
-    // trace.
-    try {
-      final accepte = await AlanyaTelecom.getAcceptedCall();
-      if (!mounted) return;
-      final idAccepte = accepte?['callId']?.toString();
-      if (idAccepte != null && idAccepte.isNotEmpty) {
-        // Décroché sur l'écran natif, application fermée : c'est lui qui l'a
-        // démarrée. L'état de la `Connection`, lu ici, ne souffre d'aucune
-        // course — même principe que la lecture de l'intention de lancement
-        // dans l'application de référence. Les gardes d'`acceptById` rendent
-        // sans effet un second décroché (événement `answer` reçu aussi).
-        _appliquerChoixCamera(accepte!);
-        _onCallAction('call_accept', idAccepte);
-        return;
-      }
-
-      // ⚠️ NE PAS COUPER LA SONNERIE NATIVE ICI, si tentant que ce soit.
-      //
-      // Une version précédente appelait `silenceRinger()` à ce point, en
-      // supposant que la sonnerie interne prendrait aussitôt le relais. Mesuré
-      // sur TECNO KL5 : le son natif s'arrêtait à 3,1 s et l'interne ne
-      // démarrait qu'à 16,0 s — HUIT SECONDES DE SILENCE. La raison est simple :
-      // `RingtoneService` ne peut sonner qu'une fois la trame socket
-      // `incoming_call` arrivée, et au démarrage à froid le WebSocket met une
-      // dizaine de secondes à se connecter.
-      //
-      // On laisse donc le natif sonner sans interruption. C'est
-      // `call_controller` qui s'abstient de lancer la sonnerie interne quand
-      // celle-ci tourne déjà — une seule source, et aucun trou.
-      //
-      // L'appel n'est pas décroché mais il SONNE : on a ouvert l'application
-      // pendant la sonnerie (l'écran natif, lui, ne la démarre pas). On
-      // affiche notre écran de sonnerie TOUT DE SUITE, avec ce que le push a
-      // confié à Telecom, au lieu d'attendre la connexion.
-      final cc = context.read<CallController>();
-      await _adopterAppelQuiSonne(cc);
-      if (!mounted) return;
-      if (cc.incoming != null) return;
-    } catch (_) {}
-
-    try {
-      final actifs = await FlutterCallkitIncoming.activeCalls();
-      if (!mounted || actifs.isEmpty) return;
-      for (final appel in actifs) {
-        if (appel.isAccepted) {
-          _onCallAction('call_accept', appel.id);
-          return;
-        }
-      }
-    } catch (_) {}
-  }
-
-  /// Telecom avait accepté la déclaration, puis n'a pas créé la `Connection` —
-  /// appel cellulaire en cours, ou compte refusé par le constructeur.
-  ///
-  /// Le repli ne pouvait pas être choisi au moment de la déclaration, puisque
-  /// celle-ci avait réussi : sans ce rattrapage, l'appel disparaîtrait sans le
-  /// moindre signe. `sansTelecom` empêche de repasser par la voie qui vient
-  /// d'échouer.
-  Future<void> _replierSurPaquet(Map<String, dynamic> data) async {
-    final callId = data['callId']?.toString();
-    if (callId == null || callId.isEmpty) return;
-    DebugOverlay.log("CL ⚠️ Telecom indisponible → repli paquet ($callId)");
-    try {
-      await CallUiNative.afficherAppelEntrant(
-        callId: callId,
-        nom: data['callerName']?.toString() ?? 'Appel entrant',
-        avatarUrl: data['callerAvatar']?.toString(),
-        video: data['callType']?.toString() == 'video',
-        sansTelecom: true,
-      );
-    } catch (e) {
-      DebugOverlay.log("CL ❌ repli paquet indisponible : $e");
+    final natif = await CallUiNative.appelActif();
+    if (!mounted) return;
+    if (natif == null) {
+      unawaited(CallUiNative.toutMasquer());
+      return;
     }
+    final callId = natif['callId']?.toString() ?? '';
+    if (callId.isEmpty) return;
+    if (natif['isAccepted'] == true) {
+      _onCallAction('call_accept', callId);
+      return;
+    }
+    context.read<CallController>().adopterAppelNatif(natif);
   }
 
   @override
@@ -575,6 +420,9 @@ class _CallListenerState extends State<CallListener>
           DebugOverlay.log(
               "CL 📞 écran de sonnerie (${isVideo ? 'vidéo' : 'audio'})");
           await ouvrirEcranSonnerie(cc);
+          // Appel repris de l'écran natif (démarrage à froid) : l'écran
+          // Flutter prend aussi la sonnerie. Sans effet si elle joue déjà.
+          unawaited(cc.prendreLaSonnerie(inc.callId));
         }
       });
     }

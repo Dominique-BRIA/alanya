@@ -9,7 +9,6 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.util.Log
 import android.view.WindowManager
-import com.alanya.telecom.CallRegistry
 import com.cloudwebrtc.webrtc.FlutterWebRTCPlugin
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -51,62 +50,49 @@ class MainActivity : FlutterFragmentActivity() {
         const val TAG_PROX = "AlanyaProximite"
     }
 
-    /**
-     * ⚠️ SANS CECI, UN APPEL REÇU ÉCRAN EN VEILLE SONNE SANS QU'ON PUISSE
-     * DÉCROCHER.
+    /*
+     * L'APPEL ENTRANT, COMME L'APPLICATION DE RÉFÉRENCE (06/11/2026).
      *
-     * La notification d'appel porte un « full-screen intent » qui lance bien
-     * cette activité, mais Android n'allume l'écran que si les drapeaux sont
-     * posés AVANT la création de la fenêtre. Après, la décision est prise :
-     * l'activité démarre derrière un écran resté noir.
-     *
-     * Or `LockScreenCall.activer()`, côté Dart, ne peut s'exécuter qu'une fois
-     * l'application démarrée et le WebSocket connecté — une dizaine de secondes
-     * au démarrage à froid. Beaucoup trop tard.
-     *
-     * On interroge donc l'état RÉEL du module Telecom, seul à savoir dès la
-     * première milliseconde qu'un appel sonne, et on n'allume le comportement
-     * que dans ce cas : le verrouillage continue de protéger les conversations
-     * le reste du temps, ce qui est précisément la raison pour laquelle
-     * `showWhenLocked` n'est pas dans le manifeste.
+     * La sonnerie n'a plus besoin de cette activité : application fermée ou en
+     * arrière-plan, c'est l'écran plein de CallKit (activité de
+     * flutter_callkit_incoming, maquette `callkit_incoming_content.xml`) qui
+     * passe par-dessus le verrouillage. Il ne reste que l'appel DÉCROCHÉ : le
+     * bouton « Accepter » nous lance avec le décrochage dans l'intent, lu par
+     * [CallAcceptFromIntent] — le seul canal sans course.
      */
     override fun onCreate(savedInstanceState: Bundle?) {
-        // `runCatching` : on est AVANT super.onCreate, le point le plus fragile
-        // du cycle de vie. Une exception ici empêcherait l'application entière
-        // de démarrer — un appel qu'on n'arrive pas à décrocher reste
-        // infiniment préférable à une application qui ne s'ouvre plus.
-        if (unAppelSonne()) runCatching { afficherParDessusVerrouillage(true) }
         super.onCreate(savedInstanceState)
+        // Pas d'affichage par-dessus l'écran de verrouillage par défaut : il
+        // n'est accordé que pendant un appel.
+        handleCallAcceptIntent(intent)
     }
 
-    /**
-     * Même situation quand le processus est encore vivant : l'activité existe
-     * déjà (`launchMode="singleTask"`), le full-screen intent la ramène au
-     * premier plan par ce chemin-ci et non par `onCreate`.
-     */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        if (unAppelSonne()) runCatching { afficherParDessusVerrouillage(true) }
+        setIntent(intent)
+        handleCallAcceptIntent(intent)
     }
 
     /**
-     * Un appel Telecom sonne-t-il, ou vient-il d'être décroché ?
-     *
-     * DÉCROCHÉ AUSSI (06/11/2026) : c'est l'écran d'appel NATIF qui sonne
-     * désormais, et c'est son décroché qui lance l'application — l'appel n'est
-     * alors plus « en sonnerie ». Sans ce cas, l'application démarrait DERRIÈRE
-     * le verrouillage, et l'appel accepté restait invisible.
-     *
-     * Le contrôle de version est indispensable : `CallRegistry` manipule des
-     * `Connection`, qui n'existent qu'à partir d'Android 8, alors que
-     * l'application descend jusqu'à Android 7 (`minSdk` 24). Y toucher plus bas
-     * lèverait une erreur de vérification de classe au chargement.
+     * Le décrochage voyage dans l'intent qui nous lance — voir
+     * [CallAcceptFromIntent], qui explique pourquoi c'est le seul canal sans
+     * course.
      */
-    private fun unAppelSonne(): Boolean =
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-            runCatching {
-                CallRegistry.ringingData() != null || CallRegistry.acceptedData() != null
-            }.getOrDefault(false)
+    private fun handleCallAcceptIntent(intent: Intent?) {
+        val callId = CallAcceptFromIntent.consommer(this, intent) ?: return
+        Log.i("MainActivity", "décrochage lu dans l'intent callId=$callId")
+        // Décroché depuis l'écran verrouillé : l'appel doit s'afficher tout de
+        // suite, avant que Flutter ne soit prêt à le demander lui-même.
+        runCatching { afficherParDessusVerrouillage(true) }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // L'app passe au premier plan : Flutter (RingtoneService) reprend la
+        // sonnerie entrante. On coupe la sonnerie de liste jouée nativement
+        // pour éviter le doublon (voir CustomRingtonePlayer).
+        CustomRingtonePlayer.stop()
+    }
 
     /**
      * Le moteur Flutter de CETTE activité — celui qui exécute l'appel. Retenu
@@ -124,6 +110,10 @@ class MainActivity : FlutterFragmentActivity() {
         moteurFlutter = flutterEngine
         // Fenetre flottante du systeme pendant un appel video (06/11/2026).
         PipBridge.attach(flutterEngine.dartExecutor.binaryMessenger, this)
+        // Actions CallKit natives ↔ Flutter (refus, fin, retrait silencieux).
+        CallNativeBridge.attach(flutterEngine.dartExecutor.binaryMessenger, this) { actif ->
+            afficherParDessusVerrouillage(actif)
+        }
 
         detecteurCapture = DetecteurCapture(
             this,
