@@ -77,11 +77,19 @@ class AlanyaApplication : Application() {
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             private fun estEcranAppel(a: android.app.Activity) =
                 a.javaClass.name == "com.hiennv.flutter_callkit_incoming.CallkitIncomingActivity"
+            /** L'appel affiché par CET écran : celui de son intent. */
+            private fun appelDe(a: android.app.Activity): String =
+                a.intent?.getBundleExtra(CallkitConstants.EXTRA_CALLKIT_INCOMING_DATA)
+                    ?.getString(CallkitConstants.EXTRA_CALLKIT_ID, "").orEmpty()
             override fun onActivityResumed(a: android.app.Activity) {
-                if (estEcranAppel(a)) AffichageAppel.ecranAppelVisible = true
+                if (!estEcranAppel(a)) return
+                AffichageAppel.ecranAppelVisible = true
+                AffichageAppel.ecranAffiche(this@AlanyaApplication, appelDe(a))
             }
             override fun onActivityPaused(a: android.app.Activity) {
-                if (estEcranAppel(a)) AffichageAppel.ecranAppelVisible = false
+                if (!estEcranAppel(a)) return
+                AffichageAppel.ecranAppelVisible = false
+                AffichageAppel.ecranQuitte(this@AlanyaApplication, appelDe(a), a.isFinishing)
             }
             override fun onActivityCreated(a: android.app.Activity, b: android.os.Bundle?) {}
             override fun onActivityStarted(a: android.app.Activity) {}
@@ -162,6 +170,7 @@ class AlanyaApplication : Application() {
             // la chaîne d'acceptation d'un appel que l'on venait de refuser.
             CallIncomingHelper.cancelOngoingNotification(this, id)
             CallIncomingHelper.clearIncomingNotification(this, id)
+            CallIncomingHelper.oublier(id)
 
             if (CallDismissRegistry.consumeIfProgrammatic(id)) {
                 Log.i(TAG, "ACTIVE_CALLS: dismiss programmatique id=$id (pas de reject)")

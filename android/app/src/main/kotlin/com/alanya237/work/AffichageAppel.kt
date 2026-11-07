@@ -21,6 +21,7 @@ import android.view.WindowManager
 import androidx.core.app.NotificationManagerCompat
 import com.hiennv.flutter_callkit_incoming.CallkitConstants
 import com.hiennv.flutter_callkit_incoming.CallkitIncomingActivity
+import com.hiennv.flutter_callkit_incoming.CallkitIncomingBroadcastReceiver
 import com.hiennv.flutter_callkit_incoming.CallkitNotificationManager
 import com.hiennv.flutter_callkit_incoming.getDataActiveCalls
 
@@ -94,6 +95,92 @@ object AffichageAppel {
 
     /** Vrai tant que l'écran d'appel CallKit est affiché (voir AlanyaApplication). */
     @Volatile var ecranAppelVisible = false
+
+    /** L'appel montré par l'écran d'appel affiché, ou vide. */
+    @Volatile private var appelAffiche = ""
+
+    /** Les appels dont l'expiration est programmée ici : une seule fois chacun. */
+    private val expirationsProgrammees = HashSet<String>()
+
+    /*
+     * UN SEUL AFFICHAGE À LA FOIS : L'ÉCRAN OU LA NOTIFICATION (07/11/2026).
+     *
+     * La notification d'appel est posée à l'arrivée de l'appel ; l'écran
+     * d'appel s'ouvre ensuite. Quand c'est NOUS qui l'ouvrons (téléphone
+     * déverrouillé, ou plein écran bloqué par le fabricant), Android affichait
+     * en même temps la notification en bannière, par-dessus l'écran.
+     *
+     * - L'écran est affiché → la notification est retirée. Retirée encore un
+     *   peu plus tard : le plugin la repose quand la photo de l'appelant finit
+     *   de charger.
+     * - L'utilisateur QUITTE l'écran sans répondre, alors que ça sonne encore
+     *   → la même notification est remise (Accepter / Refuser, et un toucher
+     *   rouvre l'écran), sinon il entendrait sonner sans moyen de répondre.
+     *   Pas écran éteint : la remettre relancerait le plein écran et
+     *   rallumerait le téléphone ; au rallumage l'écran d'appel revient de
+     *   lui-même.
+     *
+     * La sonnerie ne dépend pas de la notification : elle continue.
+     */
+    fun ecranAffiche(context: Context, callId: String) {
+        if (callId.isEmpty()) return
+        val ctx = context.applicationContext
+        appelAffiche = callId
+        CallIncomingHelper.masquerNotification(ctx, callId)
+        for (delai in longArrayOf(800, 2_000, 4_000)) {
+            principal.postDelayed({
+                if (ecranAppelVisible && appelAffiche == callId) {
+                    CallIncomingHelper.masquerNotification(ctx, callId)
+                }
+            }, delai)
+        }
+        programmerExpiration(ctx, callId)
+    }
+
+    fun ecranQuitte(context: Context, callId: String, fermeture: Boolean) {
+        if (callId.isEmpty()) return
+        val ctx = context.applicationContext
+        if (appelAffiche == callId) appelAffiche = ""
+        // Écran fermé (décroché, refusé, expiré, annulé) : rien à remettre.
+        if (fermeture) return
+        principal.postDelayed({
+            if (ecranAppelVisible) return@postDelayed // revenu entre-temps
+            val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (!pm.isInteractive) return@postDelayed
+            if (!sonneEncore(ctx, callId)) return@postDelayed
+            CallIncomingHelper.remettreNotification(ctx, callId)
+        }, 600)
+    }
+
+    /**
+     * ⚠️ L'EXPIRATION DE LA SONNERIE ÉTAIT PORTÉE PAR LA NOTIFICATION. Le
+     * plugin la déclenche quand sa notification arrive au bout de son délai
+     * (arrêt du son, appel manqué, retrait de l'appel) ; l'écran d'appel, lui,
+     * se ferme seulement. Notification retirée, plus rien n'expirait : la
+     * sonnerie aurait continué indéfiniment. On envoie donc nous-mêmes, au
+     * même instant, l'ordre d'expiration du plugin — sans effet si l'appel ne
+     * sonne plus.
+     */
+    private fun programmerExpiration(ctx: Context, callId: String) {
+        synchronized(expirationsProgrammees) {
+            if (!expirationsProgrammees.add(callId)) return
+        }
+        val bundle = CallIncomingHelper.bundleDe(callId) ?: return
+        val duree = bundle.getLong(CallkitConstants.EXTRA_CALLKIT_DURATION, 0L)
+        if (duree <= 0L) return
+        val debut = bundle.getLong(CallkitNotificationManager.EXTRA_TIME_START_CALL, System.currentTimeMillis())
+        val reste = (debut + duree - System.currentTimeMillis()).coerceAtLeast(0L)
+        principal.postDelayed({
+            synchronized(expirationsProgrammees) { expirationsProgrammees.remove(callId) }
+            if (!sonneEncore(ctx, callId)) return@postDelayed
+            Log.i(TAG, "expiration de la sonnerie (notification retirée) callId=$callId")
+            try {
+                ctx.sendBroadcast(CallkitIncomingBroadcastReceiver.getIntentTimeout(ctx, bundle))
+            } catch (e: Exception) {
+                Log.e(TAG, "expiration non envoyée", e)
+            }
+        }, reste)
+    }
 
     private fun sonneEncore(ctx: Context, callId: String): Boolean = try {
         getDataActiveCalls(ctx).any { it.id == callId && !it.isAccepted }

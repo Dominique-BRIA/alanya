@@ -34,6 +34,55 @@ object CallIncomingHelper {
     private var soundManager: CallkitSoundPlayerManager? = null
     private var lastShownCallId: String? = null
 
+    /** Les données des appels en sonnerie, par identifiant (voir [remettreNotification]). */
+    private val bundlesAffiches = HashMap<String, android.os.Bundle>()
+
+    /** L'appel ne sonne plus : ses données ne servent plus. Vide = tous. */
+    fun oublier(callId: String) {
+        synchronized(bundlesAffiches) {
+            if (callId.isBlank()) bundlesAffiches.clear() else bundlesAffiches.remove(callId)
+        }
+    }
+
+    /** Les données affichées pour [callId], ou null s'il ne sonne plus. */
+    fun bundleDe(callId: String): android.os.Bundle? =
+        synchronized(bundlesAffiches) { bundlesAffiches[callId] }
+
+    /**
+     * Retire la notification d'appel entrant de [callId] — ELLE SEULE : la
+     * sonnerie (jouée à part) continue, l'écran d'appel reste ouvert.
+     * Identifiant calqué sur le plugin : `EXTRA_CALLKIT_ID.hashCode()`.
+     * ⚠️ Pas `clearIncomingNotification`, qui couperait aussi la sonnerie et
+     * fermerait l'écran d'appel.
+     */
+    fun masquerNotification(context: Context, callId: String) {
+        if (callId.isBlank()) return
+        try {
+            NotificationManagerCompat.from(context.applicationContext).cancel(callId.hashCode())
+        } catch (e: Exception) {
+            Log.w(TAG, "masquerNotification : $e")
+        }
+    }
+
+    /**
+     * Repose la notification d'appel entrant de [callId], telle qu'à son
+     * arrivée : nom, photo, boutons Accepter et Refuser. Sans relancer la
+     * sonnerie, qui n'a jamais cessé.
+     */
+    @android.annotation.SuppressLint("MissingPermission")
+    fun remettreNotification(context: Context, callId: String) {
+        val bundle = bundleDe(callId) ?: return
+        if (!notificationsActives(context)) return
+        ensureInitialized(context)
+        try {
+            val n = notificationManager?.getIncomingNotification(bundle) ?: return
+            NotificationManagerCompat.from(context.applicationContext).notify(n.id, n.notification)
+            Log.d(TAG, "notification remise callId=$callId")
+        } catch (e: Exception) {
+            Log.e(TAG, "remettreNotification failed", e)
+        }
+    }
+
     fun ensureInitialized(context: Context) {
         if (notificationManager != null) return
         val appContext = context.applicationContext
@@ -87,6 +136,9 @@ object CallIncomingHelper {
         try {
             notificationManager?.showIncomingNotification(bundle)
             addCall(context.applicationContext, Data.fromBundle(bundle))
+            // Gardé pour pouvoir REPOSER la même notification : elle est retirée
+            // tant que l'écran d'appel est affiché (voir AffichageAppel).
+            if (callId.isNotEmpty()) synchronized(bundlesAffiches) { bundlesAffiches[callId] = bundle }
             // ── L'écran d'appel au premier plan, partout (07/11/2026) ───────
             //
             // La notification ne lance l'écran d'appel que téléphone verrouillé
@@ -270,6 +322,7 @@ object CallIncomingHelper {
             Log.e(TAG, "stopService (endCall) failed", e)
         }
         val callId = (data["callId"] ?: "").trim()
+        oublier(callId)
         // Retrait piloté par le serveur (push call_cancelled) ou par Flutter —
         // pas un refus utilisateur : marquer AVANT removeCall pour que le
         // listener ACTIVE_CALLS d'AlanyaApplication ne POST pas le refus.
