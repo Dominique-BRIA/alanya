@@ -1,4 +1,6 @@
+import '../../core/api_client.dart' show ApiException;
 import '../../core/authed_api.dart';
+import '../calls/webrtc_sfu.dart' show SfuApi;
 import '../../core/cache_ecrans.dart';
 import '../../models/meeting.dart';
 
@@ -7,6 +9,22 @@ class MeetingsRepository {
   final AuthedApi _api;
 
   MeetingsRepository(this._api);
+
+  /// Les routes du SFU de Cloudflare (07/11/2026), pour une réunion en SFU.
+  SfuApi get sfu => SfuApi(_api);
+
+  /// Le moteur de la réunion, `mesh` ou `sfu` (07/11/2026), fixé par le
+  /// serveur à la première entrée. À demander AVANT d'entrer : le moteur média
+  /// se construit avant `meeting_join`. Un serveur antérieur (404) : mesh.
+  Future<String> moteur(int idMeeting) async {
+    try {
+      final d = await _api.post("/api/meetings/$idMeeting/moteur", {});
+      return d["moteur"] == "sfu" ? "sfu" : "mesh";
+    } on ApiException catch (e) {
+      if (e.statusCode == 404) return "mesh";
+      rethrow;
+    }
+  }
 
   /// Récupère toutes les réunions de l'utilisateur (organisées ou participées).
   Future<List<Meeting>> fetchMeetings() async {

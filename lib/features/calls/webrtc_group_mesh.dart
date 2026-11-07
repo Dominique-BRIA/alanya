@@ -3,11 +3,12 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import '../../core/debug_overlay.dart';
 
+import 'moteur_media.dart';
 import 'qualite_video.dart';
 import 'webrtc_peer_session.dart';
 
 /// Mesh WebRTC : une connexion par participant distant, flux local partagé.
-class WebrtcGroupMesh {
+class WebrtcGroupMesh implements MoteurMedia {
   WebrtcGroupMesh({
     required this.myUserId,
     required this.isVideo,
@@ -46,6 +47,7 @@ class WebrtcGroupMesh {
   final String myUserId;
 
   /// Non `final` : voir [passerEnVideo].
+  @override
   bool isVideo;
 
   /// Le pair [peerId] vient de passer l'appel en vidéo.
@@ -73,14 +75,17 @@ class WebrtcGroupMesh {
   /// Le réseau a changé pendant l'appel : chaque liaison se relance tout de
   /// suite (voir `WebrtcPeerSession.relancerApresChangementDeReseau`).
   /// Une liaison au moins est-elle dégradée ? → « Connexion faible ».
+  @override
   bool get connexionFaible =>
       _peers.values.any((s) => s.connexionFaible.value);
 
   /// La caméra de [peerId] est-elle allumée ?
+  @override
   bool cameraDistanteActive(String peerId) =>
       _peers[peerId]?.cameraDistanteActive ?? true;
 
   /// Prévient tous les pairs de l'état de notre caméra.
+  @override
   void envoyerEtatCamera(bool active) {
     for (final s in _peers.values) {
       s.envoyerEtatCamera(active);
@@ -89,6 +94,7 @@ class WebrtcGroupMesh {
 
   /// Coupe ou rallume l'ÉMISSION de nos images sans toucher au choix de
   /// l'utilisateur ([cameraEnabled]) : l'application passe en arrière-plan.
+  @override
   void suspendreVideoLocale(bool suspendue) {
     for (final t in _local?.getVideoTracks() ?? const <MediaStreamTrack>[]) {
       t.enabled = !suspendue;
@@ -98,6 +104,7 @@ class WebrtcGroupMesh {
   /// Force une image clé chez les pairs : la piste est coupée puis rallumée.
   /// Sans elle, un décodeur qui a perdu le fil attend en montrant une image
   /// figée (guide du 31/10/2026).
+  @override
   Future<void> rafraichirVideoLocale() async {
     final pistes = _local?.getVideoTracks() ?? const <MediaStreamTrack>[];
     for (final t in pistes) {
@@ -109,6 +116,7 @@ class WebrtcGroupMesh {
     }
   }
 
+  @override
   void relancerLesLiaisons() {
     for (final s in _peers.values) {
       s.relancerApresChangementDeReseau();
@@ -116,22 +124,29 @@ class WebrtcGroupMesh {
   }
   final Map<String, List<Map<String, dynamic>>> _pendingByPeer = {};
 
+  @override
   MediaStream? get localStream => _local;
+  @override
   Map<String, MediaStream> get remoteStreams => {
         for (final e in _peers.entries)
           if (e.value.remoteStream != null) e.key: e.value.remoteStream!,
       };
+  @override
   int get connectedCount => remoteStreams.length;
+  @override
   Set<String> get peerIds => _peers.keys.toSet();
 
   // --- Contrôles média locaux ---
   bool _micEnabled = true;
   bool _cameraEnabled = true;
+  @override
   bool get micEnabled => _micEnabled;
+  @override
   bool get cameraEnabled => _cameraEnabled;
 
   /// Active/coupe le micro (mute/unmute) sans renégocier : on désactive juste
   /// les pistes audio locales.
+  @override
   void setMic(bool on) {
     _micEnabled = on;
     for (final t in _local?.getAudioTracks() ?? <MediaStreamTrack>[]) {
@@ -143,6 +158,7 @@ class WebrtcGroupMesh {
   /// Active/coupe la caméra locale (les pistes vidéo restent négociées, on
   /// bascule juste leur état enabled). Le correspondant en est prévenu
   /// (31/10/2026) : il voit notre avatar, et non plus un flux figé ou noir.
+  @override
   void setCamera(bool on) {
     _cameraEnabled = on;
     for (final t in _local?.getVideoTracks() ?? <MediaStreamTrack>[]) {
@@ -153,6 +169,7 @@ class WebrtcGroupMesh {
   }
 
   /// Bascule caméra avant/arrière sur la piste vidéo locale.
+  @override
   Future<void> switchCamera() async {
     final tracks = _local?.getVideoTracks() ?? <MediaStreamTrack>[];
     if (tracks.isEmpty) return;
@@ -174,6 +191,7 @@ class WebrtcGroupMesh {
   // offre », et aucune collision n'est possible puisque les deux rôles sont
   // toujours attribués par des événements différents.
 
+  @override
   Future<void> ensureLocal() async {
     /*
      * L'APERÇU DE L'APPEL ENTRANT (06/11/2026) a déjà ouvert la caméra, sans le
@@ -218,6 +236,7 @@ class WebrtcGroupMesh {
   /// coupée : c'est l'état de celui qui voit l'autre passer en vidéo et n'a
   /// pas encore répondu. [annoncer] : prévenir le pair, qui basculera à son
   /// tour — seulement pour celui qui prend l'initiative.
+  @override
   Future<void> passerEnVideo({required bool camera, bool annoncer = false}) async {
     isVideo = true;
     for (final s in _peers.values) {
@@ -253,8 +272,10 @@ class WebrtcGroupMesh {
       };
 
   /// Une caméra existe-t-elle déjà dans le flux local ?
+  @override
   bool get aUneCamera => _local?.getVideoTracks().isNotEmpty ?? false;
 
+  @override
   Future<void> connectToPeer(String peerId, {required bool asOfferer}) async {
     if (peerId == myUserId || _peers.containsKey(peerId)) {
       traceAppel("connectToPeer($peerId) IGNORE — moi=${peerId == myUserId} dejaConnu=${_peers.containsKey(peerId)}");
@@ -296,6 +317,7 @@ class WebrtcGroupMesh {
     if (isVideo && !_cameraEnabled) session.envoyerEtatCamera(false);
   }
 
+  @override
   Future<void> handleSignal(String fromPeerId, Map<String, dynamic> signal) async {
     var session = _peers[fromPeerId];
 
@@ -320,12 +342,42 @@ class WebrtcGroupMesh {
     await session.handleSignal(signal);
   }
 
+  @override
   Future<void> removePeer(String peerId) async {
     await _peers.remove(peerId)?.close();
     _pendingByPeer.remove(peerId);
     onUpdated();
   }
 
+  /// Qui parle : `inbound-rtp` de chaque liaison pour la voix reçue,
+  /// `media-source` (une seule lecture, le micro est le même) pour la nôtre.
+  @override
+  Future<Map<String, double>?> niveauxAudio(String moiCle) async {
+    final liaisons = connexions;
+    if (liaisons.isEmpty) return null;
+    final niveaux = <String, double>{};
+    for (final e in liaisons.entries) {
+      try {
+        final rapports = await e.value.getStats();
+        for (final r in rapports) {
+          final v = r.values;
+          if (v['kind'] != 'audio') continue;
+          final niveau = (v['audioLevel'] as num?)?.toDouble();
+          if (niveau == null) continue;
+          if (r.type == 'inbound-rtp') {
+            niveaux[e.key] = niveau;
+          } else if (r.type == 'media-source' && !niveaux.containsKey(moiCle)) {
+            niveaux[moiCle] = niveau;
+          }
+        }
+      } catch (_) {
+        // Liaison en cours de fermeture : elle sera absente au tour suivant.
+      }
+    }
+    return niveaux;
+  }
+
+  @override
   Future<void> close() async {
     for (final s in _peers.values) {
       await s.close();

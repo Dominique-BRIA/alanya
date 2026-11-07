@@ -1,4 +1,5 @@
 import '../../core/authed_api.dart';
+import 'webrtc_sfu.dart' show SfuApi;
 import '../../core/cache_ecrans.dart';
 import '../../models/call_record.dart';
 
@@ -24,6 +25,9 @@ class StartedCall {
   final String? groupName;
   final int memberCount;
   final List<CallCallee> callees;
+
+  /// `mesh` ou `sfu` (07/11/2026) : le moteur fixé par le serveur.
+  final String moteur;
   StartedCall({
     required this.id,
     required this.convId,
@@ -33,6 +37,7 @@ class StartedCall {
     required this.groupName,
     required this.memberCount,
     required this.callees,
+    this.moteur = "mesh",
   });
 }
 
@@ -67,6 +72,9 @@ class AcceptCallResult {
   /// second cas sur ce que l'écran natif, lui, savait déjà.
   final String? type;
 
+  /// `mesh` ou `sfu` (07/11/2026). `null` chez un serveur antérieur : mesh.
+  final String? moteur;
+
   AcceptCallResult({
     required this.id,
     required this.isGroup,
@@ -75,12 +83,17 @@ class AcceptCallResult {
     this.enregistrer = false,
     this.enregistrementCompanyId,
     this.type,
+    this.moteur,
   });
 }
 
 class CallsRepository {
   CallsRepository(this._api);
   final AuthedApi _api;
+
+  /// Les routes du SFU de Cloudflare (07/11/2026), pour les appels de groupe
+  /// en SFU.
+  SfuApi get sfu => SfuApi(_api);
 
   Future<List<CallRecord>> history() async {
     final data = await _api.get("/api/calls");
@@ -175,6 +188,7 @@ class CallsRepository {
       groupName: data["groupName"] as String?,
       memberCount: (data["memberCount"] as num?)?.toInt() ?? 2,
       callees: callees,
+      moteur: data["moteur"] == "sfu" ? "sfu" : "mesh",
     );
   }
 
@@ -215,6 +229,7 @@ class CallsRepository {
       enregistrer: (data["enregistrer"] as bool?) ?? false,
       enregistrementCompanyId: (data["enregistrementCompanyId"] as num?)?.toInt(),
       type: data["type"] as String?,
+      moteur: data["moteur"] as String?,
     );
   }
 

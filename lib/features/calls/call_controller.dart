@@ -35,8 +35,10 @@ import '../../core/token_storage.dart';
 import 'qualite_video.dart';
 import 'detecteur_parole.dart';
 import 'fenetre_video.dart';
+import 'moteur_media.dart';
 import 'webrtc_group_mesh.dart';
 import 'webrtc_peer_session.dart';
+import 'webrtc_sfu.dart';
 
 /// Traduit une chaîne du module appels depuis n'importe où dans ce fichier
 /// (parseurs JSON, sessions IVR, contrôleur), sans BuildContext : pendant un
@@ -476,7 +478,13 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
   /// Est-ce MOI qui ai fait venir cette personne ?
   bool jaiInvite(String userId) => _inviteParUserId[userId] == myUserId;
 
-  WebrtcGroupMesh? _mesh;
+  /// Le moteur média de l'appel : le mesh d'origine, ou le SFU de Cloudflare
+  /// pour un groupe que le serveur a placé en SFU (07/11/2026). Le nom
+  /// `_mesh` est resté : tout le contrôleur passe par l'interface commune.
+  MoteurMedia? _mesh;
+
+  /// `mesh` ou `sfu` : fixé par le serveur à la création de l'appel.
+  String moteurAppel = "mesh";
   final Map<String, Map<String, List<Map<String, dynamic>>>> _signalBuffer = {};
   List<Map<String, dynamic>>? _iceServers;
   String? lastError;
@@ -979,6 +987,7 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
     activeCallId = started.id;
     activeConvId = convId;
     isGroupCall = started.isGroup;
+    moteurAppel = started.moteur;
     isCallInitiator = true;
     activePeerName = started.isGroup ? (started.groupName ?? title) : title;
     activePeerAvatarUrl = started.isGroup
@@ -1093,6 +1102,7 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
     activeCallId = started.id;
     activeConvId = started.convId;
     isGroupCall = false;
+    moteurAppel = "mesh";
     isCallInitiator = true;
     activePeerName = title;
     activePeerAvatarUrl =
@@ -1282,6 +1292,7 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
       // `_clear()`, qui couperait un appel en cours.
       if (e.code == "ALREADY_JOINED") {
         isGroupCall = inc.isGroup;
+        moteurAppel = inc.moteur;
         activeCallId = inc.callId;
         activeConvId = inc.convId;
         activePeerName = inc.displayTitle;
@@ -1312,6 +1323,7 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
     }
     _acceptationEnCours = null;
     isGroupCall = result.isGroup || inc.isGroup;
+    moteurAppel = result.moteur ?? inc.moteur;
     isCallInitiator = false;
     activeCallId = inc.callId; // activeCallId défini AVANT incoming = null
     activeConvId = inc.convId;
@@ -1406,6 +1418,7 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
     try {
       final result = await _calls.accept(callId);
       isGroupCall = result.isGroup;
+      moteurAppel = result.moteur ?? "mesh";
       isCallInitiator = false;
       activeCallId = callId;
       activePeerName =
@@ -1838,6 +1851,7 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
     participantAvatars.clear();
     activeRole = null;
     isGroupCall = false;
+    moteurAppel = "mesh";
     isCallInitiator = false;
     participantNames.clear();
     joinedParticipantIds.clear();
@@ -1901,7 +1915,7 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
     if (suivre == _paroleSuivie) return;
     _paroleSuivie = suivre;
     if (suivre) {
-      _parole.demarrer(() => _mesh?.connexions ?? const {});
+      _parole.demarrer(() async => _mesh?.niveauxAudio(DetecteurParole.moi));
     } else {
       _parole.arreter();
     }
@@ -2388,19 +2402,38 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
       // L'aperçu de l'appel entrant devient le flux de l'appel.
       final apercu = _apercuEntrant;
       _apercuEntrant = null;
-      _mesh = WebrtcGroupMesh(
-        myUserId: myUserId!,
-        isVideo: isVideo,
-        qualite: qualite,
-        fluxInitial: apercu,
-        iceServers: ice,
-        onSendSignal: (peerId, sig) => _rt.callSignal(callId, peerId, sig),
-        onUpdated: _onMeshUpdated,
-        onPeerLost: _onPeerConnectionLost,
-        onPeerReconnecting: (peerId) => _marqueEnReconnexion(peerId, true),
-        onPeerReconnected: (peerId) => _marqueEnReconnexion(peerId, false),
-        onPeerPassageVideo: _onPassageVideoDistant,
-      );
+      // Groupe placé en SFU par le serveur (07/11/2026) : une seule connexion,
+      // vers Cloudflare. Sinon, le mesh d'origine.
+      traceAppel("moteur de l'appel : $moteurAppel");
+      _mesh = moteurAppel == "sfu"
+          ? WebrtcSfu(
+              myUserId: myUserId!,
+              isVideo: isVideo,
+              qualite: qualite,
+              fluxInitial: apercu,
+              iceServers: ice,
+              salle: "call:$callId",
+              api: _calls.sfu,
+              onSendSignal: (peerId, sig) => _rt.callSignal(callId, peerId, sig),
+              onUpdated: _onMeshUpdated,
+              onPeerLost: _onPeerConnectionLost,
+              onPeerReconnecting: (peerId) => _marqueEnReconnexion(peerId, true),
+              onPeerReconnected: (peerId) => _marqueEnReconnexion(peerId, false),
+              onPeerPassageVideo: _onPassageVideoDistant,
+            )
+          : WebrtcGroupMesh(
+              myUserId: myUserId!,
+              isVideo: isVideo,
+              qualite: qualite,
+              fluxInitial: apercu,
+              iceServers: ice,
+              onSendSignal: (peerId, sig) => _rt.callSignal(callId, peerId, sig),
+              onUpdated: _onMeshUpdated,
+              onPeerLost: _onPeerConnectionLost,
+              onPeerReconnecting: (peerId) => _marqueEnReconnexion(peerId, true),
+              onPeerReconnected: (peerId) => _marqueEnReconnexion(peerId, false),
+              onPeerPassageVideo: _onPassageVideoDistant,
+            );
     }
 
     try {
@@ -2608,6 +2641,7 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
         memberCount: (e["memberCount"] as num?)?.toInt() ?? 2,
         ivrFrom: e["ivrFrom"] as String?,
         ivrFromId: e["ivrFromId"] as String?,
+        moteur: e["moteur"] == "sfu" ? "sfu" : "mesh",
       );
       // COMMENT ANNONCER L'APPEL — cela dépend de l'état de l'application.
       //
@@ -2654,6 +2688,11 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
       // au moment où Android l'affiche.
       LockScreenCall.activer();
       notifyListeners();
+    } else if (type == "sfu_pistes") {
+      // Un participant d'un appel en SFU vient de publier ses pistes : on va
+      // les chercher (07/11/2026). Sans effet en mesh.
+      final moteur = _mesh;
+      if (moteur is WebrtcSfu) await moteur.surPistes(e);
     } else if (type == "call_signal") {
       final callId = e["callId"] as String?;
       final from = e["from"] as String?;

@@ -177,6 +177,10 @@ class IncomingCallInfo {
   final String? ivrFrom;
   final String? ivrFromId;
 
+  /// `mesh` ou `sfu` (07/11/2026) : le moteur de l'appel, fixé par le serveur.
+  /// Le décroché (`/accept`) le redonne et fait foi.
+  final String moteur;
+
   IncomingCallInfo({
     required this.callId,
     required this.convId,
@@ -189,6 +193,7 @@ class IncomingCallInfo {
     required this.memberCount,
     this.ivrFrom,
     this.ivrFromId,
+    this.moteur = "mesh",
   });
 
   String get displayTitle =>

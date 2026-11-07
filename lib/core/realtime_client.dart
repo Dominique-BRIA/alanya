@@ -49,8 +49,11 @@ class RealtimeClient extends ChangeNotifier {
     await _warmupDns();
     try {
       DebugOverlay.log("WS → connexion à $_wsUrl");
-      final channel =
-          WebSocketChannel.connect(Uri.parse("$_wsUrl?token=$token"));
+      // `capacites=sfu` (07/11/2026) : cette version sait rejoindre un appel de
+      // groupe ou une réunion en SFU. Le serveur ne fait passer un groupe en
+      // SFU que si tous ses membres l'ont déclaré.
+      final channel = WebSocketChannel.connect(
+          Uri.parse("$_wsUrl?token=$token&capacites=sfu"));
       await channel.ready; // lève une exception si la connexion échoue
       _channel = channel;
       _connecting = false;

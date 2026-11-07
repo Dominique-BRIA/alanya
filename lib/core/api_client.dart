@@ -281,9 +281,14 @@ class ApiClient {
   /// ⚠️ `Accept-Language` porte la langue CHOISIE DANS L'APPLICATION : le
   /// serveur écrit les courriels dans cette langue. Sans lui, un code
   /// d'inscription demandé en russe arrivait en français.
+  ///
+  /// `X-Alanya-Capacites: sfu` (07/11/2026) : cet appareil sait rejoindre un
+  /// appel de groupe ou une réunion en SFU. Le serveur refuse le décroché et
+  /// l'entrée en réunion SFU à un appareil qui ne l'envoie pas.
   Map<String, String> _headers(String? bearer) => {
         "Content-Type": "application/json",
         "Accept-Language": LocaleController.codeCourant,
+        "X-Alanya-Capacites": "sfu",
         if (bearer != null) "Authorization": "Bearer $bearer",
       };
 

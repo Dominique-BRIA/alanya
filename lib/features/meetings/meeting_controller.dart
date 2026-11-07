@@ -12,8 +12,10 @@ import '../../core/ringtone_service.dart';
 import '../../models/meeting.dart';
 import '../calls/calls_repository.dart';
 import '../calls/detecteur_parole.dart';
+import '../calls/moteur_media.dart';
 import '../calls/webrtc_group_mesh.dart';
 import '../calls/webrtc_peer_session.dart';
+import '../calls/webrtc_sfu.dart';
 import 'meetings_repository.dart';
 
 /// Contrôleur GLOBAL de réunion, à l'image de [CallController] pour les appels.
@@ -227,8 +229,12 @@ class MeetingController extends ChangeNotifier {
   int _unreadChatCount = 0;
   int get unreadChatCount => _unreadChatCount;
 
-  // WebRTC
-  WebrtcGroupMesh? _mesh;
+  // WebRTC — le mesh d'origine, ou le SFU de Cloudflare pour une réunion que
+  // le serveur a placée en SFU (07/11/2026).
+  MoteurMedia? _mesh;
+
+  /// `mesh` ou `sfu` : le moteur de la réunion en cours.
+  String moteurReunion = "mesh";
 
   /// Qui parle (06/11/2026) : la vignette de celui qui parle s'encadre, comme
   /// sur WhatsApp. Même sonde que les appels de groupe.
@@ -480,18 +486,44 @@ class MeetingController extends ChangeNotifier {
           '[MeetingController] ICE backend indisponible, fallback STUN: $e');
       _iceServers = WebrtcPeerSession.fallbackIce;
     }
-    _mesh = WebrtcGroupMesh(
-      myUserId: myUserId!,
-      isVideo: isVideo,
-      iceServers: _iceServers!,
-      onSendSignal: (peerId, sig) {
-        _rt.meetingSignal(meetingId, peerId, sig);
-      },
-      onUpdated: _onMeshUpdated,
-      onPeerLost: _onPeerLost,
-    );
+    // LE MOTEUR DE LA RÉUNION (07/11/2026), demandé au serveur avant d'entrer.
+    // Un second essai sur une coupure ; ensuite le mesh, qui ne bloque rien.
+    String moteur = "mesh";
+    for (var essai = 0; essai < 2; essai++) {
+      try {
+        moteur = await _meetings.moteur(meetingId);
+        break;
+      } catch (e) {
+        traceAppel("réunion $meetingId : moteur inconnu ($e)");
+      }
+    }
+    moteurReunion = moteur;
+    traceAppel("réunion $meetingId : moteur $moteur");
+    _mesh = moteur == "sfu"
+        ? WebrtcSfu(
+            myUserId: myUserId!,
+            isVideo: isVideo,
+            iceServers: _iceServers!,
+            salle: "meeting:$meetingId",
+            api: _meetings.sfu,
+            onSendSignal: (peerId, sig) {
+              _rt.meetingSignal(meetingId, peerId, sig);
+            },
+            onUpdated: _onMeshUpdated,
+            onPeerLost: _onPeerLost,
+          )
+        : WebrtcGroupMesh(
+            myUserId: myUserId!,
+            isVideo: isVideo,
+            iceServers: _iceServers!,
+            onSendSignal: (peerId, sig) {
+              _rt.meetingSignal(meetingId, peerId, sig);
+            },
+            onUpdated: _onMeshUpdated,
+            onPeerLost: _onPeerLost,
+          );
     await _mesh!.ensureLocal();
-    _parole.demarrer(() => _mesh?.connexions ?? const {});
+    _parole.demarrer(() async => _mesh?.niveauxAudio(DetecteurParole.moi));
 
     /*
      * 🔴 LA ROUTE AUDIO EST POSÉE ICI, ET C'EST CE QUI MANQUAIT.
@@ -867,6 +899,11 @@ class MeetingController extends ChangeNotifier {
         break;
       case "meeting_signal":
         _handleSignal(e);
+        break;
+      case "sfu_pistes":
+        // Réunion en SFU : un participant vient de publier ses pistes.
+        final moteur = _mesh;
+        if (moteur is WebrtcSfu) unawaited(moteur.surPistes(e));
         break;
       case "meeting_message":
         _handleMeetingMessage(e);

@@ -1,16 +1,19 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 /// QUI PARLE, DANS UN APPEL DE GROUPE (06/11/2026), comme WhatsApp et comme
 /// l'application de référence.
 ///
-/// Toutes les [intervalle], on lit `audioLevel` dans les statistiques WebRTC :
-/// `inbound-rtp` pour la voix reçue de chaque participant, `media-source` pour
-/// notre propre micro. Un niveau au-dessus de [seuil] pendant [mesuresPourAllumer]
+/// Toutes les [intervalle], on lit le niveau sonore de chacun, que fournit le
+/// moteur média (`MoteurMedia.niveauxAudio` : `audioLevel` des statistiques
+/// WebRTC). Un niveau au-dessus de [seuil] pendant [mesuresPourAllumer]
 /// mesures de suite allume l'indicateur ; [mesuresPourEteindre] mesures en
 /// dessous l'éteignent. Sans ce délai, il clignoterait à chaque bruit.
+///
+/// 🔁 07/11/2026 : les niveaux viennent du moteur, et non plus d'une liste de
+/// connexions. En SFU, une seule connexion porte la voix de tous : c'est le
+/// moteur qui sait à qui appartient chaque piste reçue.
 class DetecteurParole {
   DetecteurParole({
     required this.onChange,
@@ -40,9 +43,11 @@ class DetecteurParole {
 
   bool parle(String id) => _parlent.contains(id);
 
-  void demarrer(Map<String, RTCPeerConnection> Function() connexions) {
+  /// [niveaux] rend le niveau de chacun (et le nôtre sous [moi]), ou `null`
+  /// quand il n'y a encore rien à mesurer.
+  void demarrer(Future<Map<String, double>?> Function() niveaux) {
     _minuteur?.cancel();
-    _minuteur = Timer.periodic(intervalle, (_) => _sonder(connexions()));
+    _minuteur = Timer.periodic(intervalle, (_) => _sonder(niveaux));
   }
 
   void arreter() {
@@ -56,44 +61,28 @@ class DetecteurParole {
     }
   }
 
-  Future<void> _sonder(Map<String, RTCPeerConnection> connexions) async {
-    // Plusieurs `getStats` de suite peuvent dépasser l'intervalle : sans cette
+  Future<void> _sonder(Future<Map<String, double>?> Function() niveaux) async {
+    // Plusieurs lectures de suite peuvent dépasser l'intervalle : sans cette
     // garde, les sondages se chevaucheraient et les compteurs avanceraient deux
     // fois plus vite que prévu.
-    if (_enCours || connexions.isEmpty) return;
+    if (_enCours) return;
     _enCours = true;
     var change = false;
     try {
-      var moiLu = false;
-      final vus = <String>{};
-      for (final e in connexions.entries) {
-        try {
-          final rapports = await e.value.getStats();
-          for (final r in rapports) {
-            final v = r.values;
-            if (v['kind'] != 'audio') continue;
-            final niveau = (v['audioLevel'] as num?)?.toDouble();
-            if (niveau == null) continue;
-            if (r.type == 'inbound-rtp') {
-              change |= mesurer(e.key, niveau);
-              vus.add(e.key);
-            } else if (!moiLu && r.type == 'media-source') {
-              // Le même micro pour toutes les liaisons : une lecture suffit.
-              change |= mesurer(moi, niveau);
-              moiLu = true;
-            }
-          }
-        } catch (_) {
-          // Liaison en cours de fermeture : elle sera absente au tour suivant.
-        }
+      final lus = await niveaux();
+      if (lus == null) return;
+      for (final e in lus.entries) {
+        change |= mesurer(e.key, e.value);
       }
       // Un participant parti ne parle plus.
       for (final id in _parlent.toList()) {
-        if (id != moi && !connexions.containsKey(id)) {
+        if (id != moi && !lus.containsKey(id)) {
           _parlent.remove(id);
           change = true;
         }
       }
+    } catch (_) {
+      // Moteur en cours de fermeture : rien à mesurer ce tour-ci.
     } finally {
       _enCours = false;
     }
