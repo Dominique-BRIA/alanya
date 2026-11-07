@@ -27,6 +27,15 @@ import '../widgets/ivr_panel.dart';
 import '../widgets/plainte_recorder.dart';
 import '../widgets/queue_status_sheet.dart';
 
+/// Le fond des écrans d'appel (07/11/2026) : la terre cuite de l'application,
+/// du clair au soutenu. Le brun chocolat d'avant était jugé trop sombre. Même
+/// dégradé que l'écran d'appel natif (`res/values/callkit_colors.xml`).
+const degradeEcranAppel = LinearGradient(
+  begin: Alignment.topLeft,
+  end: Alignment.bottomRight,
+  colors: [AlanyaColors.terracottaLight, AlanyaColors.terracotta, Color(0xFF9C4B2C)],
+);
+
 class ActiveCallScreen extends StatefulWidget {
   const ActiveCallScreen({super.key, this.incoming = false});
 
@@ -617,10 +626,16 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
         }
       },
       child: Scaffold(
-        backgroundColor: AlanyaColors.chocolate,
+        // Terre cuite claire en haut (07/11/2026) : le brun chocolat était
+        // trop sombre. Même couleur sous la barre d'état que le haut du dégradé.
+        backgroundColor: AlanyaColors.terracottaLight,
         body: SafeArea(
           child: Stack(
             children: [
+              const Positioned.fill(
+                child: DecoratedBox(
+                    decoration: BoxDecoration(gradient: degradeEcranAppel)),
+              ),
               if (apercuPlein)
                 Positioned.fill(
                   child: RTCVideoView(
@@ -740,7 +755,8 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
                           child: afficheCommeGroupe
                               ? CircleAvatar(
                                   radius: _menuStandardAffiche(cc) ? 32 : 52,
-                                  backgroundColor: AlanyaColors.terracotta,
+                                  // Foncée : se détache du fond terre cuite.
+                                  backgroundColor: AlanyaColors.terracottaDark,
                                   child: Icon(
                                     Icons.groups,
                                     size: _menuStandardAffiche(cc) ? 30 : 48,
@@ -751,7 +767,8 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
                                   name: name,
                                   avatarUrl: callAvatarUrl,
                                   radius: _menuStandardAffiche(cc) ? 32 : 52,
-                                  backgroundColor: AlanyaColors.terracotta,
+                                  // Foncée : se détache du fond terre cuite.
+                                  backgroundColor: AlanyaColors.terracottaDark,
                                   textColor: Colors.white,
                                 ),
                         ),
@@ -1158,7 +1175,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
   /// À la place d'une image figée : le correspondant a coupé sa caméra, ou son
   /// application est passée en arrière-plan (31/10/2026).
   Widget _cameraEnPause() => Container(
-        color: AlanyaColors.chocolate,
+        decoration: const BoxDecoration(gradient: degradeEcranAppel),
         alignment: Alignment.center,
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           const CircleAvatar(
@@ -1371,8 +1388,8 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
   /// Le fond d'une vignette dont le flux vidéo n'est pas encore arrivé.
   Widget _vignetteSansImage(String label) {
     final initiale = label.trim().isNotEmpty ? label.trim()[0].toUpperCase() : "?";
-    return ColoredBox(
-      color: AlanyaColors.chocolate,
+    return DecoratedBox(
+      decoration: const BoxDecoration(gradient: degradeEcranAppel),
       child: Center(
         child: Container(
           width: 56,

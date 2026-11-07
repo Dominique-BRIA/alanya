@@ -71,6 +71,24 @@ class AlanyaApplication : Application() {
         // Avant tout affichage : c'est ce rappel qui permettra de ne pas
         // confondre un refus avec une notification expirée.
         FlutterCallkitIncomingPlugin.registerEventCallback(callkitEventCallback)
+        // L'écran d'appel CallKit est-il réellement affiché ? AffichageAppel
+        // vérifie ainsi que le plein écran annoncé par Android a bien eu lieu
+        // (bloqué par certaines surcouches de fabricant).
+        registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
+            private fun estEcranAppel(a: android.app.Activity) =
+                a.javaClass.name == "com.hiennv.flutter_callkit_incoming.CallkitIncomingActivity"
+            override fun onActivityResumed(a: android.app.Activity) {
+                if (estEcranAppel(a)) AffichageAppel.ecranAppelVisible = true
+            }
+            override fun onActivityPaused(a: android.app.Activity) {
+                if (estEcranAppel(a)) AffichageAppel.ecranAppelVisible = false
+            }
+            override fun onActivityCreated(a: android.app.Activity, b: android.os.Bundle?) {}
+            override fun onActivityStarted(a: android.app.Activity) {}
+            override fun onActivityStopped(a: android.app.Activity) {}
+            override fun onActivitySaveInstanceState(a: android.app.Activity, b: android.os.Bundle) {}
+            override fun onActivityDestroyed(a: android.app.Activity) {}
+        })
     }
 
     private fun onActiveCallsChanged() {

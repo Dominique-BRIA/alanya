@@ -19,8 +19,10 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import androidx.core.app.NotificationManagerCompat
+import com.hiennv.flutter_callkit_incoming.CallkitConstants
 import com.hiennv.flutter_callkit_incoming.CallkitIncomingActivity
 import com.hiennv.flutter_callkit_incoming.CallkitNotificationManager
+import com.hiennv.flutter_callkit_incoming.getDataActiveCalls
 
 /**
  * L'ÉCRAN D'APPEL TOUJOURS AU PREMIER PLAN (07/11/2026).
@@ -65,15 +67,38 @@ object AffichageAppel {
         val verrouille = km.isKeyguardLocked
         val pleinEcran = pleinEcranAutorise(ctx)
         val androidLeFait = pleinEcran && (!allume || verrouille)
-        if (androidLeFait) {
-            Log.d(TAG, "plein écran pris en charge par Android (allumé=$allume verrouillé=$verrouille)")
-            return
-        }
         if (!Settings.canDrawOverlays(ctx)) {
-            Log.w(TAG, "superposition refusée : l'appel reste en bannière (allumé=$allume pleinEcran=$pleinEcran)")
+            if (!androidLeFait) {
+                Log.w(TAG, "superposition refusée : l'appel reste en bannière (allumé=$allume pleinEcran=$pleinEcran)")
+            }
             return
         }
-        principal.post { lancer(ctx, bundle, allume) }
+        if (!androidLeFait) {
+            principal.post { lancer(ctx, bundle, allume) }
+            return
+        }
+        // ⚠️ ANDROID DIT QU'IL S'EN CHARGE — ON VÉRIFIE (07/11/2026). Sur TECNO
+        // (et d'autres surcouches), l'autorisation plein écran est bien
+        // accordée, mais le fabricant bloque le lancement : le téléphone sonne
+        // écran éteint, sans rien afficher. Si l'écran d'appel n'est pas à
+        // l'écran un instant plus tard alors que l'appel sonne encore, on le
+        // lance nous-mêmes.
+        val callId = bundle.getString(CallkitConstants.EXTRA_CALLKIT_ID, "")
+        principal.postDelayed({
+            if (ecranAppelVisible) return@postDelayed
+            if (!sonneEncore(ctx, callId)) return@postDelayed
+            Log.w(TAG, "plein écran annoncé mais absent (surcouche du fabricant ?) → lancement direct")
+            lancer(ctx, bundle, pm.isInteractive)
+        }, 1_500)
+    }
+
+    /** Vrai tant que l'écran d'appel CallKit est affiché (voir AlanyaApplication). */
+    @Volatile var ecranAppelVisible = false
+
+    private fun sonneEncore(ctx: Context, callId: String): Boolean = try {
+        getDataActiveCalls(ctx).any { it.id == callId && !it.isAccepted }
+    } catch (_: Exception) {
+        false
     }
 
     private fun lancer(ctx: Context, bundle: Bundle, allume: Boolean) {

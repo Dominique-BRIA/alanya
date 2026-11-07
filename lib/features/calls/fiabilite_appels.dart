@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -96,15 +97,60 @@ class FiabiliteAppels {
     }
   }
 
-  /// Au démarrage, une fois connecté : si un réglage CRITIQUE manque, on le
-  /// dit et on propose de le régler. « Plus tard » ne fait taire le rappel
-  /// que pour la journée — un appel manqué demain coûte plus cher qu'un
-  /// rappel de plus.
+  /// Les réglages indispensables, dans l'ordre où on les fait accorder.
+  static const _critiques = ['notifications', 'pleinEcran', 'superposition', 'canalAppels'];
+
+  static bool _manque(EtatAffichageAppels e, String quoi) => switch (quoi) {
+        'notifications' => !e.notifications,
+        'pleinEcran' => !e.pleinEcran,
+        'superposition' => !e.superposition,
+        'canalAppels' => !e.canalAppels,
+        _ => false,
+      };
+
+  /// Attend le retour dans l'application (l'utilisateur revient des réglages
+  /// système), borné : il peut aussi ne jamais revenir.
+  static Future<void> _attendreRetour() {
+    final fini = Completer<void>();
+    late final _Retour observateur;
+    observateur = _Retour(() {
+      WidgetsBinding.instance.removeObserver(observateur);
+      if (!fini.isCompleted) fini.complete();
+    });
+    WidgetsBinding.instance.addObserver(observateur);
+    return fini.future.timeout(const Duration(minutes: 5), onTimeout: () {
+      WidgetsBinding.instance.removeObserver(observateur);
+    });
+  }
+
+  /// Au démarrage, une fois connecté.
+  ///
+  /// 1. COMME L'APPLICATION DE RÉFÉRENCE : chaque réglage indispensable qui
+  ///    manque ouvre DIRECTEMENT sa page de réglages Android, sans fenêtre
+  ///    intermédiaire — une fois par réglage, l'un après l'autre au retour
+  ///    dans l'application.
+  /// 2. Ensuite, s'il manque encore quelque chose, un rappel par jour, qui
+  ///    mène à l'écran « Fiabilité des appels ». « Plus tard » ne fait taire
+  ///    le rappel que pour la journée — un appel manqué demain coûte plus
+  ///    cher qu'un rappel de plus.
   static Future<void> verifierAuDemarrage(BuildContext context) async {
     try {
-      final etat = await lire();
+      var etat = await lire();
       if (etat == null || !etat.critiqueManquant) return;
       final prefs = await SharedPreferences.getInstance();
+      var pagesOuvertes = false;
+      for (final quoi in _critiques) {
+        if (etat == null || !_manque(etat, quoi)) continue;
+        final cle = 'fiabilite_ouvert_$quoi';
+        if (prefs.getBool(cle) ?? false) continue;
+        await prefs.setBool(cle, true);
+        if (!await ouvrir(quoi)) continue;
+        pagesOuvertes = true;
+        await _attendreRetour();
+        etat = await lire();
+      }
+      // Pages de réglages ouvertes à l'instant : pas de rappel par-dessus.
+      if (pagesOuvertes || etat == null || !etat.critiqueManquant) return;
       final dernier = prefs.getInt(_cleRappel) ?? 0;
       final maintenant = DateTime.now().millisecondsSinceEpoch;
       if (maintenant - dernier < const Duration(hours: 24).inMilliseconds) return;
@@ -136,6 +182,17 @@ class FiabiliteAppels {
     } catch (_) {
       // Une vérification qui échoue ne doit jamais bloquer l'application.
     }
+  }
+}
+
+/// Observateur d'un seul usage : prévient au retour au premier plan.
+class _Retour with WidgetsBindingObserver {
+  _Retour(this._auRetour);
+  final VoidCallback _auRetour;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _auRetour();
   }
 }
 

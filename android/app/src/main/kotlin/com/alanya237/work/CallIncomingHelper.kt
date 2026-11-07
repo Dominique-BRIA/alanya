@@ -327,10 +327,26 @@ object CallIncomingHelper {
     private fun photoComplete(context: Context, brut: String): String {
         val v = brut.trim()
         if (v.isEmpty() || v.startsWith("http")) return v
-        if (v.startsWith("data:")) return ""
+        // Photo enregistrée en base64 (« data: ») : le chargeur d'images du
+        // plugin (Coil) ne sait pas la lire, mais il lit un fichier. On
+        // l'écrit donc dans le cache, une fois par photo (07/11/2026).
+        if (v.startsWith("data:")) return photoEnFichier(context, v)
         val base = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString("flutter.api_base_natif", null)?.trimEnd('/') ?: return ""
         return base + (if (v.startsWith("/")) v else "/$v")
+    }
+
+    private fun photoEnFichier(context: Context, dataUri: String): String = try {
+        val dossier = java.io.File(context.cacheDir, "photos_appel").apply { mkdirs() }
+        val fichier = java.io.File(dossier, "${dataUri.hashCode() and 0x7fffffff}.img")
+        if (!fichier.exists() || fichier.length() == 0L) {
+            val octets = android.util.Base64.decode(dataUri.substringAfter(','), android.util.Base64.DEFAULT)
+            fichier.writeBytes(octets)
+        }
+        fichier.absolutePath
+    } catch (e: Exception) {
+        Log.w(TAG, "photo base64 illisible : $e")
+        ""
     }
 
     private fun buildIncomingBundle(
@@ -347,7 +363,8 @@ object CallIncomingHelper {
             ?: data["callerName"] ?: data["title"] ?: "Alanya"
         // Push du serveur : `callType` = "VIDEO" ; chemin Dart : `isVideo`.
         val isVideo = data["isVideo"] == "true" || data["callType"] == "VIDEO"
-        val photo = photoComplete(context, data["callerAvatarUrl"] ?: data["photo"] ?: "")
+        val photoBrute = data["callerAvatarUrl"] ?: data["photo"] ?: ""
+        val photo = photoComplete(context, photoBrute)
         val jeton = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString("flutter.jeton_acces_natif", null).orEmpty()
 
@@ -355,7 +372,9 @@ object CallIncomingHelper {
             "callId" to callId,
             "callerId" to callerId,
             "callerName" to (data["callerName"] ?: callerName),
-            "callerPhoto" to photo,
+            // La valeur du serveur, telle quelle : c'est Flutter qui la relit
+            // (AvatarSource), pas le chargeur du plugin.
+            "callerPhoto" to photoBrute,
             "isVideo" to isVideo,
             "convId" to data["convId"].orEmpty(),
             "isGroup" to isGroup,

@@ -45,6 +45,16 @@
         tools:ignore="ContentDescription" />
 
     <!--
+      Ajout d'Alanya Work (07/11/2026) : la caméra frontale en plein écran pour
+      un appel VIDÉO, comme WhatsApp — on se voit avant de décrocher. La vue
+      s'active seule (appel vidéo et caméra autorisée), sinon reste invisible.
+      Voir ApercuCameraAppel.kt.
+    -->
+    <com.alanya237.work.ApercuCameraAppel
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!--
       Pilule « APPEL ENTRANT » (CallIncomingHeaderPill).
 
       48 dp de marge haute : l'Activity dessine sous une barre d'état

@@ -4,30 +4,32 @@
       Écran d'appel entrant natif (res/layout/callkit_incoming_content.xml,
       repris de l'application de référence).
 
-      Même maquette qu'elle, aux couleurs d'Alanya Work : celles de notre écran
-      de sonnerie Flutter (`ActiveCallScreen`, AlanyaColors). Pas de variante
-      `values-night` : notre écran d'appel est sombre dans les deux thèmes.
+      Même maquette qu'elle, aux couleurs d'Alanya Work : la terre cuite de
+      l'application, du clair au soutenu (07/11/2026) — le brun chocolat
+      d'avant était trop sombre. Même dégradé que l'écran d'appel Flutter
+      (`degradeEcranAppel`, active_call_screen.dart). Pas de variante
+      `values-night` : l'écran d'appel est le même dans les deux thèmes.
     -->
-    <!-- Fond : chocolat, légèrement assombri vers le bas -->
-    <color name="callkit_gradient_start">#FF5C3D2E</color>
-    <color name="callkit_gradient_center">#FF4F3326</color>
-    <color name="callkit_gradient_end">#FF3A251B</color>
+    <!-- Fond : terracottaLight → terracotta → terre cuite soutenue -->
+    <color name="callkit_gradient_start">#FFD4845E</color>
+    <color name="callkit_gradient_center">#FFB85C38</color>
+    <color name="callkit_gradient_end">#FF9C4B2C</color>
 
     <color name="callkit_on_background">#FFFFFFFF</color>
 
-    <!-- Halo de la photo : blanc translucide, comme CallAvatarWaves -->
-    <color name="callkit_halo_ring">#26FFFFFF</color>
-    <color name="callkit_halo_inner">#33FFFFFF</color>
-    <color name="callkit_halo_ripple">#14FFFFFF</color>
+    <!-- Halo de la photo : blanc translucide -->
+    <color name="callkit_halo_ring">#33FFFFFF</color>
+    <color name="callkit_halo_inner">#40FFFFFF</color>
+    <color name="callkit_halo_ripple">#1FFFFFFF</color>
 
     <!-- Pilule « APPEL ENTRANT » -->
     <color name="callkit_pill_bg">#33FFFFFF</color>
     <color name="callkit_pill_on">#FFFFFFFF</color>
 
-    <!-- Accepter : vert forêt ; Refuser : rouge (Colors.red de Flutter) -->
+    <!-- Accepter : vert forêt ; Refuser : rouge -->
     <color name="callkit_action_accept">#FF2D6A4F</color>
-    <color name="callkit_action_reject">#FFF44336</color>
+    <color name="callkit_action_reject">#FFE53935</color>
 
-    <!-- Fond de la photo absente : terre cuite -->
-    <color name="callkit_avatar_bg">#FFB85C38</color>
+    <!-- Fond de la photo absente : terre cuite foncée, lisible sur le fond -->
+    <color name="callkit_avatar_bg">#FF8A3A1E</color>
 </resources>
