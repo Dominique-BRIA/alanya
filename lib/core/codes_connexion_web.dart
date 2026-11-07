@@ -53,14 +53,18 @@ class CodesConnexionWeb {
     if (ctx == null) return;
     final navigateur = donnees['navigateur']?.toString() ?? '';
     final lisible = '${code.substring(0, 3)} ${code.substring(3)}';
+    // Le même code sert, depuis le 07/11/2026, à confirmer la création d'une
+    // enseigne dans l'espace développeur (`objet: "enseigne"`). Absent : une
+    // connexion web, comme avant.
+    final enseigne = donnees['objet']?.toString() == 'enseigne';
 
     showDialog<void>(
       context: ctx,
       builder: (d) => AlertDialog(
-        icon: const Icon(Icons.lock_person_outlined, size: 32),
-        title: Text(tr(d, 'cw_titre')),
+        icon: Icon(enseigne ? Icons.storefront_outlined : Icons.lock_person_outlined, size: 32),
+        title: Text(tr(d, enseigne ? 'cw_titre_enseigne' : 'cw_titre')),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
-          Text(tr(d, 'cw_corps'), textAlign: TextAlign.center),
+          Text(tr(d, enseigne ? 'cw_corps_enseigne' : 'cw_corps'), textAlign: TextAlign.center),
           const SizedBox(height: 14),
           // Un appui le copie : on le recopie souvent sur un autre écran.
           InkWell(

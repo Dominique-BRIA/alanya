@@ -34,6 +34,11 @@ String messageErreurAppel(Object erreur,
     if (erreur.code == 'APPEL_CONTACTS_SEULEMENT') {
       return tr(context, 'call_err_contacts_only');
     }
+    // Une enseigne de l'espace développeur (07/11/2026) : elle envoie des
+    // messages automatiques, personne ne répondrait à l'appel.
+    if (erreur.code == 'APPEL_ENSEIGNE') {
+      return tr(context, 'call_err_enseigne');
+    }
     return erreur.message;
   }
 
