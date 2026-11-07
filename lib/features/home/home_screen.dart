@@ -70,7 +70,7 @@ import '../chat/partage_vers_alanya.dart';
 import '../calls/call_controller.dart';
 import '../calls/ouvrir_appel_en_cours.dart';
 import '../calls/calls_repository.dart';
-import '../calls/full_screen_permission.dart';
+import '../calls/fiabilite_appels.dart';
 import '../calls/screens/calls_screen.dart';
 import '../calls/screens/abandoned_clients_screen.dart';
 import '../meetings/meeting_controller.dart';
@@ -219,7 +219,9 @@ class _HomeScreenState extends State<HomeScreen> {
       // l'appel plein écran et l'écran de divulgation de la localisation
       // partaient dans le même cycle et se recouvraient — l'un masquant l'autre
       // selon lequel arrivait le dernier. Une question à la fois.
-      await FullScreenPermission.demanderSiNecessaire(context);
+      // Réglages dont dépend l'affichage d'un appel (07/11/2026) : rappelés
+      // tant qu'un point critique manque, voir FiabiliteAppels.
+      await FiabiliteAppels.verifierAuDemarrage(context);
       if (!mounted) return;
       await _assureLeSuiviDePosition();
       // Le lien Alanya qui a lancé l'application passe APRÈS les questions

@@ -87,6 +87,14 @@ object CallIncomingHelper {
         try {
             notificationManager?.showIncomingNotification(bundle)
             addCall(context.applicationContext, Data.fromBundle(bundle))
+            // ── L'écran d'appel au premier plan, partout (07/11/2026) ───────
+            //
+            // La notification ne lance l'écran d'appel que téléphone verrouillé
+            // ou éteint, et seulement si le plein écran est autorisé. Ailleurs
+            // ce n'était qu'une bannière fugace, à rechercher ensuite dans le
+            // panneau. Voir AffichageAppel. En sourdine (communication en
+            // cours), on n'impose rien : la notification suffit.
+            if (!enCommunication) AffichageAppel.presenter(context, bundle)
             // ── La notification a-t-elle réellement été postée ? ────────────
             //
             // Le plugin ne joue son son et n'affiche quoi que ce soit que si le

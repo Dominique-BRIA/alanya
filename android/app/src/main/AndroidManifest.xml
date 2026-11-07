@@ -88,6 +88,14 @@
          `autoRunOnBoot` ne peut rien : la collecte s'arrêterait à l'extinction
          et ne repartirait qu'à la prochaine ouverture de l'application. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <!-- Appels entrants (07/11/2026, voir AffichageAppel.kt) :
+         - « Afficher par-dessus les autres applications » : seule autorisation
+           qui permet de lancer l'écran d'appel au premier plan téléphone
+           déverrouillé, ou quand le plein écran est refusé ;
+         - exemption d'optimisation de batterie : le push d'appel arrive à
+           l'heure, même téléphone endormi depuis longtemps. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
 
     <application
         android:label="Alanya Work"

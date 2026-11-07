@@ -21,6 +21,8 @@ object CallNativeBridge {
     private var appContext: Context? = null
     private var ready = false
     private var verrouillage: ((Boolean) -> Unit)? = null
+    /** L'activité, pour ouvrir une page de réglages (exige un contexte d'activité). */
+    private var activiteRef: java.lang.ref.WeakReference<android.app.Activity>? = null
 
     fun attach(
         binaryMessenger: io.flutter.plugin.common.BinaryMessenger,
@@ -28,6 +30,7 @@ object CallNativeBridge {
         afficherParDessusVerrouillage: (Boolean) -> Unit,
     ) {
         appContext = context.applicationContext
+        activiteRef = (context as? android.app.Activity)?.let { java.lang.ref.WeakReference(it) }
         verrouillage = afficherParDessusVerrouillage
         channel = MethodChannel(binaryMessenger, CHANNEL).also { ch ->
             ch.setMethodCallHandler { call, result ->
@@ -58,6 +61,18 @@ object CallNativeBridge {
                         brut.forEach { (k, v) -> if (k != null) data[k.toString()] = v?.toString() ?: "" }
                         if (ctx != null) CallIncomingHelper.showIncoming(ctx, data)
                         result.success(null)
+                    }
+                    // Écran « Fiabilité des appels » (07/11/2026) : état des
+                    // autorisations dont dépend l'affichage d'un appel, et
+                    // ouverture du réglage qui en accorde une.
+                    "etatAffichageAppels" -> {
+                        val ctx = appContext
+                        result.success(if (ctx != null) AffichageAppel.etat(ctx) else null)
+                    }
+                    "ouvrirReglageAppels" -> {
+                        val activite = activiteRef?.get()
+                        val quoi = call.argument<String>("quoi") ?: ""
+                        result.success(activite != null && AffichageAppel.ouvrir(activite, quoi))
                     }
                     // Mode de sonnerie du téléphone : 0 silencieux, 1 vibreur,
                     // 2 normal.
