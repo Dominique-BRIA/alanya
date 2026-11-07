@@ -33,12 +33,20 @@ object CallRejectHelper {
 
     private val executor = Executors.newSingleThreadExecutor()
 
-    fun enqueueAndPost(context: Context, callId: String) {
+    /**
+     * [jetonRefus] : le jeton porté par le push d'appel (07/11/2026). Il ne vaut
+     * que pour refuser CET appel, mais il est valable pendant toute la sonnerie,
+     * là où le jeton d'accès laissé par Flutter expire 15 minutes après la
+     * dernière ouverture de l'application. Sans lui, application fermée depuis
+     * plus longtemps, le refus recevait un 401 et l'appelant sonnait jusqu'au
+     * bout.
+     */
+    fun enqueueAndPost(context: Context, callId: String, jetonRefus: String = "") {
         if (callId.isBlank()) return
         enqueuePending(context, callId)
         executor.execute {
             try {
-                postReject(context, callId)
+                postReject(context, callId, jetonRefus)
             } catch (e: Exception) {
                 Log.e(TAG, "postReject failed", e)
             }
@@ -63,26 +71,56 @@ object CallRejectHelper {
         }
     }
 
-    private fun postReject(context: Context, callId: String) {
+    /** 2xx : refusé. 404/409 : l'appel est déjà clos, plus rien à refuser. */
+    private fun estDefinitif(code: Int) = code in 200..299 || code == 404 || code == 409
+
+    private fun postReject(context: Context, callId: String, jetonRefus: String) {
         val prefs = context.getSharedPreferences(FLUTTER_PREFS, Context.MODE_PRIVATE)
         val token = prefs.getString(KEY_TOKEN, null)
         val apiBase = prefs.getString(KEY_API_BASE, null)
-        if (token.isNullOrBlank() || apiBase.isNullOrBlank() || !apiBase.startsWith("https://")) {
-            Log.w(TAG, "token/apiBase manquants — refus en file pour Flutter")
+        if (apiBase.isNullOrBlank() || !apiBase.startsWith("https://")) {
+            Log.w(TAG, "apiBase manquante — refus en file pour Flutter")
             return
         }
-        val code = doRejectPost(apiBase, token, callId)
-        Log.i(TAG, "POST /api/calls/$callId/reject → HTTP $code")
-        // 2xx : refusé. 404/409 : l'appel est déjà clos, il n'y a plus rien à
-        // refuser. Tout le reste (réseau, 401, 5xx) reste en file, rejoué par
-        // Flutter à la prochaine ouverture.
-        if (code in 200..299 || code == 404 || code == 409) {
-            removePending(context, callId)
+        if (jetonRefus.isBlank() && token.isNullOrBlank()) {
+            Log.w(TAG, "aucun jeton — refus en file pour Flutter")
+            return
+        }
+        // Quelques tentatives rapprochées : le refus n'a de sens que pendant la
+        // sonnerie, et Flutter ne rejouera la file qu'à la prochaine ouverture.
+        val delais = longArrayOf(0L, 2_000L, 5_000L)
+        for (delai in delais) {
+            if (delai > 0) Thread.sleep(delai)
+            val code = tenter(apiBase, callId, jetonRefus, token)
+            Log.i(TAG, "POST /api/calls/$callId/reject → HTTP $code")
+            if (estDefinitif(code)) {
+                removePending(context, callId)
+                return
+            }
+            // 401/403 : aucun des deux jetons n'est accepté, réessayer n'y
+            // changera rien. Flutter, qui sait renouveler la session, reprendra.
+            if (code == 401 || code == 403) return
         }
     }
 
-    /** POST avec le token fourni. Retourne le code HTTP (-1 si échec réseau). */
-    private fun doRejectPost(apiBase: String, token: String, callId: String): Int {
+    /**
+     * Le jeton de refus d'abord, la session ensuite : un serveur antérieur au
+     * jeton de refus l'ignore et répond 401, la session prend alors le relais.
+     */
+    private fun tenter(apiBase: String, callId: String, jetonRefus: String, token: String?): Int {
+        var code = -1
+        if (jetonRefus.isNotBlank()) {
+            code = doRejectPost(apiBase, callId, "X-Jeton-Refus", jetonRefus)
+            if (estDefinitif(code) || code == -1 || code >= 500) return code
+        }
+        if (!token.isNullOrBlank()) {
+            code = doRejectPost(apiBase, callId, "Authorization", "Bearer $token")
+        }
+        return code
+    }
+
+    /** POST avec l'en-tête d'identification fourni. Code HTTP, ou -1 si échec réseau. */
+    private fun doRejectPost(apiBase: String, callId: String, entete: String, valeur: String): Int {
         val url = URL("${apiBase.trimEnd('/')}/api/calls/$callId/reject")
         val conn = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
@@ -90,7 +128,7 @@ object CallRejectHelper {
             readTimeout = 8000
             doOutput = true
             setRequestProperty("Content-Type", "application/json")
-            setRequestProperty("Authorization", "Bearer $token")
+            setRequestProperty(entete, valeur)
         }
         return try {
             conn.outputStream.use { it.write("{}".toByteArray()) }

@@ -85,9 +85,11 @@ class AlanyaApplication : Application() {
                 if (!estEcranAppel(a)) return
                 AffichageAppel.ecranAppelVisible = true
                 AffichageAppel.ecranAffiche(this@AlanyaApplication, appelDe(a))
+                PhotoAppel.ecranAffiche(a, appelDe(a))
             }
             override fun onActivityPaused(a: android.app.Activity) {
                 if (!estEcranAppel(a)) return
+                PhotoAppel.ecranQuitte(a)
                 AffichageAppel.ecranAppelVisible = false
                 AffichageAppel.ecranQuitte(this@AlanyaApplication, appelDe(a), a.isFinishing)
             }
@@ -196,7 +198,9 @@ class AlanyaApplication : Application() {
                     Log.w(TAG, "ACTIVE_CALLS: refus sans callId id=$id")
                 } else {
                     Log.i(TAG, "ACTIVE_CALLS: refus utilisateur caller=$callerId callId=$callId")
-                    CallRejectHelper.enqueueAndPost(this, callId)
+                    val jetonRefus = prev.optJSONObject("extra")
+                        ?.optString("jetonRefus", "").orEmpty().trim()
+                    CallRejectHelper.enqueueAndPost(this, callId, jetonRefus)
                 }
             } else {
                 Log.i(

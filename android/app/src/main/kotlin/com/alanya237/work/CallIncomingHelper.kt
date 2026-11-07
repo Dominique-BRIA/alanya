@@ -22,8 +22,8 @@ import com.hiennv.flutter_callkit_incoming.removeCall
  * Copie de `CallIncomingHelper` de l'application de référence (06/11/2026).
  * Seules diffèrent les clés propres à Alanya Work : champs du push de notre
  * serveur, registre des appels terminés (`appels_termines`), sonneries
- * (`ringtone`, `sonneries_listes_natives`) et en-tête d'autorisation de la
- * photo (notre route des médias est protégée).
+ * (`ringtone`, `sonneries_listes_natives`), jeton de refus de l'appel, et
+ * photo chargée par nous (PhotoAppel).
  */
 object CallIncomingHelper {
 
@@ -42,6 +42,7 @@ object CallIncomingHelper {
         synchronized(bundlesAffiches) {
             if (callId.isBlank()) bundlesAffiches.clear() else bundlesAffiches.remove(callId)
         }
+        PhotoAppel.oublier(callId)
     }
 
     /** Les données affichées pour [callId], ou null s'il ne sonne plus. */
@@ -133,6 +134,8 @@ object CallIncomingHelper {
             if (enCommunication) "silence" else ringtonePath,
             pleinEcran = !enCommunication,
         )
+        // La photo, chargée par nous et posée sur l'écran d'appel (PhotoAppel).
+        PhotoAppel.preparer(context, callId, sourcePhoto(context, data["callerAvatarUrl"] ?: data["photo"] ?: ""))
         try {
             notificationManager?.showIncomingNotification(bundle)
             addCall(context.applicationContext, Data.fromBundle(bundle))
@@ -373,33 +376,25 @@ object CallIncomingHelper {
     }
 
     /**
-     * Photo de l'appelant : URL complète, le serveur rendant souvent un chemin
-     * relatif. L'image se charge par le plugin, avec l'en-tête d'autorisation
-     * passé dans `headers` (notre route des médias est protégée).
+     * Photo de l'appelant : une adresse absolue et PUBLIQUE, ou la photo
+     * `data:` telle quelle (lue par [PhotoAppel], jamais par le plugin).
+     *
+     * L'ancienne forme relative `/api/media/<id>` exige un jeton, que le
+     * téléphone n'a plus forcément application tuée : la même photo est servie
+     * sans jeton par `/api/avatars/<id>` (07/11/2026).
      */
-    private fun photoComplete(context: Context, brut: String): String {
+    private fun sourcePhoto(context: Context, brut: String): String {
         val v = brut.trim()
-        if (v.isEmpty() || v.startsWith("http")) return v
-        // Photo enregistrée en base64 (« data: ») : le chargeur d'images du
-        // plugin (Coil) ne sait pas la lire, mais il lit un fichier. On
-        // l'écrit donc dans le cache, une fois par photo (07/11/2026).
-        if (v.startsWith("data:")) return photoEnFichier(context, v)
+        if (v.isEmpty() || v.startsWith("http") || v.startsWith("data:")) return v
         val base = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString("flutter.api_base_natif", null)?.trimEnd('/') ?: return ""
-        return base + (if (v.startsWith("/")) v else "/$v")
-    }
-
-    private fun photoEnFichier(context: Context, dataUri: String): String = try {
-        val dossier = java.io.File(context.cacheDir, "photos_appel").apply { mkdirs() }
-        val fichier = java.io.File(dossier, "${dataUri.hashCode() and 0x7fffffff}.img")
-        if (!fichier.exists() || fichier.length() == 0L) {
-            val octets = android.util.Base64.decode(dataUri.substringAfter(','), android.util.Base64.DEFAULT)
-            fichier.writeBytes(octets)
+        val chemin = if (v.startsWith("/")) v else "/$v"
+        val public = if (chemin.startsWith("/api/media/")) {
+            "/api/avatars/" + chemin.removePrefix("/api/media/")
+        } else {
+            chemin
         }
-        fichier.absolutePath
-    } catch (e: Exception) {
-        Log.w(TAG, "photo base64 illisible : $e")
-        ""
+        return base + public
     }
 
     private fun buildIncomingBundle(
@@ -417,9 +412,9 @@ object CallIncomingHelper {
         // Push du serveur : `callType` = "VIDEO" ; chemin Dart : `isVideo`.
         val isVideo = data["isVideo"] == "true" || data["callType"] == "VIDEO"
         val photoBrute = data["callerAvatarUrl"] ?: data["photo"] ?: ""
-        val photo = photoComplete(context, photoBrute)
-        val jeton = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString("flutter.jeton_acces_natif", null).orEmpty()
+        // Le plugin ne lit que les adresses http(s) : une photo `data:` ne lui
+        // est pas confiée, PhotoAppel la pose lui-même.
+        val photo = sourcePhoto(context, photoBrute).takeIf { it.startsWith("http") }.orEmpty()
 
         val extra = hashMapOf<String, Any?>(
             "callId" to callId,
@@ -432,6 +427,9 @@ object CallIncomingHelper {
             "convId" to data["convId"].orEmpty(),
             "isGroup" to isGroup,
             "groupName" to groupName,
+            // Le droit de refuser CET appel sans session (07/11/2026), relu par
+            // AlanyaApplication au refus. Voir CallRejectHelper.
+            "jetonRefus" to data["jetonRefus"].orEmpty(),
             // Fraîcheur pour le cold start Flutter : une entrée ACTIVE_CALLS
             // résiduelle d'un essai précédent ne doit jamais déclencher une
             // auto-réponse ou un écran entrant fantôme.
@@ -450,7 +448,10 @@ object CallIncomingHelper {
             // personne ne passe.
             "duration" to 60000L,
             "extra" to extra,
-            "headers" to (if (jeton.isNotEmpty()) hashMapOf("Authorization" to "Bearer $jeton") else hashMapOf<String, Any?>()),
+            // AUCUN en-tête (07/11/2026). Les photos de profil sont publiques, et
+            // le chargeur du plugin ajoutait notre jeton — souvent expiré — à
+            // chaque requête, redirection vers Cloudflare comprise. Voir PhotoAppel.
+            "headers" to hashMapOf<String, Any?>(),
             "android" to hashMapOf(
                 "isCustomNotification" to true,
                 "isShowLogo" to false,
