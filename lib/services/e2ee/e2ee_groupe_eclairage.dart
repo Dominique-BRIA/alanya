@@ -22,11 +22,13 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 
 import '../../core/message_cache.dart';
 import '../../models/message.dart';
 import 'e2ee_fournisseur.dart';
 import 'e2ee_groupe_fil.dart' show EchecGroupe;
+import 'e2ee_media.dart' show DescripteurMedia;
 
 /// Ce qu'une ouverture a donné.
 class EclairageGroupe {
@@ -59,10 +61,36 @@ Future<EclairageGroupe> ouvrirMessagesGroupe({
   }
   final sortie = <Message>[];
   final attente = <String>{};
+  /*
+   * 🔁 LE CACHE D'ABORD (11/11/2026, lot 1 du chiffrement des groupes v2).
+   * Ce qui a déjà été déchiffré une fois sur cet appareil n'est plus jamais
+   * redéchiffré : c'était le coût de chaque ouverture de groupe et de chaque
+   * aperçu de liste. Un message MODIFIÉ, lui, a un nouveau chiffré : il est
+   * toujours relu. L'expéditeur de la ligne en cache doit être le même.
+   */
+  final candidats = [
+    for (final m in page)
+      if (m.chiffreGroupe != null && !m.isDeleted && m.editedAt == null) m.id,
+  ];
+  var connus = const <String, ({String texte, String expediteurId, String? mediaJson})>{};
+  try {
+    connus = await MessageCache.clairsConnus(convId, candidats);
+  } catch (_) {
+    // Cache illisible : on retombe sur le déchiffrement, comme avant.
+  }
   for (final m in page) {
     final c = m.chiffreGroupe;
     if (c == null || m.isDeleted) {
       sortie.add(m);
+      continue;
+    }
+    final connu = m.editedAt == null ? connus[m.id] : null;
+    if (connu != null && connu.expediteurId == m.senderId) {
+      DescripteurMedia? media;
+      try {
+        if (connu.mediaJson != null) media = DescripteurMedia.depuisJson(jsonDecode(connu.mediaJson!));
+      } catch (_) {}
+      sortie.add(m.avecDechiffre(texte: connu.texte, media: media));
       continue;
     }
     try {

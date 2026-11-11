@@ -781,8 +781,15 @@ class EtatChiffrement {
   final bool jePeuxActiver;
 
   /// Faut-il activer maintenant, sans rien demander à personne ?
+  ///
+  /// 🔁 PLUS DE GROUPE (11/11/2026, lot 1 du chiffrement des groupes v2). Un
+  /// groupe basculait en chiffré dès qu'un administrateur l'ouvrait, pour tout
+  /// le monde et sans retour : les membres dont l'appareil n'avait pas suivi
+  /// perdaient l'accès. L'activation automatique des groupes reviendra au
+  /// lot 5, quand tous les membres auront une clé de COMPTE. Les groupes déjà
+  /// chiffrés le restent ; le tête-à-tête ne change pas.
   bool get aActiverSilencieusement =>
-      !actif && chiffrementActif && activable && (!groupe || jePeuxActiver);
+      !actif && chiffrementActif && activable && !groupe;
 }
 
 /// Le chiffrement n'a pas pu se faire — et on ne retombe pas en clair.

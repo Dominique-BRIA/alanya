@@ -641,6 +641,45 @@ class MessageCache {
         (mediaJson == null || l.first['e2ee_media_json'] == mediaJson);
   }
 
+  /// LES CLAIRS DÉJÀ CONNUS d'un fil chiffré, pour [ids] (11/11/2026, lot 1
+  /// du chiffrement des groupes v2).
+  ///
+  /// Un message de groupe ne se consomme pas : son chiffré revient à chaque
+  /// chargement. Le redéchiffrer à chaque ouverture coûtait une vérification
+  /// de signature et un AES en Dart pur par message — l'ouverture lente des
+  /// groupes. Ce qui a déjà été déchiffré une fois est relu ici.
+  ///
+  /// Seules les lignes CHIFFRÉES, non supprimées, du bon expéditeur comptent :
+  /// la clé `id → expéditeur` est vérifiée par l'appelant.
+  static Future<Map<String, ({String texte, String expediteurId, String? mediaJson})>>
+      clairsConnus(String convId, List<String> ids) async {
+    if (ids.isEmpty) return const {};
+    final db = await _database();
+    final sortie = <String, ({String texte, String expediteurId, String? mediaJson})>{};
+    // Par paquets : SQLite borne le nombre de paramètres d'une requête.
+    for (var i = 0; i < ids.length; i += 400) {
+      final paquet = ids.sublist(i, i + 400 > ids.length ? ids.length : i + 400);
+      final lignes = await db.query(
+        'messages',
+        columns: ['id', 'content', 'sender_id', 'e2ee_media_json'],
+        where: 'conv_id = ? AND chiffre = 1 AND deleted_at IS NULL '
+            "AND content IS NOT NULL AND content != '' "
+            'AND id IN (${List.filled(paquet.length, '?').join(',')})',
+        whereArgs: [convId, ...paquet],
+      );
+      for (final l in lignes) {
+        final texte = l['content'] as String;
+        if (estChargeTechnique(texte)) continue;
+        sortie[l['id'] as String] = (
+          texte: texte,
+          expediteurId: l['sender_id'] as String,
+          mediaJson: l['e2ee_media_json'] as String?,
+        );
+      }
+    }
+    return sortie;
+  }
+
   /// Range un message venu de l'archive chiffrée — sans rien défaire.
   ///
   /// ⚠️ PAS UN `upsert`. La règle, et le défaut qu'elle corrige, sont dans

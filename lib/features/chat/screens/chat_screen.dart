@@ -4,7 +4,7 @@ import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
 import '../../../services/e2ee/e2ee_fil.dart' show MessageClair;
 import '../../../services/e2ee/e2ee_fournisseur.dart';
 import '../../../services/e2ee/e2ee_groupe_eclairage.dart';
-import '../../../services/e2ee/e2ee_groupe_fil.dart' show EchecGroupe;
+import '../../../services/e2ee/e2ee_groupe_fil.dart' show CleGroupeAbsente, EchecGroupe;
 import '../../../services/e2ee/e2ee_media.dart';
 import '../../../services/e2ee/e2ee_media_envoi.dart';
 import '../../../widgets/e2ee/e2ee_widgets.dart';
@@ -3067,12 +3067,38 @@ class _ChatScreenState extends State<ChatScreen>
     DateTime quand, {
     String type = "TEXT",
     String? replyToId,
+    int tentativeCle = 0,
   }) {
     _fileEnvoisChiffres = _fileEnvoisChiffres
         .then((_) => _envoyerChiffreMaintenant(pile, pair, texte, tempId, quand,
-            type: type, replyToId: replyToId))
+            type: type, replyToId: replyToId, tentativeCle: tentativeCle))
         .catchError((_) {});
   }
+
+  /*
+   * 🔁 UN MESSAGE DE GROUPE N'ÉCHOUE PLUS FAUTE DE CLÉ (11/11/2026, lot 1 du
+   * chiffrement des groupes v2). Clé du groupe pas encore là, ou qui vient de
+   * changer (`VERSION_PERIMEE`) : la bulle reste « en attente » et l'envoi est
+   * retenté seul, de plus en plus espacé — la clé arrive le plus souvent en
+   * quelques secondes (boîte, copie personnelle, autre appareil). Au bout de
+   * ces délais (12 minutes et demie en tout), « Réessayer » prend le relais.
+   *
+   * Les relances continuent si l'on quitte l'écran : le message part quand
+   * même, et se retrouve dans le fil à la prochaine ouverture.
+   */
+  static const _delaisCleGroupe = [
+    Duration(seconds: 3),
+    Duration(seconds: 5),
+    Duration(seconds: 10),
+    Duration(seconds: 15),
+    Duration(seconds: 30),
+    Duration(seconds: 30),
+    Duration(seconds: 60),
+    Duration(seconds: 60),
+    Duration(seconds: 120),
+    Duration(seconds: 120),
+    Duration(seconds: 300),
+  ];
 
   Future<void> _envoyerChiffreMaintenant(
     PileE2ee pile,
@@ -3082,6 +3108,7 @@ class _ChatScreenState extends State<ChatScreen>
     DateTime quand, {
     String type = "TEXT",
     String? replyToId,
+    int tentativeCle = 0,
   }) async {
     try {
       final id = await pile.fil.envoyer(
@@ -3159,6 +3186,18 @@ class _ChatScreenState extends State<ChatScreen>
         _rebuildCombined();
       });
     } catch (e) {
+      // Clé du groupe absente ou changée : on attend, sans échec (voir
+      // `_delaisCleGroupe`). Toujours chiffré : on ne retombe jamais en clair.
+      if (e is CleGroupeAbsente && tentativeCle < _delaisCleGroupe.length) {
+        if (tentativeCle == 0 && mounted) {
+          showAppSnackBar(tr(context, 'e2ee_groupe_envoi_attente'));
+        }
+        Future<void>.delayed(_delaisCleGroupe[tentativeCle], () {
+          _envoyerChiffreEnFond(pile, pair, texte, tempId, quand,
+              type: type, replyToId: replyToId, tentativeCle: tentativeCle + 1);
+        });
+        return;
+      }
       /*
        * ⚠️ ON NE RETOMBE JAMAIS EN CLAIR SI LE CHIFFREMENT ÉCHOUE : on le dit,
        * et la bulle reste là, marquée en échec, avec son texte — « Réessayer »

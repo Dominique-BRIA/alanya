@@ -1535,6 +1535,7 @@ class AppLocalizations {
 'stock_vider_temp_ok': "Fichiers temporaires supprimés",
 'stock_vider': "Vider",
 'stock_unites': "o|Ko|Mo|Go",
+'e2ee_groupe_envoi_attente': "La clé du groupe arrive : ton message partira tout seul dans un instant.",
 },
 'en': {
 'e2ee_texte_indisponible': "Decrypting…",
@@ -3060,6 +3061,7 @@ class AppLocalizations {
 'stock_vider_temp_ok': "Temporary files deleted",
 'stock_vider': "Clear",
 'stock_unites': "B|KB|MB|GB",
+'e2ee_groupe_envoi_attente': "The group key is on its way: your message will be sent automatically in a moment.",
 },
 'es': {
 'e2ee_texte_indisponible': "Descifrando…",
@@ -4585,6 +4587,7 @@ class AppLocalizations {
 'stock_vider_temp_ok': "Archivos temporales eliminados",
 'stock_vider': "Vaciar",
 'stock_unites': "B|KB|MB|GB",
+'e2ee_groupe_envoi_attente': "La clave del grupo está llegando: tu mensaje se enviará solo en un momento.",
 },
 'de': {
 'e2ee_texte_indisponible': "Wird entschlüsselt…",
@@ -6110,6 +6113,7 @@ class AppLocalizations {
 'stock_vider_temp_ok': "Temporäre Dateien gelöscht",
 'stock_vider': "Leeren",
 'stock_unites': "B|KB|MB|GB",
+'e2ee_groupe_envoi_attente': "Der Gruppenschlüssel kommt gleich: deine Nachricht wird automatisch gesendet.",
 },
 'pt': {
 'e2ee_texte_indisponible': "A decifrar…",
@@ -7635,6 +7639,7 @@ class AppLocalizations {
 'stock_vider_temp_ok': "Arquivos temporários excluídos",
 'stock_vider': "Limpar",
 'stock_unites': "B|KB|MB|GB",
+'e2ee_groupe_envoi_attente': "A chave do grupo está chegando: sua mensagem será enviada sozinha em instantes.",
 },
 'ru': {
 'e2ee_texte_indisponible': "Расшифровка…",
@@ -9160,6 +9165,7 @@ class AppLocalizations {
 'stock_vider_temp_ok': "Временные файлы удалены",
 'stock_vider': "Очистить",
 'stock_unites': "Б|КБ|МБ|ГБ",
+'e2ee_groupe_envoi_attente': "Ключ группы скоро придёт: сообщение отправится само через мгновение.",
 },
 'zh': {
 'e2ee_texte_indisponible': "正在解密…",
@@ -10685,6 +10691,7 @@ class AppLocalizations {
 'stock_vider_temp_ok': "临时文件已删除",
 'stock_vider': "清除",
 'stock_unites': "B|KB|MB|GB",
+'e2ee_groupe_envoi_attente': "群组密钥即将到达：你的消息稍后会自动发送。",
 },
 'sv': {
 'e2ee_texte_indisponible': "Dekrypterar…",
@@ -12210,6 +12217,7 @@ class AppLocalizations {
 'stock_vider_temp_ok': "Tillfälliga filer raderade",
 'stock_vider': "Töm",
 'stock_unites': "B|kB|MB|GB",
+'e2ee_groupe_envoi_attente': "Gruppnyckeln är på väg: ditt meddelande skickas automatiskt om en stund.",
 },
 'no': {
 'e2ee_texte_indisponible': "Dekrypterer…",
@@ -13735,6 +13743,7 @@ class AppLocalizations {
 'stock_vider_temp_ok': "Midlertidige filer slettet",
 'stock_vider': "Tøm",
 'stock_unites': "B|kB|MB|GB",
+'e2ee_groupe_envoi_attente': "Gruppenøkkelen er på vei: meldingen sendes automatisk om et øyeblikk.",
 }
 };
 }
