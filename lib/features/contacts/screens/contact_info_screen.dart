@@ -24,6 +24,7 @@ import '../../account/screens/avatar_viewer_screen.dart';
 import '../../calls/call_controller.dart';
 import '../../calls/message_erreur_appel.dart';
 import '../../calls/ouvrir_appel_en_cours.dart';
+import '../../auth/auth_controller.dart';
 import '../../chat/chat_repository.dart';
 import '../../chat/medias_partages.dart';
 import '../../chat/screens/media_gallery_viewer.dart';
@@ -123,6 +124,12 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
   /// et s'il refuse d'être renommé.
   Contact? _fiche;
 
+  /// Le serveur a répondu : on sait si la personne est dans mes contacts.
+  /// Tant qu'il ne l'a pas fait, le bouton « Ajouter » ne s'affiche pas —
+  /// il apparaîtrait puis disparaîtrait pour quelqu'un qui y est déjà.
+  bool _ficheConnue = false;
+  bool _ajoutEnCours = false;
+
   Future<void> _chargerFiche() async {
     final repo = context.read<ContactsRepository>();
     // La copie du téléphone d'abord, puis le serveur.
@@ -134,8 +141,48 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
     try {
       final liste = await repo.list();
       final trouve = liste.where((c) => c.userId == widget.userId);
-      if (mounted) setState(() => _fiche = trouve.isEmpty ? null : trouve.first);
+      if (mounted) {
+        setState(() {
+          _fiche = trouve.isEmpty ? null : trouve.first;
+          _ficheConnue = true;
+        });
+      }
     } catch (_) {}
+  }
+
+  /// « Ajouter » se montre-t-il ? Pas pour moi-même, pas pour le compte
+  /// officiel (il ne s'ajoute pas), pas sans numéro, pas pour qui y est déjà.
+  bool get _peutAjouter {
+    if (!_ficheConnue || _fiche != null || widget.publicNumber.isEmpty) return false;
+    if (widget.badge?.type == 'officiel') return false;
+    final moi = context.read<AuthController>().user?.id;
+    return moi == null || moi != widget.userId;
+  }
+
+  /// AJOUTER DEPUIS LA FICHE (11/11/2026), comme dans l'application de
+  /// référence : un appui, et la personne entre dans mes contacts.
+  Future<void> _ajouter() async {
+    if (_ajoutEnCours) return;
+    setState(() => _ajoutEnCours = true);
+    final repo = context.read<ContactsRepository>();
+    try {
+      final ajoute = await repo.add(widget.publicNumber);
+      if (!mounted) return;
+      setState(() => _fiche = ajoute);
+      showAppSnackBar(tr(context, 'contact_saved'));
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      if (e.code == 'ALREADY_CONTACT') {
+        // Déjà là (ajouté depuis un autre appareil) : on relit la fiche.
+        await _chargerFiche();
+      } else {
+        showAppSnackBar(e.message);
+      }
+    } catch (_) {
+      if (mounted) showAppSnackBar(tr(context, 'save_failed'));
+    } finally {
+      if (mounted) setState(() => _ajoutEnCours = false);
+    }
   }
 
   String? get _nomDonne => NomsDonnes.de(widget.userId);
@@ -323,7 +370,8 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
   }
 
   Future<void> _toggleBlock() async {
-    final contactId = widget.contactId;
+    // Ajouté depuis cette fiche : son identifiant de contact vient de `_fiche`.
+    final contactId = widget.contactId ?? _fiche?.id;
     if (contactId == null) {
       showAppSnackBar(
           tr(context, 'ci_add_first_to_block'));
@@ -641,6 +689,13 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
           label: tr(context, 'video'),
           onTap: () => _startCall("VIDEO"),
         ),
+        if (_peutAjouter)
+          _RoundAction(
+            icon: Icons.person_add_alt_1_rounded,
+            label: tr(context, 'add_action'),
+            onTap: _ajouter,
+            occupe: _ajoutEnCours,
+          ),
       ],
     );
   }
@@ -1029,11 +1084,15 @@ class _RoundAction extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.onTap,
+    this.occupe = false,
   });
 
   final IconData icon;
   final String label;
   final VoidCallback onTap;
+
+  /// Action en cours : une roue à la place de l'icône, et plus d'appui.
+  final bool occupe;
 
   @override
   Widget build(BuildContext context) {
@@ -1046,11 +1105,17 @@ class _RoundAction extends StatelessWidget {
           shape: const CircleBorder(),
           child: InkWell(
             customBorder: const CircleBorder(),
-            onTap: onTap,
+            onTap: occupe ? null : onTap,
             child: SizedBox(
               width: 60,
               height: 60,
-              child: Icon(icon, color: accentOf(context), size: 26),
+              child: occupe
+                  ? Padding(
+                      padding: const EdgeInsets.all(19),
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2.2, color: accentOf(context)),
+                    )
+                  : Icon(icon, color: accentOf(context), size: 26),
             ),
           ),
         ),
