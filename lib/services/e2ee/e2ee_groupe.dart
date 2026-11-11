@@ -426,3 +426,210 @@ String ouvrirBoite(
     throw const GroupeInvalide('boîte : déchiffrement refusé');
   }
 }
+
+/* ══════════════════ VERSION 2 (11/11/2026) ══════════════════
+ *
+ * Chiffrement des groupes v2 — conception côté serveur :
+ * `docs/2026-11-11-e2ee-groupes-v2-conception.md`. ⚠️ JUMEAU DE
+ * `STAGE-WEB/src/services/e2ee-groupe.ts` (lot 4) : mêmes octets, mêmes
+ * données associées, mêmes vecteurs (`test/e2ee_groupe_v2_test.dart`).
+ */
+
+/// Le message de groupe au format 2 : sans signature par appareil.
+const formatGroupeV2 = 0x02;
+
+/// Le format d'un corps de message de groupe (1 ou 2), ou `null` s'il est
+/// illisible.
+int? formatDuCorps(String corps) {
+  try {
+    final brut = base64Decode(corps);
+    return brut.isEmpty ? null : brut[0];
+  } catch (_) {
+    return null;
+  }
+}
+
+/// Les données associées du format 2 : le groupe, le message, la version et
+/// l'expéditeur — sans l'appareil, que le serveur ne garantit pas.
+Uint8List donneesAssocieesV2(ContexteGroupe c) {
+  for (final v in [c.convId, c.messageId, c.expediteurId]) {
+    if (v.isEmpty || v.contains('\n')) throw const GroupeInvalide('contexte mal formé');
+  }
+  if (c.version < 1) throw const GroupeInvalide('version invalide');
+  return Uint8List.fromList(utf8.encode(
+    'alanya-groupe-v2\n${c.convId}\n${c.messageId}\n${c.version}\n${c.expediteurId}',
+  ));
+}
+
+/// Chiffre un message de groupe au format 2 :
+/// `base64( 0x02 | nonce(12) | AES-256-GCM(clé, charge) )`.
+///
+/// 🔴 PAS DE SIGNATURE : c'est le serveur qui garantit l'expéditeur (il écrit
+/// le message au nom du compte connecté), et l'AAD le colle au chiffré. Prix
+/// assumé (conception § 3.3) : un membre de connivence avec le serveur
+/// pourrait écrire au nom d'un autre. Gain : plus jamais de message
+/// « indisponible » parce que l'appareil de l'auteur est inconnu.
+String chiffrerMessageGroupeV2(
+  String clair,
+  Uint8List cle,
+  ContexteGroupe contexte, {
+  Uint8List? nonceImpose,
+}) {
+  if (cle.length != _tailleCle) throw const GroupeInvalide('clé de groupe invalide');
+  final nonce = nonceImpose ?? _aleatoire(_tailleNonce);
+  if (nonce.length != _tailleNonce) throw const GroupeInvalide('nonce invalide');
+  final chiffre =
+      _gcm(true, cle, nonce, donneesAssocieesV2(contexte), Uint8List.fromList(utf8.encode(clair)));
+  return base64Encode(_concat([Uint8List.fromList([formatGroupeV2]), nonce, chiffre]));
+}
+
+/// Déchiffre un message de groupe au format 2. Lève [GroupeInvalide].
+String dechiffrerMessageGroupeV2(String corps, Uint8List cle, ContexteGroupe contexte) {
+  final Uint8List brut;
+  try {
+    brut = base64Decode(corps);
+  } catch (_) {
+    throw const GroupeInvalide('corps illisible');
+  }
+  if (brut.length < 1 + _tailleNonce + _tailleEtiquette) {
+    throw const GroupeInvalide('corps trop court');
+  }
+  if (brut[0] != formatGroupeV2) throw const GroupeInvalide('format inconnu');
+  if (cle.length != _tailleCle) throw const GroupeInvalide('clé de groupe invalide');
+  final nonce = Uint8List.sublistView(brut, 1, 1 + _tailleNonce);
+  final chiffre = Uint8List.sublistView(brut, 1 + _tailleNonce);
+  try {
+    return utf8.decode(_gcm(false, cle, nonce, donneesAssocieesV2(contexte), chiffre));
+  } catch (_) {
+    throw const GroupeInvalide(
+        'déchiffrement refusé : mauvaise clé, mauvaise version ou contexte déplacé');
+  }
+}
+
+/// Lit un message au FORMAT 1 sans vérifier sa signature — quand l'identité
+/// de l'appareil auteur n'est pas connue ici (conception § 3.3). Le
+/// déchiffrement GCM contrôle déjà groupe, message, version, expéditeur et
+/// appareil (données associées) ; seule la preuve que CET appareil l'a écrit
+/// manque, et le serveur garantit l'expéditeur.
+String dechiffrerMessageGroupeSansSignature(String corps, Uint8List cle, ContexteGroupe contexte) {
+  final Uint8List brut;
+  try {
+    brut = base64Decode(corps);
+  } catch (_) {
+    throw const GroupeInvalide('corps illisible');
+  }
+  if (brut.length < 1 + _tailleNonce + _tailleEtiquette + _tailleSignature) {
+    throw const GroupeInvalide('corps trop court');
+  }
+  if (brut[0] != formatGroupe) throw const GroupeInvalide('format inconnu');
+  if (cle.length != _tailleCle) throw const GroupeInvalide('clé de groupe invalide');
+  final nonce = Uint8List.sublistView(brut, 1, 1 + _tailleNonce);
+  final chiffre =
+      Uint8List.sublistView(brut, 1 + _tailleNonce, brut.length - _tailleSignature);
+  try {
+    return utf8.decode(_gcm(false, cle, nonce, donneesAssociees(contexte), chiffre));
+  } catch (_) {
+    throw const GroupeInvalide(
+        'déchiffrement refusé : mauvaise clé, mauvaise version ou contexte déplacé');
+  }
+}
+
+/* ── L'emballage d'une clé de groupe pour un COMPTE (conception § 3.2) ──
+ *
+ *   corps = base64( 0x01 | éphémère 33 | nonce 12 | AES-256-GCM(K, clé de groupe 32) )
+ *   K     = HKDF-SHA256( X25519(éphémère, clé du compte destinataire),
+ *                        sel = 32 zéros, info = « alanya-emballage-v1 » )
+ *   AAD   = « alanya-emballage-v1 » \n convId \n destinataireId \n version \n versionCompte
+ *
+ * Le scellement des boîtes, adressé au compte au lieu de l'appareil, et SANS
+ * signature : le dépôt est contrôlé par le serveur (membre actif, version
+ * détenue), et un emballage faux se voit à l'ouverture (il est alors retiré).
+ */
+const formatEmballage = 0x01;
+const _infoEmballage = 'alanya-emballage-v1';
+
+class ContexteEmballage {
+  const ContexteEmballage({
+    required this.convId,
+    required this.destinataireId,
+    required this.version,
+    required this.versionCompte,
+  });
+  final String convId;
+  final String destinataireId;
+  final int version;
+  final int versionCompte;
+}
+
+Uint8List donneesEmballage(ContexteEmballage c) {
+  for (final v in [c.convId, c.destinataireId]) {
+    if (v.isEmpty || v.contains('\n')) {
+      throw const GroupeInvalide("contexte d'emballage mal formé");
+    }
+  }
+  if (c.version < 1 || c.versionCompte < 1) throw const GroupeInvalide('version invalide');
+  return Uint8List.fromList(utf8.encode(
+      '$_infoEmballage\n${c.convId}\n${c.destinataireId}\n${c.version}\n${c.versionCompte}'));
+}
+
+Uint8List _cleEmballage(Uint8List partage) {
+  final hkdf = HKDFKeyDerivator(SHA256Digest())
+    ..init(HkdfParameters(
+        partage, 32, Uint8List(32), Uint8List.fromList(utf8.encode(_infoEmballage))));
+  final sortie = Uint8List(32);
+  hkdf.deriveKey(null, 0, sortie, 0);
+  return sortie;
+}
+
+/// Emballe [cleGroupe] (32 octets) pour le compte dont la clé publique est
+/// [clePubliqueCompte] (33 octets). [ephemere] et [nonceImpose] : pour les
+/// vecteurs seulement.
+String emballerCle(
+  Uint8List cleGroupe,
+  Uint8List clePubliqueCompte,
+  ContexteEmballage contexte, {
+  ({Uint8List pub, Uint8List priv})? ephemere,
+  Uint8List? nonceImpose,
+}) {
+  if (cleGroupe.length != _tailleCle) throw const GroupeInvalide('clé de groupe invalide');
+  final eph = ephemere ??
+      (() {
+        final k = Curve.generateKeyPair();
+        return (
+          pub: Uint8List.fromList(k.publicKey.serialize()),
+          priv: Uint8List.fromList(k.privateKey.serialize()),
+        );
+      })();
+  final partage = Curve.calculateAgreement(
+      Curve.decodePoint(clePubliqueCompte, 0), Curve.decodePrivatePoint(eph.priv));
+  final nonce = nonceImpose ?? _aleatoire(_tailleNonce);
+  final chiffre =
+      _gcm(true, _cleEmballage(partage), nonce, donneesEmballage(contexte), cleGroupe);
+  return base64.encode(_concat([Uint8List.fromList([formatEmballage]), eph.pub, nonce, chiffre]));
+}
+
+/// Ouvre un emballage avec la clé privée du compte (32 octets). Rend la clé
+/// de groupe. Lève [GroupeInvalide].
+Uint8List deballerCle(String corps, Uint8List clePriveeCompte, ContexteEmballage contexte) {
+  final Uint8List brut;
+  try {
+    brut = base64.decode(corps);
+  } catch (_) {
+    throw const GroupeInvalide('emballage illisible');
+  }
+  if (brut.length != 1 + _taillePublique + _tailleNonce + _tailleCle + _tailleEtiquette ||
+      brut[0] != formatEmballage) {
+    throw const GroupeInvalide('emballage mal formé');
+  }
+  final eph = Uint8List.sublistView(brut, 1, 1 + _taillePublique);
+  final nonce =
+      Uint8List.sublistView(brut, 1 + _taillePublique, 1 + _taillePublique + _tailleNonce);
+  final chiffre = Uint8List.sublistView(brut, 1 + _taillePublique + _tailleNonce);
+  try {
+    final partage = Curve.calculateAgreement(
+        Curve.decodePoint(eph, 0), Curve.decodePrivatePoint(clePriveeCompte));
+    return _gcm(false, _cleEmballage(partage), nonce, donneesEmballage(contexte), chiffre);
+  } catch (_) {
+    throw const GroupeInvalide('emballage : ouverture refusée');
+  }
+}

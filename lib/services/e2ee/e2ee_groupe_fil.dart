@@ -26,6 +26,7 @@ import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart'
     show SignalProtocolAddress;
 
 import '../../core/api_client.dart' show ApiException;
+import 'e2ee_compte.dart';
 import 'e2ee_groupe.dart' as g;
 import 'e2ee_media.dart';
 import 'e2ee_service.dart';
@@ -100,10 +101,22 @@ typedef BilanDistribution = ({int appareils, int boites, List<String> sansAppare
 
 class GroupeChiffre {
   GroupeChiffre(this._service, this._api, this._monDeviceId, this._monCompte)
-      : copies = CopiesTrousseau(_service.coffre, _api, _monCompte);
+      : copies = CopiesTrousseau(_service.coffre, _api, _monCompte),
+        comptes = ComptesE2ee(_service.coffre, _api, _monCompte);
 
   /// Ma copie personnelle de chaque trousseau (lot 6).
   final CopiesTrousseau copies;
+
+  /// Ma clé de COMPTE (chiffrement des groupes v2, lot 3) : elle ouvre les
+  /// emballages, sans qu'aucun autre appareil soit en ligne.
+  final ComptesE2ee comptes;
+
+  /// ÉCRIRE AU FORMAT 2 (sans signature par appareil) — faux tant que des
+  /// membres peuvent encore avoir une application qui ne lit que le format 1.
+  /// Le lot 5 le passe à vrai, avec l'activation réservée aux groupes dont
+  /// tous les membres ont une clé de compte. LIRE les deux formats est actif
+  /// dès maintenant.
+  static const ecrireFormat2 = false;
 
   final E2eeService _service;
   final Future<Map<String, dynamic>> Function(
@@ -164,8 +177,14 @@ class GroupeChiffre {
     final derniere = _restaurations[convId];
     if (derniere != null && DateTime.now().difference(derniere).inSeconds < 30) return local;
     _restaurations[convId] = DateTime.now();
-    // 🔴 D'ABORD MA BOÎTE PERMANENTE (chapitre 39) : elle se relit sans
-    // personne en ligne.
+    // 🔴 D'ABORD MES EMBALLAGES (v2, lot 3) : la clé du compte les ouvre sur
+    // n'importe quel appareil, sans personne en ligne.
+    try {
+      await releverEmballages(convId);
+      final apres = await trousseau(convId);
+      if (apres.isNotEmpty && (voulue == null || apres.any((v) => v.n == voulue))) return apres;
+    } catch (_) {}
+    // Puis ma boîte permanente (chapitre 39), l'ancien chemin.
     try {
       await releverBoites(convId);
       final apres = await trousseau(convId);
@@ -313,6 +332,9 @@ class GroupeChiffre {
   /// (archive ouverte). Rend le nombre de groupes repris. Ne lève jamais.
   Future<int> restaurerTous() async {
     try {
+      await releverEmballages();
+    } catch (_) {}
+    try {
       await releverBoites();
     } catch (_) {}
     var n = 0;
@@ -330,6 +352,109 @@ class GroupeChiffre {
   /// Parti ou exclu : on oublie la clé. Les messages déjà lus restent dans le
   /// cache (décision du user).
   Future<void> oublier(String convId) => _service.coffre.oublierTrousseauGroupe(convId);
+
+  /* ══════════════ LES EMBALLAGES (v2, lot 3) ══════════════ */
+
+  /// Relit MES emballages (tous, ou ceux d'un groupe) et range les clés qu'ils
+  /// portent. Rend le nombre de versions ouvertes. Un emballage qui ne s'ouvre
+  /// pas est retiré : le complément (`rattraper`) d'un autre membre en
+  /// redéposera un bon. Sans clé de compte (clé maîtresse absente) : rien.
+  Future<int> releverEmballages([String? convId]) async {
+    final cle = await comptes.assurer();
+    final moi = _monCompte;
+    if (cle == null || moi == null) return 0;
+    final r = await _api(
+        'GET', '/api/e2ee/emballages${convId == null ? '' : '?convId=$convId'}', null);
+    final parGroupe = <String, List<g.VersionCle>>{};
+    for (final e in ((r['emballages'] as List?) ?? const []).cast<Map<String, dynamic>>()) {
+      final conv = e['convId'] as String;
+      final version = e['version'] as int;
+      final versionCompte = e['versionCompte'] as int;
+      if (versionCompte != cle.version) continue;
+      try {
+        final cleGroupe = g.deballerCle(
+          e['corps'] as String,
+          cle.priv,
+          g.ContexteEmballage(
+              convId: conv, destinataireId: moi, version: version, versionCompte: versionCompte),
+        );
+        parGroupe.putIfAbsent(conv, () => []).add(
+            g.VersionCle(n: version, cle: cleGroupe, creeLe: DateTime.now().millisecondsSinceEpoch));
+      } catch (_) {
+        unawaited(_api('DELETE', '/api/e2ee/emballages', {
+          'convId': conv,
+          'version': version,
+          'versionCompte': versionCompte,
+        }).then((_) {}, onError: (_) {}));
+      }
+    }
+    var n = 0;
+    for (final e in parGroupe.entries) {
+      try {
+        await ranger(e.key, e.value);
+        n += e.value.length;
+      } catch (_) {
+        // Une version déjà connue sous une autre clé : refusée par
+        // `fusionnerTrousseau`, les autres groupes continuent.
+      }
+    }
+    return n;
+  }
+
+  final _rattrapages = <String, DateTime>{};
+
+  /// COMPLÈTE LES EMBALLAGES MANQUANTS d'un groupe (conception § 5.6) avec
+  /// les versions que cet appareil connaît : pour moi d'abord (c'est ce qui
+  /// prouve au serveur que je les détiens), puis pour les autres membres.
+  /// Appelé à l'ouverture du groupe, sur la trame `e2ee_manquants`, et après
+  /// une activation, un ajout ou un changement de clé.
+  ///
+  /// ⚠️ UNE FOIS PAR GROUPE ET PAR DEMI-MINUTE, sauf [force]. Ne lève jamais.
+  /// Rend le nombre d'emballages acceptés.
+  Future<int> rattraper(String convId, {bool force = false}) async {
+    final derniere = _rattrapages[convId];
+    if (!force && derniere != null && DateTime.now().difference(derniere).inSeconds < 30) return 0;
+    _rattrapages[convId] = DateTime.now();
+    try {
+      final moi = _monCompte;
+      if (moi == null || await comptes.assurer() == null) return 0;
+      final locales = {for (final v in await trousseau(convId)) v.n: v.cle};
+      if (locales.isEmpty) return 0;
+      final r = await _api('GET', '/api/conversations/$convId/e2ee/manquants', null);
+      final pourMoi = <Map<String, dynamic>>[];
+      final pourAutres = <Map<String, dynamic>>[];
+      for (final m in ((r['manquants'] as List?) ?? const []).cast<Map<String, dynamic>>()) {
+        final uid = m['userId'] as String;
+        final versionCompte = m['versionCompte'] as int;
+        final publique = Uint8List.fromList(base64.decode(m['publique'] as String));
+        for (final v in ((m['versions'] as List?) ?? const []).cast<int>()) {
+          final cleGroupe = locales[v];
+          if (cleGroupe == null) continue;
+          final corps = g.emballerCle(
+            cleGroupe,
+            publique,
+            g.ContexteEmballage(
+                convId: convId, destinataireId: uid, version: v, versionCompte: versionCompte),
+          );
+          (uid == moi ? pourMoi : pourAutres).add(
+              {'userId': uid, 'version': v, 'versionCompte': versionCompte, 'corps': corps});
+        }
+      }
+      var acceptes = 0;
+      for (final lot in [pourMoi, pourAutres]) {
+        for (var i = 0; i < lot.length; i += 2000) {
+          final d = await _api('PUT', '/api/e2ee/emballages', {
+            'convId': convId,
+            'emballages': lot.sublist(i, min(i + 2000, lot.length)),
+          });
+          acceptes += (d['deposes'] as int?) ?? 0;
+        }
+      }
+      return acceptes;
+    } catch (_) {
+      return 0;
+    }
+  }
 
   /* ══════════════ ENVOYER ══════════════ */
 
@@ -402,13 +527,11 @@ class GroupeChiffre {
     final appareil = await _monDeviceId();
     final genre = genresCharge.contains(type) ? type : null;
     final charge = ecrireCharge(id, texte, media, replyToId, genre);
-    final corps = g.chiffrerMessageGroupe(
-      charge,
-      courante.cle,
-      g.ContexteGroupe(
-          convId: convId, messageId: id, version: courante.n, expediteurId: moi, deviceId: appareil),
-      (await _maPaire()).priv,
-    );
+    final contexte = g.ContexteGroupe(
+        convId: convId, messageId: id, version: courante.n, expediteurId: moi, deviceId: appareil);
+    final corps = ecrireFormat2
+        ? g.chiffrerMessageGroupeV2(charge, courante.cle, contexte)
+        : g.chiffrerMessageGroupe(charge, courante.cle, contexte, (await _maPaire()).priv);
     return (id: id, groupe: {'version': courante.n, 'appareil': appareil, 'corps': corps});
   }
 
@@ -426,17 +549,15 @@ class GroupeChiffre {
     if (moi == null) throw StateError('Compte inconnu');
     final appareil = await _monDeviceId();
     final charge = ecrireCharge(messageId, texte, null, null, null, true);
-    final corps = g.chiffrerMessageGroupe(
-      charge,
-      courante.cle,
-      g.ContexteGroupe(
-          convId: convId,
-          messageId: messageId,
-          version: courante.n,
-          expediteurId: moi,
-          deviceId: appareil),
-      (await _maPaire()).priv,
-    );
+    final contexte = g.ContexteGroupe(
+        convId: convId,
+        messageId: messageId,
+        version: courante.n,
+        expediteurId: moi,
+        deviceId: appareil);
+    final corps = ecrireFormat2
+        ? g.chiffrerMessageGroupeV2(charge, courante.cle, contexte)
+        : g.chiffrerMessageGroupe(charge, courante.cle, contexte, (await _maPaire()).priv);
     try {
       final r = await _api('PATCH', '/api/conversations/$convId/messages/$messageId', {
         'chiffre': true,
@@ -457,7 +578,11 @@ class GroupeChiffre {
   /// jamais écrit —, on ouvre une session à deux avec ses appareils : le
   /// chemin ordinaire, qui vérifie les pré-clés signées et retient
   /// l'identité. On ne prend JAMAIS une clé servie juste pour l'occasion.
-  Future<Uint8List?> _cleSignataire(String userId, int deviceId) async {
+  ///
+  /// [ouvrirSiInconnue] faux : seulement l'identité déjà connue, sans réseau
+  /// (lecture d'un message de groupe, qui sait se passer de la signature).
+  Future<Uint8List?> _cleSignataire(String userId, int deviceId,
+      {bool ouvrirSiInconnue = true}) async {
     final moi = _monCompte;
     final monAppareil = await _monDeviceId();
     if (userId == moi && deviceId == monAppareil) return (await _maPaire()).pub;
@@ -467,7 +592,7 @@ class GroupeChiffre {
     }
 
     final deja = await connue();
-    if (deja != null) return deja;
+    if (deja != null || !ouvrirSiInconnue) return deja;
     try {
       await _service.ouvrirSessions(userId, exclure: userId == moi ? monAppareil : null);
     } catch (_) {
@@ -492,20 +617,32 @@ class GroupeChiffre {
     final versions = await trousseauAvecRepli(convId, version);
     final cle = versions.where((v) => v.n == version).firstOrNull;
     if (cle == null) return (null, EchecGroupe.cleAbsente);
-    final signataire = await _cleSignataire(expediteurId, appareil);
-    if (signataire == null) return (null, EchecGroupe.expediteurInconnu);
+    final corps = chiffre['corps'] as String;
+    final contexte = g.ContexteGroupe(
+        convId: convId,
+        messageId: messageId,
+        version: version,
+        expediteurId: expediteurId,
+        deviceId: appareil);
     try {
-      final clair = g.dechiffrerMessageGroupe(
-        chiffre['corps'] as String,
-        cle.cle,
-        g.ContexteGroupe(
-            convId: convId,
-            messageId: messageId,
-            version: version,
-            expediteurId: expediteurId,
-            deviceId: appareil),
-        signataire,
-      );
+      /*
+       * 🔁 DEUX FORMATS (chiffrement des groupes v2, lot 3) :
+       *  - format 2 : sans signature, l'AAD et le serveur garantissent
+       *    l'expéditeur ;
+       *  - format 1 : signé. Signature vérifiée si l'identité de l'appareil
+       *    auteur est DÉJÀ connue ici ; sinon, lu sans elle — plus de message
+       *    « indisponible » ni d'aller-retour réseau parce qu'un membre a
+       *    réinstallé (conception § 3.3).
+       */
+      final String clair;
+      if (g.formatDuCorps(corps) == g.formatGroupeV2) {
+        clair = g.dechiffrerMessageGroupeV2(corps, cle.cle, contexte);
+      } else {
+        final signataire = await _cleSignataire(expediteurId, appareil, ouvrirSiInconnue: false);
+        clair = signataire == null
+            ? g.dechiffrerMessageGroupeSansSignature(corps, cle.cle, contexte)
+            : g.dechiffrerMessageGroupe(corps, cle.cle, contexte, signataire);
+      }
       final c = lireCharge(clair, messageId);
       return (
         (texte: c.texte, media: c.media, reponseA: c.reponseA, genre: c.genre, modifie: c.modifie),
@@ -662,6 +799,8 @@ class GroupeChiffre {
     final versions = await ranger(convId, [v1]);
     final bilan = await distribuer(
         convId, 'ACTIVATION', versions, (await _membres(convId)).map((m) => m['id'] as String));
+    // v2 : les emballages, en plus de l'ancien envoi (lot 3).
+    unawaited(rattraper(convId, force: true));
     return (deja: false, bilan: bilan);
   }
 
@@ -670,6 +809,8 @@ class GroupeChiffre {
   Future<BilanDistribution> partagerAvecNouveaux(String convId, Iterable<String> userIds) async {
     final versions = await trousseauAvecRepli(convId);
     if (versions.isEmpty) throw const CleGroupeAbsente();
+    // v2 : les emballages des nouveaux, en plus de l'ancien envoi (lot 3).
+    unawaited(rattraper(convId, force: true));
     return distribuer(convId, 'AJOUT', versions, userIds);
   }
 
@@ -701,6 +842,8 @@ class GroupeChiffre {
     final versions = await ranger(convId, [...await trousseauAvecRepli(convId), neuve]);
     final bilan = await distribuer(
         convId, motif, versions, (await _membres(convId)).map((m) => m['id'] as String));
+    // v2 : la nouvelle version, emballée pour chacun (lot 3).
+    unawaited(rattraper(convId, force: true));
     return (version: attendue, bilan: bilan);
   }
 }

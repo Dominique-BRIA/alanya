@@ -819,6 +819,20 @@ class _ConversationsTabState extends State<_ConversationsTab>
             await pile?.releverEtRanger();
           } catch (_) {}
         }());
+      } else if (t == "e2ee_emballage" || t == "e2ee_manquants") {
+        /*
+         * Chiffrement des groupes v2 (lot 3) : une clé de groupe vient de
+         * m'être emballée — je la relis ; ou des membres attendent la leur —
+         * je la leur emballe si je l'ai.
+         */
+        final convId = e["convId"];
+        final pile = context.e2ee;
+        if (convId is String && pile != null) {
+          unawaited((t == "e2ee_emballage"
+                  ? pile.fil.groupe.releverEmballages(convId)
+                  : pile.fil.groupe.rattraper(convId, force: true))
+              .then((_) {}, onError: (_) {}));
+        }
       } else if (t == "e2ee_membre_parti") {
         /*
          * Parti ou exclu d'un groupe chiffré (lot 3, chapitre 34) : ce

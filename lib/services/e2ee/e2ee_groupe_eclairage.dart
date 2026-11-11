@@ -59,6 +59,10 @@ Future<EclairageGroupe> ouvrirMessagesGroupe({
   if (!page.any((m) => m.chiffreGroupe != null)) {
     return EclairageGroupe(messages: page, attenteCle: const {});
   }
+  // v2 (lot 3) : ce groupe a peut-être des membres à qui il manque des
+  // emballages (nouveau venu, nouvelle clé de compte, migration) ; cet appareil
+  // les complète s'il a les clés. En arrière-plan, une fois par demi-minute.
+  unawaited(pile.fil.groupe.rattraper(convId));
   final sortie = <Message>[];
   final attente = <String>{};
   /*

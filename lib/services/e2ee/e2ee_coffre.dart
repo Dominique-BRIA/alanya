@@ -668,6 +668,13 @@ class CoffreE2ee implements SignalProtocolStore {
     return b == null ? null : Uint8List.fromList(base64.decode(b));
   }
 
+  /// MA CLÉ DE COMPTE (chiffrement des groupes v2, 11/11/2026) : JSON
+  /// `{version, pub, priv}` en base64. Comme la clé maîtresse, elle dort dans
+  /// le coffre adossé au matériel et part avec `oublier()` à la déconnexion ;
+  /// sa copie serveur est chiffrée par la clé maîtresse.
+  Future<String?> lireCleCompte() => _lire('compte.cle');
+  Future<void> rangerCleCompte(String json) => _ecrire('compte.cle', json);
+
   /// Le secret de la serrure « trousseau » de CET appareil.
   ///
   /// ⚠️ IL NE QUITTE JAMAIS LE COFFRE MATÉRIEL, et notre serveur ne le voit
