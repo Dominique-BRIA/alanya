@@ -75,6 +75,27 @@ class MediaCache {
     } catch (_) {}
   }
 
+  /// Le dossier du cache, pour l'écran Stockage (11/11/2026).
+  static Future<Directory> dossier() => _cacheDir();
+
+  /// La place occupée par le cache, en octets (écran Stockage).
+  static Future<int> tailleOctets() async {
+    try {
+      final dir = await _cacheDir();
+      var total = 0;
+      await for (final e in dir.list(recursive: true, followLinks: false)) {
+        if (e is File) {
+          try {
+            total += await e.length();
+          } catch (_) {}
+        }
+      }
+      return total;
+    } catch (_) {
+      return 0;
+    }
+  }
+
   /*
    * 🐛 LE DOSSIER ÉTAIT REDEMANDÉ À ANDROID AVANT CHAQUE IMAGE (01/11/2026,
    * « les images testent d'abord le réseau »). `getExternalStorageDirectory`

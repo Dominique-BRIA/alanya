@@ -24,6 +24,7 @@ import '../../chat/screens/starred_messages_screen.dart';
 import '../deconnexion.dart';
 import '../dissocier_telephone.dart';
 import '../widgets/preferences_section.dart';
+import 'stockage_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -305,6 +306,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
             trailing: _chevron(),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const BlockedUsersScreen()),
+            ),
+          ),
+          // La place prise sur le téléphone, et de quoi en libérer (11/11/2026).
+          _settingsTile(
+            icon: Icons.sd_storage_outlined,
+            iconColor: _accent,
+            title: tr(context, 'stock_titre'),
+            subtitle: tr(context, 'stock_sub'),
+            trailing: _chevron(),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const StockageScreen()),
             ),
           ),
 

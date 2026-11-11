@@ -14,6 +14,26 @@ class ContactsRepository {
     return UserSearchResult.fromJson(data);
   }
 
+  /// RECHERCHE PAR LE NOM (11/11/2026), reprise de l'application de
+  /// référence : le nom ou le pseudo EXACT (casse ignorée), ou l'Alanya ID.
+  /// Exact et non « contient » : on ne doit pas pouvoir parcourir l'annuaire
+  /// lettre par lettre. Un serveur antérieur (422 sans `number`) : aucun
+  /// résultat.
+  Future<List<UserSearchResult>> rechercher(String texte) async {
+    try {
+      final data = await _api
+          .get("/api/users/search?q=${Uri.encodeQueryComponent(texte.trim())}");
+      final raw = data["resultats"] as List?;
+      if (raw == null) return [];
+      return raw
+          .map((u) => UserSearchResult.fromJson(u as Map<String, dynamic>))
+          .toList();
+    } on ApiException catch (e) {
+      if (e.statusCode == 422) return [];
+      rethrow;
+    }
+  }
+
   /// Envoie un tableau de numéros et renvoie ceux qui sont sur Alanya.
   /// Utilisé pour la synchronisation automatique du répertoire téléphonique.
   Future<List<UserSearchResult>> matchNumbers(List<String> numbers) async {

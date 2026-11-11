@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../../../l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
@@ -34,6 +36,21 @@ class _ContactsScreenState extends State<ContactsScreen> {
   /// Texte tapé dans la barre de recherche. Vide = aucun filtre.
   String _recherche = "";
   final _rechercheCtrl = TextEditingController();
+
+  /*
+   * RECHERCHE SUR TOUT ALANYA WORK (11/11/2026), comme dans l'application de
+   * référence : quand aucun de mes contacts ne correspond, le serveur cherche
+   * un compte portant EXACTEMENT ce nom (ou ce pseudo, ou cet Alanya ID),
+   * 400 ms après la dernière frappe. Voir `ContactsRepository.rechercher`.
+   */
+  Timer? _minuteurDistant;
+  List<UserSearchResult>? _distants;
+  bool _rechercheDistante = false;
+  bool _echecDistant = false;
+
+  /// La recherche dont on attend la réponse : une réponse tardive d'une
+  /// frappe précédente est ignorée.
+  String _demandeDistante = "";
 
   /// ⚠️ LA BARRE DE RECHERCHE A ENCORE DÉMÉNAGÉ (10/10/2026). Le 19/08 elle
   /// était passée dans l'en-tête, derrière une loupe ; elle est désormais
@@ -84,6 +101,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
     // Le contrôleur de la barre de recherche retient un écouteur : sans cette
     // libération, l'écran resterait référencé après sa fermeture.
     _rechercheCtrl.dispose();
+    _minuteurDistant?.cancel();
     super.dispose();
   }
 
@@ -324,6 +342,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                   style: TextStyle(color: mutedOf(context, Colors.black54)),
                 ),
               ),
+            ..._sectionDistante(),
           ],
         ),
         if (_loading)
@@ -458,7 +477,136 @@ class _ContactsScreenState extends State<ContactsScreen> {
   /// Vide le filtre (la croix du champ).
   void _viderRecherche() {
     _rechercheCtrl.clear();
-    setState(() => _recherche = "");
+    _surRecherche("");
+  }
+
+  void _surRecherche(String v) {
+    setState(() {
+      _recherche = v;
+      _distants = null;
+      _echecDistant = false;
+      _rechercheDistante = false;
+    });
+    _minuteurDistant?.cancel();
+    final q = v.trim();
+    // Seulement quand mes contacts ne donnent rien, comme chez eux.
+    if (q.length < 2 || _contactsAffiches.isNotEmpty) return;
+    _minuteurDistant =
+        Timer(const Duration(milliseconds: 400), () => _rechercherDistant(q));
+  }
+
+  Future<void> _rechercherDistant(String q) async {
+    if (!mounted || q != _recherche.trim()) return;
+    _demandeDistante = q;
+    setState(() => _rechercheDistante = true);
+    try {
+      final r = await context.read<ContactsRepository>().rechercher(q);
+      if (!mounted || _demandeDistante != q) return;
+      setState(() {
+        _distants = r;
+        _rechercheDistante = false;
+      });
+    } catch (_) {
+      if (!mounted || _demandeDistante != q) return;
+      setState(() {
+        _echecDistant = true;
+        _rechercheDistante = false;
+      });
+    }
+  }
+
+  Future<void> _ouvrirDistant(UserSearchResult u) async {
+    final chat = context.read<ChatRepository>();
+    try {
+      final convId = await chat.createDirect(u.publicNumber);
+      if (!mounted) return;
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ChatScreen(
+            convId: convId,
+            title: u.pseudo ?? formatAlanyaId(u.publicNumber),
+            avatarUrl: u.avatarUrl,
+            otherUserId: u.id,
+            otherPublicNumber: u.publicNumber,
+            otherStatusMsg: u.statusMsg,
+          ),
+        ),
+      );
+    } on ApiException catch (e) {
+      _snack(e.message);
+    } catch (_) {
+      if (!mounted) return;
+      _snack(tr(context, 'chat_open_failed'));
+    }
+  }
+
+  Future<void> _ajouterDistant(UserSearchResult u) async {
+    try {
+      await context.read<ContactsRepository>().add(u.publicNumber);
+      if (!mounted) return;
+      _snack(tr(context, 'contact_saved'));
+      _viderRecherche();
+      await _load();
+    } on ApiException catch (e) {
+      _snack(e.message);
+    } catch (_) {
+      if (!mounted) return;
+      _snack(tr(context, 'save_failed'));
+    }
+  }
+
+  /// Les comptes trouvés sur Alanya Work, sous les contacts (vides).
+  List<Widget> _sectionDistante() {
+    final q = _recherche.trim();
+    if (q.length < 2 || _contactsAffiches.isNotEmpty) return const [];
+    final distants = _distants;
+    final enAttente = _rechercheDistante || (distants == null && !_echecDistant);
+    return [
+      _titreSection(tr(context, 'search_on_alanya')),
+      if (enAttente)
+        Padding(
+          padding: const EdgeInsets.all(20),
+          child: Center(
+            child: SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(strokeWidth: 2, color: accentOf(context)),
+            ),
+          ),
+        )
+      else if (_echecDistant || (distants != null && distants.isEmpty))
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+          child: Text(
+            tr(context, _echecDistant ? 'search_remote_failed' : 'search_remote_none'),
+            textAlign: TextAlign.center,
+            style: TextStyle(color: mutedOf(context, Colors.black54)),
+          ),
+        )
+      else
+        for (final u in distants!)
+          ListTile(
+            leading: AvatarCircle(
+              name: u.pseudo ?? u.publicNumber,
+              avatarUrl: u.avatarUrl,
+              radius: 22,
+              backgroundColor: AlanyaColors.gold,
+            ),
+            title: Text(u.pseudo ?? formatAlanyaId(u.publicNumber),
+                style: const TextStyle(fontWeight: FontWeight.w600)),
+            subtitle: Text(
+                tr(context, 'home_alanya_id', {'id': formatAlanyaId(u.publicNumber)}),
+                style: alanyaIdStyleOf(context)),
+            onTap: () => _ouvrirDistant(u),
+            trailing: u.alreadyContact
+                ? null
+                : IconButton(
+                    tooltip: tr(context, 'search_add_contact'),
+                    icon: Icon(Icons.person_add_alt_1, color: accentOf(context)),
+                    onPressed: () => _ajouterDistant(u),
+                  ),
+          ),
+    ];
   }
 
   Widget _champRecherche() {
@@ -466,7 +614,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
     return TextField(
       controller: _rechercheCtrl,
       textInputAction: TextInputAction.search,
-      onChanged: (v) => setState(() => _recherche = v),
+      onChanged: _surRecherche,
       decoration: InputDecoration(
         isDense: true,
         hintText: tr(context, 'search_contact'),
