@@ -639,9 +639,24 @@ class GroupeChiffre {
         clair = g.dechiffrerMessageGroupeV2(corps, cle.cle, contexte);
       } else {
         final signataire = await _cleSignataire(expediteurId, appareil, ouvrirSiInconnue: false);
-        clair = signataire == null
-            ? g.dechiffrerMessageGroupeSansSignature(corps, cle.cle, contexte)
-            : g.dechiffrerMessageGroupe(corps, cle.cle, contexte, signataire);
+        /*
+         * 🐛 13/11/2026 : « Déchiffrement en cours… » sur le téléphone, message
+         * lisible sur le web. Un appareil qui se réinstalle GARDE SON NUMÉRO
+         * mais change d'identité : le téléphone qui connaissait l'ancienne
+         * refusait la signature, le web qui ne la connaissait pas lisait sans.
+         * Signature refusée = même confiance qu'un appareil inconnu : on lit
+         * sans elle. La clé du groupe reste exigée.
+         */
+        String sansSignature() => g.dechiffrerMessageGroupeSansSignature(corps, cle.cle, contexte);
+        String avecSignature(Uint8List s) {
+          try {
+            return g.dechiffrerMessageGroupe(corps, cle.cle, contexte, s);
+          } catch (_) {
+            return sansSignature();
+          }
+        }
+
+        clair = signataire == null ? sansSignature() : avecSignature(signataire);
       }
       final c = lireCharge(clair, messageId);
       return (
