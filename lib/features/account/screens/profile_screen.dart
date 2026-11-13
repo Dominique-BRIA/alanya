@@ -25,6 +25,7 @@ import '../../../core/alanya_id_formatter.dart';
 import '../../../core/contact_cache.dart';
 import '../../../core/api_client.dart';
 import '../../../core/lien_alanya.dart';
+import '../../../core/nom_personne.dart';
 import '../../../core/pays_repository.dart';
 import '../../../core/token_storage.dart';
 import '../../../l10n/app_localizations.dart';
@@ -125,8 +126,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _save() async {
-    final pseudo = _pseudoCtrl.text.trim();
-    if (pseudo.length < 2) {
+    final pseudo = nettoyerNom(_pseudoCtrl.text);
+    if (!nomPersonneValide(pseudo)) {
       _snack(tr(context, 'pseudo_min_2'));
       return;
     }

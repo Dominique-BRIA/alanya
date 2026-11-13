@@ -6,6 +6,7 @@ import '../../../l10n/app_localizations.dart';
 
 import '../../../core/api_client.dart';
 import '../../../core/app_snackbar.dart';
+import '../../../core/nom_personne.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../auth_controller.dart';
@@ -138,7 +139,7 @@ class _SetupScreenState extends State<SetupScreen> {
       final session = await context.read<AuthRepository>().setup(
             setupToken: widget.setupToken,
             password: _passwordCtrl.text,
-            nom: _nomCtrl.text.trim(),
+            nom: nettoyerNom(_nomCtrl.text),
             // L'indicatif est recollé ici : il n'est pas dans le champ, il est
             // dans sa propre case à gauche.
             mobile: SaisiePaysNumero.numeroComplet(
@@ -258,9 +259,11 @@ class _SetupScreenState extends State<SetupScreen> {
                   // Minimum 2 caractères, et non 1 : le nom sert de pseudo au
                   // serveur, qui en exige deux. Un nom d'une seule lettre
                   // passerait ici puis serait rejeté à l'envoi.
-                  validator: (v) => (v ?? "").trim().length < 2
-                      ? tr(context, 'name_min_2')
-                      : null,
+                  // Et deux VRAIES lettres (13/11/2026) : ni « .. », ni des
+                  // caractères invisibles — `core/nom_personne.dart`.
+                  validator: (v) => nomPersonneValide(v ?? "")
+                      ? null
+                      : tr(context, 'name_min_2'),
                 ),
                 const SizedBox(height: 16),
 
