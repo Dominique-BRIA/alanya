@@ -81,6 +81,19 @@ class _RestaurationScreenState extends State<RestaurationScreen> {
         if (mounted) setState(() => _progression = p);
       },
     );
+    /*
+     * 🔴 LA CLÉ DU COMPTE TOUT DE SUITE (chiffrement des groupes v2, 13/11/2026).
+     *
+     * 🐛 Un compte neuf, mis hors ligne juste après l'inscription puis ajouté à
+     * un groupe chiffré, ne pouvait jamais lire ce groupe sans qu'un membre
+     * revienne en ligne. Sa clé de compte n'était tirée qu'au démarrage, AVANT
+     * que cet écran crée l'archive : sans clé maîtresse, rien. Sans clé de
+     * compte sur le serveur, personne ne peut lui emballer la clé du groupe.
+     *
+     * La clé maîtresse vient d'être posée : on crée (ou reprend) la clé du
+     * compte et on relit les groupes. En fond, sans retarder l'entrée.
+     */
+    unawaited(pile.fil.groupe.restaurerTous());
     // L'utilisateur a pu choisir « Continuer en arrière-plan » : l'écran n'est
     // plus là, la restauration, elle, est allée au bout.
     if (!mounted) return;
