@@ -1333,6 +1333,21 @@ class _ChatScreenState extends State<ChatScreen>
         } catch (_) {}
         if (mounted) await _rafraichirGroupe();
       }());
+    } else if (type == "e2ee_emballage") {
+      /*
+       * 🐛 13/11/2026 — la même chose pour la v2 : la clé de CE groupe vient
+       * de m'être emballée. Sans cette branche, un fil ouvert au moment où
+       * elle arrivait gardait ses bulles illisibles jusqu'à ce qu'on le
+       * quitte et le rouvre.
+       */
+      if (e["convId"] != widget.convId) return;
+      final pile = context.e2ee;
+      unawaited(() async {
+        try {
+          await pile?.fil.groupe.releverEmballages(widget.convId);
+        } catch (_) {}
+        if (mounted) await _rafraichirGroupe();
+      }());
     } else if (type == "read") {
       if (e["convId"] != widget.convId) return;
       setState(() {
