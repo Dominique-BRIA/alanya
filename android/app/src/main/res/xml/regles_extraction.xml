@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Sauvegarde cloud ET transfert d'appareil à appareil, Android 12 et suivants
+  (14/11/2026). Mêmes fichiers et même raison que `regles_sauvegarde.xml`, qui
+  les détaille : le coffre sécurisé dépend d'une clé du Keystore qui ne quitte
+  jamais le téléphone ; restauré ailleurs, il est illisible pour toujours.
+
+  ⚠️ LE TRANSFERT D'APPAREIL À APPAREIL COMPTE AUSSI : sous Android 12+, il
+  copie les données même quand la sauvegarde cloud est désactivée. D'où les
+  deux sections.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="alanya_e2ee.xml" />
+        <exclude domain="sharedpref" path="FlutterSecureKeyStorage:alanya_e2ee.xml" />
+        <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration:alanya_e2ee.xml" />
+        <exclude domain="sharedpref" path="alanya_session.xml" />
+        <exclude domain="sharedpref" path="FlutterSecureKeyStorage:alanya_session.xml" />
+        <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration:alanya_session.xml" />
+        <exclude domain="sharedpref" path="FlutterSecureStorage.xml" />
+        <exclude domain="sharedpref" path="FlutterSecureKeyStorage.xml" />
+        <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="alanya_e2ee.xml" />
+        <exclude domain="sharedpref" path="FlutterSecureKeyStorage:alanya_e2ee.xml" />
+        <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration:alanya_e2ee.xml" />
+        <exclude domain="sharedpref" path="alanya_session.xml" />
+        <exclude domain="sharedpref" path="FlutterSecureKeyStorage:alanya_session.xml" />
+        <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration:alanya_session.xml" />
+        <exclude domain="sharedpref" path="FlutterSecureStorage.xml" />
+        <exclude domain="sharedpref" path="FlutterSecureKeyStorage.xml" />
+        <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration.xml" />
+    </device-transfer>
+</data-extraction-rules>

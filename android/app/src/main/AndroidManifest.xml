@@ -102,6 +102,8 @@
         android:name=".AlanyaApplication"
         android:icon="@mipmap/ic_launcher"
         android:largeHeap="true"
+        android:fullBackupContent="@xml/regles_sauvegarde"
+        android:dataExtractionRules="@xml/regles_extraction"
         android:usesCleartextTraffic="true">
         <!-- `singleTask` et NON `singleTop` : une seule instance de
              l'application peut exister, quel que soit le point d'entrée.

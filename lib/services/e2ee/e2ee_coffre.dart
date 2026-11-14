@@ -70,6 +70,32 @@ const _options = AndroidOptions(
 );
 
 /*
+ * 🔴 L'ACCÈS DE RÉPARATION — le même espace, mais `resetOnError: true`
+ * (14/11/2026, Ibrahim Traore : coffre illisible, aucun envoi possible).
+ *
+ * 🐛 L'ANCIENNE RÉPARATION NE POUVAIT PAS ABOUTIR. Elle appelait `deleteAll()`
+ * avec les réglages ordinaires ; or la bibliothèque OUVRE le coffre avant toute
+ * opération, effacement compris (`FlutterSecureStoragePlugin` : `initialize`,
+ * puis seulement l'action). Le coffre ne s'ouvrant plus, l'effacement levait la
+ * même erreur, et le téléphone restait bloqué pour toujours.
+ *
+ * La seule remise à zéro qui marche est celle de la bibliothèque
+ * (`deleteAllDataAndKeys`) : clé du Keystore, clé emballée, données, marqueurs
+ * d'algorithme — puis réouverture sur un coffre neuf. Elle ne se déclenche
+ * qu'avec `resetOnError: true`, à l'ouverture. Cet accès ne sert donc QU'À
+ * [CoffreE2ee._reparer], appelé sur la panne reconnue et persistante : les
+ * accès ordinaires gardent `resetOnError: false`, et une erreur passagère
+ * n'efface jamais rien.
+ *
+ * ⚠️ MÊME ESPACE, et c'est voulu : la bibliothèque tient un coffre par espace ;
+ * celui-ci reprend la main sur l'ouverture ratée de l'autre.
+ */
+const _optionsReparation = AndroidOptions(
+  storageNamespace: 'alanya_e2ee',
+  resetOnError: true,
+);
+
+/*
  * 🐛 « IDENTITÉ ABSENTE — APPELER PREPARER() » À L'ENVOI DE GROS FICHIERS
  * (user, 27/10/2026), puis à CHAQUE envoi de la conversation.
  *
@@ -117,6 +143,16 @@ class _MagasinSerialise {
 
   Future<void> deleteAll({AndroidOptions? aOptions}) =>
       _tour(() => _s.deleteAll(aOptions: aOptions));
+
+  static const _reparation = FlutterSecureStorage(aOptions: _optionsReparation);
+
+  /// Remet l'espace à zéro par la bibliothèque elle-même (voir
+  /// [_optionsReparation]). Sans reprise : ce n'est pas une erreur passagère.
+  Future<void> reparer() {
+    final r = _file.then((_) => _reparation.deleteAll(aOptions: _optionsReparation));
+    _file = r.then((_) {}, onError: (_) {});
+    return r;
+  }
 }
 
 /// Les magasins que la bibliothèque Signal exige, adossés au coffre matériel.
@@ -169,13 +205,23 @@ class CoffreE2ee implements SignalProtocolStore {
         texte.contains('key type incompatible');
   }
 
-  /// Vide l'espace de ce coffre après la panne ci-dessus. Ne lève jamais.
+  /// Remet l'espace de ce coffre à zéro après la panne ci-dessus, par l'accès
+  /// de réparation (clé du Keystore comprise). Ne lève jamais.
+  ///
+  /// ⚠️ PAS D'IDENTITÉ CRÉÉE ICI : la prochaine lecture la prépare (voir
+  /// [preparer]) et la pile la republie (`surIdentiteNeuve`).
+  ///
+  /// ⚠️ L'ESPACE EST COMMUN À TOUS LES COMPTES de ce téléphone : tous repartent
+  /// à neuf. Ils étaient de toute façon illisibles, puisque c'est l'ouverture du
+  /// coffre entier qui échouait.
   Future<void> _reparer() async {
     try {
-      await _magasin.deleteAll(aOptions: _options);
-      debugPrint('[e2ee] coffre matériel illisible : espace vidé, identité neuve.');
-    } catch (_) {
-      // Même l'effacement peut échouer : on laissera `preparer()` retenter.
+      await _magasin.reparer();
+      debugPrint('[e2ee] coffre matériel illisible : remis à zéro, identité neuve.');
+    } catch (e) {
+      // La remise à zéro elle-même a échoué : on le dit, et la prochaine
+      // opération retentera.
+      debugPrint('[e2ee] coffre : remise à zéro impossible — $e');
     }
   }
 

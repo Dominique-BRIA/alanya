@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Sauvegarde automatique d'Android 11 et antérieurs (14/11/2026).
+
+  🔴 LES FICHIERS DU COFFRE SÉCURISÉ NE PARTENT JAMAIS DANS UNE SAUVEGARDE.
+
+  Ils sont fermés par une clé du Keystore Android, qui ne quitte JAMAIS le
+  téléphone et n'est donc jamais restaurée avec eux. Restaurés (réinstallation,
+  nouveau téléphone, transfert), ils deviennent indéchiffrables : « Failed to
+  unwrap key », plus d'identité de chiffrement, plus aucun envoi chiffré
+  (Ibrahim Traore, 14/11/2026). L'application de référence exclut ses fichiers
+  pour la même raison.
+
+  Après une restauration, l'application repart donc avec un coffre VIDE : on se
+  reconnecte, l'identité se recrée, l'historique revient par la sauvegarde
+  chiffrée (mot de passe). Le reste des préférences reste sauvegardé.
+
+  Par espace (`storageNamespace`, voir `token_storage.dart` et
+  `e2ee_coffre.dart`), la bibliothèque écrit trois fichiers : les données
+  (<espace>.xml), la clé emballée (FlutterSecureKeyStorage:<espace>.xml) et les
+  marqueurs d'algorithme (FlutterSecureStorageConfiguration:<espace>.xml). Les
+  trois derniers noms sont ceux de l'espace par défaut, utilisé avant le 27/09.
+
+  Jumeau : `regles_extraction.xml` (Android 12 et suivants).
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="alanya_e2ee.xml" />
+    <exclude domain="sharedpref" path="FlutterSecureKeyStorage:alanya_e2ee.xml" />
+    <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration:alanya_e2ee.xml" />
+    <exclude domain="sharedpref" path="alanya_session.xml" />
+    <exclude domain="sharedpref" path="FlutterSecureKeyStorage:alanya_session.xml" />
+    <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration:alanya_session.xml" />
+    <exclude domain="sharedpref" path="FlutterSecureStorage.xml" />
+    <exclude domain="sharedpref" path="FlutterSecureKeyStorage.xml" />
+    <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration.xml" />
+</full-backup-content>
