@@ -90,6 +90,7 @@ import '../../calls/message_erreur_appel.dart';
 import '../../calls/ouvrir_appel_en_cours.dart';
 import '../../contacts/contacts_repository.dart';
 import '../../contacts/screens/contact_info_screen.dart';
+import '../../account/screens/profile_screen.dart';
 import '../../contacts/verification_cle.dart';
 import '../../group/screens/group_info_screen.dart';
 import '../../media/media_repository.dart';
@@ -323,7 +324,22 @@ class _ChatScreenState extends State<ChatScreen>
   /// jamais révéler un nom privé (même règle que Talky).
   Map<String, String> _nomsProfil = {};
 
+  /// Photo et Alanya ID de chaque membre (14/11/2026) : la photo se pose à côté
+  /// du nom de l'expéditeur, le numéro ouvre sa fiche avec « Ajouter ».
+  Map<String, String> _photosMembres = {};
+  Map<String, String> _numerosMembres = {};
+
   void _appliqueMembres(List<Map<String, dynamic>> membres) {
+    _photosMembres = {
+      for (final m in membres)
+        if (m["id"] is String && (m["avatarUrl"] as String?)?.isNotEmpty == true)
+          m["id"] as String: m["avatarUrl"] as String,
+    };
+    _numerosMembres = {
+      for (final m in membres)
+        if (m["id"] is String && (m["publicNumber"] as String?)?.isNotEmpty == true)
+          m["id"] as String: m["publicNumber"] as String,
+    };
     _nomsProfil = {
       for (final m in membres)
         if (m["id"] is String)
@@ -535,10 +551,27 @@ class _ChatScreenState extends State<ChatScreen>
   bool _typingSent = false;
   bool _recordingSent = false;
   // Réception : activité du correspondant.
-  bool _peerTyping = false;
-  bool _peerRecording = false;
-  Timer? _typingTimeout;
-  Timer? _recordingTimeout;
+  //
+  // 🔁 14/11/2026 : PAR PERSONNE, et non un simple oui/non. Dans un groupe,
+  // plusieurs membres peuvent écrire à la fois, et l'écran doit dire QUI
+  // (« Ana écrit… », comme l'application de référence). Chaque entrée porte
+  // son filet de sécurité : effacée si aucun « stop » n'arrive.
+  final Map<String, Timer> _ecrivent = {};
+  final Map<String, Timer> _enregistrent = {};
+
+  /// Le dernier membre qui s'est mis à écrire ou à enregistrer : c'est lui
+  /// qu'on nomme quand plusieurs le font.
+  String? _dernierActif;
+
+  bool get _peerTyping => _ecrivent.isNotEmpty;
+  bool get _peerRecording => _enregistrent.isNotEmpty;
+
+  /// Le nom à afficher pour l'activité en cours, dans un groupe seulement.
+  String? _nomActif(Map<String, Timer> actifs) {
+    if (!widget.isGroup || actifs.isEmpty) return null;
+    final uid = actifs.containsKey(_dernierActif) ? _dernierActif! : actifs.keys.last;
+    return uid.isEmpty ? null : _nomExpediteur(uid);
+  }
   Message? _replyTo;
   Message? _editing; // message en cours d'édition (compose = mode édition)
   /*
@@ -1013,8 +1046,9 @@ class _ChatScreenState extends State<ChatScreen>
     ChatScreen.activeConvId = null;
     WidgetsBinding.instance.removeObserver(this);
     _typingDebounce?.cancel();
-    _typingTimeout?.cancel();
-    _recordingTimeout?.cancel();
+    for (final t in [..._ecrivent.values, ..._enregistrent.values]) {
+      t.cancel();
+    }
     _emitTyping(false);
     _emitRecording(false);
     _pollTimer?.cancel();
@@ -1600,26 +1634,22 @@ class _ChatScreenState extends State<ChatScreen>
   // ── Réception : indicateur d'activité du correspondant ──
   void _onPeerActivity({bool? typing, bool? recording, String? uid}) {
     if (uid != null && uid == _myId) return; // ignore un éventuel écho de soi
-    final appearing = !_peerTyping && !_peerRecording;
-    if (typing != null) {
-      _typingTimeout?.cancel();
-      if (typing) {
+    final cle = uid ?? '';
+    void suivre(Map<String, Timer> actifs, bool actif, Duration filet) {
+      actifs.remove(cle)?.cancel();
+      if (actif) {
         // Filet de sécurité : efface l'indicateur si aucun "stop" n'arrive.
-        _typingTimeout = Timer(const Duration(seconds: 6), () {
-          if (mounted) setState(() => _peerTyping = false);
+        actifs[cle] = Timer(filet, () {
+          if (mounted) setState(() => actifs.remove(cle));
         });
+        _dernierActif = cle;
       }
-      if (_peerTyping != typing) setState(() => _peerTyping = typing);
+      setState(() {});
     }
+
+    if (typing != null) suivre(_ecrivent, typing, const Duration(seconds: 6));
     if (recording != null) {
-      _recordingTimeout?.cancel();
-      if (recording) {
-        _recordingTimeout = Timer(const Duration(seconds: 12), () {
-          if (mounted) setState(() => _peerRecording = false);
-        });
-      }
-      if (_peerRecording != recording)
-        setState(() => _peerRecording = recording);
+      suivre(_enregistrent, recording, const Duration(seconds: 12));
     }
     // Aucun son ici : l'indicateur d'activité est une information visuelle.
     // Faire sonner le destinataire pendant que l'autre tape le prévenait d'un
@@ -5895,26 +5925,72 @@ class _ChatScreenState extends State<ChatScreen>
           final members = ((snap.data!["members"] as List?) ?? [])
               .map((e) => Map<String, dynamic>.from(e as Map))
               .toList();
+          /*
+           * 🔁 TROIS ÉTATS ET UNE BARRE (14/11/2026, comme l'application de
+           * référence) : lu, reçu sans être lu, pas encore reçu.
+           *
+           * « Reçu » vient du serveur (`received`) : le membre s'est connecté
+           * depuis l'envoi. Un serveur plus ancien ne l'envoie pas — on garde
+           * alors les deux états d'avant (lu / en attente).
+           */
           final readList = members.where((x) => x["read"] == true).toList();
-          final pending = members.where((x) => x["read"] != true).toList();
+          final nonLus = members.where((x) => x["read"] != true).toList();
+          final saitRecu = members.any((x) => x.containsKey("received"));
+          final recus = saitRecu ? nonLus.where((x) => x["received"] == true).toList() : const <Map<String, dynamic>>[];
+          final pasRecus = saitRecu ? nonLus.where((x) => x["received"] != true).toList() : nonLus;
+          final total = members.length;
           return SafeArea(
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Padding(
-                padding: const EdgeInsets.all(14),
-                child: Text(tr(fctx, 'message_infos'),
-                    style: const TextStyle(
-                        fontWeight: FontWeight.bold, fontSize: 16)),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: MediaQuery.of(fctx).size.height * 0.75),
+              child: SingleChildScrollView(
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Text(tr(fctx, 'message_infos'),
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 16)),
+                  ),
+                  if (total > 0)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: SizedBox(
+                            height: 8,
+                            child: Row(children: [
+                              if (readList.isNotEmpty)
+                                Expanded(flex: readList.length, child: Container(color: AlanyaColors.tickRead)),
+                              if (recus.isNotEmpty)
+                                Expanded(flex: recus.length, child: Container(color: _mutedIcon)),
+                              if (pasRecus.isNotEmpty)
+                                Expanded(
+                                    flex: pasRecus.length,
+                                    child: Container(color: _mutedIcon.withValues(alpha: 0.25))),
+                            ]),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                            tr(fctx, 'info_lus_sur',
+                                {'n': '${readList.length}', 'total': '$total'}),
+                            style: TextStyle(fontSize: 12, color: _muted)),
+                      ]),
+                    ),
+                  const Divider(height: 1),
+                  _infoSection(Icons.done_all, AlanyaColors.tickRead,
+                      tr(fctx, 'read_label'), readList),
+                  _infoSection(Icons.done_all, _mutedIcon, tr(fctx, 'info_recu'), recus),
+                  _infoSection(Icons.done, _mutedIcon,
+                      tr(fctx, saitRecu ? 'info_pas_recu' : 'pending_label'), pasRecus),
+                  if (total == 0)
+                    Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Text(tr(fctx, 'no_recipient'))),
+                  const SizedBox(height: 8),
+                ]),
               ),
-              const Divider(height: 1),
-              _infoSection(
-                  Icons.done_all, AlanyaColors.tickRead, tr(fctx, 'read_label'), readList),
-              _infoSection(Icons.done, _mutedIcon, tr(fctx, 'pending_label'), pending),
-              if (readList.isEmpty && pending.isEmpty)
-                Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Text(tr(fctx, 'no_recipient'))),
-              const SizedBox(height: 8),
-            ]),
+            ),
           );
         },
       ),
@@ -5937,10 +6013,12 @@ class _ChatScreenState extends State<ChatScreen>
       ...list.map((x) {
         final readAtStr = x["readAt"] as String?;
         final when = readAtStr != null ? _readAtLabel(readAtStr) : null;
+        final nom = (x["name"] as String?) ?? "";
         return ListTile(
           dense: true,
-          leading: Icon(Icons.person_outline, color: _mutedIcon),
-          title: Text((x["name"] as String?) ?? ""),
+          // La photo du membre quand le serveur la donne (14/11/2026).
+          leading: AvatarCircle(name: nom, avatarUrl: x["avatarUrl"] as String?, radius: 16),
+          title: Text(nom),
           trailing: when != null
               ? Text(when, style: TextStyle(fontSize: 12, color: _muted))
               : null,
@@ -6311,6 +6389,32 @@ class _ChatScreenState extends State<ChatScreen>
   // ══════════════════════════════════════════════
 
 
+  /// Sous-titre de l'en-tête d'un groupe (14/11/2026, comme l'application de
+  /// référence) : « Ana écrit… » pendant qu'un membre écrit, sinon les noms
+  /// des membres, moi exclu. Repli sur « N membres » tant qu'ils sont inconnus.
+  Widget _sousTitreGroupe() {
+    final ecrit = _nomActif(_ecrivent);
+    if (ecrit != null) {
+      return Text('${tr(context, 'typing_name_hint', {'nom': ecrit})}…',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+              fontSize: 11, fontWeight: FontWeight.w600, color: _positive));
+    }
+    final source = _membresCharges.isNotEmpty ? _membresCharges : widget.memberNames;
+    final noms = [
+      for (final e in source.entries)
+        if (e.key != _myId && e.value.trim().isNotEmpty) e.value.trim(),
+    ];
+    return Text(
+        noms.isEmpty
+            ? trN(context, 'grp_members', widget.memberNames.length)
+            : noms.join(', '),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(fontSize: 11, color: _onAppBarSub));
+  }
+
   PreferredSizeWidget _whatsappAppBar() {
     return AppBar(
       backgroundColor: _appBarBg,
@@ -6345,8 +6449,7 @@ class _ChatScreenState extends State<ChatScreen>
                     BadgeCompteWidget(_badgeAffiche!, taille: 17),
                 ]),
                 if (widget.isGroup)
-                  Text(trN(context, 'grp_members', widget.memberNames.length),
-                      style: TextStyle(fontSize: 11, color: _onAppBarSub))
+                  _sousTitreGroupe()
                 else
                   // Présence LIVE : lit le PresenceStore (mis à jour par les events WS
                   // `presence`), avec repli sur les données REST passées au widget.
@@ -6791,10 +6894,11 @@ class _ChatScreenState extends State<ChatScreen>
                               widgets.add(const BanniereChiffrement());
                             }
                             if (item is Message) {
-                              widgets.add(_bubble(item, item.senderId == myId));
+                              widgets.add(_bubble(item, item.senderId == myId,
+                                  enTete: _debutDeSerie(i)));
                             } else if (item is GroupeMedias) {
-                              widgets.add(
-                                  _groupBubble(item, item.senderId == myId));
+                              widgets.add(_groupBubble(item, item.senderId == myId,
+                                  enTete: _debutDeSerie(i)));
                             } else if (item is CallRecord) {
                               widgets.add(_callBubbleInChat(item));
                             }
@@ -6803,9 +6907,11 @@ class _ChatScreenState extends State<ChatScreen>
                 if (!_enBas && !_loading)
                   Positioned(right: 12, bottom: 12, child: _boutonVersLeBas()),
               ])),
-          if (!widget.isGroup)
-            ActivityIndicatorBar(
-                typing: _peerTyping, recording: _peerRecording),
+          // Groupes compris depuis le 14/11/2026, avec le nom de qui écrit.
+          ActivityIndicatorBar(
+              typing: _peerTyping,
+              recording: _peerRecording,
+              name: _nomActif(_peerRecording ? _enregistrent : _ecrivent)),
           // Juste au-dessus du champ : la liste sort du `@` qu'on vient de
           // taper, et doit rester sous les yeux, au-dessus du clavier.
           if (_officiel)
@@ -6824,7 +6930,7 @@ class _ChatScreenState extends State<ChatScreen>
   // ══════════════════════════════════════════════
   // BUBBLE — WhatsApp previews + grille multi-médias
   // ══════════════════════════════════════════════
-  Widget _bubble(Message m, bool mine) {
+  Widget _bubble(Message m, bool mine, {bool enTete = true}) {
     // Message système (ex. « Messages éphémères activés ») : pastille centrée.
     if (m.type == "SYSTEM") {
       /*
@@ -6897,7 +7003,8 @@ class _ChatScreenState extends State<ChatScreen>
     final stickerRecu = effectif == "STICKER" && !m.isDeleted && envoiEnCours == null
         ? ChargeSticker.lire(m.content)
         : null;
-    final senderLabel = widget.isGroup && !mine ? _nomExpediteur(m.senderId) : null;
+    // Photo + nom, en tête de série seulement (14/11/2026).
+    final avecEnTete = widget.isGroup && !mine && enTete;
     final isHighlighted =
         _highlightedMessageId == m.id || _selectedMessageId == m.id;
     final isGrid = isMultiMedia; // 2+ médias → grille
@@ -6909,14 +7016,7 @@ class _ChatScreenState extends State<ChatScreen>
           crossAxisAlignment:
               mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
-            if (senderLabel != null)
-              Padding(
-                  padding: const EdgeInsets.only(left: 4, bottom: 2),
-                  child: Text(senderLabel,
-                      style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: _positive))),
+            if (avecEnTete) _enTeteExpediteur(m.senderId),
             _SwipeToReply(
               onReply: () => _setReplyTo(m),
               child: GestureDetector(
@@ -7286,10 +7386,9 @@ class _ChatScreenState extends State<ChatScreen>
   ///
   /// L'appui long agit sur le message du média touché, jamais sur le groupe :
   /// « répondre » ou « supprimer » n'a de sens que pour un message.
-  Widget _groupBubble(GroupeMedias groupe, bool mine) {
+  Widget _groupBubble(GroupeMedias groupe, bool mine, {bool enTete = true}) {
     final medias = groupe.medias;
-    final senderLabel =
-        widget.isGroup && !mine ? _nomExpediteur(groupe.senderId) : null;
+    final avecEnTete = widget.isGroup && !mine && enTete;
     // Une grille regroupe PLUSIEURS messages : elle s'illumine dès que l'un
     // d'eux est la cible. Sans cela, sauter vers une photo citée amenait au bon
     // endroit sans que rien ne s'allume — la grille ignorait la surbrillance,
@@ -7317,15 +7416,7 @@ class _ChatScreenState extends State<ChatScreen>
         crossAxisAlignment:
             mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
         children: [
-          if (senderLabel != null)
-            Padding(
-              padding: const EdgeInsets.only(left: 4, bottom: 2),
-              child: Text(senderLabel,
-                  style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: _positive)),
-            ),
+          if (avecEnTete) _enTeteExpediteur(groupe.senderId),
           AnimatedContainer(
             duration: const Duration(milliseconds: 400),
             margin: const EdgeInsets.symmetric(vertical: 4),
@@ -7645,22 +7736,82 @@ class _ChatScreenState extends State<ChatScreen>
   /// Se mentionner soi-même n'arrive pas (le serveur l'écarte), mais un ancien
   /// message pourrait en porter : on n'ouvre alors rien plutôt que d'afficher
   /// sa propre fiche comme celle d'un correspondant.
-  Future<void> _ouvreFicheMentionne(MentionMessage mention) async {
-    if (mention.userId == _myId) return;
-    final nom = _membresCharges[mention.userId] ??
-        widget.memberNames[mention.userId] ??
-        mention.libelle;
+  Future<void> _ouvreFicheMentionne(MentionMessage mention) =>
+      _ouvreFicheMembre(mention.userId, repli: mention.libelle);
+
+  /// La fiche d'un membre du groupe — depuis une @mention ou le nom de
+  /// l'expéditeur (14/11/2026, comme l'application de référence). Moi : mon
+  /// profil, car la fiche propose bloquer et signaler, absurdes sur soi.
+  ///
+  /// ⚠️ JAMAIS `convId` : « Message » sur la fiche doit ouvrir la discussion à
+  /// deux avec ce membre, pas revenir au groupe.
+  Future<void> _ouvreFicheMembre(String? userId, {String? repli}) async {
+    if (userId == null || userId.isEmpty) return;
+    if (userId == _myId) {
+      await Navigator.of(context)
+          .push(MaterialPageRoute(builder: (_) => const ProfileScreen()));
+      return;
+    }
+    final nom = _membresCharges[userId] ?? widget.memberNames[userId] ?? repli ?? "";
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => ContactInfoScreen(
-          userId: mention.userId,
+          userId: userId,
           name: nom,
-          // Le numéro n'est pas connu ici : la fiche l'affiche vide plutôt que
-          // d'inventer, et les actions qui en dépendent le disent.
-          publicNumber: "",
+          // Le numéro vient de la liste des membres : la fiche peut alors
+          // proposer « Ajouter ». Inconnu, elle l'affiche vide plutôt que
+          // d'inventer.
+          publicNumber: _numerosMembres[userId] ?? "",
+          avatarUrl: _photosMembres[userId],
         ),
       ),
     );
+  }
+
+  /// Photo et nom de l'expéditeur, au-dessus de la PREMIÈRE bulle d'une série
+  /// dans un groupe (14/11/2026). Un appui ouvre sa fiche.
+  Widget _enTeteExpediteur(String? senderId) {
+    final nom = _nomExpediteur(senderId);
+    return Padding(
+      padding: const EdgeInsets.only(left: 2, bottom: 3, top: 4),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => _ouvreFicheMembre(senderId),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          AvatarCircle(
+              name: nom,
+              avatarUrl: senderId == null ? null : _photosMembres[senderId],
+              radius: 10),
+          const SizedBox(width: 6),
+          ConstrainedBox(
+            constraints:
+                BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.6),
+            child: Text(nom,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 12, fontWeight: FontWeight.w600, color: _positive)),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  /// Ce message ouvre-t-il une SÉRIE ? Oui si le précédent vient d'un autre
+  /// membre, n'est pas un message, change de jour ou date de plus de dix
+  /// minutes. Répéter le nom sur chaque bulle d'une rafale ne dit rien de
+  /// neuf et double la hauteur du fil.
+  bool _debutDeSerie(int i) {
+    if (i <= 0 || i >= _combined.length) return true;
+    final item = _combined[i];
+    final prec = _combined[i - 1];
+    String? auteur(dynamic x) => x is Message
+        ? (x.type == "SYSTEM" ? null : x.senderId)
+        : (x is GroupeMedias ? x.senderId : null);
+    final a = auteur(item);
+    if (a == null || auteur(prec) != a) return true;
+    if (_needsDateSeparatorCombined(i)) return true;
+    return _dateOfCombined(item).difference(_dateOfCombined(prec)).inMinutes.abs() > 10;
   }
 
   /// Le texte d'un message, avec ses `@mentions` mises en évidence.

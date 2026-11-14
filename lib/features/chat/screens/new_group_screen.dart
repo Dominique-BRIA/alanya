@@ -22,6 +22,17 @@ class NewGroupScreen extends StatefulWidget {
 
 class _NewGroupScreenState extends State<NewGroupScreen> {
   final _nameCtrl = TextEditingController();
+
+  /// Description et réglages dès la création (14/11/2026, comme l'application
+  /// de référence). Les réglages partent juste après la création, par la même
+  /// route que l'écran d'infos du groupe : le créateur en est administrateur.
+  final _descriptionCtrl = TextEditingController();
+  final Map<String, bool> _reglages = {
+    'adminsSeulsEcrivent': false,
+    'adminsSeulsModifient': false,
+    'adminsSeulsAjoutent': false,
+    'historiqueCacheNouveaux': false,
+  };
   List<Contact> _contacts = [];
   final Set<String> _selected = {}; // numéros publics sélectionnés
   bool _loading = true;
@@ -37,6 +48,7 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
   @override
   void dispose() {
     _nameCtrl.dispose();
+    _descriptionCtrl.dispose();
     super.dispose();
   }
 
@@ -69,7 +81,19 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
     });
     final chat = context.read<ChatRepository>();
     try {
-      final convId = await chat.createGroup(name, _selected.toList());
+      final convId = await chat.createGroup(name, _selected.toList(),
+          description: _descriptionCtrl.text);
+      // Les réglages choisis, s'il y en a. Un échec ici ne défait pas le
+      // groupe, déjà créé : ils restent modifiables dans les infos du groupe.
+      final choisis = {
+        for (final e in _reglages.entries)
+          if (e.value) e.key: true,
+      };
+      if (choisis.isNotEmpty) {
+        try {
+          await chat.changerReglagesGroupe(convId, choisis);
+        } catch (_) {}
+      }
       if (!mounted) return;
       final me = context.read<AuthController>().user;
       final names = <String, String>{
@@ -108,6 +132,39 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
                       prefixIcon: const Icon(Icons.groups),
                     ),
                   ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+                  child: TextField(
+                    controller: _descriptionCtrl,
+                    maxLength: 512,
+                    minLines: 1,
+                    maxLines: 3,
+                    decoration: InputDecoration(
+                      labelText: tr(context, 'grp_add_description'),
+                      prefixIcon: const Icon(Icons.notes_rounded),
+                      counterText: "",
+                    ),
+                  ),
+                ),
+                // Repliés par défaut : la liste des contacts garde la place.
+                ExpansionTile(
+                  leading: const Icon(Icons.tune_rounded),
+                  title: Text(tr(context, 'grp_settings')),
+                  children: [
+                    for (final (cle, titre, sous) in const [
+                      ('adminsSeulsEcrivent', 'grp_set_admins_send', 'grp_set_admins_send_sub'),
+                      ('adminsSeulsModifient', 'grp_set_admins_edit', 'grp_set_admins_edit_sub'),
+                      ('adminsSeulsAjoutent', 'grp_set_admins_add', 'grp_set_admins_add_sub'),
+                      ('historiqueCacheNouveaux', 'grp_set_hide_history', 'grp_set_hide_history_sub'),
+                    ])
+                      SwitchListTile(
+                        title: Text(tr(context, titre)),
+                        subtitle: Text(tr(context, sous), style: const TextStyle(fontSize: 12.5)),
+                        value: _reglages[cle]!,
+                        onChanged: (v) => setState(() => _reglages[cle] = v),
+                      ),
+                  ],
                 ),
                 if (_error != null)
                   Padding(

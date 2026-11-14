@@ -22,6 +22,8 @@ import '../geo/screens/geo_disclosure_screen.dart';
 import '../../core/push_service.dart';
 import '../../core/notification_settings.dart';
 import '../../core/realtime_client.dart';
+import '../../core/noms_donnes.dart';
+import '../chat/widgets/activity_indicator.dart' show TypingDots;
 import '../../core/authed_api.dart';
 import '../../widgets/back_app_bar.dart';
 import '../../widgets/chargement.dart';
@@ -774,6 +776,10 @@ class _ConversationsTabState extends State<_ConversationsTab>
         StatutsEnDirect.instance.recevoir(e);
         return;
       }
+      if (t == "typing") {
+        _recevoirFrappe(e);
+        return;
+      }
       if (t == "message") {
         _poll();
         // Notification locale si l'utilisateur n'est PAS dans cette conversation
@@ -1058,10 +1064,39 @@ class _ConversationsTabState extends State<_ConversationsTab>
     }
   }
 
+  /// Qui écrit, par discussion (14/11/2026) : le dernier à s'y être mis, avec
+  /// son filet — effacé si aucun « stop » n'arrive dans les 6 secondes.
+  final Map<String, ({String uid, Timer filet})> _ecrivent = {};
+
+  void _recevoirFrappe(Map<String, dynamic> e) {
+    final convId = e["convId"];
+    final uid = e["userId"];
+    if (convId is! String || uid is! String) return;
+    if (uid == context.read<AuthController>().user?.id) return;
+    final avant = _ecrivent[convId];
+    if (e["isTyping"] == true) {
+      avant?.filet.cancel();
+      _ecrivent[convId] = (
+        uid: uid,
+        filet: Timer(const Duration(seconds: 6), () {
+          if (mounted) setState(() => _ecrivent.remove(convId));
+        }),
+      );
+      setState(() {});
+    } else if (avant != null && avant.uid == uid) {
+      // Seul celui qu'on affiche efface l'indicateur.
+      avant.filet.cancel();
+      setState(() => _ecrivent.remove(convId));
+    }
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
+    for (final f in _ecrivent.values) {
+      f.filet.cancel();
+    }
     _rtSub?.cancel();
     try {
       context.read<CallController>().removeListener(_onCallActivity);
@@ -2073,6 +2108,34 @@ class _ConversationsTabState extends State<_ConversationsTab>
             color: themed(context,
                 light: AlanyaColors.grey600, dark: AlanyaColors.craie2),
           );
+
+      // Quelqu'un écrit dans cette discussion (14/11/2026, comme l'application
+      // de référence) : l'aperçu cède la place aux trois points et au nom.
+      final ecrit = _ecrivent[c.id];
+      if (ecrit != null) {
+        final accent = isDark ? AlanyaColors.indigoLight : AlanyaColors.forest;
+        String libelle = tr(context, 'typing_hint');
+        if (c.isGroup) {
+          final membre = c.members.where((m) => m.id == ecrit.uid).firstOrNull;
+          final nom = membre == null
+              ? null
+              : NomsDonnes.nomPour(membre.id, membre.pseudo ?? membre.publicNumber);
+          if (nom != null && nom.trim().isNotEmpty) {
+            libelle = tr(context, 'typing_name_hint', {'nom': nom.trim()});
+          }
+        }
+        return Row(children: [
+          TypingDots(color: accent, dotSize: 5, amplitude: 3),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('$libelle…',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: baseStyle.copyWith(
+                    color: accent, fontStyle: FontStyle.italic, fontWeight: FontWeight.w500)),
+          ),
+        ]);
+      }
 
       // Si on doit afficher l'appel comme dernier événement (WhatsApp-like)
       if (useCallPreview && lastCall != null) {

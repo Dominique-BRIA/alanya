@@ -1536,6 +1536,9 @@ class AppLocalizations {
 'stock_vider': "Vider",
 'stock_unites': "o|Ko|Mo|Go",
 'e2ee_groupe_envoi_attente': "La clé du groupe arrive : ton message partira tout seul dans un instant.",
+'info_recu': "Reçu",
+'info_pas_recu': "Pas encore reçu",
+'info_lus_sur': "{n} sur {total} ont lu",
 },
 'en': {
 'e2ee_texte_indisponible': "Decrypting…",
@@ -3062,6 +3065,9 @@ class AppLocalizations {
 'stock_vider': "Clear",
 'stock_unites': "B|KB|MB|GB",
 'e2ee_groupe_envoi_attente': "The group key is on its way: your message will be sent automatically in a moment.",
+'info_recu': "Delivered",
+'info_pas_recu': "Not delivered yet",
+'info_lus_sur': "{n} of {total} have read",
 },
 'es': {
 'e2ee_texte_indisponible': "Descifrando…",
@@ -4588,6 +4594,9 @@ class AppLocalizations {
 'stock_vider': "Vaciar",
 'stock_unites': "B|KB|MB|GB",
 'e2ee_groupe_envoi_attente': "La clave del grupo está llegando: tu mensaje se enviará solo en un momento.",
+'info_recu': "Recibido",
+'info_pas_recu': "Aún no recibido",
+'info_lus_sur': "{n} de {total} han leído",
 },
 'de': {
 'e2ee_texte_indisponible': "Wird entschlüsselt…",
@@ -6114,6 +6123,9 @@ class AppLocalizations {
 'stock_vider': "Leeren",
 'stock_unites': "B|KB|MB|GB",
 'e2ee_groupe_envoi_attente': "Der Gruppenschlüssel kommt gleich: deine Nachricht wird automatisch gesendet.",
+'info_recu': "Zugestellt",
+'info_pas_recu': "Noch nicht zugestellt",
+'info_lus_sur': "{n} von {total} haben gelesen",
 },
 'pt': {
 'e2ee_texte_indisponible': "A decifrar…",
@@ -7640,6 +7652,9 @@ class AppLocalizations {
 'stock_vider': "Limpar",
 'stock_unites': "B|KB|MB|GB",
 'e2ee_groupe_envoi_attente': "A chave do grupo está chegando: sua mensagem será enviada sozinha em instantes.",
+'info_recu': "Recebido",
+'info_pas_recu': "Ainda não recebido",
+'info_lus_sur': "{n} de {total} leram",
 },
 'ru': {
 'e2ee_texte_indisponible': "Расшифровка…",
@@ -9166,6 +9181,9 @@ class AppLocalizations {
 'stock_vider': "Очистить",
 'stock_unites': "Б|КБ|МБ|ГБ",
 'e2ee_groupe_envoi_attente': "Ключ группы скоро придёт: сообщение отправится само через мгновение.",
+'info_recu': "Доставлено",
+'info_pas_recu': "Ещё не доставлено",
+'info_lus_sur': "Прочитали {n} из {total}",
 },
 'zh': {
 'e2ee_texte_indisponible': "正在解密…",
@@ -10692,6 +10710,9 @@ class AppLocalizations {
 'stock_vider': "清除",
 'stock_unites': "B|KB|MB|GB",
 'e2ee_groupe_envoi_attente': "群组密钥即将到达：你的消息稍后会自动发送。",
+'info_recu': "已送达",
+'info_pas_recu': "尚未送达",
+'info_lus_sur': "{total} 人中 {n} 人已读",
 },
 'sv': {
 'e2ee_texte_indisponible': "Dekrypterar…",
@@ -12218,6 +12239,9 @@ class AppLocalizations {
 'stock_vider': "Töm",
 'stock_unites': "B|kB|MB|GB",
 'e2ee_groupe_envoi_attente': "Gruppnyckeln är på väg: ditt meddelande skickas automatiskt om en stund.",
+'info_recu': "Levererat",
+'info_pas_recu': "Inte levererat än",
+'info_lus_sur': "{n} av {total} har läst",
 },
 'no': {
 'e2ee_texte_indisponible': "Dekrypterer…",
@@ -13744,6 +13768,9 @@ class AppLocalizations {
 'stock_vider': "Tøm",
 'stock_unites': "B|kB|MB|GB",
 'e2ee_groupe_envoi_attente': "Gruppenøkkelen er på vei: meldingen sendes automatisk om et øyeblikk.",
+'info_recu': "Levert",
+'info_pas_recu': "Ikke levert ennå",
+'info_lus_sur': "{n} av {total} har lest",
 }
 };
 }

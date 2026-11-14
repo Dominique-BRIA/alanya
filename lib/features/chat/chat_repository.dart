@@ -48,10 +48,16 @@ class ChatRepository {
   }
 
   /// Crée une conversation de groupe avec un nom et les numéros publics des membres.
-  Future<String> createGroup(String name, List<String> memberNumbers) async {
+  ///
+  /// [description] (14/11/2026) : posée dès la création, comme l'application
+  /// de référence. Le serveur l'accepte depuis le 01/11/2026.
+  Future<String> createGroup(String name, List<String> memberNumbers,
+      {String? description}) async {
     final data = await _api.post("/api/conversations", {
       "name": name,
       "memberNumbers": memberNumbers,
+      if (description != null && description.trim().isNotEmpty)
+        "description": description.trim(),
     });
     return data["id"] as String;
   }
