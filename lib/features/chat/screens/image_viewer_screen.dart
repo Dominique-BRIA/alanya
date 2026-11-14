@@ -95,6 +95,8 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
             child: CachedMedia(
               url: widget.imageUrl,
               fit: BoxFit.contain,
+              // Ouverte exprès : jamais retenue (14/11/2026).
+              explicite: true,
               placeholder: const Center(
                 child: CircularProgressIndicator(color: Colors.white),
               ),

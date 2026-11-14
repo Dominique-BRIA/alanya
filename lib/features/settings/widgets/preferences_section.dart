@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/data_saver_service.dart';
+import '../../../core/telechargement_auto.dart';
 import '../../../core/locale_controller.dart';
 import '../../../core/theme_controller.dart';
 import '../../../l10n/app_localizations.dart';
@@ -18,6 +19,7 @@ import '../screens/export_medias_screen.dart';
 import '../screens/notification_settings_screen.dart';
 import '../screens/repondeur_screen.dart';
 import '../screens/ringtones_screen.dart';
+import '../screens/telechargement_medias_screen.dart';
 import '../screens/translation_screen.dart';
 
 /// Le titre d'une catégorie de réglages, en petites capitales.
@@ -158,11 +160,6 @@ class _PreferencesSectionState extends State<PreferencesSection> {
     light: AlanyaColors.forest,
     dark: AlanyaColors.indigoLight,
   );
-  Color get _chipOffBg => themed(
-    context,
-    light: AlanyaColors.grey200,
-    dark: surfacesOf(context).surfaceHaute,
-  );
 
   TuileReglage _tuile({
     required IconData icone,
@@ -241,32 +238,22 @@ class _PreferencesSectionState extends State<PreferencesSection> {
         fin: chevronReglage(context),
         onTap: () => _choisirTheme(themeCtrl),
       ),
+      // 🔁 14/11/2026 : l'interrupteur devient une entrée — l'économie de
+      // données, le Wi-Fi uniquement et les familles téléchargées d'office
+      // vivent ensemble (`TelechargementMediasScreen`).
       _tuile(
-        icone: _economie ? Icons.data_saver_on : Icons.data_saver_off,
-        couleur: _economie ? _positive : _mutedIcon,
-        titre: tr(context, 'set_data_saver'),
+        icone: _economie ? Icons.data_saver_on : Icons.download_for_offline_outlined,
+        couleur: _economie ? _positive : _accent,
+        titre: tr(context, 'dl_titre'),
         sousTitre: _economie
             ? tr(context, 'set_data_saver_on')
-            : tr(context, 'set_disabled_tap_on'),
-        fin: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: _economie ? _positive.withValues(alpha: 0.1) : _chipOffBg,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Text(
-            _economie ? "ON" : "OFF",
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: _economie ? _positive : _muted,
-            ),
-          ),
-        ),
+            : tr(context,
+                TelechargementAuto.instance.wifiSeulement ? 'dl_resume_wifi' : 'dl_resume_toujours'),
+        fin: chevronReglage(context),
         onTap: () async {
-          final v = !_economie;
-          await DataSaverService.instance.setEnabled(v);
-          if (mounted) setState(() => _economie = v);
+          await Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const TelechargementMediasScreen()));
+          if (mounted) setState(() => _economie = DataSaverService.instance.isOn);
         },
       ),
       _tuile(

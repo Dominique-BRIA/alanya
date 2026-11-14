@@ -140,6 +140,8 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
                     child: CachedMedia(
                       url: it.url,
                       fit: BoxFit.contain,
+                      // Ouverte exprès : jamais retenue (14/11/2026).
+                      explicite: true,
                       placeholder: const Center(
                         child: CircularProgressIndicator(color: Colors.white),
                       ),

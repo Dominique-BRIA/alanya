@@ -4,7 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
-import '../../core/data_saver_service.dart';
+import '../../core/telechargement_auto.dart';
 import '../../core/media_cache.dart';
 import '../../theme/alanya_theme.dart';
 import 'shimmer_box.dart';
@@ -56,7 +56,12 @@ class CachedMedia extends StatefulWidget {
     this.borderRadius,
     this.placeholder,
     this.errorWidget,
+    this.explicite = false,
   });
+
+  /// Ouverture DEMANDÉE (visionneuse plein écran, galerie) : le téléchargement
+  /// automatique ne la retient jamais — c'est une demande (14/11/2026).
+  final bool explicite;
 
   /// URL du média (peut déjà contenir `?token=`). La clé de cache est l'`id`
   /// (dernier segment du chemin), indépendante du token.
@@ -149,11 +154,16 @@ class _CachedMediaState extends State<CachedMedia> {
       }
     } catch (_) {}
     if (!mounted) return;
-    // 2. Mode éco activé et média absent du cache → téléchargement manuel.
-    if (!force && DataSaverService.instance.isOn) {
-      setState(() => _needsManual = true);
+    // 2. Absent du cache, et le téléchargement automatique ne le permet pas
+    //    (famille, Wi-Fi uniquement, économie de données) → au toucher.
+    //    Voir `core/telechargement_auto.dart` (14/11/2026).
+    if (!force &&
+        !widget.explicite &&
+        !await TelechargementAuto.instance.autoriser(FamilleMedia.photo)) {
+      if (mounted) setState(() => _needsManual = true);
       return;
     }
+    if (!mounted) return;
     // 3. Télécharge (streaming + progression + retry) puis met en cache.
     setState(() {
       _needsManual = false;

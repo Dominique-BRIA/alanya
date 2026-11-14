@@ -13,6 +13,7 @@ import 'core/centre_transferts.dart';
 import 'core/authed_api.dart';
 import 'core/connectivity_service.dart';
 import 'core/data_saver_service.dart';
+import 'core/telechargement_auto.dart';
 import 'core/debug_overlay.dart';
 import 'core/geo_service.dart';
 import 'core/traduction_auto.dart';
@@ -142,6 +143,8 @@ void main() async {
   // qui dira si ce compte est concerné, et l'utilisateur qui devra l'accepter.
   GeoService.instance.init(authedApi);
   await DataSaverService.instance.load();
+  // Le téléchargement automatique des médias, avant leur premier rendu.
+  await TelechargementAuto.instance.charger();
   await NotificationSettings.instance.load();
   await TraductionAuto.instance.load();
   // Les noms donnés aux contacts, avant le premier écran (voir `NomsDonnes`).

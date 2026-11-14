@@ -13,6 +13,8 @@ import 'package:video_player/video_player.dart';
 
 import '../../../core/authed_api.dart';
 import '../../../core/media_helper.dart';
+import '../../../core/telechargement_auto.dart';
+import '../../settings/export_medias_repository.dart' show tailleLisible;
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/media/bulle_vocale.dart';
 import '../screens/visionneuse_document_sensible.dart';
@@ -88,15 +90,52 @@ class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
     }
   }
 
+  /// Photo RETENUE par le réglage du téléchargement automatique (14/11/2026) :
+  /// la bulle montre son aperçu, son poids et un bouton ; un toucher la
+  /// télécharge. Voir `core/telechargement_auto.dart`.
+  bool _retenu = false;
+
+  /// Un vocal se prépare d'office (pour sa forme d'onde) seulement si le
+  /// réglage le permet. Faux tant que la réponse n'est pas connue.
+  bool _vocalAuto = false;
+
   @override
   void initState() {
     super.initState();
     // Une ouverture lancée avant de quitter la conversation continue : la
     // bulle recréée s'y raccroche, pourcentage compris (27/10/2026).
-    if (_image || OuvertureMediaChiffre.enCours(d.id)) {
+    if (OuvertureMediaChiffre.enCours(d.id)) {
       unawaited(_charger());
+    } else if (_image) {
+      unawaited(_chargerSiPermis());
     } else {
       unawaited(_dejaLa());
+      if (_vocal) {
+        unawaited(TelechargementAuto.instance
+            .autoriser(FamilleMedia.audio, moi: widget.isMe)
+            .then((ok) {
+          if (ok && mounted) setState(() => _vocalAuto = true);
+        }));
+      }
+    }
+  }
+
+  /// Une photo : déjà là, elle s'affiche ; sinon elle ne se télécharge
+  /// d'office que si le réglage le permet (famille, Wi-Fi, économie).
+  Future<void> _chargerSiPermis() async {
+    final f = await OuvertureMediaChiffre.dejaLa(d);
+    if (!mounted) return;
+    if (f != null) {
+      setState(() {
+        _fichier = f;
+        _etat = _Etat.pret;
+      });
+      return;
+    }
+    if (await TelechargementAuto.instance.autoriser(FamilleMedia.photo, moi: widget.isMe)) {
+      if (mounted) unawaited(_charger());
+    } else if (mounted) {
+      setState(() => _retenu = true);
     }
   }
 
@@ -112,7 +151,10 @@ class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
 
   Future<File?> _charger() async {
     if (_fichier != null) return _fichier;
-    setState(() => _etat = _Etat.chargement);
+    setState(() {
+      _etat = _Etat.chargement;
+      _retenu = false;
+    });
     try {
       final f = await OuvertureMediaChiffre.ouvrir(
         d,
@@ -180,6 +222,11 @@ class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
     return GestureDetector(
       onLongPress: widget.onLongPress,
       onTap: () async {
+        // Retenue : le premier toucher la télécharge sur place.
+        if (_retenu) {
+          unawaited(_charger());
+          return;
+        }
         if (widget.onOuvrir != null) return widget.onOuvrir!();
         final f = _fichier ?? await _charger();
         if (f == null || !context.mounted) return;
@@ -214,6 +261,8 @@ class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
                   Container(color: Colors.black12),
                 if (_image && _fichier != null)
                   Image.file(_fichier!, fit: BoxFit.cover),
+                if (_retenu && _etat != _Etat.chargement)
+                  Center(child: BoutonTelechargerMedia(taille: d.taille)),
                 if (_etat == _Etat.chargement)
                   Center(
                     child: AvancementOuverture(
@@ -282,7 +331,10 @@ class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
       couleur: couleur,
       couleurDiscrete: widget.couleurDiscrete,
       duree: d.dureeMs == null ? null : Duration(milliseconds: d.dureeMs!),
-      chargementAuto: d.taille <= 2 * 1024 * 1024,
+      // Et seulement si le réglage du téléchargement automatique le permet
+      // (14/11/2026) ; sinon la forme d'onde vient au premier toucher.
+      key: ValueKey('vocal-${d.id}-$_vocalAuto'),
+      chargementAuto: _vocalAuto && d.taille <= 2 * 1024 * 1024,
       onLongPress: widget.onLongPress,
       obtenirSource: () async => (_fichier ?? await _charger())?.path,
     );
@@ -580,6 +632,7 @@ class TuileMediaChiffre extends StatefulWidget {
     required this.token,
     this.onLongPress,
     this.onOuvrir,
+    this.isMe = false,
   });
 
   final DescripteurMedia descripteur;
@@ -591,6 +644,9 @@ class TuileMediaChiffre extends StatefulWidget {
   /// autres. Sans lui, le toucher ouvre ce seul média en plein écran.
   final VoidCallback? onOuvrir;
 
+  /// Je l'ai envoyé : jamais retenu par le téléchargement automatique.
+  final bool isMe;
+
   @override
   State<TuileMediaChiffre> createState() => _TuileMediaChiffreState();
 }
@@ -600,13 +656,32 @@ class _TuileMediaChiffreState extends State<TuileMediaChiffre> {
   bool _echec = false;
   bool _charge = false;
 
+  /// Retenue par le réglage du téléchargement automatique (14/11/2026).
+  bool _retenu = false;
+
   DescripteurMedia get d => widget.descripteur;
   bool get _image => d.mime.startsWith('image/');
 
   @override
   void initState() {
     super.initState();
-    if (_image) _charger();
+    if (_image) unawaited(_chargerSiPermis());
+  }
+
+  /// Même règle que la bulle : déjà là, affichée ; sinon d'office seulement
+  /// si le réglage le permet.
+  Future<void> _chargerSiPermis() async {
+    final f = await OuvertureMediaChiffre.dejaLa(d);
+    if (!mounted) return;
+    if (f != null) {
+      setState(() => _fichier = f);
+      return;
+    }
+    if (await TelechargementAuto.instance.autoriser(FamilleMedia.photo, moi: widget.isMe)) {
+      if (mounted) unawaited(_charger());
+    } else if (mounted) {
+      setState(() => _retenu = true);
+    }
   }
 
   Future<File?> _charger() async {
@@ -616,6 +691,7 @@ class _TuileMediaChiffreState extends State<TuileMediaChiffre> {
       setState(() {
         _charge = true;
         _echec = false;
+        _retenu = false;
       });
     }
     try {
@@ -650,6 +726,11 @@ class _TuileMediaChiffreState extends State<TuileMediaChiffre> {
     return GestureDetector(
       onLongPress: widget.onLongPress,
       onTap: () async {
+        // Retenue : le premier toucher la télécharge sur place.
+        if (_retenu) {
+          unawaited(_charger());
+          return;
+        }
         if (widget.onOuvrir != null) return widget.onOuvrir!();
         final f = _fichier ?? await _charger();
         if (f == null || !context.mounted) return;
@@ -667,6 +748,8 @@ class _TuileMediaChiffreState extends State<TuileMediaChiffre> {
         else
           Container(color: Colors.black12),
         if (_fichier != null && _image) Image.file(_fichier!, fit: BoxFit.cover),
+        if (_retenu && !_charge)
+          Center(child: BoutonTelechargerMedia(taille: d.taille, compact: true)),
         if (_charge)
           const Center(
             child: SizedBox(
@@ -903,6 +986,38 @@ class AvancementOuverture extends StatelessWidget {
     return ValueListenableBuilder<double?>(
       valueListenable: suivi,
       builder: (_, v, __) => roue(v),
+    );
+  }
+}
+
+/// LE BOUTON D'UN MÉDIA RETENU par le téléchargement automatique (14/11/2026) :
+/// une icône de téléchargement et le poids du fichier, pour décider en
+/// connaissance de cause avant de dépenser son forfait. Le toucher, lui, est
+/// porté par la bulle ou la tuile qui l'affiche.
+class BoutonTelechargerMedia extends StatelessWidget {
+  const BoutonTelechargerMedia({super.key, required this.taille, this.compact = false});
+
+  final int taille;
+
+  /// Dans une tuile de grille : l'icône seule, sans le poids.
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: compact ? 8 : 12, vertical: compact ? 8 : 7),
+      decoration: BoxDecoration(
+        color: Colors.black54,
+        borderRadius: BorderRadius.circular(compact ? 20 : 18),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        const Icon(Icons.download_rounded, color: Colors.white, size: 20),
+        if (!compact && taille > 0) ...[
+          const SizedBox(width: 6),
+          Text(tailleLisible(taille),
+              style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+        ],
+      ]),
     );
   }
 }

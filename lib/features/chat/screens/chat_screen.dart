@@ -7486,6 +7486,7 @@ class _ChatScreenState extends State<ChatScreen>
             token: _token,
             onLongPress: () => _openMessageActions(m),
             onOuvrir: () => _openGallery(m.mediaChiffre!.id),
+            isMe: mine,
           )
         : GestureDetector(
             onLongPress: () => _openMessageActions(m),
