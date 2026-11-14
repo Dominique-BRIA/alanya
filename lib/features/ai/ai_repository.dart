@@ -37,10 +37,14 @@ class AiRepository {
   /// Envoie un message. `threadId` null = nouvelle conversation.
   /// Renvoie (threadId, réponse) — le threadId permet de poursuivre.
   Future<(String, AiMessage)> send(String message, {String? threadId}) async {
+    // ⚠️ 75 SECONDES ET NON 30 (14/11/2026) : l'assistant peut chercher sur
+    // Internet et lire des pages avant de répondre. Le serveur borne ce
+    // travail (35 s d'outils au plus, puis une dernière réponse) ; le délai
+    // ordinaire aurait coupé une réponse sur le point d'arriver.
     final data = await _api.post("/api/ai/chat", {
       "message": message,
       if (threadId != null) "threadId": threadId,
-    });
+    }, delai: const Duration(seconds: 75));
     final tid = data["threadId"] as String;
     final reply = AiMessage.fromJson(data["reply"] as Map<String, dynamic>);
     return (tid, reply);

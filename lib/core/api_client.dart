@@ -122,17 +122,21 @@ class ApiClient {
 
   static Never _pasDeCopie() => throw ApiException(0, 'Pas de copie locale.');
 
+  /// [delai] : à la place de [delaiReponse], pour une route qui travaille
+  /// légitimement plus longtemps — l'assistant qui cherche sur Internet
+  /// (14/11/2026).
   Future<Map<String, dynamic>> post(
     String path,
     Map<String, dynamic> body, {
     String? bearer,
+    Duration? delai,
   }) async {
     if (enCopieSeule) _pasDeCopie();
     final res = await http.post(
       Uri.parse("$baseUrl$path"),
       headers: _headers(bearer),
       body: jsonEncode(body),
-    ).timeout(delaiReponse, onTimeout: _expire);
+    ).timeout(delai ?? delaiReponse, onTimeout: _expire);
     return _decode(res);
   }
 

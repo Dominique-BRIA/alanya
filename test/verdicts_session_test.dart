@@ -34,7 +34,7 @@ class _ServeurQuiRefuse extends ApiClient {
 
   @override
   Future<Map<String, dynamic>> post(String path, Map<String, dynamic> body,
-      {String? bearer}) async {
+      {String? bearer, Duration? delai}) async {
     if (path == "/api/auth/refresh") {
       renouvellements++;
       await Future<void>.delayed(const Duration(milliseconds: 5));

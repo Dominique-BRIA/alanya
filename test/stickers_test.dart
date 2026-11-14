@@ -97,7 +97,7 @@ class _FauxApi implements AuthedApi {
   }
 
   @override
-  Future<Map<String, dynamic>> post(String path, Map<String, dynamic> body) async {
+  Future<Map<String, dynamic>> post(String path, Map<String, dynamic> body, {Duration? delai}) async {
     appels.add('POST $path');
     if (path.endsWith('/copy')) creees.insert(0, 93);
     return {};

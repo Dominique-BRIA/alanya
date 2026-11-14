@@ -32,8 +32,8 @@ class AuthedApi {
       ? _api.get(path)
       : _withAuth((token) => _api.get(path, bearer: token));
 
-  Future<Map<String, dynamic>> post(String path, Map<String, dynamic> body) =>
-      _withAuth((token) => _api.post(path, body, bearer: token));
+  Future<Map<String, dynamic>> post(String path, Map<String, dynamic> body, {Duration? delai}) =>
+      _withAuth((token) => _api.post(path, body, bearer: token, delai: delai));
 
   Future<Map<String, dynamic>> patch(String path, Map<String, dynamic> body) =>
       _withAuth((token) => _api.patch(path, body, bearer: token));
