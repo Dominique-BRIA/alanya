@@ -675,6 +675,14 @@ class E2eeSauvegarde {
   /// se tromper ici ne coûte qu'un tour de travail, jamais une donnée.
   ///
   /// ⚠️ NE LÈVE JAMAIS : c'est un rattrapage de fond, pas un préalable.
+  /// Relit la clé maîtresse gardée sur l'appareil, sans réseau : c'est tout
+  /// ce qu'il faut à [deposer] (relève d'arrière-plan, 14/11/2026).
+  Future<void> chargerMaitresse(CoffreE2ee coffre) async {
+    try {
+      _maitresse ??= await coffre.lireMaitresse();
+    } catch (_) {}
+  }
+
   Future<int> reprendreAuDemarrage(CoffreE2ee coffre, {bool force = false}) async {
     try {
       _maitresse ??= await coffre.lireMaitresse();

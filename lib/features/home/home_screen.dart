@@ -58,6 +58,7 @@ import '../auth/auth_controller.dart';
 import '../settings/deconnexion.dart';
 import '../chat/chat_repository.dart';
 import '../../services/e2ee/e2ee_fournisseur.dart';
+import '../parametres/screens/sauvegarde_chiffree_screen.dart';
 import '../../services/e2ee/e2ee_groupe_eclairage.dart';
 import '../chat/screens/chat_screen.dart';
 import '../calls/screens/dialer_screen.dart';
@@ -161,6 +162,56 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _appelsManques = MissedCalls.instance.count);
   }
 
+  /*
+   * 🔴 LA SAUVEGARDE CHIFFRÉE FERMÉE SUR CET APPAREIL SE DIT (14/11/2026).
+   *
+   * 🐛 Test du user dans « Test E2EE » : Chiwen, ajouté au groupe, ne pouvait
+   * ni lire ni écrire. Il n'avait pas de clé de compte, parce que la clé
+   * maîtresse manquait sur son téléphone : sa sauvegarde existait (mot de
+   * passe posé le 16/10), mais n'avait jamais été ouverte ici. Rien ne le lui
+   * disait ; seul un détour par les paramètres l'ouvrait. Un coffre réparé ou
+   * un téléphone neuf se retrouvent dans le même cas.
+   *
+   * ⚠️ UNE FOIS PAR LANCEMENT, et jamais quand la sauvegarde a été refusée ou
+   * n'existe pas : on ne pousse personne à en créer une ici.
+   */
+  static bool _sauvegardeProposee = false;
+
+  Future<void> _proposerOuvertureSauvegarde() async {
+    if (_sauvegardeProposee) return;
+    // La pile démarre en fond : on lui laisse le temps de relire sa clé.
+    await Future<void>.delayed(const Duration(seconds: 5));
+    if (!mounted) return;
+    final pile = context.e2ee;
+    if (pile == null || pile.sauvegarde.estOuverte) return;
+    if (await pile.coffre.lireMaitresse() != null) return;
+    final etat = await pile.sauvegarde.lireCoffre();
+    if (etat.refusee || etat.serrures.isEmpty || !mounted) return;
+    _sauvegardeProposee = true;
+    final ouvrir = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(Icons.lock_outline),
+        title: Text(tr(ctx, 'svg_fermee_titre')),
+        content: Text(tr(ctx, 'svg_fermee_texte')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(tr(ctx, 'svg_fermee_plus_tard')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(tr(ctx, 'svg_fermee_ouvrir')),
+          ),
+        ],
+      ),
+    );
+    if (ouvrir != true || !mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const SauvegardeChiffreeScreen()),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -188,6 +239,7 @@ class _HomeScreenState extends State<HomeScreen> {
        */
       try {
       context.read<RealtimeClient>().connect();
+      unawaited(_proposerOuvertureSauvegarde());
       // Les écrans du menu, mis en réserve en arrière-plan : chaque onglet
       // s'ouvrira aussitôt avec sa copie (voir `PrechargementEcrans`).
       PrechargementEcrans.lancer(context);

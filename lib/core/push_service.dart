@@ -27,6 +27,8 @@ import '../core/server_config.dart';
 import 'sonneries_livrees.dart';
 import 'codes_connexion_web.dart';
 import '../core/token_storage.dart';
+import '../core/authed_api.dart';
+import '../services/e2ee/e2ee_fournisseur.dart';
 
 /// Service de notifications push complet (FCM + notifications locales).
 ///
@@ -892,6 +894,13 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
     return;
   }
 
+  // Un message : relevé et rangé tout de suite, application fermée (piste A,
+  // 14/11/2026). Voir `PileE2ee.releverEnArrierePlan`.
+  if (message.data['type'] == 'message') {
+    await _releverDepuisNotification();
+    return;
+  }
+
   // Appel annulé/terminé par l'appelant → retire la notif d'appel plein écran
   // (ciblée par le callId partagé WS/FCM).
   if (message.data['type'] == 'call_cancelled') {
@@ -1032,6 +1041,24 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
       ),
       payload: jsonEncode(data),
     );
+  }
+}
+
+/// Relève les messages chiffrés depuis l'isolat de la notification.
+///
+/// ⚠️ RIEN DE L'APPLICATION N'EXISTE ICI : le compte et ses jetons sont relus
+/// depuis le stockage. Sans compte connecté, on ne fait rien.
+Future<void> _releverDepuisNotification() async {
+  try {
+    final storage = TokenStorage();
+    final brut = await storage.userJson;
+    if (brut == null) return;
+    final id = (jsonDecode(brut) as Map)['id']?.toString();
+    if (id == null || id.isEmpty) return;
+    final n = await PileE2ee.releverEnArrierePlan(AuthedApi(ApiClient(), storage), id);
+    debugPrint("[PushService] relève d'arrière-plan : $n message(s)");
+  } catch (e) {
+    debugPrint("[PushService] relève d'arrière-plan impossible : $e");
   }
 }
 

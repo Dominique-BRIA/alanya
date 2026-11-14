@@ -21,6 +21,7 @@ import 'e2ee_fil.dart';
 import 'e2ee_sauvegarde.dart';
 import 'e2ee_service.dart';
 import 'e2ee_trousseau.dart';
+import 'verrou_releve.dart';
 
 /// Construit la pile de chiffrement pour un compte.
 ///
@@ -114,7 +115,9 @@ class PileE2ee {
   final _releves = StreamController<List<MessageClair>>.broadcast();
 
   Future<({List<MessageClair> messages, int illisibles})> releverEtRanger() async {
-    final r = await _releverEtRangerSansDiffuser();
+    // Une seule relève à la fois, y compris avec l'isolat d'arrière-plan
+    // réveillé par une notification (piste A, 14/11/2026).
+    final r = await VerrouReleve.sous(_releverEtRangerSansDiffuser);
     if (r.messages.isNotEmpty && !_releves.isClosed) _releves.add(r.messages);
     return r;
   }
@@ -137,6 +140,19 @@ class PileE2ee {
           // part pas dans l'archive : il y ressusciterait à la restauration.
           if (range) ranges.add(m);
         }
+        /*
+         * 🔴 AFFICHÉ DÈS QU'IL EST RANGÉ (14/11/2026, user : « le temps que la
+         * notification arrive et que le message s'affiche est trop grand »).
+         * L'écran attendait la fin de la relève : le dépôt dans l'archive (un
+         * aller-retour réseau par message) puis l'acquittement (un autre).
+         * Le texte est déjà dans le cache, l'écran peut le montrer ; l'archive
+         * et l'acquittement suivent dans le même ordre qu'avant.
+         *
+         * ⚠️ LA DIFFUSION DE FIN, DANS `releverEtRanger`, RESTE : elle répète
+         * ces messages sans effet (`fusionnerReleve` ignore un message déjà
+         * affiché) et couvre un rangement qui aurait levé.
+         */
+        if (messages.isNotEmpty && !_releves.isClosed) _releves.add(messages);
         if (ranges.isEmpty) return;
         // ⚠️ `deposer` ne lève jamais, et rend `false` sans archive ouverte :
         // l'archive peut manquer ce lot, le cache l'a déjà.
@@ -261,6 +277,39 @@ class PileE2ee {
       echecDemarrage = e;
     } finally {
       _demarrageEnCours = false;
+    }
+  }
+
+  /*
+   * 🔴 PISTE A (14/11/2026) : RELEVER DÈS LA NOTIFICATION, APPLICATION FERMÉE.
+   *
+   * Un message n'existe en clair nulle part chez moi tant qu'un de mes
+   * appareils ne l'a pas relevé. Avant, le téléphone ne relevait qu'à
+   * l'ouverture de l'application : un téléphone perdu ou réinitialisé entre
+   * la notification et l'ouverture perdait le message pour toujours. Relevé
+   * ici, il est aussitôt rangé dans le cache ET dans la sauvegarde chiffrée,
+   * d'où un nouveau téléphone le reprendra.
+   *
+   * ⚠️ PAS DE `demarrer()` : ni publication de clés, ni reprise d'archive, ni
+   * restauration des groupes. Seulement ce qu'il faut pour lire et ranger :
+   * l'identité, la mémoire des fils et la clé maîtresse.
+   *
+   * ⚠️ LE VERROU DE RELÈVE (`VerrouReleve`) empêche l'écran revenu au même
+   * moment de relever en parallèle.
+   *
+   * ⚠️ NE LÈVE JAMAIS : la notification doit s'afficher quoi qu'il arrive.
+   */
+  static Future<int> releverEnArrierePlan(AuthedApi api, String compteId) async {
+    try {
+      final pile = PileE2ee.pour(api, compteId);
+      await pile.coffre.preparer();
+      await pile.fil.chargerMemoire();
+      await pile.sauvegarde.chargerMaitresse(pile.coffre);
+      final r = await pile.releverEtRanger().timeout(const Duration(seconds: 20));
+      return r.messages.length;
+    } catch (e) {
+      debugPrint("[e2ee] relève d'arrière-plan impossible : $e");
+      return 0;
     }
   }
 
