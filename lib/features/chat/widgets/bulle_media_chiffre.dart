@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' show ImageFilter;
 
@@ -443,15 +444,58 @@ class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
 
 /// La bulle d'un média chiffré dont CET appareil n'a pas la clé — enveloppe
 /// jamais reçue ici. Même règle que pour un texte : le dire.
+///
+/// 🔴 UNE TUILE, PLUS UNE PHRASE (E1 de la liste du professeur, 07/11/2026) :
+/// « l'affichage est inesthétique, avant il y avait un trait au milieu ».
+///
+/// Une ligne de texte en italique à la place d'une photo se lit comme un défaut
+/// d'affichage — on croit que quelque chose a raté. Une tuile de la taille d'un
+/// média, avec un cadenas barré au-dessus d'un filet et la phrase dessous, dit
+/// la même chose en occupant la place que le média aurait prise : il manque
+/// quelque chose ICI, et ce n'est pas une panne.
+///
+/// ⚠️ MÊME DESSIN QUE LE WEB (`media-chiffre.tsx`, classe `.mc-absent`), au
+/// pixel près autant que deux plateformes le permettent : mêmes bornes de
+/// largeur, même icône, même filet, même ordre. Les deux affichaient la même
+/// phrase ; ils affichent maintenant la même tuile.
 class MediaChiffreIndisponible extends StatelessWidget {
   const MediaChiffreIndisponible({super.key, required this.couleur});
   final Color couleur;
 
   @override
-  Widget build(BuildContext context) => Text(
-    tr(context, 'e2ee_media_indisponible'),
-    style: TextStyle(fontStyle: FontStyle.italic, fontSize: 13, color: couleur),
-  );
+  Widget build(BuildContext context) {
+    // Mêmes bornes que `.mc-visuel` côté web : la bulle ne change pas de
+    // largeur selon qu'on a la clé ou non.
+    final largeur = math.min(260.0, MediaQuery.sizeOf(context).width * 0.7);
+    return Container(
+      width: largeur,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
+      decoration: BoxDecoration(
+        color: couleur.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.no_encryption_outlined,
+              size: 26, color: couleur.withValues(alpha: 0.75)),
+          const SizedBox(height: 8),
+          // Le filet du milieu — ce que le professeur disait avoir vu disparaître.
+          Container(
+            width: 44,
+            height: 1,
+            color: couleur.withValues(alpha: 0.25),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            tr(context, 'e2ee_media_indisponible'),
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12, height: 1.35, color: couleur),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _ImagePleinEcran extends StatelessWidget {
@@ -815,7 +859,8 @@ class EnvoiChiffreEnCours extends StatelessWidget {
           style: const TextStyle(color: Colors.white, fontSize: 11)),
     ]);
   }
-}
+}
+
 
 /// La roue d'une ouverture en cours, avec son POURCENTAGE (27/10/2026) : elle
 /// suit `OuvertureMediaChiffre.avancement`, qui vit hors de la bulle. Sans
