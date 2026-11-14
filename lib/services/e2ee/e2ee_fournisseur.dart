@@ -89,6 +89,10 @@ class PileE2ee {
   /// rend muette.
   Object? echecDemarrage;
 
+  /// Vrai pendant [demarrer] : une identité créée PENDANT le démarrage sera
+  /// publiée par lui, inutile d'en relancer un.
+  bool _demarrageEnCours = false;
+
   /// Relève les enveloppes et range CHAQUE message dans son fil, puis dans
   /// l'archive — avant l'acquittement.
   ///
@@ -163,6 +167,7 @@ class PileE2ee {
      * une panne déjà réparée.
      */
     echecDemarrage = null;
+    _demarrageEnCours = true;
     try {
       await coffre.preparer();
       // La mémoire des fils chiffrés, avant tout écran : voir `E2eeFil.noteEtat`.
@@ -254,6 +259,8 @@ class PileE2ee {
        * ce qui a réellement échoué au lieu de laisser accuser l'autre.
        */
       echecDemarrage = e;
+    } finally {
+      _demarrageEnCours = false;
     }
   }
 
@@ -309,12 +316,23 @@ class PileE2ee {
 
     final coffre = CoffreE2ee(compteId);
     final service = E2eeService(coffre, appel);
-    return PileE2ee._(
+    final pile = PileE2ee._(
         compteId,
         coffre,
         service,
         E2eeFil(service, appel, coffre.deviceId, monCompte: compteId),
         E2eeSauvegarde(appel));
+    /*
+     * 🔴 UNE IDENTITÉ RECRÉÉE APRÈS LE DÉMARRAGE EST REPUBLIÉE AUSSITÔT
+     * (14/11/2026). C'est le cas d'un coffre vidé par sa réparation : sans
+     * republication, nos correspondants continueraient de chiffrer pour
+     * l'ancienne identité, et plus rien ne s'ouvrirait ici jusqu'au prochain
+     * lancement de l'application.
+     */
+    coffre.surIdentiteNeuve = () {
+      if (!pile._demarrageEnCours) unawaited(pile.demarrer());
+    };
+    return pile;
   }
 }
 

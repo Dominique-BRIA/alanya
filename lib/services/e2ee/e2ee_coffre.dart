@@ -227,16 +227,46 @@ class CoffreE2ee implements SignalProtocolStore {
   /// 🔴 UNE IDENTITÉ PAR APPAREIL, JAMAIS PAR COMPTE. C'est ce qui permet au
   /// téléphone et au navigateur d'exister en même temps : chacun a la sienne, et
   /// chacun reçoit sa propre enveloppe pour un message donné.
-  Future<void> preparer() async {
+  ///
+  /// 🐛 « IDENTITÉ ABSENTE — APPELER PREPARER() » EN ÉCRIVANT, JUSTE APRÈS LA
+  /// CONNEXION (user, 14/11/2026 : Ibrahim Traore vers Doms). La pile appelle
+  /// `preparer()` en arrière-plan au démarrage, mais les accès au coffre passent
+  /// un par un, et la file est chargée juste après la connexion (restauration de
+  /// l'archive, relève des clés de groupe). Un envoi passé avant demandait
+  /// l'identité qui n'existait pas encore.
+  ///
+  /// 🔴 DÉSORMAIS UNE SEULE PRÉPARATION À LA FOIS, ET ON L'ATTEND : deux appels
+  /// simultanés partagent la même création — sans quoi chacun tirerait SA
+  /// paire, et la seconde écraserait la première, déjà peut-être publiée. Lire
+  /// l'identité absente ([identiteLocale], [getLocalRegistrationId]) prépare au
+  /// lieu de lever.
+  Future<void> preparer() => _preparation ??= _preparerUneFois().whenComplete(() => _preparation = null);
+
+  Future<void>? _preparation;
+
+  /// Prévenu quand une identité est CRÉÉE (pas quand elle existait déjà). La
+  /// pile s'en sert pour republier ses clés si cela arrive après son démarrage
+  /// — après une réparation du coffre, par exemple (voir `PileE2ee`).
+  void Function()? surIdentiteNeuve;
+
+  Future<void> _preparerUneFois() async {
     if (await _lire('identite') != null) return;
 
     final identite = generateIdentityKeyPair();
     await _ecrire('identite', base64.encode(identite.serialize()));
     await _ecrire('registrationId', '${generateRegistrationId(false)}');
+    // Une identité neuve n'est, par définition, pas publiée : la prochaine
+    // préparation de la pile doit la publier, quoi qu'en dise un ancien drapeau.
+    await _effacer('publie');
+    surIdentiteNeuve?.call();
   }
 
   Future<IdentityKeyPair> identiteLocale() async {
-    final brut = await _lire('identite');
+    var brut = await _lire('identite');
+    if (brut == null) {
+      await preparer();
+      brut = await _lire('identite');
+    }
     if (brut == null) throw StateError('Identité absente — appeler preparer().');
     return IdentityKeyPair.fromSerialized(base64.decode(brut));
   }
@@ -245,8 +275,15 @@ class CoffreE2ee implements SignalProtocolStore {
   Future<IdentityKeyPair> getIdentityKeyPair() => identiteLocale();
 
   @override
-  Future<int> getLocalRegistrationId() async =>
-      int.parse((await _lire('registrationId'))!);
+  Future<int> getLocalRegistrationId() async {
+    var brut = await _lire('registrationId');
+    if (brut == null) {
+      await preparer();
+      brut = await _lire('registrationId');
+    }
+    if (brut == null) throw StateError('Identité absente — appeler preparer().');
+    return int.parse(brut);
+  }
 
   @override
   Future<IdentityKey?> getIdentity(SignalProtocolAddress address) async {

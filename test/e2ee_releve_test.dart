@@ -438,13 +438,18 @@ void main() {
       alice.fil.noteEtat('fil-ab', true);
       await Future<void>.delayed(Duration.zero);
       await alice.coffre.noterPublie();
+      final ancienne =
+          (await alice.coffre.identiteLocale()).getPublicKey().serialize().toString();
 
       await alice.service.oublierCetAppareil();
 
       expect(serveur.cles['alice']?[id], isNull, reason: 'identité restée servie');
       expect(await alice.coffre.dejaPublie(), isFalse,
           reason: 'le coffre disait encore « publié » : pas de republication');
-      expect(alice.coffre.identiteLocale(), throwsStateError,
+      // Depuis le 14/11/2026, lire une identité absente en PRÉPARE une neuve
+      // (au lieu de lever) : la garantie est que l'ANCIENNE n'existe plus.
+      expect((await alice.coffre.identiteLocale()).getPublicKey().serialize().toString(),
+          isNot(ancienne),
           reason: 'l’identité privée restait sur l’appareil');
       expect(await alice.coffre.filsChiffres(), isEmpty);
     });
