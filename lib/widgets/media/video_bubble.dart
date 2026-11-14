@@ -141,6 +141,7 @@ class _VideoBubbleState extends State<VideoBubble> {
                     // Thumbnail : serveur > générée > placeholder visible
                     if (hasThumbUrl)
                       CachedMedia(url: thumbUrl!, fit: BoxFit.cover,
+                          moi: widget.isMe,
                           errorWidget: _placeholder())
                     else if (_thumbnailBytes != null)
                       Image.memory(_thumbnailBytes!, fit: BoxFit.cover)

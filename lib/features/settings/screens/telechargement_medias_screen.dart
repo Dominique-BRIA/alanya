@@ -13,12 +13,11 @@ import '../../../widgets/back_app_bar.dart';
 ///     référence) : sur données mobiles, rien ne se télécharge tout seul ;
 ///   - « Économie de données » : la même chose, plus les modèles de traduction
 ///     hors ligne qui attendent le Wi-Fi ;
-///   - les familles qui se téléchargent d'office : photos et messages vocaux.
-///
-/// ⚠️ PAS DE CASE « VIDÉOS » NI « DOCUMENTS » : sur le mobile, ils attendent
-/// déjà un toucher (une vidéo ou un document chiffrés ne viennent jamais
-/// d'office). Un interrupteur qui ne change rien serait un mensonge ; la note
-/// en bas de l'écran le dit.
+///   - les familles qui se téléchargent d'office : photos, messages vocaux,
+///     vidéos, documents et autres fichiers (vidéos et documents ajoutés le
+///     14/11/2026 à la demande du user ; avant, ils attendaient toujours un
+///     toucher). Au-delà de 100 Mo, ou sensible, un fichier attend toujours un
+///     toucher : la note en bas de l'écran le dit.
 class TelechargementMediasScreen extends StatefulWidget {
   const TelechargementMediasScreen({super.key});
 
@@ -87,6 +86,18 @@ class _TelechargementMediasScreenState extends State<TelechargementMediasScreen>
             title: Text(tr(context, 'dl_vocaux')),
             value: _reglages.famille(FamilleMedia.audio),
             onChanged: (v) => _reglages.changerFamille(FamilleMedia.audio, v),
+          ),
+          SwitchListTile(
+            secondary: const Icon(Icons.videocam_outlined),
+            title: Text(tr(context, 'dl_videos')),
+            value: _reglages.famille(FamilleMedia.video),
+            onChanged: (v) => _reglages.changerFamille(FamilleMedia.video, v),
+          ),
+          SwitchListTile(
+            secondary: const Icon(Icons.insert_drive_file_outlined),
+            title: Text(tr(context, 'dl_documents')),
+            value: _reglages.famille(FamilleMedia.document),
+            onChanged: (v) => _reglages.changerFamille(FamilleMedia.document, v),
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),

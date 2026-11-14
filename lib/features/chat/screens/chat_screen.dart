@@ -3861,6 +3861,20 @@ class _ChatScreenState extends State<ChatScreen>
   // ══════════════════════════════════════════════
   // REPLY PREVIEW HEADER (WhatsApp style)
   // ══════════════════════════════════════════════
+  /// La citation au-dessus d'un sticker, dans une petite bulle de la couleur
+  /// de l'expéditeur : la même allure qu'au-dessus d'un texte.
+  Widget _bulleCitationSticker(bool mine, Widget citation) => Container(
+        margin: const EdgeInsets.only(bottom: 4),
+        padding: const EdgeInsets.fromLTRB(8, 8, 8, 2),
+        constraints: const BoxConstraints(maxWidth: 260),
+        decoration: BoxDecoration(
+          color: mine ? _sentBubbleColor : _recvBubbleColor,
+          borderRadius: BorderRadius.circular(12),
+          border: mine ? null : Border.all(color: _hairline),
+        ),
+        child: citation,
+      );
+
   Widget _replyPreviewHeader(Message m, bool mine) {
     final snapshot = _resolveReply(m);
     final original = _findMessage(m.replyToId);
@@ -7054,10 +7068,24 @@ class _ChatScreenState extends State<ChatScreen>
                   child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        /*
+                         * 🐛 UN STICKER QUI RÉPOND (14/11/2026, user : « le
+                         * rendu du message au-dessus est très différent »). La
+                         * bulle d'un sticker est transparente et sans marge :
+                         * la citation flottait sur le fond, sans le cadre ni
+                         * les couleurs d'une réponse ordinaire. On lui rend sa
+                         * petite bulle, de la couleur de l'expéditeur.
+                         */
                         if (m.replyToId != null && !m.isDeleted)
-                          _replyPreviewHeader(m, mine),
+                          stickerRecu != null
+                              ? _bulleCitationSticker(
+                                  mine, _replyPreviewHeader(m, mine))
+                              : _replyPreviewHeader(m, mine),
                         if (m.statutCite != null && !m.isDeleted)
-                          _citationStatut(m.statutCite!, mine),
+                          stickerRecu != null
+                              ? _bulleCitationSticker(
+                                  mine, _citationStatut(m.statutCite!, mine))
+                              : _citationStatut(m.statutCite!, mine),
                         m.isDeleted
                             ? _deletedBubble(m, mine)
                             // Envoi en cours ou échoué : la bulle montre la vignette

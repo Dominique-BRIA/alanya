@@ -67,6 +67,7 @@ class ImageBubble extends StatelessWidget {
                       token: token,
                       width: width,
                       fit: BoxFit.cover,
+                      moi: isMe,
                       errorWidget: Container(
                         width: width,
                         height: 160,

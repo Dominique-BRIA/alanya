@@ -485,6 +485,16 @@ class _MediaGalleryPickerScreenState extends State<MediaGalleryPickerScreen> {
             : _onglets(),
         centerTitle: true,
         actions: [
+          // Le sélecteur d'Android voit tout ce que le téléphone montre, même
+          // ce que cette galerie n'a pas le droit de lire (14/11/2026).
+          IconButton(
+            tooltip: tr(context, 'galerie_tout_telephone'),
+            icon: Icon(Icons.perm_media_outlined, color: _texte),
+            onPressed: () async {
+              final r = await choisirParSelecteurSysteme(context);
+              if (r.isNotEmpty && context.mounted) Navigator.of(context).pop(r);
+            },
+          ),
           if (_choisis.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(right: 8),

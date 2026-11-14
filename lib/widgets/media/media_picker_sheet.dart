@@ -423,66 +423,8 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
    * `core/compression_envoi.dart`, comme dans les autres chemins.
    */
   Future<void> _pickFullGalleryParSysteme(NavigatorState navigator) async {
-    try {
-      final choisis = await ImagePicker().pickMultipleMedia(
-        maxWidth: imageBordMax.toDouble(),
-        maxHeight: imageBordMax.toDouble(),
-        imageQuality: imageQualite,
-      );
-      if (choisis.isEmpty || !mounted) return;
-      final results = <MediaPickResult>[];
-      final tropGros = <String>[];
-      for (final file in choisis) {
-        // Une vidéo reste sur le disque (29/10/2026) : l'écran de légende la
-        // compresse depuis son chemin.
-        if (_guessMime(file.name).startsWith('video/')) {
-          final taille = await File(file.path).length();
-          if (taille == 0) continue;
-          results.add(MediaPickResult(
-            bytes: Uint8List(0),
-            tailleSurDisque: taille,
-            fileName: file.name,
-            mimeType: _guessMime(file.name),
-            path: file.path,
-          ));
-          continue;
-        }
-        final octets = await file.readAsBytes();
-        if (octets.isEmpty) continue;
-        // ⚠️ MÊME PLAFOND QUE LES DOCUMENTS, plus bas. Ce chemin ne sert que si
-        // l'accès à la galerie est refusé, ce qui l'avait fait oublier — mais
-        // il envoie exactement les mêmes fichiers.
-        // Les photos sont déjà réduites par le sélecteur ; une vidéo, elle,
-        // arrive entière et se transcode ici.
-        final pret = await compresserPourEnvoi(
-          octets: octets,
-          nomFichier: file.name,
-          mimeType: _guessMime(file.name),
-          chemin: file.path,
-        );
-        if (depassePlafondMedia(pret.octets.length)) {
-          tropGros.add(pret.nomFichier);
-          continue;
-        }
-        results.add(MediaPickResult(
-          bytes: pret.octets,
-          fileName: pret.nomFichier,
-          mimeType: pret.mimeType,
-          path: file.path,
-          compresse: pret.compresse,
-          niveauSuperieurPossible: pret.niveauSuperieurPossible,
-          definitionAutreNiveau: pret.definitionAutreNiveau,
-          tailleOriginale: pret.compresse ? pret.tailleAvant : null,
-        ));
-      }
-      if (!mounted) return;
-      final avis = messageMediasEcartes(tropGros, context: context);
-      if (avis != null) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(avis)));
-      }
-      if (results.isNotEmpty) navigator.pop(results);
-    } catch (_) {}
+    final results = await choisirParSelecteurSysteme(context);
+    if (results.isNotEmpty && mounted) navigator.pop(results);
   }
 
   // ══ DOCUMENTS — TOUS TYPES ══
@@ -611,25 +553,7 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
     return 'image/jpeg';
   }
 
-  String _guessMime(String fileName) {
-    final ext = fileName.split('.').last.toLowerCase();
-    switch (ext) {
-      case 'jpg': case 'jpeg': return 'image/jpeg';
-      case 'png': return 'image/png';
-      case 'gif': return 'image/gif';
-      case 'webp': return 'image/webp';
-      case 'mp4': return 'video/mp4';
-      case 'mov': return 'video/quicktime';
-      case 'pdf': return 'application/pdf';
-      case 'doc': return 'application/msword';
-      case 'docx': return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-      case 'xls': return 'application/vnd.ms-excel';
-      case 'xlsx': return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-      case 'ppt': return 'application/vnd.ms-powerpoint';
-      case 'pptx': return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
-      default: return 'application/octet-stream';
-    }
-  }
+  String _guessMime(String fileName) => devinerMimeMedia(fileName);
 
   String _formatDuration(int seconds) {
     final m = seconds ~/ 60;
@@ -882,5 +806,99 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
         );
       },
     );
+  }
+}
+
+/// LE SÉLECTEUR DE PHOTOS D'ANDROID (14/11/2026) : il voit TOUT ce que le
+/// téléphone sait montrer, y compris ce que la galerie interne n'a pas le
+/// droit de lire (accès partiel) ou ne liste pas. Partagé par la feuille
+/// d'envoi (accès refusé) et la galerie plein écran (bouton « Tout le
+/// téléphone »), comme l'application de référence, qui n'utilise que lui.
+Future<List<MediaPickResult>> choisirParSelecteurSysteme(BuildContext context) async {
+final results = <MediaPickResult>[];
+  try {
+    final choisis = await ImagePicker().pickMultipleMedia(
+      maxWidth: imageBordMax.toDouble(),
+      maxHeight: imageBordMax.toDouble(),
+      imageQuality: imageQualite,
+    );
+    if (choisis.isEmpty || !context.mounted) return results;
+    final tropGros = <String>[];
+    for (final file in choisis) {
+      // Une vidéo reste sur le disque (29/10/2026) : l'écran de légende la
+      // compresse depuis son chemin.
+      if (devinerMimeMedia(file.name).startsWith('video/')) {
+        final taille = await File(file.path).length();
+        if (taille == 0) continue;
+        results.add(MediaPickResult(
+          bytes: Uint8List(0),
+          tailleSurDisque: taille,
+          fileName: file.name,
+          mimeType: devinerMimeMedia(file.name),
+          path: file.path,
+        ));
+        continue;
+      }
+      final octets = await file.readAsBytes();
+      if (octets.isEmpty) continue;
+      // ⚠️ MÊME PLAFOND QUE LES DOCUMENTS, plus bas. Ce chemin ne sert que si
+      // l'accès à la galerie est refusé, ce qui l'avait fait oublier — mais
+      // il envoie exactement les mêmes fichiers.
+      // Les photos sont déjà réduites par le sélecteur ; une vidéo, elle,
+      // arrive entière et se transcode ici.
+      final pret = await compresserPourEnvoi(
+        octets: octets,
+        nomFichier: file.name,
+        mimeType: devinerMimeMedia(file.name),
+        chemin: file.path,
+      );
+      if (depassePlafondMedia(pret.octets.length)) {
+        tropGros.add(pret.nomFichier);
+        continue;
+      }
+      results.add(MediaPickResult(
+        bytes: pret.octets,
+        fileName: pret.nomFichier,
+        mimeType: pret.mimeType,
+        path: file.path,
+        compresse: pret.compresse,
+        niveauSuperieurPossible: pret.niveauSuperieurPossible,
+        definitionAutreNiveau: pret.definitionAutreNiveau,
+        tailleOriginale: pret.compresse ? pret.tailleAvant : null,
+      ));
+    }
+    if (!context.mounted) return results;
+    final avis = messageMediasEcartes(tropGros, context: context);
+    if (avis != null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(avis)));
+    }
+  } catch (_) {}
+  return results;
+}
+
+/// Le type MIME d'un média d'après l'extension de son nom.
+String devinerMimeMedia(String fileName) {
+  final ext = fileName.split('.').last.toLowerCase();
+  switch (ext) {
+    case 'jpg': case 'jpeg': return 'image/jpeg';
+    case 'png': return 'image/png';
+    case 'gif': return 'image/gif';
+    case 'webp': return 'image/webp';
+    case 'mp4': return 'video/mp4';
+    case 'mov': return 'video/quicktime';
+    case '3gp': return 'video/3gpp';
+    case 'mkv': return 'video/x-matroska';
+    case 'webm': return 'video/webm';
+    case 'heic': return 'image/heic';
+    case 'heif': return 'image/heif';
+    case 'pdf': return 'application/pdf';
+    case 'doc': return 'application/msword';
+    case 'docx': return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    case 'xls': return 'application/vnd.ms-excel';
+    case 'xlsx': return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    case 'ppt': return 'application/vnd.ms-powerpoint';
+    case 'pptx': return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+    default: return 'application/octet-stream';
   }
 }

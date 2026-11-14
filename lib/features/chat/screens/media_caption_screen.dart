@@ -14,6 +14,7 @@ import '../../../core/compression_video.dart' show videoBordCourtHaute;
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/media/avancement_compression.dart';
 import '../../../widgets/media/media_picker_sheet.dart';
+import '../../status/screens/editeur_media_statut_screen.dart';
 import '../../../l10n/app_localizations.dart';
 import 'visionneur_vue_unique.dart' show PastilleVueUnique;
 
@@ -430,6 +431,30 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
               color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
         ),
         actions: [
+          // Les outils du statut, sur une photo à envoyer (14/11/2026) :
+          // rogner et faire pivoter, émoji, texte, dessin.
+          if (_modifiable(courant)) ...[
+            IconButton(
+              tooltip: tr(context, 'rogner_titre'),
+              icon: const Icon(Icons.crop_rotate, color: Colors.white),
+              onPressed: () => _modifier(OutilEditeur.rogner),
+            ),
+            IconButton(
+              tooltip: tr(context, 'status_emoji'),
+              icon: const Icon(Icons.emoji_emotions_outlined, color: Colors.white),
+              onPressed: () => _modifier(OutilEditeur.emoji),
+            ),
+            IconButton(
+              tooltip: tr(context, 'text_action'),
+              icon: const Icon(Icons.title, color: Colors.white),
+              onPressed: () => _modifier(OutilEditeur.texte),
+            ),
+            IconButton(
+              tooltip: tr(context, 'status_draw'),
+              icon: const Icon(Icons.brush, color: Colors.white),
+              onPressed: () => _modifier(OutilEditeur.dessin),
+            ),
+          ],
           IconButton(
             tooltip: tr(context, 'remove_media'),
             icon: const Icon(Icons.delete_outline, color: Colors.white),
@@ -462,6 +487,38 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
         ),
       ),
     );
+  }
+
+  /// Une photo ordinaire, en mémoire, qu'aucune compression ne retravaille en
+  /// ce moment : on peut l'ouvrir dans l'éditeur.
+  bool _modifiable(MediaPickResult f) =>
+      f.estImage &&
+      !f.sensible &&
+      !f.surDisque &&
+      f.bytes.isNotEmpty &&
+      f.mimeType != 'image/gif' &&
+      _recompresse == null;
+
+  /// Ouvre la photo courante dans l'éditeur du statut, et la remplace par ce
+  /// qu'il rend.
+  ///
+  /// ⚠️ PLUS DE CHANGEMENT DE QUALITÉ ENSUITE : il repartirait de l'original
+  /// et effacerait les retouches. `niveauSuperieurPossible` passe donc à faux.
+  Future<void> _modifier(OutilEditeur outil) async {
+    final i = _index;
+    final f = _fichiers[i];
+    _lecteurs[i]?.pause();
+    final r = await EditeurMediaStatutScreen.modifierImage(context, f, outil: outil);
+    if (r == null || !mounted || i >= _fichiers.length || _fichiers[i] != f) return;
+    setState(() {
+      _fichiers[i] = f.copieAvec(
+        bytes: r.octets,
+        fileName: r.nomFichier,
+        mimeType: r.mimeType,
+        compresse: true,
+        niveauSuperieurPossible: false,
+      );
+    });
   }
 
   Widget _apercu(int i) {

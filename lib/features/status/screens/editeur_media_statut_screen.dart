@@ -67,6 +67,10 @@ class _Trait {
 /// Les outils disponibles en haut de l'éditeur.
 enum _Outil { aucun, dessin }
 
+/// L'outil à ouvrir d'emblée, quand l'éditeur est lancé depuis un bouton
+/// précis de l'écran d'envoi (rogner, émoji, texte, dessin).
+enum OutilEditeur { aucun, rogner, emoji, texte, dessin }
+
 /// ÉDITEUR DE STATUT MÉDIA, façon WhatsApp — image et vidéo.
 ///
 /// Un seul écran pour les deux, avec la même barre d'outils et la même barre de
@@ -83,9 +87,22 @@ enum _Outil { aucun, dessin }
 /// pire que de ne pas les proposer : la vidéo garde donc la légende, qui est
 /// stockée à part et n'a rien à incruster.
 class EditeurMediaStatutScreen extends StatefulWidget {
-  const EditeurMediaStatutScreen({super.key, required this.media});
+  const EditeurMediaStatutScreen({
+    super.key,
+    required this.media,
+    this.imageSeule = false,
+    this.outilInitial = OutilEditeur.aucun,
+  });
+
+  final OutilEditeur outilInitial;
 
   final MediaPickResult media;
+
+  /// Pour une photo qu'on ENVOIE dans une conversation ou un groupe
+  /// (14/11/2026, plaintes des utilisateurs : « impossible de faire sur une
+  /// photo envoyée ce qu'on fait sur un statut »). Mêmes outils ; la légende
+  /// reste dans l'écran d'envoi, et le bouton « Terminé » remplace l'envoi.
+  final bool imageSeule;
 
   static Future<MediaEdite?> ouvrir(
     BuildContext context,
@@ -94,6 +111,24 @@ class EditeurMediaStatutScreen extends StatefulWidget {
     return Navigator.of(context).push<MediaEdite>(
       MaterialPageRoute(
         builder: (_) => EditeurMediaStatutScreen(media: media),
+        fullscreenDialog: true,
+      ),
+    );
+  }
+
+  /// Modifie une photo avant l'envoi. `null` : rien n'a changé (ou annulé).
+  static Future<MediaEdite?> modifierImage(
+    BuildContext context,
+    MediaPickResult media, {
+    OutilEditeur outil = OutilEditeur.aucun,
+  }) {
+    return Navigator.of(context).push<MediaEdite>(
+      MaterialPageRoute(
+        builder: (_) => EditeurMediaStatutScreen(
+          media: media,
+          imageSeule: true,
+          outilInitial: outil,
+        ),
         fullscreenDialog: true,
       ),
     );
@@ -168,6 +203,23 @@ class _EditeurMediaStatutScreenState extends State<EditeurMediaStatutScreen> {
   @override
   void initState() {
     super.initState();
+    if (widget.outilInitial == OutilEditeur.dessin) _outil = _Outil.dessin;
+    if (widget.outilInitial != OutilEditeur.aucun &&
+        widget.outilInitial != OutilEditeur.dessin) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        switch (widget.outilInitial) {
+          case OutilEditeur.rogner:
+            _rogner();
+          case OutilEditeur.emoji:
+            _ajouterEmoji();
+          case OutilEditeur.texte:
+            _ajouterTexte();
+          default:
+            break;
+        }
+      });
+    }
     final chemin = widget.media.path;
     if (_estVideo && chemin != null) {
       final c = VideoPlayerController.file(File(chemin));
@@ -309,9 +361,15 @@ class _EditeurMediaStatutScreenState extends State<EditeurMediaStatutScreen> {
 
   Future<void> _publier() async {
     if (_envoiEnCours) return;
+    // Rien de changé : l'écran d'envoi garde la photo telle quelle (et sa
+    // compression JPEG).
+    if (widget.imageSeule && !_aDesAnnotations && _baseRognee == null) {
+      Navigator.of(context).pop();
+      return;
+    }
     setState(() => _envoiEnCours = true);
 
-    final legende = _legendeCtrl.text.trim();
+    final legende = widget.imageSeule ? '' : _legendeCtrl.text.trim();
     var octets = widget.media.bytes;
     var nom = widget.media.fileName;
     var mime = widget.media.mimeType;
@@ -362,7 +420,7 @@ class _EditeurMediaStatutScreenState extends State<EditeurMediaStatutScreen> {
             _barreOutils(),
             Expanded(child: Center(child: _zone())),
             if (_outil == _Outil.dessin) _paletteDessin(),
-            _barreLegende(),
+            if (widget.imageSeule) _barreTerminer() else _barreLegende(),
           ],
         ),
       ),
@@ -579,6 +637,27 @@ class _EditeurMediaStatutScreenState extends State<EditeurMediaStatutScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// Le bas de l'éditeur pour une photo à envoyer : un seul bouton, qui rend
+  /// la photo modifiée à l'écran d'envoi.
+  Widget _barreTerminer() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+      child: Align(
+        alignment: Alignment.centerRight,
+        child: FloatingActionButton.extended(
+          backgroundColor: Colors.white,
+          foregroundColor: Colors.black,
+          onPressed: _envoiEnCours ? null : _publier,
+          icon: _envoiEnCours
+              ? const SizedBox(
+                  width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.check),
+          label: Text(tr(context, 'edit_done')),
+        ),
       ),
     );
   }

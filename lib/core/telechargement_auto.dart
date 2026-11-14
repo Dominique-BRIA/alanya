@@ -15,8 +15,10 @@ import 'data_saver_service.dart';
 /// 🔴 LA RÈGLE, EN UN SEUL ENDROIT — sur le modèle de l'application de
 /// référence (`media_download_preferences.dart`) et du web (réglage par
 /// famille, `telechargement-auto.ts`) :
-///   1. ce que J'AI envoyé n'est jamais retenu : je l'ai déjà ;
-///   2. une famille éteinte ne télécharge rien d'office ;
+///   1. la photo ou le vocal que J'AI envoyé n'est jamais retenu : je l'ai
+///      déjà ;
+///   2. une famille éteinte ne télécharge rien d'office ; une vidéo ou un
+///      document de plus de 100 Mo non plus ;
 ///   3. « Wi-Fi uniquement » ou « Économie de données » : d'office seulement
 ///      sur un réseau sans forfait (Wi-Fi, Ethernet) ;
 ///   4. réseau indéterminable : on s'abstient. Une photo retenue se rattrape
@@ -108,10 +110,21 @@ class TelechargementAuto extends ChangeNotifier {
     }
   }
 
+  /// Au-delà, une vidéo ou un document attend toujours un toucher, même en
+  /// Wi-Fi : on ne remplit pas le stockage d'un petit téléphone avec des
+  /// fichiers que personne n'a encore ouverts.
+  static const tailleMaxAuto = 100 * 1024 * 1024;
+
   /// Un média de cette [f]amille peut-il se télécharger D'OFFICE, maintenant ?
-  /// [moi] : je l'ai envoyé.
-  Future<bool> autoriser(FamilleMedia f, {bool moi = false}) async {
-    if (moi) return true;
+  /// [moi] : je l'ai envoyé. [taille] : son poids en octets, s'il est connu.
+  ///
+  /// ⚠️ « JE L'AI ENVOYÉ » NE VAUT PASSE-DROIT QUE POUR UNE PHOTO OU UN VOCAL.
+  /// Envoyée d'ici, la copie est déjà dans le cache et rien ne se télécharge ;
+  /// envoyée depuis le web, une vidéo de 80 Mo partirait sur le forfait.
+  Future<bool> autoriser(FamilleMedia f, {bool moi = false, int? taille}) async {
+    final leger = f == FamilleMedia.photo || f == FamilleMedia.audio;
+    if (moi && leger) return true;
+    if (!leger && taille != null && taille > tailleMaxAuto) return false;
     if (!famille(f)) return false;
     if (_wifiSeulement || DataSaverService.instance.isOn) return reseauSansForfait();
     return true;

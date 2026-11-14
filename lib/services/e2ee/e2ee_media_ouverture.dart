@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -36,6 +37,16 @@ class OuvertureMediaChiffre {
   /// bulle recréée au retour ne le savait pas. Tenu ICI, hors de la bulle, il
   /// se retrouve par l'identifiant du média.
   static final _avancements = <String, ValueNotifier<double?>>{};
+
+  /// L'identifiant de chaque média dont le clair VIENT D'ARRIVER sur
+  /// l'appareil : rangé à l'envoi, ou ouvert ailleurs (galerie, autre bulle).
+  ///
+  /// 🐛 « QUAND LE TÉLÉCHARGEMENT AUTO DES IMAGES EST COUPÉ, UNE IMAGE ENVOYÉE
+  /// NE S'AFFICHE QU'EN ROUVRANT LA CONVERSATION » (user, 14/11/2026). Une
+  /// bulle ne regardait le cache qu'à sa naissance : née avant que le clair y
+  /// soit rangé, elle restait sur son aperçu. Elle écoute désormais ce flux.
+  static final _arrivees = StreamController<String>.broadcast();
+  static Stream<String> get arrivees => _arrivees.stream;
 
   /// Le clair de ce média s'il est DÉJÀ sur l'appareil — sans réseau.
   ///
@@ -87,6 +98,7 @@ class OuvertureMediaChiffre {
       _avancements.remove(d.id);
     });
     _enCours[d.id] = f;
+    unawaited(f.then((_) => _arrivees.add(d.id), onError: (_) {}));
     return f;
   }
 
@@ -95,6 +107,7 @@ class OuvertureMediaChiffre {
   static Future<void> garderClair(DescripteurMedia d, List<int> clair) async {
     try {
       await MediaCache.put(_cle(d), _extension(d), clair);
+      _arrivees.add(d.id);
     } catch (_) {}
   }
 
@@ -102,6 +115,7 @@ class OuvertureMediaChiffre {
   static Future<void> garderClairFichier(DescripteurMedia d, String chemin) async {
     try {
       await MediaCache.putFichier(_cle(d), _extension(d), chemin);
+      _arrivees.add(d.id);
     } catch (_) {}
   }
 

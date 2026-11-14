@@ -57,7 +57,12 @@ class CachedMedia extends StatefulWidget {
     this.placeholder,
     this.errorWidget,
     this.explicite = false,
+    this.moi = false,
   });
+
+  /// Je l'ai envoyée : jamais retenue par le téléchargement automatique
+  /// (14/11/2026 : ma propre photo restait sur « télécharger »).
+  final bool moi;
 
   /// Ouverture DEMANDÉE (visionneuse plein écran, galerie) : le téléchargement
   /// automatique ne la retient jamais — c'est une demande (14/11/2026).
@@ -159,7 +164,7 @@ class _CachedMediaState extends State<CachedMedia> {
     //    Voir `core/telechargement_auto.dart` (14/11/2026).
     if (!force &&
         !widget.explicite &&
-        !await TelechargementAuto.instance.autoriser(FamilleMedia.photo)) {
+        !await TelechargementAuto.instance.autoriser(FamilleMedia.photo, moi: widget.moi)) {
       if (mounted) setState(() => _needsManual = true);
       return;
     }

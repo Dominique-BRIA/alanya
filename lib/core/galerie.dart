@@ -29,7 +29,20 @@ import 'package:photo_manager/photo_manager.dart';
 /// remonterait en tête alors qu'elle est ancienne, et la date de prise de vue
 /// est celle que l'utilisateur a en tête quand il cherche « la photo de tout à
 /// l'heure ».
+///
+/// 🐛 « LA GALERIE NE RÉCUPÈRE PAS TOUS LES ÉLÉMENTS » (user, 14/11/2026). Le
+/// filtre par défaut de photo_manager écarte toute image ou vidéo dont Android
+/// ne connaît pas les dimensions (largeur ou hauteur à 0 dans MediaStore) :
+/// captures d'écran, images reçues d'autres applications, fichiers copiés.
+/// On ignore donc la taille, et on accepte toutes les durées de vidéo.
 final FilterOptionGroup ordreRecentDAbord = FilterOptionGroup(
+  imageOption: const FilterOption(
+    sizeConstraint: SizeConstraint(ignoreSize: true),
+  ),
+  videoOption: const FilterOption(
+    sizeConstraint: SizeConstraint(ignoreSize: true),
+    durationConstraint: DurationConstraint(max: Duration(days: 365)),
+  ),
   orders: const [
     OrderOption(type: OrderOptionType.createDate, asc: false),
   ],

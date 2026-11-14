@@ -90,4 +90,29 @@ void main() {
     expect(familleDuMime('video/mp4'), FamilleMedia.video);
     expect(familleDuMime('application/pdf'), FamilleMedia.document);
   });
+
+  test("vidéos et documents : d'office en Wi-Fi, et chacun se coupe", () async {
+    reseau = [ConnectivityResult.wifi];
+    expect(await t.autoriser(FamilleMedia.video, taille: 20 << 20), isTrue);
+    expect(await t.autoriser(FamilleMedia.document, taille: 2 << 20), isTrue);
+    await t.changerFamille(FamilleMedia.video, false);
+    expect(await t.autoriser(FamilleMedia.video, taille: 20 << 20), isFalse);
+    expect(await t.autoriser(FamilleMedia.document, taille: 2 << 20), isTrue);
+    await t.changerFamille(FamilleMedia.document, false);
+    expect(await t.autoriser(FamilleMedia.document, taille: 2 << 20), isFalse);
+  });
+
+  test('au-delà de 100 Mo, une vidéo ou un document attend un toucher', () async {
+    reseau = [ConnectivityResult.wifi];
+    const gros = TelechargementAuto.tailleMaxAuto + 1;
+    expect(await t.autoriser(FamilleMedia.video, taille: gros), isFalse);
+    expect(await t.autoriser(FamilleMedia.document, taille: gros), isFalse);
+    expect(await t.autoriser(FamilleMedia.video, taille: TelechargementAuto.tailleMaxAuto), isTrue);
+  });
+
+  test("« je l'ai envoyé » ne vaut pas passe-droit pour une vidéo sur données mobiles", () async {
+    expect(await t.autoriser(FamilleMedia.video, moi: true, taille: 80 << 20), isFalse);
+    expect(await t.autoriser(FamilleMedia.document, moi: true, taille: 1 << 20), isFalse);
+    expect(await t.autoriser(FamilleMedia.audio, moi: true), isTrue);
+  });
 }

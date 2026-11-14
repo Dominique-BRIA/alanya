@@ -30,9 +30,10 @@ import '../../../services/e2ee/e2ee_media_ouverture.dart';
 /// dans l'enveloppe avec la clé. Les dimensions aussi — la bulle prend sa
 /// taille d'emblée et le fil ne saute pas quand l'image nette arrive.
 ///
-/// Photo : téléchargée et déchiffrée d'office. Vidéo, vocal, document : sur
-/// demande — on ne fait pas télécharger cinquante mégaoctets à qui fait
-/// défiler un fil.
+/// D'office ou sur demande selon le réglage du téléchargement automatique,
+/// famille par famille : photos, vocaux, vidéos, documents (14/11/2026, voir
+/// `core/telechargement_auto.dart`). Un document SENSIBLE attend toujours un
+/// toucher.
 ///
 /// ⚠️ UN FICHIER ALTÉRÉ LE DIT, au lieu d'afficher une image cassée.
 class BulleMediaChiffre extends StatefulWidget {
@@ -90,10 +91,14 @@ class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
     }
   }
 
-  /// Photo RETENUE par le réglage du téléchargement automatique (14/11/2026) :
-  /// la bulle montre son aperçu, son poids et un bouton ; un toucher la
-  /// télécharge. Voir `core/telechargement_auto.dart`.
+  /// Photo ou vidéo RETENUE par le réglage du téléchargement automatique
+  /// (14/11/2026) : la bulle montre son aperçu, son poids et un bouton ; un
+  /// toucher la télécharge. Voir `core/telechargement_auto.dart`.
   bool _retenu = false;
+
+  /// Le clair arrivé APRÈS la naissance de la bulle (rangé à l'envoi, ouvert
+  /// dans la galerie) : voir `OuvertureMediaChiffre.arrivees`.
+  StreamSubscription<String>? _arrivees;
 
   /// Un vocal se prépare d'office (pour sa forme d'onde) seulement si le
   /// réglage le permet. Faux tant que la réponse n'est pas connue.
@@ -104,49 +109,56 @@ class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
     super.initState();
     // Une ouverture lancée avant de quitter la conversation continue : la
     // bulle recréée s'y raccroche, pourcentage compris (27/10/2026).
+    _arrivees = OuvertureMediaChiffre.arrivees
+        .where((id) => id == d.id)
+        .listen((_) => unawaited(_dejaLa()));
     if (OuvertureMediaChiffre.enCours(d.id)) {
       unawaited(_charger());
-    } else if (_image) {
-      unawaited(_chargerSiPermis());
     } else {
-      unawaited(_dejaLa());
-      if (_vocal) {
-        unawaited(TelechargementAuto.instance
-            .autoriser(FamilleMedia.audio, moi: widget.isMe)
-            .then((ok) {
-          if (ok && mounted) setState(() => _vocalAuto = true);
-        }));
-      }
+      unawaited(_chargerSiPermis());
     }
   }
 
-  /// Une photo : déjà là, elle s'affiche ; sinon elle ne se télécharge
-  /// d'office que si le réglage le permet (famille, Wi-Fi, économie).
+  @override
+  void dispose() {
+    _arrivees?.cancel();
+    super.dispose();
+  }
+
+  /// Déjà là, il s'affiche ; sinon il ne se télécharge d'office que si le
+  /// réglage le permet (famille, Wi-Fi, économie, poids).
   Future<void> _chargerSiPermis() async {
-    final f = await OuvertureMediaChiffre.dejaLa(d);
+    if (await _dejaLa()) return;
     if (!mounted) return;
-    if (f != null) {
-      setState(() {
-        _fichier = f;
-        _etat = _Etat.pret;
-      });
+    final auto = TelechargementAuto.instance;
+    if (_vocal) {
+      // Un vocal se prépare d'office pour sa forme d'onde ; la bulle vocale
+      // s'en charge (`chargementAuto`).
+      if (await auto.autoriser(FamilleMedia.audio, moi: widget.isMe) && mounted) {
+        setState(() => _vocalAuto = true);
+      }
       return;
     }
-    if (await TelechargementAuto.instance.autoriser(FamilleMedia.photo, moi: widget.isMe)) {
-      if (mounted) unawaited(_charger());
-    } else if (mounted) {
+    if (d.sensible) return;
+    if (await auto.autoriser(familleDuMime(d.mime), moi: widget.isMe, taille: d.taille)) {
+      if (mounted && _fichier == null) unawaited(_charger());
+    } else if (mounted && (_image || _video)) {
       setState(() => _retenu = true);
     }
   }
 
   /// Déjà téléchargé : la bulle le dit, et un toucher l'ouvre sans réseau.
-  Future<void> _dejaLa() async {
+  /// Vrai s'il est là.
+  Future<bool> _dejaLa() async {
     final f = await OuvertureMediaChiffre.dejaLa(d);
-    if (f == null || !mounted || _fichier != null) return;
+    if (f == null || !mounted) return false;
+    if (_fichier != null) return true;
     setState(() {
       _fichier = f;
       _etat = _Etat.pret;
+      _retenu = false;
     });
+    return true;
   }
 
   Future<File?> _charger() async {
@@ -272,7 +284,7 @@ class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
                       couleur: Colors.white,
                     ),
                   ),
-                if (_video && _etat != _Etat.chargement)
+                if (_video && _etat != _Etat.chargement && !_retenu)
                   const Center(
                     child: CircleAvatar(
                       radius: 24,
@@ -659,13 +671,31 @@ class _TuileMediaChiffreState extends State<TuileMediaChiffre> {
   /// Retenue par le réglage du téléchargement automatique (14/11/2026).
   bool _retenu = false;
 
+  /// Voir `OuvertureMediaChiffre.arrivees`.
+  StreamSubscription<String>? _arrivees;
+
   DescripteurMedia get d => widget.descripteur;
   bool get _image => d.mime.startsWith('image/');
 
   @override
   void initState() {
     super.initState();
-    if (_image) unawaited(_chargerSiPermis());
+    _arrivees = OuvertureMediaChiffre.arrivees.where((id) => id == d.id).listen((_) async {
+      final f = await OuvertureMediaChiffre.dejaLa(d);
+      if (f != null && mounted && _fichier == null) {
+        setState(() {
+          _fichier = f;
+          _retenu = false;
+        });
+      }
+    });
+    unawaited(_chargerSiPermis());
+  }
+
+  @override
+  void dispose() {
+    _arrivees?.cancel();
+    super.dispose();
   }
 
   /// Même règle que la bulle : déjà là, affichée ; sinon d'office seulement
@@ -677,8 +707,9 @@ class _TuileMediaChiffreState extends State<TuileMediaChiffre> {
       setState(() => _fichier = f);
       return;
     }
-    if (await TelechargementAuto.instance.autoriser(FamilleMedia.photo, moi: widget.isMe)) {
-      if (mounted) unawaited(_charger());
+    if (await TelechargementAuto.instance
+        .autoriser(familleDuMime(d.mime), moi: widget.isMe, taille: d.taille)) {
+      if (mounted && _fichier == null) unawaited(_charger());
     } else if (mounted) {
       setState(() => _retenu = true);
     }
@@ -757,7 +788,7 @@ class _TuileMediaChiffreState extends State<TuileMediaChiffre> {
                 height: 22,
                 child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white)),
           ),
-        if (!_image && !_charge)
+        if (!_image && !_charge && !_retenu)
           const Center(
             child: CircleAvatar(
               radius: 18,

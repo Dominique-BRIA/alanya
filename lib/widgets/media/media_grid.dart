@@ -219,6 +219,7 @@ class _MediaGridState extends State<MediaGrid> {
                 url: url,
                 width: largeur,
                 fit: BoxFit.cover,
+                moi: widget.isMe,
                 errorWidget: _placeholder(type)),
             if (widget.timestamp != null)
               Positioned(
@@ -262,7 +263,10 @@ class _MediaGridState extends State<MediaGrid> {
         // Image ou thumbnail vidéo
         if (type == AlanyaMediaType.image)
           CachedMedia(
-              url: url, fit: BoxFit.cover, errorWidget: _placeholder(type))
+              url: url,
+              fit: BoxFit.cover,
+              moi: widget.isMe,
+              errorWidget: _placeholder(type))
         else if (type == AlanyaMediaType.video)
           _buildVideoThumbnail(thumbKey, url)
         else
