@@ -150,13 +150,51 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
     } catch (_) {}
   }
 
-  /// « Ajouter » se montre-t-il ? Pas pour moi-même, pas pour le compte
-  /// officiel (il ne s'ajoute pas), pas sans numéro, pas pour qui y est déjà.
-  bool get _peutAjouter {
-    if (!_ficheConnue || _fiche != null || widget.publicNumber.isEmpty) return false;
+  /// Le bouton « Ajouter / Retirer » se montre-t-il ? Pas pour moi-même, pas
+  /// pour le compte officiel (il ne s'ajoute pas), pas sans numéro.
+  ///
+  /// 🔁 14/11/2026 (demande du user) : il ne DISPARAÎT plus une fois la
+  /// personne ajoutée, il devient « Retirer ». Sa forme suit [_fiche].
+  bool get _boutonContact {
+    if (!_ficheConnue) return false;
+    if (_fiche == null && widget.publicNumber.isEmpty) return false;
     if (widget.badge?.type == 'officiel') return false;
     final moi = context.read<AuthController>().user?.id;
     return moi == null || moi != widget.userId;
+  }
+
+  /// RETIRER DEPUIS LA FICHE : même confirmation que dans la liste des
+  /// contacts. Le bouton redevient « Ajouter ».
+  Future<void> _retirer() async {
+    final fiche = _fiche;
+    if (fiche == null || _ajoutEnCours) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(tr(ctx, 'contact_delete_q')),
+        content: Text(tr(ctx, 'contact_delete_body', {'nom': fiche.displayName})),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr(ctx, 'cancel'))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(tr(ctx, 'delete'))),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() => _ajoutEnCours = true);
+    final repo = context.read<ContactsRepository>();
+    try {
+      await repo.remove(fiche.id);
+      if (!mounted) return;
+      setState(() => _fiche = null);
+      // La copie du téléphone suit, sinon la fiche rouverte le croirait encore là.
+      try {
+        await ContactCache.putAll(await repo.list());
+      } catch (_) {}
+    } catch (_) {
+      if (mounted) showAppSnackBar(tr(context, 'delete_failed'));
+    } finally {
+      if (mounted) setState(() => _ajoutEnCours = false);
+    }
   }
 
   /// AJOUTER DEPUIS LA FICHE (11/11/2026), comme dans l'application de
@@ -689,13 +727,20 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
           label: tr(context, 'video'),
           onTap: () => _startCall("VIDEO"),
         ),
-        if (_peutAjouter)
-          _RoundAction(
-            icon: Icons.person_add_alt_1_rounded,
-            label: tr(context, 'add_action'),
-            onTap: _ajouter,
-            occupe: _ajoutEnCours,
-          ),
+        if (_boutonContact)
+          _fiche == null
+              ? _RoundAction(
+                  icon: Icons.person_add_alt_1_rounded,
+                  label: tr(context, 'add_action'),
+                  onTap: _ajouter,
+                  occupe: _ajoutEnCours,
+                )
+              : _RoundAction(
+                  icon: Icons.person_remove_alt_1_rounded,
+                  label: tr(context, 'remove'),
+                  onTap: _retirer,
+                  occupe: _ajoutEnCours,
+                ),
       ],
     );
   }
