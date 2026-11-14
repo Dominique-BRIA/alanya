@@ -27,12 +27,18 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
   /// de référence). Les réglages partent juste après la création, par la même
   /// route que l'écran d'infos du groupe : le créateur en est administrateur.
   final _descriptionCtrl = TextEditingController();
-  final Map<String, bool> _reglages = {
+
+  /// ⚠️ LES VALEURS PAR DÉFAUT DU SERVEUR, et non « tout coupé » : un groupe
+  /// neuf réserve déjà aux admins la modification des infos et l'ajout de
+  /// membres (`schema.prisma`, comme `ReglagesGroupe`). L'écran les montre
+  /// telles quelles, et seul ce que la personne change part au serveur.
+  static const Map<String, bool> _parDefaut = {
     'adminsSeulsEcrivent': false,
-    'adminsSeulsModifient': false,
-    'adminsSeulsAjoutent': false,
+    'adminsSeulsModifient': true,
+    'adminsSeulsAjoutent': true,
     'historiqueCacheNouveaux': false,
   };
+  final Map<String, bool> _reglages = Map.of(_parDefaut);
   List<Contact> _contacts = [];
   final Set<String> _selected = {}; // numéros publics sélectionnés
   bool _loading = true;
@@ -87,7 +93,7 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
       // groupe, déjà créé : ils restent modifiables dans les infos du groupe.
       final choisis = {
         for (final e in _reglages.entries)
-          if (e.value) e.key: true,
+          if (e.value != _parDefaut[e.key]) e.key: e.value,
       };
       if (choisis.isNotEmpty) {
         try {
