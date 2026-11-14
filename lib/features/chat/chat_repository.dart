@@ -47,6 +47,16 @@ class ChatRepository {
     return data["id"] as String;
   }
 
+  /// Les groupes où MOI et [userId] sommes tous deux membres (14/11/2026) :
+  /// `[{id, nom, avatarUrl, membres}]`, les plus actifs d'abord. Vide si le
+  /// serveur ne connaît pas encore la route.
+  Future<List<Map<String, dynamic>>> groupesCommuns(String userId) async {
+    final data = await _api.get("/api/users/${Uri.encodeComponent(userId)}/groupes-communs");
+    return ((data["groupes"] as List?) ?? const [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
   /// Crée une conversation de groupe avec un nom et les numéros publics des membres.
   ///
   /// [description] (14/11/2026) : posée dès la création, comme l'application

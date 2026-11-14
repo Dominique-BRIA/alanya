@@ -1539,6 +1539,8 @@ class AppLocalizations {
 'info_recu': "Reçu",
 'info_pas_recu': "Pas encore reçu",
 'info_lus_sur': "{n} sur {total} ont lu",
+'groupes_communs_one': "{n} groupe en commun",
+'groupes_communs_many': "{n} groupes en commun",
 },
 'en': {
 'e2ee_texte_indisponible': "Decrypting…",
@@ -3068,6 +3070,8 @@ class AppLocalizations {
 'info_recu': "Delivered",
 'info_pas_recu': "Not delivered yet",
 'info_lus_sur': "{n} of {total} have read",
+'groupes_communs_one': "{n} group in common",
+'groupes_communs_many': "{n} groups in common",
 },
 'es': {
 'e2ee_texte_indisponible': "Descifrando…",
@@ -4597,6 +4601,8 @@ class AppLocalizations {
 'info_recu': "Recibido",
 'info_pas_recu': "Aún no recibido",
 'info_lus_sur': "{n} de {total} han leído",
+'groupes_communs_one': "{n} grupo en común",
+'groupes_communs_many': "{n} grupos en común",
 },
 'de': {
 'e2ee_texte_indisponible': "Wird entschlüsselt…",
@@ -6126,6 +6132,8 @@ class AppLocalizations {
 'info_recu': "Zugestellt",
 'info_pas_recu': "Noch nicht zugestellt",
 'info_lus_sur': "{n} von {total} haben gelesen",
+'groupes_communs_one': "{n} gemeinsame Gruppe",
+'groupes_communs_many': "{n} gemeinsame Gruppen",
 },
 'pt': {
 'e2ee_texte_indisponible': "A decifrar…",
@@ -7655,6 +7663,8 @@ class AppLocalizations {
 'info_recu': "Recebido",
 'info_pas_recu': "Ainda não recebido",
 'info_lus_sur': "{n} de {total} leram",
+'groupes_communs_one': "{n} grupo em comum",
+'groupes_communs_many': "{n} grupos em comum",
 },
 'ru': {
 'e2ee_texte_indisponible': "Расшифровка…",
@@ -9184,6 +9194,8 @@ class AppLocalizations {
 'info_recu': "Доставлено",
 'info_pas_recu': "Ещё не доставлено",
 'info_lus_sur': "Прочитали {n} из {total}",
+'groupes_communs_one': "{n} общая группа",
+'groupes_communs_many': "Общих групп: {n}",
 },
 'zh': {
 'e2ee_texte_indisponible': "正在解密…",
@@ -10713,6 +10725,8 @@ class AppLocalizations {
 'info_recu': "已送达",
 'info_pas_recu': "尚未送达",
 'info_lus_sur': "{total} 人中 {n} 人已读",
+'groupes_communs_one': "{n} 个共同群组",
+'groupes_communs_many': "{n} 个共同群组",
 },
 'sv': {
 'e2ee_texte_indisponible': "Dekrypterar…",
@@ -12242,6 +12256,8 @@ class AppLocalizations {
 'info_recu': "Levererat",
 'info_pas_recu': "Inte levererat än",
 'info_lus_sur': "{n} av {total} har läst",
+'groupes_communs_one': "{n} gemensam grupp",
+'groupes_communs_many': "{n} gemensamma grupper",
 },
 'no': {
 'e2ee_texte_indisponible': "Dekrypterer…",
@@ -13771,6 +13787,8 @@ class AppLocalizations {
 'info_recu': "Levert",
 'info_pas_recu': "Ikke levert ennå",
 'info_lus_sur': "{n} av {total} har lest",
+'groupes_communs_one': "{n} felles gruppe",
+'groupes_communs_many': "{n} felles grupper",
 }
 };
 }

@@ -26,6 +26,7 @@ import '../../calls/message_erreur_appel.dart';
 import '../../calls/ouvrir_appel_en_cours.dart';
 import '../../auth/auth_controller.dart';
 import '../../chat/chat_repository.dart';
+import '../../chat/screens/chat_screen.dart';
 import '../../chat/medias_partages.dart';
 import '../../chat/screens/media_gallery_viewer.dart';
 import '../../chat/screens/shared_content_screen.dart';
@@ -112,6 +113,71 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
     _loadLangue();
     _loadSharedMedia();
     _chargerFiche();
+    _chargerGroupesCommuns();
+  }
+
+  /// Les groupes que je partage avec cette personne (14/11/2026, comme
+  /// l'application de référence). `null` : pas encore chargés.
+  List<Map<String, dynamic>>? _groupesCommuns;
+
+  Future<void> _chargerGroupesCommuns() async {
+    final moi = context.read<AuthController>().user?.id;
+    if (moi == null || moi == widget.userId) return;
+    try {
+      final g = await context.read<ChatRepository>().groupesCommuns(widget.userId);
+      if (mounted) setState(() => _groupesCommuns = g);
+    } catch (_) {
+      // Serveur plus ancien ou hors ligne : la carte ne s'affiche pas.
+    }
+  }
+
+  /// La carte « N groupes en commun » : chaque ligne ouvre le groupe.
+  Widget _groupesCommunsCard() {
+    final groupes = _groupesCommuns;
+    if (groupes == null || groupes.isEmpty) return const SizedBox.shrink();
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: GlassCard(
+        radius: 22,
+        padding: const EdgeInsets.fromLTRB(16, 14, 12, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Icon(Icons.groups_rounded, size: 20, color: accentOf(context)),
+              const SizedBox(width: 10),
+              Text(trN(context, 'groupes_communs', groupes.length),
+                  style: TextStyle(
+                      fontWeight: FontWeight.w600, fontSize: 15, color: cs.onSurface)),
+            ]),
+            const SizedBox(height: 6),
+            for (final g in groupes)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                leading: AvatarCircle(
+                    name: (g['nom'] as String?) ?? '',
+                    avatarUrl: g['avatarUrl'] as String?,
+                    radius: 18),
+                title: Text((g['nom'] as String?) ?? '',
+                    maxLines: 1, overflow: TextOverflow.ellipsis),
+                subtitle: Text(trN(context, 'grp_members', (g['membres'] as int?) ?? 0),
+                    style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => ChatScreen(
+                    convId: g['id'] as String,
+                    title: (g['nom'] as String?) ?? '',
+                    isGroup: true,
+                    avatarUrl: g['avatarUrl'] as String?,
+                    memberNames: const {},
+                  ),
+                )),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   // ── Le nom que JE donne à ce contact (18/10/2026) ───────────────────────
@@ -507,6 +573,7 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
                   const SizedBox(height: 16),
                   _sharedMediaCard(),
                   const SizedBox(height: 16),
+                  _groupesCommunsCard(),
                   _settingsCard(),
                 ],
               ),
