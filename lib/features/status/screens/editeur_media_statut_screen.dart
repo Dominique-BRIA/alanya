@@ -9,6 +9,7 @@ import 'package:video_player/video_player.dart';
 import '../../../core/compression_image.dart' show imageBordMax;
 import '../../../widgets/media/media_picker_sheet.dart';
 import '../widgets/choix_emoji.dart';
+import 'rognage_image_screen.dart';
 import '../../../l10n/app_localizations.dart';
 
 /// Ce que l'éditeur rend à l'écran de publication.
@@ -136,6 +137,33 @@ class _EditeurMediaStatutScreenState extends State<EditeurMediaStatutScreen> {
 
   bool get _estVideo => widget.media.mimeType.startsWith('video/');
   bool get _aDesAnnotations => _calques.isNotEmpty || _traits.isNotEmpty;
+
+  /// L'image affichée et envoyée : l'originale, ou celle rendue par le
+  /// rognage (14/11/2026). Nul tant qu'on n'y a pas touché.
+  Uint8List? _baseRognee;
+  Uint8List get _base => _baseRognee ?? widget.media.bytes;
+
+  /// ROGNER ET FAIRE PIVOTER, comme WhatsApp (demande du user, 14/11/2026).
+  ///
+  /// ⚠️ ON ROGNE CE QUE L'ON VOIT. Si des textes ou des traits sont déjà
+  /// posés, l'image est d'abord aplatie avec eux : leurs positions sont en
+  /// fractions de la zone, et elles ne voudraient plus rien dire sur une image
+  /// recadrée. Ils deviennent alors partie de l'image, et la pile « défaire »
+  /// repart de zéro.
+  Future<void> _rogner() async {
+    Uint8List? source = _base;
+    if (_aDesAnnotations) source = await _aplatir() ?? _base;
+    if (!mounted) return;
+    final rognee = await RognageImageScreen.ouvrir(context, source);
+    if (rognee == null || !mounted) return;
+    setState(() {
+      _baseRognee = rognee;
+      _calques.clear();
+      _traits.clear();
+      _historique.clear();
+      _outil = _Outil.aucun;
+    });
+  }
 
   @override
   void initState() {
@@ -298,6 +326,13 @@ class _EditeurMediaStatutScreenState extends State<EditeurMediaStatutScreen> {
         // Le chemin ne mène plus à ce qu'on envoie.
         chemin = null;
       }
+    } else if (!_estVideo && _baseRognee != null) {
+      // Rognée ou pivotée, sans annotation ensuite : l'image rendue par le
+      // rognage, à sa pleine résolution, plutôt qu'une capture d'écran.
+      octets = _baseRognee!;
+      nom = _enPng(nom);
+      mime = "image/png";
+      chemin = null;
     }
 
     if (!mounted) return;
@@ -350,6 +385,11 @@ class _EditeurMediaStatutScreenState extends State<EditeurMediaStatutScreen> {
             onPressed: _defaire,
           ),
         if (actifs) ...[
+          IconButton(
+            tooltip: tr(context, 'rogner_titre'),
+            icon: const Icon(Icons.crop_rotate, color: Colors.white),
+            onPressed: _rogner,
+          ),
           IconButton(
             tooltip: tr(context, 'status_emoji'),
             icon: const Icon(
@@ -421,7 +461,7 @@ class _EditeurMediaStatutScreenState extends State<EditeurMediaStatutScreen> {
         child: VideoPlayer(v),
       );
     }
-    return Image.memory(widget.media.bytes, fit: BoxFit.contain);
+    return Image.memory(_base, fit: BoxFit.contain, gaplessPlayback: true);
   }
 
   Widget _rendreCalque(_Calque c) {
