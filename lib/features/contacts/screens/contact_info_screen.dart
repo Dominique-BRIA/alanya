@@ -526,12 +526,36 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
     }
   }
 
-  void _openMessage() {
-    // La fiche est ouverte depuis le chat → revenir affiche la conversation.
-    if (Navigator.of(context).canPop()) {
-      Navigator.of(context).pop();
-    } else {
-      showAppSnackBar(tr(context, 'ci_open_from_home'));
+  /*
+   * 🐛 « DEPUIS UN GROUPE, MESSAGE RAMÈNE AU GROUPE » (user, 14/11/2026).
+   * Le bouton faisait toujours `pop` : juste quand la fiche vient de la
+   * discussion à deux (elle porte alors son `convId`), faux depuis un groupe,
+   * d'où la fiche s'ouvre sans `convId`. On ouvre alors la discussion à deux,
+   * retrouvée ou créée par le serveur, à la place de la fiche.
+   */
+  Future<void> _openMessage() async {
+    final nav = Navigator.of(context);
+    if (widget.convId != null && nav.canPop()) {
+      nav.pop();
+      return;
+    }
+    try {
+      final convId = await context.read<ChatRepository>().directAvec(widget.userId);
+      if (!mounted) return;
+      await nav.pushReplacement(MaterialPageRoute(
+        builder: (_) => ChatScreen(
+          convId: convId,
+          title: widget.name,
+          avatarUrl: widget.avatarUrl,
+          otherUserId: widget.userId,
+          otherPublicNumber: widget.publicNumber.isEmpty ? null : widget.publicNumber,
+          otherStatusMsg: widget.statusMsg,
+          contactId: widget.contactId,
+          isBlocked: widget.isBlocked,
+        ),
+      ));
+    } catch (e) {
+      if (mounted) showAppSnackBar(tr(context, 'ci_open_from_home'));
     }
   }
 

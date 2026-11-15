@@ -47,6 +47,13 @@ class ChatRepository {
     return data["id"] as String;
   }
 
+  /// Crée (ou récupère) la conversation à deux avec [userId], par son
+  /// identifiant : depuis un groupe, on n'a pas toujours son numéro.
+  Future<String> directAvec(String userId) async {
+    final data = await _api.post("/api/conversations/direct", {"targetUserId": userId});
+    return data["id"] as String;
+  }
+
   /// Les groupes où MOI et [userId] sommes tous deux membres (14/11/2026) :
   /// `[{id, nom, avatarUrl, membres}]`, les plus actifs d'abord. Vide si le
   /// serveur ne connaît pas encore la route.

@@ -877,6 +877,10 @@ class _ConversationsTabState extends State<_ConversationsTab>
             await pile?.releverEtRanger();
           } catch (_) {}
         }());
+      } else if (t == "e2ee_renvoi") {
+        // Piste B : un correspondant attend un de mes messages sur un nouvel
+        // appareil. Je le rechiffre pour lui.
+        unawaited(context.e2ee?.servirRenvois() ?? Future.value(0));
       } else if (t == "e2ee_emballage" || t == "e2ee_manquants") {
         /*
          * Chiffrement des groupes v2 (lot 3) : une clé de groupe vient de
