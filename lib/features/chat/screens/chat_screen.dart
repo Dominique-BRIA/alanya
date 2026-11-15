@@ -7782,18 +7782,14 @@ class _ChatScreenState extends State<ChatScreen>
       return;
     }
     final nom = _membresCharges[userId] ?? widget.memberNames[userId] ?? repli ?? "";
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ContactInfoScreen(
-          userId: userId,
-          name: nom,
-          // Le numéro vient de la liste des membres : la fiche peut alors
-          // proposer « Ajouter ». Inconnu, elle l'affiche vide plutôt que
-          // d'inventer.
-          publicNumber: _numerosMembres[userId] ?? "",
-          avatarUrl: _photosMembres[userId],
-        ),
-      ),
+    // La MÊME fiche que depuis la discussion à deux (15/11/2026) : voir
+    // `ContactInfoScreen.ouvrirPourMembre`.
+    await ContactInfoScreen.ouvrirPourMembre(
+      context,
+      userId: userId,
+      nom: nom,
+      avatarUrl: _photosMembres[userId],
+      publicNumber: _numerosMembres[userId] ?? "",
     );
   }
 

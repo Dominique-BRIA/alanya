@@ -9,6 +9,8 @@ import '../../../core/api_client.dart';
 import '../../../core/alanya_id_formatter.dart';
 import '../../../core/app_snackbar.dart';
 import '../../../core/contact_cache.dart';
+import '../../../core/conversation_cache.dart';
+import '../../../models/conversation.dart';
 import '../../../core/noms_donnes.dart';
 import '../../../models/contact.dart';
 import '../../../core/memoire_langues.dart';
@@ -62,7 +64,12 @@ class ContactInfoScreen extends StatefulWidget {
     this.isOnline = false,
     this.lastSeen,
     this.badge,
+    this.depuisGroupe = false,
   });
+
+  /// Ouverte depuis un GROUPE : « Message » ouvre la discussion à deux au
+  /// lieu de revenir en arrière (ce qui ramènerait au groupe).
+  final bool depuisGroupe;
 
   final String userId;
   final String name;
@@ -82,6 +89,65 @@ class ContactInfoScreen extends StatefulWidget {
 
   @override
   State<ContactInfoScreen> createState() => _ContactInfoScreenState();
+
+  /*
+   * 🔴 UNE SEULE FICHE CONTACT (15/11/2026, décision du user : « je veux que
+   * ce soit le même écran, sinon on va se perdre »).
+   *
+   * Ouverte depuis un groupe, la fiche ne recevait que le nom, la photo et
+   * parfois le numéro : ni présence, ni badge, ni médias partagés, et un
+   * « Bloquer » qui ne connaissait pas l'état réel. Depuis un groupe, on
+   * retrouve donc la DISCUSSION À DEUX avec ce membre et on ouvre la fiche
+   * exactement comme elle l'ouvre (`ChatScreen._openContactInfo`).
+   *
+   * ⚠️ RIEN N'EST CRÉÉ : regarder une fiche ne doit pas faire apparaître une
+   * discussion vide dans la liste. Sans discussion à deux, la fiche s'ouvre
+   * sans elle — il n'y a de toute façon aucun média partagé à montrer — et
+   * « Message » la créera.
+   */
+  static Future<void> ouvrirPourMembre(
+    BuildContext context, {
+    required String userId,
+    required String nom,
+    String? avatarUrl,
+    String publicNumber = '',
+  }) async {
+    final chats = context.read<ChatRepository>();
+    final nav = Navigator.of(context);
+
+    Conversation? directe(List<Conversation> convs) {
+      for (final c in convs) {
+        if (!c.isGroup && c.members.any((m) => m.id == userId)) return c;
+      }
+      return null;
+    }
+
+    var conv = directe(await ConversationCache.getAll());
+    if (conv == null) {
+      try {
+        conv = directe(await chats.listConversations());
+      } catch (_) {
+        // Hors ligne : la fiche s'ouvre avec ce que le groupe connaît.
+      }
+    }
+    final membre = conv?.members.where((m) => m.id == userId).firstOrNull;
+    final badge = conv == null ? null : await ConversationCache.badgeDe(conv.id);
+    final numero = (membre?.publicNumber.isNotEmpty ?? false) ? membre!.publicNumber : publicNumber;
+
+    await nav.push(MaterialPageRoute(
+      builder: (_) => ContactInfoScreen(
+        userId: userId,
+        name: nom,
+        badge: badge,
+        publicNumber: numero,
+        avatarUrl: avatarUrl ?? conv?.avatarUrl,
+        convId: conv?.id,
+        isOnline: (membre?.isOnline ?? 0) == 1,
+        lastSeen: membre?.lastSeen,
+        depuisGroupe: true,
+      ),
+    ));
+  }
 }
 
 class _ContactInfoScreenState extends State<ContactInfoScreen> {
@@ -535,12 +601,13 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
    */
   Future<void> _openMessage() async {
     final nav = Navigator.of(context);
-    if (widget.convId != null && nav.canPop()) {
+    if (widget.convId != null && !widget.depuisGroupe && nav.canPop()) {
       nav.pop();
       return;
     }
     try {
-      final convId = await context.read<ChatRepository>().directAvec(widget.userId);
+      final convId =
+          widget.convId ?? await context.read<ChatRepository>().directAvec(widget.userId);
       if (!mounted) return;
       await nav.pushReplacement(MaterialPageRoute(
         builder: (_) => ChatScreen(
@@ -552,6 +619,8 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
           otherStatusMsg: widget.statusMsg,
           contactId: widget.contactId,
           isBlocked: widget.isBlocked,
+          otherIsOnline: widget.isOnline ? 1 : 0,
+          otherLastSeen: widget.lastSeen,
         ),
       ));
     } catch (e) {
