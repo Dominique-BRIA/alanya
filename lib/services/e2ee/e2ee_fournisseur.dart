@@ -17,7 +17,7 @@ import 'package:provider/provider.dart';
 import '../../core/authed_api.dart';
 import '../../core/message_cache.dart';
 import 'e2ee_coffre.dart';
-import 'e2ee_media.dart' show ecrireCharge;
+import 'e2ee_renvois.dart';
 import 'e2ee_fil.dart';
 import 'e2ee_sauvegarde.dart';
 import 'e2ee_service.dart';
@@ -53,87 +53,28 @@ class PileE2ee {
   /// lui est jamais transmis, contrairement au mot de passe.
   final Trousseau trousseau;
 
-  /// L'appel au serveur, pour les renvois (piste B). Posé par [pour].
-  Future<Map<String, dynamic>> Function(String, String, Map<String, dynamic>?)? _api;
+  /// Le renvoi par l'expéditeur (piste B, 14/11/2026). Posé par [pour] ;
+  /// voir `e2ee_renvois.dart`.
+  RenvoisE2ee? _renvois;
 
-  /*
-   * 🔴 PISTE B (14/11/2026) : LE RENVOI PAR L'EXPÉDITEUR.
-   *
-   * Un message chiffré pour mes seuls anciens appareils, qu'aucun n'a relevé,
-   * est illisible ici : personne ne l'a chiffré pour cet appareil. Je le
-   * DEMANDE ([demanderRenvois]) ; le serveur choisit lui-même les messages
-   * éligibles et prévient leurs expéditeurs. Un appareil de l'expéditeur
-   * retrouve le clair dans SON cache, le rechiffre pour moi et le dépose
-   * ([servirRenvois]). La relève ordinaire remplit ensuite la bulle.
-   *
-   * ⚠️ LE CHIFFREMENT NE CHANGE PAS : le renvoi ne part que vers un appareil
-   * publié du compte destinataire, avec ses clés publiées, comme un envoi
-   * ordinaire.
-   */
-  Future<void> demanderRenvois() async {
-    final api = _api;
-    if (api == null) return;
-    try {
-      await api('POST', '/api/e2ee/renvois', {'deviceId': await coffre.deviceId()});
-    } catch (_) {
-      // Serveur ancien ou réseau coupé : on redemandera au prochain lancement.
-    }
-  }
+  /// Demande les messages que mes anciens appareils n'ont jamais relevés.
+  Future<int> demanderRenvois() => _renvois?.demander() ?? Future.value(0);
 
-  bool _servirEnCours = false;
+  /// Sert les demandes de renvoi qui visent MES messages.
+  Future<int> servirRenvois() => _renvois?.servir() ?? Future.value(0);
 
-  /// Sert les demandes de renvoi qui visent MES messages. Rend le nombre servi.
-  Future<int> servirRenvois() async {
-    final api = _api;
-    if (api == null || _servirEnCours) return 0;
-    _servirEnCours = true;
-    var servis = 0;
-    try {
-      final r = await api('GET', '/api/e2ee/renvois', null);
-      final demandes = ((r['demandes'] as List?) ?? const []).cast<Map>();
-      if (demandes.isEmpty) return 0;
-      final monAppareil = await coffre.deviceId();
-      final fils = <String, Map<String, dynamic>>{};
-      // Sous le verrou de relève : rechiffrer avance la même session qu'une
-      // relève lirait.
-      await VerrouReleve.sous(() async {
-        for (final d in demandes) {
-          try {
-            final convId = d['convId'] as String;
-            final messageId = d['messageId'] as String;
-            final demandeur = d['demandeurId'] as String;
-            final appareil = d['demandeurDevice'] as int;
-            final fil = fils[convId] ??= {
-              for (final m in await MessageCache.getConv(convId)) m.id: m,
-            };
-            final m = fil[messageId];
-            // Le clair n'est plus ici : un autre de mes appareils l'a peut-être.
-            if (m == null) continue;
-            final media = m.mediaChiffre;
-            final texte = m.content ?? '';
-            if (media == null && texte.isEmpty) continue;
-            final genre = media == null && m.type != 'TEXT' ? m.type as String? : null;
-            final clair = ecrireCharge(messageId, texte, media, m.replyToId, genre);
-            final appareils = await service.ouvrirSessions(demandeur);
-            if (!appareils.contains(appareil)) continue;
-            final e = await service.chiffrer(demandeur, appareil, clair);
-            await api('POST', '/api/e2ee/renvois/servir', {
-              'id': d['id'],
-              'deviceId': monAppareil,
-              'type': e.type,
-              'corps': e.corps,
-            });
-            servis++;
-          } catch (e) {
-            debugPrint("[e2ee] renvoi impossible : $e");
-          }
-        }
-      });
-    } catch (_) {
-    } finally {
-      _servirEnCours = false;
-    }
-    return servis;
+  /// Les clairs de MES messages dans un fil, lus dans le cache local.
+  Future<Map<String, ClairARenvoyer>> _clairsDuCache(String convId) async {
+    return {
+      for (final m in await MessageCache.getConv(convId))
+        if (m.senderId == compteId)
+          m.id: ClairARenvoyer(
+            texte: m.content ?? '',
+            media: m.mediaChiffre,
+            reponseA: m.replyToId,
+            genre: m.mediaChiffre == null && m.type != 'TEXT' ? m.type : null,
+          ),
+    };
   }
 
 
@@ -461,7 +402,13 @@ class PileE2ee {
         service,
         E2eeFil(service, appel, coffre.deviceId, monCompte: compteId),
         E2eeSauvegarde(appel));
-    pile._api = appel;
+    pile._renvois = RenvoisE2ee(
+      api: appel,
+      service: service,
+      monAppareil: coffre.deviceId,
+      lireClairs: pile._clairsDuCache,
+      verrou: VerrouReleve.sous,
+    );
     /*
      * 🔴 UNE IDENTITÉ RECRÉÉE APRÈS LE DÉMARRAGE EST REPUBLIÉE AUSSITÔT
      * (14/11/2026). C'est le cas d'un coffre vidé par sa réparation : sans
