@@ -34,14 +34,26 @@ import 'package:photo_manager/photo_manager.dart';
 /// filtre par défaut de photo_manager écarte toute image ou vidéo dont Android
 /// ne connaît pas les dimensions (largeur ou hauteur à 0 dans MediaStore) :
 /// captures d'écran, images reçues d'autres applications, fichiers copiés.
-/// On ignore donc la taille, et on accepte toutes les durées de vidéo.
+/// On ignore donc la taille, et on accepte une vidéo sans durée connue.
+///
+/// 🐛 « LA GALERIE NE CAPTE PLUS RIEN, RÉCENT EST VIDE » (user, 15/11/2026),
+/// causé par la correction ci-dessus. La durée maximale était d'un an. Elle
+/// part en MILLISECONDES, et le code Android de photo_manager la lit comme un
+/// `Int` 32 bits (`durationMap["max"] as Int`) : au-delà de 2 147 483 647 ms
+/// (24,8 jours), la conversion lève, et TOUTE la requête échoue. Plus aucun
+/// album, plus aucune photo.
+///
+/// ⚠️ [dureeVideoMax] DOIT TENIR SUR 32 BITS, en millisecondes. Vérifié par
+/// `test/galerie_filtre_test.dart`.
+const dureeVideoMax = Duration(days: 20);
+
 final FilterOptionGroup ordreRecentDAbord = FilterOptionGroup(
   imageOption: const FilterOption(
     sizeConstraint: SizeConstraint(ignoreSize: true),
   ),
   videoOption: const FilterOption(
     sizeConstraint: SizeConstraint(ignoreSize: true),
-    durationConstraint: DurationConstraint(max: Duration(days: 365)),
+    durationConstraint: DurationConstraint(max: dureeVideoMax, allowNullable: true),
   ),
   orders: const [
     OrderOption(type: OrderOptionType.createDate, asc: false),
