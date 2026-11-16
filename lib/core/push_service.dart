@@ -146,7 +146,9 @@ class PushService {
       // 8) Écoute les changements de token (refresh) → ré-enregistre si auth
       FirebaseMessaging.instance.onTokenRefresh.listen((newToken) {
         _fcmToken = newToken;
-        registerTokenIfAuthenticated(); // ré-enregistre si l'utilisateur est co
+        // ⚠️ Jamais pendant ou après une déconnexion : voir [_deconnecte].
+        if (_deconnecte) return;
+        registerTokenIfAuthenticated(depuisRenouvellement: true);
       });
 
       _initialized = true;
@@ -159,7 +161,11 @@ class PushService {
   /// Enregistre le token FCM auprès du backend.
   /// À appeler APRÈS l'authentification (login ou bootstrap réussi).
   /// Peut être appelé plusieurs fois sans risque (idempotent).
-  Future<void> registerTokenIfAuthenticated() async {
+  Future<void> registerTokenIfAuthenticated({bool depuisRenouvellement = false}) async {
+    // Une connexion (ou un démarrage connecté) lève l'interdiction ; un simple
+    // renouvellement du jeton, non.
+    if (depuisRenouvellement && _deconnecte) return;
+    if (!depuisRenouvellement) _deconnecte = false;
     try {
       // S'assure que Firebase est initialisé
       if (!_initialized) {
@@ -822,7 +828,20 @@ class PushService {
   /// Désenregistre le token FCM (à la déconnexion).
   /// Tente d'utiliser le refresh token si l'access token est expiré,
   /// pour que le backend supprime bien l'association du token FCM.
+  /*
+   * 🔴 DÉCONNECTÉ : PLUS AUCUN ENREGISTREMENT DE JETON (15/11/2026, user :
+   * « une personne déconnectée continue de recevoir les notifications »).
+   *
+   * [unregister] supprime le jeton puis appelle `deleteToken()`. Firebase en
+   * fabrique aussitôt un NOUVEAU, annoncé par `onTokenRefresh`, qui le
+   * réenregistrait tant que les jetons de session n'étaient pas encore
+   * effacés — et ce jeton-là survivait à la déconnexion. Levé seulement par
+   * une connexion.
+   */
+  bool _deconnecte = false;
+
   Future<void> unregister() async {
+    _deconnecte = true;
     try {
       _fcmToken ??= await FirebaseMessaging.instance.getToken();
       if (_fcmToken != null && _api != null && _storage != null) {

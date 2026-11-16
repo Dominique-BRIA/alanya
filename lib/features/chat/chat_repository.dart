@@ -47,6 +47,17 @@ class ChatRepository {
     return data["id"] as String;
   }
 
+  /// Ce que la fiche contact doit connaître de [userId] (15/11/2026) : son
+  /// statut, et si je l'ai bloqué. `null` : serveur ancien ou inconnu.
+  Future<({String? statusMsg, bool bloque})?> fiche(String userId) async {
+    try {
+      final d = await _api.get("/api/users/${Uri.encodeComponent(userId)}/fiche");
+      return (statusMsg: d["statusMsg"] as String?, bloque: d["bloque"] == true);
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Crée (ou récupère) la conversation à deux avec [userId], par son
   /// identifiant : depuis un groupe, on n'a pas toujours son numéro.
   Future<String> directAvec(String userId) async {

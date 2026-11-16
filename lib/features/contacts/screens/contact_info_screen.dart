@@ -180,6 +180,26 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
     _loadSharedMedia();
     _chargerFiche();
     _chargerGroupesCommuns();
+    _chargerEtat();
+  }
+
+  /*
+   * 🔴 L'ÉTAT RÉEL DU BLOCAGE ET LE STATUT (15/11/2026, user).
+   *
+   * Aucun écran ne les transmettait à la fiche, ni la discussion à deux ni le
+   * groupe : « Bloquer » s'affichait même pour quelqu'un de déjà bloqué (le
+   * toucher l'aurait débloqué), et le statut restait vide. La fiche les lit
+   * elle-même, au serveur, quel que soit l'écran qui l'ouvre.
+   */
+  String? _statut;
+
+  Future<void> _chargerEtat() async {
+    final f = await context.read<ChatRepository>().fiche(widget.userId);
+    if (f == null || !mounted) return;
+    setState(() {
+      _isBlocked = f.bloque;
+      _statut = f.statusMsg;
+    });
   }
 
   /// Les groupes que je partage avec cette personne (14/11/2026, comme
@@ -616,9 +636,9 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
           avatarUrl: widget.avatarUrl,
           otherUserId: widget.userId,
           otherPublicNumber: widget.publicNumber.isEmpty ? null : widget.publicNumber,
-          otherStatusMsg: widget.statusMsg,
+          otherStatusMsg: _statut ?? widget.statusMsg,
           contactId: widget.contactId,
-          isBlocked: widget.isBlocked,
+          isBlocked: _isBlocked,
           otherIsOnline: widget.isOnline ? 1 : 0,
           otherLastSeen: widget.lastSeen,
         ),
@@ -909,8 +929,9 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
   // INFORMATIONS
   // ---------------------------------------------------------------------------
   Widget _infoCard() {
-    final bio = widget.statusMsg?.isNotEmpty == true
-        ? widget.statusMsg!
+    final statut = _statut ?? widget.statusMsg;
+    final bio = statut?.isNotEmpty == true
+        ? statut!
         : tr(context, 'ci_default_invite');
     final username = widget.username;
     return GlassCard(
