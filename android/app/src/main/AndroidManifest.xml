@@ -184,6 +184,15 @@
                       android:host="alanyavox.com"
                       android:pathPrefix="/i/"/>
             </intent-filter>
+            <!-- Le lien (et le QR) d'un groupe, 18/11/2026. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https"
+                      android:host="alanyavox.com"
+                      android:pathPrefix="/g/"/>
+            </intent-filter>
             <!-- PARTAGER VERS ALANYA (07/10/2026, demande du user). Alanya
                  apparaît dans la feuille de partage des autres applications,
                  pour un texte, un lien ou n'importe quel fichier, seul ou

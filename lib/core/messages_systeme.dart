@@ -106,6 +106,16 @@ String composerMessageSysteme(
       return tr(context, 'system_member_left')
           .replaceFirst("{target}", _texte(charge["target"]));
 
+    // Entré par le lien du groupe (18/11/2026) ; avec `actor` quand un admin
+    // a accepté sa demande (groupe privé).
+    case "member_joined_link":
+      final acteur = _texte(charge["actor"]);
+      return (acteur.isEmpty
+              ? tr(context, 'system_member_joined_link')
+              : tr(context, 'system_member_joined_link_approved')
+                  .replaceFirst("{actor}", acteur))
+          .replaceFirst("{target}", _texte(charge["target"]));
+
     // Groupes chiffrés (lot 7, chapitre 36).
     case "e2ee_active":
       return tr(context, 'system_e2ee_active')

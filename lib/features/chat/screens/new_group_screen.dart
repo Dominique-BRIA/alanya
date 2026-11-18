@@ -46,6 +46,10 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
     'historiqueCacheNouveaux': false,
   };
   final Map<String, bool> _reglages = Map.of(_parDefaut);
+
+  /// Privé (par défaut, comme le serveur) ou public (18/11/2026, demande du
+  /// user : le choix se fait à la création).
+  String _acces = 'prive';
   List<Contact> _contacts = [];
   final Set<String> _selected = {}; // numéros publics sélectionnés
   bool _loading = true;
@@ -97,7 +101,7 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
     final chat = context.read<ChatRepository>();
     try {
       final convId = await chat.createGroup(name, _selected.toList(),
-          description: _descriptionCtrl.text);
+          description: _descriptionCtrl.text, acces: _acces);
       // Les réglages choisis, s'il y en a. Un échec ici ne défait pas le
       // groupe, déjà créé : ils restent modifiables dans les infos du groupe.
       final choisis = {
@@ -160,6 +164,35 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
                       prefixIcon: const Icon(Icons.notes_rounded),
                       counterText: "",
                     ),
+                  ),
+                ),
+                // PRIVÉ OU PUBLIC (18/11/2026) : visible d'emblée, c'est un
+                // choix de création, pas un réglage parmi d'autres.
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: SegmentedButton<String>(
+                      segments: [
+                        ButtonSegment(
+                            value: 'prive',
+                            icon: const Icon(Icons.lock_outline),
+                            label: Text(tr(context, 'grp_type_private'))),
+                        ButtonSegment(
+                            value: 'public',
+                            icon: const Icon(Icons.public),
+                            label: Text(tr(context, 'grp_type_public'))),
+                      ],
+                      selected: {_acces},
+                      onSelectionChanged: (s) => setState(() => _acces = s.first),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 6, 20, 0),
+                  child: Text(
+                    tr(context, _acces == 'public' ? 'grp_type_public_sub' : 'grp_type_private_sub'),
+                    style: TextStyle(fontSize: 12.5, color: mutedOf(context, Colors.black54)),
                   ),
                 ),
                 // Repliés par défaut : la liste des contacts garde la place.

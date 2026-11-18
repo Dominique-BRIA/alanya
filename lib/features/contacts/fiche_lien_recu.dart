@@ -11,6 +11,7 @@ import '../../models/invitation_qr.dart';
 import '../../theme/alanya_theme.dart';
 import '../../widgets/avatar_circle.dart';
 import '../auth/auth_controller.dart';
+import '../group/rejoindre_groupe.dart';
 import 'contacts_repository.dart';
 import 'ouvrir_invitation.dart';
 import 'ouvrir_profil_scanne.dart';
@@ -30,6 +31,9 @@ Future<void> proposerLienRecu(BuildContext context, CibleLien cible) async {
       await _proposerProfil(context, publicNumber);
     case CibleInvitation(:final jeton):
       await _proposerInvitation(context, jeton);
+    // Le lien d'un groupe (18/11/2026) : sa propre fiche de confirmation.
+    case CibleGroupe(:final code):
+      await proposerGroupe(context, code);
   }
 }
 

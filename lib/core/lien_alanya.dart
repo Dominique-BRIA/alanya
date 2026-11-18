@@ -8,10 +8,12 @@ import 'alanya_id_formatter.dart';
 /// téléphone — dans l'application si elle est installée (liens d'application
 /// Android), sur la page web sinon.
 ///
-/// Deux formes, et deux seulement :
+/// Trois formes, et trois seulement :
 ///   · `/u/<Alanya ID>` — le QR PERMANENT de l'écran Profil ;
 ///   · `/i/<jeton>`     — l'invitation à usage unique (15 min), où l'Alanya ID
-///                        n'apparaît pas : le serveur seul sait à qui il mène.
+///                        n'apparaît pas : le serveur seul sait à qui il mène ;
+///   · `/g/<code>`      — le lien (et le QR) d'un GROUPE (18/11/2026) : on
+///                        entre (groupe public) ou on demande (groupe privé).
 ///
 /// ⚠️ La fabrication et la lecture vivent dans le MÊME fichier : deux endroits
 /// qui décrivent un format finissent toujours par ne plus être d'accord, et
@@ -32,6 +34,10 @@ String lienProfil(String publicNumber) =>
 
 /// Le lien d'une invitation à usage unique.
 String lienInvitation(String jeton) => 'https://$hoteLiensAlanya/i/$jeton';
+
+/// Le lien d'un groupe (18/11/2026). Le serveur le rend aussi tout fait ;
+/// celui-ci sert aux tests et à relire un code.
+String lienGroupe(String code) => 'https://$hoteLiensAlanya/g/$code';
 
 /// Ce vers quoi mène un code scanné ou un lien ouvert.
 sealed class CibleLien {
@@ -64,6 +70,19 @@ class CibleInvitation extends CibleLien {
   int get hashCode => jeton.hashCode;
   @override
   String toString() => 'CibleInvitation($jeton)';
+}
+
+/// Un groupe, désigné par le code de son lien (18/11/2026).
+class CibleGroupe extends CibleLien {
+  final String code;
+  const CibleGroupe(this.code);
+
+  @override
+  bool operator ==(Object other) => other is CibleGroupe && other.code == code;
+  @override
+  int get hashCode => code.hashCode;
+  @override
+  String toString() => 'CibleGroupe($code)';
 }
 
 /// Un jeton est du base64url (alphabet `A-Z a-z 0-9 - _`). Bornes larges :
@@ -105,6 +124,9 @@ CibleLien? analyserLienAlanya(String brut) {
           : null;
     case 'i':
       return _formeJeton.hasMatch(valeur) ? CibleInvitation(valeur) : null;
+    // Même alphabet et mêmes bornes que les jetons d'invitation.
+    case 'g':
+      return _formeJeton.hasMatch(valeur) ? CibleGroupe(valeur) : null;
     default:
       return null;
   }

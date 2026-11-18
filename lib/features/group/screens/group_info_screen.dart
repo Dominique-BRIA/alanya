@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import '../../media/media_repository.dart';
@@ -24,6 +25,9 @@ import '../../../services/e2ee/e2ee_fournisseur.dart';
 import '../../contacts/verification_cle.dart';
 import '../../../models/groupe_reglages.dart';
 import '../../signalement/signalement_sheet.dart';
+import '../../../core/realtime_client.dart';
+import 'demandes_groupe_screen.dart';
+import 'lien_groupe_screen.dart';
 
 /// Écran d'infos d'un groupe — style WhatsApp.
 ///
@@ -61,6 +65,21 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     _refreshMembers();
     _lireEtatChiffrement();
     _chargerMedias();
+    // La liste d'attente a changé (nouvelle demande, ou traitée par un autre
+    // admin) : le compteur suit (18/11/2026).
+    _rtDemandes = context.read<RealtimeClient>().events.listen((e) {
+      if (e['type'] == 'invitation_groupe_demandes' && e['convId'] == widget.convId) {
+        _refreshMembers();
+      }
+    });
+  }
+
+  StreamSubscription<Map<String, dynamic>>? _rtDemandes;
+
+  @override
+  void dispose() {
+    _rtDemandes?.cancel();
+    super.dispose();
   }
 
   /* ══════════════ LES MÉDIAS DU GROUPE (carte « Médias, liens et docs ») ══════════════ */
@@ -297,6 +316,37 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
     }
   }
 
+  /* ══════════════ PRIVÉ OU PUBLIC, LIEN, LISTE D'ATTENTE (18/11/2026) ══════════════ */
+
+  Future<void> _changerAcces(String acces) async {
+    if (acces == _reglages.acces) return;
+    try {
+      final r = await context.read<ChatRepository>().changerAccesGroupe(widget.convId, acces);
+      if (mounted) setState(() => _reglages = r);
+    } catch (e) {
+      if (mounted) _dire(e is ApiException ? e.message : trLu(context, 'grp_settings_failed'));
+    }
+  }
+
+  Future<void> _ouvrirLien() async {
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => LienGroupeScreen(
+        convId: widget.convId,
+        nom: _title,
+        avatarUrl: _avatarUrl,
+        estAdmin: _amAdmin,
+      ),
+    ));
+  }
+
+  Future<void> _ouvrirDemandes() async {
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => DemandesGroupeScreen(convId: widget.convId),
+    ));
+    // Des demandes acceptées : de nouveaux membres à montrer.
+    await _refreshMembers();
+  }
+
   Future<void> _changerReglage(String cle, bool valeur) async {
     try {
       final r = await context
@@ -358,6 +408,36 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
             child: Text(tr(context, 'grp_settings'),
                 style: TextStyle(
                     fontWeight: FontWeight.w600, fontSize: 16, color: cs.onSurface)),
+          ),
+          // Privé ou public (18/11/2026) : ce que fait le lien du groupe.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 6, 18, 2),
+            child: Text(tr(context, 'grp_type_title'),
+                style: TextStyle(fontSize: 15, color: cs.onSurface)),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 6, 18, 2),
+            child: SegmentedButton<String>(
+              segments: [
+                ButtonSegment(
+                    value: 'prive',
+                    icon: const Icon(Icons.lock_outline),
+                    label: Text(tr(context, 'grp_type_private'))),
+                ButtonSegment(
+                    value: 'public',
+                    icon: const Icon(Icons.public),
+                    label: Text(tr(context, 'grp_type_public'))),
+              ],
+              selected: {_reglages.acces},
+              onSelectionChanged: (s) => _changerAcces(s.first),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 4, 18, 8),
+            child: Text(
+                tr(context,
+                    _reglages.estPublic ? 'grp_type_public_sub' : 'grp_type_private_sub'),
+                style: TextStyle(fontSize: 12.5, color: cs.onSurfaceVariant)),
           ),
           interrupteur('grp_set_admins_send', 'grp_set_admins_send_sub',
               _reglages.adminsSeulsEcrivent, 'adminsSeulsEcrivent'),
@@ -948,6 +1028,52 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                   style: TextStyle(
                       color: accentOf(context), fontWeight: FontWeight.w600, fontSize: 15.5)),
               onTap: _addMembers,
+            ),
+          // LE LIEN ET LE QR CODE DU GROUPE (18/11/2026) : ceux qui peuvent
+          // ajouter des membres.
+          if (_peutAjouter)
+            ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 18),
+              leading: CircleAvatar(
+                radius: 22,
+                backgroundColor: accentOf(context).withValues(alpha: 0.12),
+                child: Icon(Icons.link_rounded, color: accentOf(context)),
+              ),
+              title: Text(tr(context, 'grp_link_title'),
+                  style: TextStyle(
+                      color: accentOf(context), fontWeight: FontWeight.w600, fontSize: 15.5)),
+              subtitle: Text(
+                  tr(context,
+                      _reglages.estPublic ? 'grp_link_sub_public' : 'grp_link_sub_private'),
+                  style: TextStyle(fontSize: 12.5, color: cs.onSurfaceVariant)),
+              onTap: _ouvrirLien,
+            ),
+          // LA LISTE D'ATTENTE : les admins ; toujours visible dans un groupe
+          // privé, et dans un public tant qu'il reste des demandes d'avant.
+          if (_amAdmin && (!_reglages.estPublic || _reglages.demandesEnAttente > 0))
+            ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 18),
+              leading: CircleAvatar(
+                radius: 22,
+                backgroundColor: accentOf(context).withValues(alpha: 0.12),
+                child: Icon(Icons.how_to_reg_outlined, color: accentOf(context)),
+              ),
+              title: Text(tr(context, 'grp_requests_title'),
+                  style: TextStyle(
+                      color: accentOf(context), fontWeight: FontWeight.w600, fontSize: 15.5)),
+              trailing: _reglages.demandesEnAttente > 0
+                  ? Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: accentOf(context),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text('${_reglages.demandesEnAttente}',
+                          style: const TextStyle(
+                              color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12.5)),
+                    )
+                  : null,
+              onTap: _ouvrirDemandes,
             ),
           ...(_tousLesMembres ? tries : tries.take(_membresVisibles))
               .map((m) => _ligneMembre(m, nomDe(m), cs)),

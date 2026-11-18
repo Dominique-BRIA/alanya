@@ -5,6 +5,7 @@ import '../../core/cache_ecrans.dart';
 import '../../core/device_registry.dart';
 import '../../core/message_cache.dart';
 import '../../models/conversation.dart';
+import '../../models/groupe_lien.dart';
 import '../../models/groupe_reglages.dart';
 import '../../models/message.dart';
 import '../home/dernier_message_local.dart';
@@ -79,13 +80,17 @@ class ChatRepository {
   ///
   /// [description] (14/11/2026) : posée dès la création, comme l'application
   /// de référence. Le serveur l'accepte depuis le 01/11/2026.
+  ///
+  /// [acces] (18/11/2026) : « prive » ou « public ». Omis, le serveur crée un
+  /// groupe privé.
   Future<String> createGroup(String name, List<String> memberNumbers,
-      {String? description}) async {
+      {String? description, String? acces}) async {
     final data = await _api.post("/api/conversations", {
       "name": name,
       "memberNumbers": memberNumbers,
       if (description != null && description.trim().isNotEmpty)
         "description": description.trim(),
+      if (acces != null) "acces": acces,
     });
     return data["id"] as String;
   }
@@ -311,6 +316,60 @@ class ChatRepository {
     );
     await _retenirReglages(convId, r);
     return r;
+  }
+
+  /*
+   * ══════════════ GROUPES PRIVÉS ET PUBLICS, LIEN, LISTE D'ATTENTE (18/11/2026) ══════════════
+   */
+
+  /// Privé ou public (admins).
+  Future<ReglagesGroupe> changerAccesGroupe(String convId, String acces) async {
+    final data = await _api.patch("/api/conversations/$convId", {"acces": acces});
+    final avant = reglagesConnus[convId] ?? const ReglagesGroupe();
+    final r = avant.copyWith(acces: data['acces'] as String? ?? acces);
+    await _retenirReglages(convId, r);
+    return r;
+  }
+
+  /// Le lien du groupe (ceux qui peuvent ajouter des membres).
+  Future<LienGroupe> lienDuGroupe(String convId) async =>
+      LienGroupe.fromJson(await _api.get("/api/conversations/$convId/lien"));
+
+  /// Un nouveau lien (admins) : l'ancien et son QR ne mènent plus nulle part.
+  Future<LienGroupe> renouvelerLienDuGroupe(String convId) async =>
+      LienGroupe.fromJson(await _api.post("/api/conversations/$convId/lien", const {}));
+
+  /// Ce que montre un lien de groupe, avant de confirmer.
+  Future<ApercuGroupe> apercuLienGroupe(String code) async =>
+      ApercuGroupe.fromJson(await _api.get("/api/groupes/lien/$code"));
+
+  /// Confirmer : on entre (public) ou la demande part aux admins (privé).
+  Future<ResultatRejoindre> rejoindreParLien(String code) async => ResultatRejoindre.fromJson(
+      await _api.post("/api/groupes/lien/$code/rejoindre", const {}));
+
+  /// Retirer sa demande en attente.
+  Future<void> annulerDemandeGroupe(String code) async {
+    await _api.delete("/api/groupes/lien/$code/rejoindre");
+  }
+
+  /// La liste d'attente (admins).
+  Future<List<DemandeAdhesion>> demandesDuGroupe(String convId) async {
+    final data = await _api.get("/api/conversations/$convId/demandes");
+    final liste = [
+      for (final d in (data['demandes'] as List? ?? const []))
+        if (d is Map) DemandeAdhesion.fromJson(Map<String, dynamic>.from(d)),
+    ];
+    final avant = reglagesConnus[convId];
+    if (avant != null) {
+      await _retenirReglages(convId, avant.copyWith(demandesEnAttente: liste.length));
+    }
+    return liste;
+  }
+
+  /// Accepter ou refuser une demande (admins).
+  Future<void> deciderDemandeGroupe(String convId, String demandeId, {required bool accepter}) async {
+    await _api.post("/api/conversations/$convId/demandes/$demandeId",
+        {"decision": accepter ? "accepter" : "refuser"});
   }
 
   /// « Rester » sur la bannière d'arrivée : retenu par le serveur, pour que

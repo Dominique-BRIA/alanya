@@ -15,6 +15,9 @@ class ReglagesGroupe {
     this.adminsSeulsAjoutent = true,
     this.historiqueCacheNouveaux = false,
     this.arriveeAConfirmer = false,
+    this.acces = 'prive',
+    this.peutPartagerLien = false,
+    this.demandesEnAttente = 0,
   });
 
   final String? description;
@@ -32,6 +35,18 @@ class ReglagesGroupe {
   /// Ajouté par quelqu'un, je n'ai pas encore dit « Rester ».
   final bool arriveeAConfirmer;
 
+  /// GROUPES PRIVÉS ET PUBLICS (18/11/2026). « prive » : le lien du groupe
+  /// place dans une liste d'attente ; « public » : il fait entrer aussitôt.
+  /// Un serveur qui ne l'envoie pas : privé, le fonctionnement d'avant.
+  final String acces;
+  bool get estPublic => acces == 'public';
+
+  /// Puis-je voir et partager le lien ? (ceux qui peuvent ajouter)
+  final bool peutPartagerLien;
+
+  /// Demandes en attente — rendues aux admins seulement (0 sinon).
+  final int demandesEnAttente;
+
   factory ReglagesGroupe.fromJson(Map<String, dynamic>? groupe, Map<String, dynamic>? moi) {
     final g = groupe ?? const {};
     return ReglagesGroupe(
@@ -42,6 +57,9 @@ class ReglagesGroupe {
       adminsSeulsAjoutent: (g['adminsSeulsAjoutent'] as bool?) ?? true,
       historiqueCacheNouveaux: (g['historiqueCacheNouveaux'] as bool?) ?? false,
       arriveeAConfirmer: (moi?['arriveeAConfirmer'] as bool?) ?? false,
+      acces: (g['acces'] as String?) == 'public' ? 'public' : 'prive',
+      peutPartagerLien: (g['peutPartagerLien'] as bool?) ?? false,
+      demandesEnAttente: (g['demandesEnAttente'] as num?)?.toInt() ?? 0,
     );
   }
 
@@ -53,6 +71,9 @@ class ReglagesGroupe {
           'adminsSeulsModifient': adminsSeulsModifient,
           'adminsSeulsAjoutent': adminsSeulsAjoutent,
           'historiqueCacheNouveaux': historiqueCacheNouveaux,
+          'acces': acces,
+          'peutPartagerLien': peutPartagerLien,
+          'demandesEnAttente': demandesEnAttente,
         },
         'moi': {'arriveeAConfirmer': arriveeAConfirmer},
       };
@@ -65,6 +86,8 @@ class ReglagesGroupe {
     bool? adminsSeulsAjoutent,
     bool? historiqueCacheNouveaux,
     bool? arriveeAConfirmer,
+    String? acces,
+    int? demandesEnAttente,
   }) =>
       ReglagesGroupe(
         description: effacerDescription ? null : (description ?? this.description),
@@ -74,6 +97,9 @@ class ReglagesGroupe {
         adminsSeulsAjoutent: adminsSeulsAjoutent ?? this.adminsSeulsAjoutent,
         historiqueCacheNouveaux: historiqueCacheNouveaux ?? this.historiqueCacheNouveaux,
         arriveeAConfirmer: arriveeAConfirmer ?? this.arriveeAConfirmer,
+        acces: acces ?? this.acces,
+        peutPartagerLien: peutPartagerLien,
+        demandesEnAttente: demandesEnAttente ?? this.demandesEnAttente,
       );
 }
 

@@ -14,6 +14,7 @@ import '../../../widgets/back_app_bar.dart';
 import '../../chat/chat_repository.dart';
 import '../../contacts/contacts_repository.dart';
 import '../../contacts/ouvrir_invitation.dart';
+import '../../group/rejoindre_groupe.dart';
 import '../../contacts/ouvrir_profil_scanne.dart';
 import '../../contacts/screens/add_contact_screen.dart';
 import '../../contacts/screens/scanner_qr_screen.dart';
@@ -227,6 +228,11 @@ class _DialerScreenState extends State<DialerScreen> {
         setState(() => _ouvertureQr = true);
         await utiliserInvitationEtOuvrir(context, jeton, remplacer: true);
         if (mounted) setState(() => _ouvertureQr = false);
+      // Le QR d'un groupe (18/11/2026) : la fiche du groupe, puis entrer ou
+      // demander. Jamais d'entrée sans confirmation, même scannée.
+      case CibleGroupe(:final code):
+        _debounce?.cancel();
+        await proposerGroupe(context, code, remplacer: true);
     }
   }
 
