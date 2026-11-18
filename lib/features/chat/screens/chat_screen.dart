@@ -131,6 +131,7 @@ import 'package:path_provider/path_provider.dart' show getTemporaryDirectory;
 import 'package:share_plus/share_plus.dart';
 import '../../../widgets/media/media_picker_sheet.dart';
 import '../../../core/erreur_lisible.dart';
+import '../../signalement/signalement_sheet.dart';
 
 class ChatScreen extends StatefulWidget {
   static String? activeConvId;
@@ -6315,6 +6316,26 @@ class _ChatScreenState extends State<ChatScreen>
                       onTap: () {
                         Navigator.pop(ctx);
                         _partagerMessage(m);
+                      }),
+                // SIGNALER (18/11/2026, exigence du Play Store) : le message
+                // d'un autre, déjà enregistré par le serveur.
+                if (m.senderId != _myId && !m.id.startsWith('tmp-'))
+                  ListTile(
+                      leading: Icon(Icons.flag_outlined, color: Theme.of(context).colorScheme.error),
+                      title: Text(tr(context, 'sig_signaler')),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        SignalementSheet.ouvrir(
+                          context,
+                          SignalerMessage(
+                            messageId: m.id,
+                            chiffre: m.chiffre,
+                            extrait: m.type == 'STICKER' ? null : m.content,
+                            auteurNumero: widget.isGroup
+                                ? _numerosMembres[m.senderId]
+                                : widget.otherPublicNumber,
+                          ),
+                        );
                       }),
                 // Un sticker n'a pas de texte à copier : sa charge est du JSON.
                 if (m.type != 'STICKER')

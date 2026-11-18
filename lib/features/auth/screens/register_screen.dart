@@ -10,6 +10,7 @@ import '../auth_repository.dart';
 import 'otp_screen.dart';
 import 'setup_screen.dart';
 import '../../../core/erreur_lisible.dart';
+import '../../../core/pages_legales.dart';
 
 /// Étape 1 : saisie de l'email pour recevoir le code de confirmation.
 class RegisterScreen extends StatefulWidget {
@@ -172,7 +173,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     return null;
                   },
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 18),
+                // Les conditions et la confidentialité, avant de créer le
+                // compte (18/11/2026, exigence du Play Store).
+                const MentionAcceptation(),
+                const SizedBox(height: 14),
                 ElevatedButton(
                   onPressed: _loading ? null : _submit,
                   child: _loading

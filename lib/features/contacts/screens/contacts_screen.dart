@@ -21,7 +21,6 @@ import '../../chat/screens/new_group_screen.dart';
 import '../contacts_repository.dart';
 import 'contact_lists_screen.dart';
 import 'new_chat_screen.dart';
-import 'phone_sync_screen.dart';
 
 class ContactsScreen extends StatefulWidget {
   const ContactsScreen({super.key});
@@ -390,16 +389,6 @@ class _ContactsScreenState extends State<ContactsScreen> {
           _load();
         },
       ),
-      _carteAction(
-        icon: Icons.contacts_rounded,
-        label: tr(context, 'import_from_phone'),
-        onTap: () async {
-          final added = await Navigator.of(context).push<bool>(
-            MaterialPageRoute(builder: (_) => const PhoneSyncScreen()),
-          );
-          if (added == true) _load();
-        },
-      ),
     ];
     return Column(
       children: [
@@ -409,11 +398,10 @@ class _ContactsScreenState extends State<ContactsScreen> {
           Expanded(child: cartes[1]),
         ]),
         const SizedBox(height: 12),
-        Row(children: [
-          Expanded(child: cartes[2]),
-          const SizedBox(width: 12),
-          Expanded(child: cartes[3]),
-        ]),
+        // L'importation depuis le répertoire du téléphone a été retirée le
+        // 18/11/2026 (décision du user, publication sur le Play Store) : la
+        // troisième carte prend toute la largeur.
+        Row(children: [Expanded(child: cartes[2])]),
       ],
     );
   }

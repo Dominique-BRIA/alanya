@@ -81,13 +81,14 @@ android {
 
     buildTypes {
         release {
-            // Clé stable si elle est fournie, clé debug sinon. Le repli garde
-            // le build fonctionnel sans configuration, au prix du conflit
-            // d'installation décrit plus haut.
-            signingConfig = if (signatureDisponible) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
+            // 🔴 PLUS DE REPLI SUR LA CLÉ DEBUG (18/11/2026, publication sur
+            // le Play Store). Un APK ou un AAB de publication signé avec une
+            // clé jetable ne s'installerait pas par-dessus la version du Store
+            // et serait refusé par la Play Console. Sans clé de publication,
+            // la compilation de publication ÉCHOUE (voir `gradle.taskGraph`
+            // plus bas) ; la compilation debug, elle, garde sa clé debug.
+            if (signatureDisponible) {
+                signingConfig = signingConfigs.getByName("release")
             }
             // FIX taille APK :
             //  - isMinifyEnabled = true → active R8, retire le code Kotlin/Java
@@ -181,4 +182,21 @@ dependencies {
     // `androidx.annotation.OptIn`, pour déclarer l'usage des API « instables »
     // de Media3 sans que le contrôle d'Android (lint) refuse la construction.
     implementation("androidx.annotation:annotation-experimental:1.4.1")
+}
+
+// La garde de la signature de publication (18/11/2026) : elle ne joue que si une
+// tâche de PUBLICATION est demandée (assembleRelease, bundleRelease…), pour que
+// la compilation debug et les tests restent possibles sans la clé.
+gradle.taskGraph.whenReady {
+    val publication = allTasks.any { t ->
+        t.project.name == "app" &&
+            (t.name.startsWith("assemble") || t.name.startsWith("bundle") || t.name.startsWith("package")) &&
+            t.name.endsWith("Release")
+    }
+    if (publication && !signatureDisponible) {
+        throw GradleException(
+            "Clé de publication absente (android/key.properties) : la compilation de " +
+                "publication refuse de signer avec la clé debug. Voir l'étape « Signature stable » de la CI.",
+        )
+    }
 }

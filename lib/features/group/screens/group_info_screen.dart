@@ -23,6 +23,7 @@ import '../../../l10n/app_localizations.dart';
 import '../../../services/e2ee/e2ee_fournisseur.dart';
 import '../../contacts/verification_cle.dart';
 import '../../../models/groupe_reglages.dart';
+import '../../signalement/signalement_sheet.dart';
 
 /// Écran d'infos d'un groupe — style WhatsApp.
 ///
@@ -727,6 +728,19 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
                   style: TextStyle(
                       color: dangerOf(context), fontWeight: FontWeight.w600, fontSize: 16)),
               onTap: _leaveGroup,
+            ),
+          ),
+          // SIGNALER LE GROUPE (18/11/2026, exigence du Play Store).
+          const SizedBox(height: 10),
+          GlassCard(
+            radius: 22,
+            child: ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
+              leading: Icon(Icons.flag_outlined, color: dangerOf(context)),
+              title: Text(tr(context, 'sig_titre_groupe'),
+                  style: TextStyle(
+                      color: dangerOf(context), fontWeight: FontWeight.w600, fontSize: 16)),
+              onTap: () => SignalementSheet.ouvrir(context, SignalerGroupe(widget.convId)),
             ),
           ),
         ],

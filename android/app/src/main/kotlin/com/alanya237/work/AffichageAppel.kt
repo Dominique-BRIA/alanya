@@ -295,8 +295,13 @@ object AffichageAppel {
             "superposition" -> listOf(
                 Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, paquet),
             )
+            // 🔴 PLUS DE DEMANDE DIRECTE (18/11/2026, publication sur le Play
+            // Store) : `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` exige la
+            // permission REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, que Google refuse
+            // à une messagerie (les notifications prioritaires suffisent). On
+            // ouvre la LISTE des réglages de batterie, où la personne choisit
+            // elle-même — aucun permission requise.
             "batterie" -> listOf(
-                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, paquet),
                 Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
             )
             // Réglages propres au fabricant (démarrage automatique, affichage

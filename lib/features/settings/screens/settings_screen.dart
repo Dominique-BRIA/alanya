@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../../core/alanya_id_formatter.dart';
 import '../../../core/biometric_service.dart';
+import '../../../core/pages_legales.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/alanya_wordmark.dart';
@@ -358,6 +359,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const DeleteAccountScreen()),
             ),
+          ),
+          // Les pages légales (18/11/2026, exigence du Play Store).
+          _settingsTile(
+            icon: Icons.description_outlined,
+            iconColor: themed(context, light: AlanyaColors.grey600, dark: AlanyaColors.craie2),
+            title: tr(context, 'legal_conditions'),
+            trailing: const Icon(Icons.open_in_new, size: 18),
+            onTap: () => PagesLegales.ouvrir(context, PagesLegales.conditions),
+          ),
+          _settingsTile(
+            icon: Icons.privacy_tip_outlined,
+            iconColor: themed(context, light: AlanyaColors.grey600, dark: AlanyaColors.craie2),
+            title: tr(context, 'legal_confidentialite'),
+            trailing: const Icon(Icons.open_in_new, size: 18),
+            onTap: () => PagesLegales.ouvrir(context, PagesLegales.confidentialite),
           ),
           const SizedBox(height: 24),
           Padding(

@@ -126,9 +126,13 @@ jobs:
           set -euo pipefail
           # La garde est DANS le script et non dans un `if:` de l'étape : le
           # contexte `secrets` n'est pas disponible dans les conditions de step.
+          # 🔴 PLUS DE BUILD EN SIGNATURE DEBUG (18/11/2026, publication sur
+          # le Play Store) : sans clé, la compilation de publication échoue
+          # (`build.gradle.kts`). On le dit ici, tout de suite, plutôt que
+          # vingt minutes plus tard dans Gradle.
           if [ -z "${KEYSTORE_BASE64:-}" ]; then
-            echo "Aucune clé de signature configurée : build en signature debug."
-            exit 0
+            echo "::error::Aucune clé de signature configurée (secret ANDROID_KEYSTORE_BASE64) : un APK ou un AAB de publication ne se signe pas avec une clé debug."
+            exit 1
           fi
           # `storeFile` est résolu par `file()` DANS le module app : le chemin
           # est donc relatif à android/app, pas à la racine du dépôt.
@@ -255,6 +259,22 @@ jobs:
         with:
           name: alanya-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 7
+
+      # 🔴 LE FORMAT DU PLAY STORE (18/11/2026) : la Play Console n'accepte que
+      # l'Android App Bundle (.aab). Même code, même clé, même numéro de
+      # version que l'APK ci-dessus ; Gradle réutilise ce qu'il vient de
+      # compiler, l'étape est donc bien plus courte que la première.
+      - name: Build AAB (Play Store)
+        run: flutter build appbundle --release --dart-define=MAPTILER_KEY="$MAPTILER_KEY"
+        env:
+          MAPTILER_KEY: ${{ secrets.MAPTILER_KEY }}
+
+      - name: Upload AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: alanya-aab
+          path: build/app/outputs/bundle/release/app-release.aab
           retention-days: 7
 
       # Ne garder que les 5 APK les plus récents.

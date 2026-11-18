@@ -34,6 +34,7 @@ import '../../chat/screens/media_gallery_viewer.dart';
 import '../../chat/screens/shared_content_screen.dart';
 import '../../chat/widgets/bulle_media_chiffre.dart';
 import '../contacts_repository.dart';
+import '../../signalement/signalement_sheet.dart';
 import '../verification_cle.dart';
 
 /// Écran "Info Contact" — design premium glassmorphism, mode sombre prioritaire.
@@ -1294,6 +1295,30 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
                     fontSize: 15),
               ),
               onTap: _toggleBlock,
+            ),
+          ),
+          _divider(),
+          // SIGNALER (18/11/2026, exigence du Play Store).
+          Material(
+            type: MaterialType.transparency,
+            child: ListTile(
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+              leading: const Icon(Icons.flag_outlined, color: AlanyaColors.error),
+              title: Text(
+                tr(context, 'sig_titre_compte'),
+                style: const TextStyle(
+                    color: AlanyaColors.error,
+                    fontWeight: FontWeight.w500,
+                    fontSize: 15),
+              ),
+              onTap: () => SignalementSheet.ouvrir(
+                context,
+                SignalerCompte(
+                  userId: widget.userId,
+                  numero: _isBlocked || widget.publicNumber.isEmpty ? null : widget.publicNumber,
+                ),
+              ),
             ),
           ),
         ],

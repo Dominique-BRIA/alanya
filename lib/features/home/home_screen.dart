@@ -66,6 +66,7 @@ import '../contacts/teintes_listes.dart';
 import '../../core/sonneries_livrees.dart';
 import '../contacts/screens/contact_lists_screen.dart';
 import '../chat/screens/new_group_screen.dart';
+import '../signalement/signalement_sheet.dart';
 import '../contacts/screens/contacts_screen.dart';
 import '../contacts/fiche_lien_recu.dart';
 import '../../core/liens_entrants.dart';
@@ -3661,6 +3662,8 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
   }
 
   /// Menu contextuel pour un message IA (copier, partager, supprimer).
+  static final _idServeur = RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', caseSensitive: false);
+
   void _showAiMessageOptions(AiMessage msg) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     showModalBottomSheet(
@@ -3694,6 +3697,18 @@ class _AiTabState extends State<_AiTab> with TickerProviderStateMixin {
                 );
               },
             ),
+            // SIGNALER UNE RÉPONSE (18/11/2026, exigence du Play Store pour
+            // l'IA générative) : seulement une réponse enregistrée.
+            if (msg.role == 'MODEL' && _idServeur.hasMatch(msg.id))
+              ListTile(
+                leading: Icon(Icons.flag_outlined,
+                    color: isDark ? AlanyaColors.erreurNuit : Colors.red),
+                title: Text(tr(context, 'sig_signaler')),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  SignalementSheet.ouvrir(context, SignalerReponseIa(msg.id));
+                },
+              ),
             ListTile(
               leading: Icon(Icons.delete_outline,
                   color: isDark ? AlanyaColors.erreurNuit : Colors.red),
