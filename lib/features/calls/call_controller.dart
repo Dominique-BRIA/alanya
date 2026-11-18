@@ -2176,7 +2176,7 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
       traceAppel("passage en vidéo impossible : $e");
       activeType = avant;
       lastError = _trAppel('call_webrtc_failed',
-          "Connexion WebRTC impossible : micro/caméra inaccessible");
+          "Connexion impossible : micro ou caméra inaccessible");
       notifyListeners();
       return;
     }
@@ -2443,7 +2443,7 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
       cameraEntranteActive = true;
       notifyListeners();
     } catch (e) {
-      lastError = _trAppel('call_webrtc_failed', "Connexion WebRTC impossible : micro/caméra inaccessible");
+      lastError = _trAppel('call_webrtc_failed', "Connexion impossible : micro ou caméra inaccessible");
       debugPrint("[webrtc] mesh ensureLocal: $e");
       // Nettoie la mesh cassée pour permettre une nouvelle tentative
       await _mesh?.close();
