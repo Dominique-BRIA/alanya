@@ -134,8 +134,18 @@ class SonneriesDeListes extends ChangeNotifier {
       alimenter(await _depot.list());
       return true;
     } catch (_) {
+      // Hors ligne : la dernière copie de l'appareil, si rien n'est encore
+      // affiché (18/11/2026). Ce qui est déjà à l'écran n'est jamais remplacé
+      // par une copie plus ancienne.
+      await _depuisLeCache();
       return false;
     }
+  }
+
+  Future<void> _depuisLeCache() async {
+    if (_cache.isNotEmpty) return;
+    final copie = await ContactListsRepository.enCache();
+    if (copie.isNotEmpty && _cache.isEmpty) alimenter(copie);
   }
 
   /// Charge les listes une fois, en tâche de fond, sans jamais lever.
@@ -150,6 +160,7 @@ class SonneriesDeListes extends ChangeNotifier {
     } catch (_) {
       // Silencieux : une sonnerie personnalisée est un confort, jamais un dû.
       _chargementLance = false;
+      await _depuisLeCache();
     }
   }
 

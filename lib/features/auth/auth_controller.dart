@@ -22,6 +22,7 @@ import '../../core/push_service.dart';
 import '../../core/realtime_client.dart';
 import '../../core/token_storage.dart';
 import '../../models/auth_user.dart';
+import '../contacts/contact_lists_repository.dart';
 import 'auth_repository.dart';
 
 enum AuthStatus { unknown, unauthenticated, authenticated }
@@ -487,6 +488,7 @@ class AuthController extends ChangeNotifier {
     await ConversationCache.clear();
     await CallCache.clear();
     await ContactCache.clear();
+    await ContactListsRepository.oublierCache();
     PrechargementEcrans.arreter();
     CodesConnexionWeb.instance.arreter();
     await CacheEcrans.clear();

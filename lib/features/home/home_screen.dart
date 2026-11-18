@@ -65,6 +65,7 @@ import '../calls/screens/dialer_screen.dart';
 import '../contacts/teintes_listes.dart';
 import '../../core/sonneries_livrees.dart';
 import '../contacts/screens/contact_lists_screen.dart';
+import '../chat/screens/new_group_screen.dart';
 import '../contacts/screens/contacts_screen.dart';
 import '../contacts/fiche_lien_recu.dart';
 import '../../core/liens_entrants.dart';
@@ -1579,10 +1580,85 @@ class _ConversationsTabState extends State<_ConversationsTab>
     );
   }
 
+  /*
+   * 🔴 APPUI LONG SUR UNE LISTE (18/11/2026, demande du user) : ajouter et
+   * supprimer, sans passer par Paramètres › Listes de contacts.
+   *
+   * La règle métier tient en une phrase : UNE LISTE NE CONTIENT QUE DES
+   * PERSONNES. Un groupe n'y entre jamais (`estDansListe` rend faux pour un
+   * groupe). D'où les deux ajouts offerts :
+   *   - « Ajouter des contacts » : les membres de la liste ;
+   *   - « Créer un groupe avec ces contacts » : un nouveau groupe, membres de
+   *     la liste déjà cochés — l'ajout d'un groupe qui a un sens ici.
+   * La suppression reprend celle de l'écran des listes, et n'est pas offerte
+   * pour les quatre listes créées d'office (le serveur la refuse).
+   *
+   * ⚠️ HORS LIGNE, RIEN QUI ÉCRIVE : la liste est une copie de l'appareil.
+   */
+  Future<void> _menuListe(ListeContacts l) async {
+    HapticFeedback.selectionClick();
+    final choix = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+            child: Text(l.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(ctx).textTheme.titleMedium),
+          ),
+          ListTile(
+            leading: const Icon(Icons.person_add_alt_1_outlined),
+            title: Text(tr(ctx, 'liste_ajouter_contacts')),
+            onTap: () => Navigator.pop(ctx, 'contacts'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.group_add_outlined),
+            title: Text(tr(ctx, 'liste_creer_groupe')),
+            subtitle: l.members.isEmpty ? Text(tr(ctx, 'list_no_members')) : null,
+            enabled: l.members.isNotEmpty,
+            onTap: () => Navigator.pop(ctx, 'groupe'),
+          ),
+          if (!l.estParDefaut)
+            ListTile(
+              leading: Icon(Icons.delete_outline, color: Theme.of(ctx).colorScheme.error),
+              title: Text(tr(ctx, 'liste_supprimer'),
+                  style: TextStyle(color: Theme.of(ctx).colorScheme.error)),
+              onTap: () => Navigator.pop(ctx, 'supprimer'),
+            ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+    if (choix == null || !mounted) return;
+    switch (choix) {
+      case 'contacts':
+        await ContactListsScreen.modifierListe(context, l);
+      case 'groupe':
+        await Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => NewGroupScreen(
+            numerosInitiaux: [for (final m in l.members) m.publicNumber],
+            nomInitial: l.name,
+          ),
+        ));
+        if (mounted) _refresh();
+      case 'supprimer':
+        if (await ContactListsScreen.supprimerListe(context, l) &&
+            mounted &&
+            _listeActive == l.id) {
+          setState(() => _listeActive = null);
+        }
+    }
+  }
+
   Widget _puceListe(ListeContacts l, bool sombre) {
     final actif = l.id == _listeActive;
     final teinte = couleurDeListe(l.color, sombre: sombre);
-    return FilterChip(
+    return GestureDetector(
+      onLongPress: () => _menuListe(l),
+      child: FilterChip(
       selected: actif,
       // Même raison que pour les puces système : la coche mangerait le point
       // coloré, qui est justement ce qui identifie la liste.
@@ -1619,6 +1695,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
         ),
       ),
       label: Text(l.name, style: const TextStyle(fontSize: 13)),
+      ),
     );
   }
 

@@ -14,7 +14,14 @@ import '../../../l10n/app_localizations.dart';
 
 /// Création d'un groupe : nom + sélection de contacts du répertoire.
 class NewGroupScreen extends StatefulWidget {
-  const NewGroupScreen({super.key});
+  const NewGroupScreen({super.key, this.numerosInitiaux = const [], this.nomInitial});
+
+  /// Les numéros publics déjà cochés : les membres d'une liste de contacts
+  /// dont on crée un groupe depuis l'écran Discussions (18/11/2026).
+  final List<String> numerosInitiaux;
+
+  /// Le nom proposé, modifiable — celui de la liste.
+  final String? nomInitial;
 
   @override
   State<NewGroupScreen> createState() => _NewGroupScreenState();
@@ -48,6 +55,8 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
   @override
   void initState() {
     super.initState();
+    _selected.addAll(widget.numerosInitiaux.where((n) => n.isNotEmpty));
+    if (widget.nomInitial != null) _nameCtrl.text = widget.nomInitial!;
     _loadContacts();
   }
 

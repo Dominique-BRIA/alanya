@@ -81,6 +81,73 @@ class ContactListsScreen extends StatefulWidget {
 
   @override
   State<ContactListsScreen> createState() => _ContactListsScreenState();
+
+  /*
+   * LES GESTES D'UNE LISTE, DEPUIS L'ÉCRAN DISCUSSIONS (18/11/2026, user :
+   * « quand on maintient sur une liste, proposer l'ajout et la suppression »).
+   *
+   * ⚠️ AUCUNE NOUVELLE LOGIQUE : ce sont l'éditeur et la confirmation de
+   * suppression de cet écran, servis tels quels. Un seul endroit décide de ce
+   * que veut dire modifier ou supprimer une liste.
+   */
+
+  /// Ouvre l'éditeur de [liste] (nom, couleur, membres, sonneries). Vrai si
+  /// elle a changé ; le service des listes est alors rafraîchi.
+  static Future<bool> modifierListe(BuildContext context, ListeContacts liste) async {
+    final depotContacts = context.read<ContactsRepository>();
+    final service = context.read<SonneriesDeListes>();
+    List<Contact> contacts;
+    try {
+      contacts = await depotContacts.list();
+    } catch (_) {
+      showAppSnackBar(tr(context, 'lists_load_error'));
+      return false;
+    }
+    if (!context.mounted) return false;
+    final resultat = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _EditeurListe(
+        existante: liste,
+        contacts: contacts,
+        toutesLesListes: service.listes,
+      ),
+    );
+    if (resultat == true) await service.rafraichir();
+    return resultat == true;
+  }
+
+  /// Demande confirmation puis supprime [liste]. Vrai si elle l'a été.
+  ///
+  /// Une liste créée d'office ne se supprime pas : le serveur la refuse
+  /// (409 `LISTE_PAR_DEFAUT`), l'appelant ne doit donc pas l'offrir.
+  static Future<bool> supprimerListe(BuildContext context, ListeContacts liste) async {
+    final depot = context.read<ContactListsRepository>();
+    final service = context.read<SonneriesDeListes>();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(tr(ctx, 'list_delete_q')),
+        // Dit ce que ça NE fait PAS : la crainte naturelle est de perdre les
+        // contacts eux-mêmes.
+        content: Text(tr(ctx, 'list_delete_body', {'nom': liste.name})),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr(ctx, 'cancel'))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(tr(ctx, 'delete'))),
+        ],
+      ),
+    );
+    if (ok != true) return false;
+    try {
+      await depot.supprimer(liste.id);
+      await service.rafraichir();
+      return true;
+    } catch (_) {
+      showAppSnackBar(tr(context, 'delete_failed'));
+      return false;
+    }
+  }
 }
 
 class _ContactListsScreenState extends State<ContactListsScreen> {
@@ -128,9 +195,17 @@ class _ContactListsScreenState extends State<ContactListsScreen> {
       });
     } catch (_) {
       if (!mounted) return;
+      // Hors ligne : la dernière copie de l'appareil plutôt qu'une erreur
+      // (18/11/2026). Modifier attendra le réseau ; regarder, non.
+      final copie = await ContactListsRepository.enCache();
+      if (!mounted) return;
       setState(() {
         _chargement = false;
-        _erreur = tr(context, 'lists_load_error');
+        if (copie.isNotEmpty && _listes == null) {
+          _listes = copie;
+        } else if (copie.isEmpty) {
+          _erreur = tr(context, 'lists_load_error');
+        }
       });
     }
   }
@@ -151,34 +226,7 @@ class _ContactListsScreenState extends State<ContactListsScreen> {
   }
 
   Future<void> _supprimer(ListeContacts l) async {
-    // Saisi avant la boîte de dialogue, qui est un point d'attente.
-    final depot = context.read<ContactListsRepository>();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text(tr(context, 'list_delete_q')),
-        // Dit ce que ça NE fait PAS : la crainte naturelle est de perdre les
-        // contacts eux-mêmes.
-        content: Text(
-          tr(context, 'list_delete_body', {'nom': l.name}),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: Text(tr(context, 'cancel'))),
-          TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: Text(tr(context, 'delete'))),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    try {
-      await depot.supprimer(l.id);
-      await _charger();
-    } catch (_) {
-      showAppSnackBar(tr(context, 'delete_failed'));
-    }
+    if (await ContactListsScreen.supprimerListe(context, l)) await _charger();
   }
 
   @override

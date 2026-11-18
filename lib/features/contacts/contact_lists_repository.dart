@@ -1,3 +1,7 @@
+import 'dart:convert';
+
+import 'package:shared_preferences/shared_preferences.dart';
+
 import '../../core/authed_api.dart';
 import '../../models/contact_list.dart';
 
@@ -10,15 +14,54 @@ class ContactListsRepository {
   final AuthedApi _api;
 
   /// Toutes mes listes, avec leurs membres.
+  ///
+  /// La réponse est gardée sur l'appareil ([enCache]) : sans réseau, les
+  /// listes restent visibles (18/11/2026).
   Future<List<ListeContacts>> list() async {
     final data = await _api.get("/api/contact-lists");
     final brut = data["lists"] as List?;
     if (brut == null) return const [];
-    return brut
-        .whereType<Map<String, dynamic>>()
-        .map(ListeContacts.fromJson)
-        .toList();
+    try {
+      await (await SharedPreferences.getInstance()).setString(_cleCache, jsonEncode(brut));
+    } catch (_) {
+      // Un cache raté ne doit pas faire échouer la lecture.
+    }
+    return _lire(brut);
   }
+
+  /*
+   * 🐛 « LES LISTES DE CONTACTS NE SONT PAS VISIBLES SANS CONNEXION » (user,
+   * 18/11/2026). Elles ne vivaient qu'en mémoire, rechargées au serveur à
+   * chaque ouverture : hors ligne, la rangée de l'écran Discussions restait
+   * vide, comme l'écran des listes. La dernière réponse du serveur est donc
+   * gardée ici, et relue quand il ne répond pas.
+   *
+   * ⚠️ EFFACÉE À LA DÉCONNEXION ([oublierCache]) : les listes d'un compte ne
+   * doivent pas apparaître au compte suivant sur le même téléphone.
+   */
+  static const _cleCache = 'listes_contacts_cache';
+
+  /// Les listes gardées sur l'appareil ; vide si rien n'a encore été lu.
+  static Future<List<ListeContacts>> enCache() async {
+    try {
+      final brut = (await SharedPreferences.getInstance()).getString(_cleCache);
+      if (brut == null) return const [];
+      return _lire(jsonDecode(brut) as List);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  static Future<void> oublierCache() async {
+    try {
+      await (await SharedPreferences.getInstance()).remove(_cleCache);
+    } catch (_) {}
+  }
+
+  static List<ListeContacts> _lire(List brut) => brut
+      .whereType<Map>()
+      .map((m) => ListeContacts.fromJson(Map<String, dynamic>.from(m)))
+      .toList();
 
   /// Crée une liste.
   ///
