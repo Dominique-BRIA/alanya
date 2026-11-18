@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 
 import '../../../core/alanya_id_formatter.dart';
 import '../../../core/biometric_service.dart';
+import '../../../core/geo_service.dart';
+import '../../geo/screens/geo_disclosure_screen.dart';
 import '../../../core/pages_legales.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../theme/alanya_theme.dart';
@@ -43,6 +45,72 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     _loadBiometric();
+    _chargerSuivi();
+  }
+
+  /*
+   * 🔴 L'INTERRUPTEUR DU SUIVI DE POSITION (18/11/2026, demande du user,
+   * publication sur le Play Store).
+   *
+   * Un agent qui avait accepté le suivi ne pouvait l'arrêter qu'en retirant
+   * l'autorisation de position dans les réglages d'Android. La règle de
+   * Google sur la position en arrière-plan attend qu'on puisse le couper
+   * depuis l'application, aussi simplement qu'on l'a accepté.
+   *
+   * ⚠️ RÉSERVÉ AUX COMPTES CONCERNÉS (`user.suiviPosition` : rattachés à une
+   * entreprise). Un particulier ne voit rien.
+   *
+   * Couper : le consentement passe à « refusé » (sur l'appareil et au
+   * serveur, qui en informe l'entreprise) et le suivi s'arrête aussitôt.
+   * Rallumer : l'écran d'information s'ouvre de nouveau — jamais d'accord
+   * sans lui —, puis le suivi redémarre.
+   */
+  ConsentementGeo? _suivi;
+  bool _suiviEnCours = false;
+
+  Future<void> _chargerSuivi() async {
+    final user = context.read<AuthController>().user;
+    if (user == null || !user.suiviPosition) return;
+    final c = await GeoService.instance.consentement(user.id);
+    if (mounted) setState(() => _suivi = c);
+  }
+
+  Future<void> _basculerSuivi(bool activer) async {
+    final user = context.read<AuthController>().user;
+    if (user == null || _suiviEnCours) return;
+    setState(() => _suiviEnCours = true);
+    try {
+      if (activer) {
+        final accepte = await Navigator.of(context).push<bool>(
+          MaterialPageRoute(builder: (_) => GeoDisclosureScreen(userId: user.id)),
+        );
+        if (accepte == true) {
+          await GeoService.instance.demarrer(
+            userId: user.id,
+            intervalleMin: user.suiviPositionIntervalleMin,
+          );
+        }
+      } else {
+        final confirme = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: Text(tr(ctx, 'geo_couper_titre')),
+            content: Text(tr(ctx, 'geo_couper_texte')),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr(ctx, 'cancel'))),
+              TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(tr(ctx, 'geo_couper_action'))),
+            ],
+          ),
+        );
+        if (confirme == true) {
+          await GeoService.instance.enregistreConsentement(user.id, false);
+          await GeoService.instance.arreter();
+        }
+      }
+    } finally {
+      if (mounted) setState(() => _suiviEnCours = false);
+      await _chargerSuivi();
+    }
   }
 
   Future<void> _loadBiometric() async {
@@ -288,6 +356,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ? null
                 : () => _toggleBiometric(!_biometricEnabled),
           ),
+          if (user?.suiviPosition == true && _suivi != null)
+            _settingsTile(
+              icon: _suivi == ConsentementGeo.accepte
+                  ? Icons.my_location
+                  : Icons.location_disabled_outlined,
+              iconColor: _suivi == ConsentementGeo.accepte ? _positive : _mutedIcon,
+              title: tr(context, 'geo_reglage_titre'),
+              subtitle: tr(context,
+                  _suivi == ConsentementGeo.accepte ? 'geo_reglage_actif' : 'geo_reglage_inactif'),
+              trailing: _suiviEnCours
+                  ? const SizedBox(
+                      width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                  : Switch(
+                      value: _suivi == ConsentementGeo.accepte,
+                      onChanged: (v) => _basculerSuivi(v),
+                    ),
+              onTap: _suiviEnCours
+                  ? null
+                  : () => _basculerSuivi(_suivi != ConsentementGeo.accepte),
+            ),
           _settingsTile(
             icon: Icons.star,
             iconColor: AlanyaColors.gold,
