@@ -45,7 +45,18 @@ jobs:
         run: flutter pub get
 
       - name: Compilation iOS (release, sans signature)
-        run: flutter build ios --release --no-codesign --build-number=${{ github.run_number }}
+        run: |
+          set -o pipefail
+          flutter build ios --release --no-codesign --build-number=${{ github.run_number }} 2>&1 | tee build-ios.log
+
+      # Les erreurs deviennent des ANNOTATIONS : lisibles sur la page du
+      # flux, et par l'API publique de GitHub sans aucun identifiant.
+      - name: Erreurs de compilation
+        if: failure()
+        run: |
+          grep -E "error:|Error \(Xcode\)|❌|Fatal|fatal error|\[!\]" build-ios.log             | sed -E 's/^.*(ios\/Runner|ios\/ShareExtension|Pods\/)//'             | sort -u | head -45             | while IFS= read -r ligne; do echo "::error::${ligne:0:1000}"; done
+          echo "::error::$(tail -n 25 build-ios.log | tr '
+' '|' | cut -c1-3000)"
 
       - name: Application non signée
         run: |
