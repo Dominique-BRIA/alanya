@@ -172,6 +172,10 @@ class PushService {
         await tryInitialize();
       }
 
+      // iPhone : Firebase ne donne son jeton qu'une fois celui d'Apple (APNs)
+      // obtenu, quelques instants après le lancement (19/11/2026).
+      if (Platform.isIOS) await _attendreJetonApns();
+
       // Récupère le token si pas déjà en cache
       _fcmToken ??= await FirebaseMessaging.instance.getToken();
       if (_fcmToken == null) {
@@ -197,7 +201,8 @@ class PushService {
         '/api/push/register',
         {
           'token': _fcmToken,
-          'platform': 'android',
+          // 'ios' sur iPhone (19/11/2026) ; Android inchangé.
+          'platform': Platform.isIOS ? 'ios' : 'android',
           // ⚠️ Rattache le jeton à CET appareil. Sans lui, l'envoi ne cible
           // qu'un compte : un téléphone déconnecté ou évincé continuait de
           // recevoir messages et appels, faute de savoir en base quel jeton lui
@@ -209,8 +214,48 @@ class PushService {
         bearer: accessToken,
       );
       debugPrint('[PushService] ✅ Token enregistré auprès du backend');
+      if (Platform.isIOS) await _enregistrerJetonVoip(accessToken);
     } catch (e) {
       debugPrint('[PushService] Erreur enregistrement token: $e');
+    }
+  }
+
+  /*
+   * ══════════════ iPHONE (19/11/2026) ══════════════
+   *
+   * Les APPELS entrants arrivent par PushKit, avec un jeton à part : le
+   * serveur les envoie directement à Apple (notification « VoIP »), jamais par
+   * Firebase. Ce jeton est enregistré sous la plateforme `ios_voip`, rattaché
+   * au même appareil que les autres : la déconnexion le coupe pareil.
+   */
+  String? _jetonVoip;
+
+  Future<void> _attendreJetonApns() async {
+    for (var i = 0; i < 20; i++) {
+      try {
+        if (await FirebaseMessaging.instance.getAPNSToken() != null) return;
+      } catch (_) {}
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+    }
+  }
+
+  Future<void> _enregistrerJetonVoip(String accessToken) async {
+    try {
+      final jeton = await FlutterCallkitIncoming.getDevicePushTokenVoIP();
+      if (jeton == null || jeton.isEmpty) return;
+      await _api!.post(
+        '/api/push/register',
+        {
+          'token': jeton,
+          'platform': 'ios_voip',
+          'deviceId': await DeviceRegistry.instance.deviceId(),
+        },
+        bearer: accessToken,
+      );
+      _jetonVoip = jeton;
+      debugPrint('[PushService] jeton VoIP enregistré');
+    } catch (e) {
+      debugPrint('[PushService] jeton VoIP non enregistré : $e');
     }
   }
 
@@ -875,6 +920,15 @@ class PushService {
             '/api/push/register?token=$_fcmToken',
             bearer: accessToken,
           );
+          // iPhone : le jeton des appels part avec (19/11/2026).
+          final voip = _jetonVoip;
+          if (Platform.isIOS && voip != null) {
+            try {
+              await _api!.delete('/api/push/register?token=$voip',
+                  bearer: accessToken);
+            } catch (_) {}
+            _jetonVoip = null;
+          }
         } else {
           // Même sans token valide, on tente le DELETE : le backend
           // peut supprimer l'association côté serveur s'il connaît le token.

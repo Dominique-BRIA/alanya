@@ -458,7 +458,8 @@ class SignatureDocument {
     Directory dossier,
     SignatureSortie signature,
   ) async {
-    if (!Platform.isAndroid) return null;
+    // iOS (19/11/2026) : `SignatureDocument.swift` (AVFoundation).
+    if (!(Platform.isAndroid || Platform.isIOS)) return null;
     final point = nom.lastIndexOf('.');
     final racine = point > 0 ? nom.substring(0, point) : nom;
     final nomMp4 = '$racine.mp4';

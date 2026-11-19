@@ -1,0 +1,10 @@
+/* Textes d'autorisation d'Alanya Work (19/11/2026). */
+"CFBundleDisplayName" = "Alanya Work";
+"NSCameraUsageDescription" = "Alanya Work 使用相机进行视频通话、拍摄您要发送的照片和视频，以及扫描二维码。";
+"NSFaceIDUsageDescription" = "Alanya Work 使用面容 ID 锁定应用并保护您的对话。";
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "仅限外勤人员：您的组织会在工作时间内跟踪您的位置（即使应用已关闭），以便协调现场工作并保障您的安全。您可以在“设置 › 安全”中关闭。";
+"NSLocationAlwaysUsageDescription" = "仅限外勤人员：您的组织会在工作时间内跟踪您的位置（即使应用已关闭），以便协调现场工作并保障您的安全。您可以在“设置 › 安全”中关闭。";
+"NSLocationWhenInUseUsageDescription" = "当您在对话中分享位置时，Alanya Work 会使用您的位置；对于外勤人员，还会将其发送给您的组织。";
+"NSMicrophoneUsageDescription" = "Alanya Work 使用麦克风进行语音和视频通话以及录制语音消息。";
+"NSPhotoLibraryAddUsageDescription" = "Alanya Work 会将您下载的照片和视频保存到您的图库。";
+"NSPhotoLibraryUsageDescription" = "Alanya Work 会显示您的照片和视频，以便您选择要发送的内容。";

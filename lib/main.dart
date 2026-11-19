@@ -62,6 +62,7 @@ import 'features/meetings/meeting_controller.dart';
 import 'features/meetings/meetings_repository.dart';
 import 'features/status/status_repository.dart';
 import 'core/liens_entrants.dart';
+import 'core/appels_ios.dart';
 import 'core/partage_entrant.dart';
 import 'core/server_config.dart';
 import 'features/chat/envoi_morceaux/envoi_morceaux_api.dart';
@@ -152,6 +153,8 @@ void main() async {
   // Liens Alanya (QR, lien partagé) : abonnement AVANT tout écran, sans quoi
   // le lien qui a lancé l'application serait perdu. Voir `LiensEntrants`.
   LiensEntrants.instance.demarrer();
+  // iPhone seulement (jeton VoIP, décroché écran verrouillé) : sans effet ailleurs.
+  AppelsIos.demarrer();
   // Ce qu'une autre application partage vers Alanya : même règle, même
   // raison. Voir `PartageEntrant`.
   unawaited(PartageEntrant.instance.demarrer());

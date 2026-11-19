@@ -1,0 +1,10 @@
+/* Textes d'autorisation d'Alanya Work (19/11/2026). */
+"CFBundleDisplayName" = "Alanya Work";
+"NSCameraUsageDescription" = "O Alanya Work usa a câmara para as videochamadas, para tirar as fotos e vídeos que envia e para ler códigos QR.";
+"NSFaceIDUsageDescription" = "O Alanya Work usa o Face ID para bloquear a aplicação e proteger as suas conversas.";
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "Apenas para agentes de campo: a sua organização acompanha a sua posição durante o horário de trabalho, mesmo com a aplicação fechada, para coordenar as intervenções e garantir a sua segurança. Pode desativar em Definições › Segurança.";
+"NSLocationAlwaysUsageDescription" = "Apenas para agentes de campo: a sua organização acompanha a sua posição durante o horário de trabalho, mesmo com a aplicação fechada, para coordenar as intervenções e garantir a sua segurança. Pode desativar em Definições › Segurança.";
+"NSLocationWhenInUseUsageDescription" = "O Alanya Work usa a sua localização quando a partilha numa conversa e, para os agentes de campo, para a enviar à sua organização.";
+"NSMicrophoneUsageDescription" = "O Alanya Work usa o microfone para as chamadas de áudio e vídeo e para gravar mensagens de voz.";
+"NSPhotoLibraryAddUsageDescription" = "O Alanya Work guarda na sua fototeca as fotos e vídeos que transfere.";
+"NSPhotoLibraryUsageDescription" = "O Alanya Work mostra as suas fotos e vídeos para que escolha quais enviar.";

@@ -32,7 +32,12 @@ class LiensEntrants {
 
   /// À appeler une fois, dans `main()`. Sans effet hors Android.
   void demarrer() {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    // iOS (19/11/2026) : liens universels (apple-app-site-association).
+    if (kIsWeb ||
+        (defaultTargetPlatform != TargetPlatform.android &&
+            defaultTargetPlatform != TargetPlatform.iOS)) {
+      return;
+    }
     _abonnement ??= AppLinks().uriLinkStream.listen(
       (uri) {
         final cible = analyserLienAlanya(uri.toString());

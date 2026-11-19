@@ -20,7 +20,8 @@ class EcranProtege {
   static Future<void> desactiver() => _appeler('desactiver');
 
   static Future<void> _appeler(String methode) async {
-    if (kIsWeb || !Platform.isAndroid) return;
+    // iOS (19/11/2026) : `EcranProtege` dans `CanauxAlanya.swift`.
+    if (kIsWeb || !(Platform.isAndroid || Platform.isIOS)) return;
     try {
       await _canal.invokeMethod<bool>(methode);
     } catch (e) {

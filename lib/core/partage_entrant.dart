@@ -38,7 +38,12 @@ class PartageEntrant {
 
   /// À appeler une fois, dans `main()`. Sans effet hors Android.
   Future<void> demarrer() async {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    // iOS (19/11/2026) : l'extension de partage `ios/ShareExtension`.
+    if (kIsWeb ||
+        (defaultTargetPlatform != TargetPlatform.android &&
+            defaultTargetPlatform != TargetPlatform.iOS)) {
+      return;
+    }
     final greffon = ShareHandlerPlatform.instance;
     try {
       final initial = await greffon.getInitialSharedMedia();
@@ -84,7 +89,11 @@ class PartageEntrant {
   /// ⚠️ NE LÈVE JAMAIS : Android limite le nombre de raccourcis et le rythme
   /// des mises à jour ; un refus ne doit pas gêner l'envoi du message.
   Future<void> proposerEnHaut(String convId, String nom) async {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    if (kIsWeb ||
+        (defaultTargetPlatform != TargetPlatform.android &&
+            defaultTargetPlatform != TargetPlatform.iOS)) {
+      return;
+    }
     try {
       await ShareHandlerPlatform.instance.recordSentMessage(
         conversationIdentifier: convId,

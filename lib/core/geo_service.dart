@@ -462,10 +462,23 @@ class GeoService {
     // Écoute continue des déplacements >= 75 mètres via la position stream
     _positionStreamSub?.cancel();
     _positionStreamSub = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: seuilDeplacementMetresDefaut,
-      ),
+      // iPhone (19/11/2026) : pas de service de premier plan ; c'est ce flux,
+      // autorisé en arrière-plan (mode « location » et accord « toujours »),
+      // qui garde le suivi actif application quittée, avec l'indicateur bleu
+      // d'iOS. Android garde exactement ses réglages.
+      locationSettings: Platform.isIOS
+          ? AppleSettings(
+              accuracy: LocationAccuracy.high,
+              distanceFilter: seuilDeplacementMetresDefaut,
+              activityType: ActivityType.other,
+              pauseLocationUpdatesAutomatically: false,
+              allowBackgroundLocationUpdates: true,
+              showBackgroundLocationIndicator: true,
+            )
+          : const LocationSettings(
+              accuracy: LocationAccuracy.high,
+              distanceFilter: seuilDeplacementMetresDefaut,
+            ),
     ).listen((position) {
       unawaited(_traiteNouvellePosition(position));
     });

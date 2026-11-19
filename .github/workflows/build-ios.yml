@@ -1,0 +1,61 @@
+name: Build iOS (sans signature)
+
+# LA COMPILATION iOS (19/11/2026). Un fichier À PART de `build-android.yml` :
+# la chaîne Android ne change pas.
+#
+# Sans compte Apple, on ne peut ni signer ni publier : ce flux vérifie que tout
+# compile (Swift, Objective-C, modules CocoaPods, extension de partage) et
+# conserve l'application non signée. La signature et l'envoi sur TestFlight
+# viendront avec le compte Apple (voir codemagic.yaml, flux `ios-testflight`).
+#
+# ⚠️ Les machines macOS de GitHub coûtent 10 fois plus de minutes que Linux :
+# le flux ne part que sur la branche iOS, ou à la main.
+on:
+  push:
+    branches: [feat/ios]
+  workflow_dispatch:
+
+concurrency:
+  group: build-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios:
+    runs-on: macos-latest
+    timeout-minutes: 75
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          # ⚠️ MÊME VERSION QUE build-android.yml.
+          flutter-version: '3.44.6'
+          cache: true
+
+      - name: Versions
+        run: |
+          xcodebuild -version
+          pod --version
+          flutter --version
+
+      - name: Dépendances
+        run: flutter pub get
+
+      - name: Compilation iOS (release, sans signature)
+        run: flutter build ios --release --no-codesign --build-number=${{ github.run_number }}
+
+      - name: Application non signée
+        run: |
+          cd build/ios/iphoneos
+          zip -qry Runner-non-signe.zip Runner.app
+          ls -lh Runner-non-signe.zip
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: alanya-ios-non-signe
+          path: build/ios/iphoneos/Runner-non-signe.zip
+          retention-days: 7

@@ -61,7 +61,8 @@ class EnregistreurAppel {
   /// échouer un décrochage : l'appel est ce qui compte, la trace est un
   /// supplément.
   Future<bool> demarrer(String callId, String localTrackId) async {
-    if (kIsWeb || !Platform.isAndroid) return false;
+    // iOS (19/11/2026) : `EnregistreurAppel.swift`, mêmes fichiers AAC.
+    if (kIsWeb || !(Platform.isAndroid || Platform.isIOS)) return false;
     if (_callId == callId) return true;
     if (_callId != null) await _abandonner();
     try {

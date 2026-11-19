@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:media_store_plus/media_store_plus.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:photo_manager/photo_manager.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 /// Téléchargement de médias depuis Alanya vers le stockage **public** du
@@ -57,6 +58,7 @@ Future<void> openLocalFile(String path) async => _openFile(path);
 Future<String?> enregistrerOctets(List<int> octets, String filename) async {
   try {
     if (Platform.isAndroid) return _saveAndroid(octets, filename);
+    if (Platform.isIOS) return _saveIos(octets, filename);
     return _saveAppDocuments(octets, filename);
   } catch (e) {
     debugPrint('[Alanya] Erreur enregistrement: $e');
@@ -115,7 +117,8 @@ Future<String?> _downloadTo(
     if (Platform.isAndroid) {
       return _saveAndroid(bytes, filename);
     }
-    // iOS / desktop / autres : dossier documents de l'app
+    if (Platform.isIOS) return _saveIos(bytes, filename);
+    // desktop / autres : dossier documents de l'app
     return _saveAppDocuments(bytes, filename);
   } catch (e) {
     debugPrint('[Alanya] Erreur téléchargement: $e');
@@ -206,7 +209,36 @@ Future<String?> _saveAndroid(List<int> bytes, String filename) async {
   }
 }
 
-/// Fallback iOS/desktop : dossier documents de l'app, sous-dossier "Alanya".
+/// iPhone (19/11/2026) : le fichier va dans les Documents de l'application,
+/// visibles dans l'app « Fichiers » (Info.plist : `UIFileSharingEnabled`) ;
+/// une photo ou une vidéo est AUSSI ajoutée à la photothèque, comme Android
+/// la range dans la galerie. Le chemin rendu reste celui des Documents.
+Future<String?> _saveIos(List<int> bytes, String filename) async {
+  final chemin = await _saveAppDocuments(bytes, filename);
+  if (chemin == null) return null;
+  const images = {'jpg', 'jpeg', 'png', 'gif', 'heic', 'heif'};
+  const videos = {'mp4', 'mov', 'm4v'};
+  final ext = _ext(filename).toLowerCase();
+  if (!images.contains(ext) && !videos.contains(ext)) return chemin;
+  try {
+    final droit = await PhotoManager.requestPermissionExtend(
+      requestOption: const PermissionRequestOption(
+        iosAccessLevel: IosAccessLevel.addOnly,
+      ),
+    );
+    if (!droit.hasAccess && droit != PermissionState.limited) return chemin;
+    if (images.contains(ext)) {
+      await PhotoManager.editor.saveImageWithPath(chemin, title: filename);
+    } else {
+      await PhotoManager.editor.saveVideo(File(chemin), title: filename);
+    }
+  } catch (e) {
+    debugPrint('[Alanya] Photothèque non mise à jour : $e');
+  }
+  return chemin;
+}
+
+/// Fallback desktop : dossier documents de l'app, sous-dossier "Alanya".
 Future<String?> _saveAppDocuments(List<int> bytes, String filename) async {
   try {
     final base = await getApplicationDocumentsDirectory();

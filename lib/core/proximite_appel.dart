@@ -31,7 +31,7 @@ class ProximiteAppel {
   /// reconstruction de widget : les appels viennent de `notifyListeners`, donc
   /// plusieurs fois de suite avec la même valeur.
   static Future<void> regler(bool actif) async {
-    if (!Platform.isAndroid) return;
+    if (!(Platform.isAndroid || Platform.isIOS)) return;
     if (_actif == actif) return;
     _actif = actif;
     try {
@@ -52,7 +52,7 @@ class ProximiteAppel {
   /// caméra, et le correspondant voyait une image figée jusqu'à ce qu'on
   /// touche l'écran. Le son, lui, continuait.
   static Future<void> garderEcranAllume(bool actif) async {
-    if (!Platform.isAndroid) return;
+    if (!(Platform.isAndroid || Platform.isIOS)) return;
     if (_ecranAllume == actif) return;
     _ecranAllume = actif;
     try {

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -83,6 +84,7 @@ class SonneriesDeListes extends ChangeNotifier {
   static const cleNative = 'sonneries_listes_natives';
 
   Future<void> _publierPourLeNatif() async {
+    if (!kIsWeb && Platform.isIOS) return _publierPourIos();
     if (kIsWeb || !Platform.isAndroid) return;
     try {
       final table = <String, String>{};
@@ -109,6 +111,38 @@ class SonneriesDeListes extends ChangeNotifier {
   }
 
   /// Le chemin local d'une sonnerie importée, téléchargée au besoin.
+  /*
+   * iPHONE (19/11/2026). CallKit ne joue qu'un fichier son rangé par
+   * l'application : le natif (`SonneriesIos.swift`) convertit chaque sonnerie
+   * en CAF dans `Library/Sounds`, et la notification VoIP choisit celle de
+   * l'appelant, même application tuée. Même table que pour Android.
+   */
+  static const _canalIos = MethodChannel('alanya/sonneries');
+
+  Future<void> _publierPourIos() async {
+    try {
+      final table = <String, String>{};
+      final ids = <String>{
+        for (final l in _cache)
+          for (final m in l.members) m.id.toLowerCase(),
+      };
+      for (final id in ids) {
+        final brut = listePourAppelant(callerId: id)?.ringtone;
+        if (brut == null || brut.isEmpty) continue;
+        final asset = assetDeSonnerie(brut);
+        if (asset != null) {
+          table[id] = 'asset:$asset';
+          continue;
+        }
+        final fichier = await _telechargerPourLeNatif(brut);
+        if (fichier != null) table[id] = fichier;
+      }
+      await _canalIos.invokeMethod('preparer', {'table': table});
+    } catch (e) {
+      debugPrint('[SonneriesDeListes] sonneries iOS non préparées : $e');
+    }
+  }
+
   Future<String?> _telechargerPourLeNatif(String brut) async {
     final dossier = Directory(
         '${(await getApplicationSupportDirectory()).path}/sonneries_listes');

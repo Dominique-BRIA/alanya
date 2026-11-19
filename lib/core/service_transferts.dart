@@ -25,7 +25,9 @@ class ServiceTransferts {
   /// Vrai quand le service tourne, pour ne pas le redémarrer à chaque pour cent.
   static bool _actif = false;
 
-  static bool get _disponible => !kIsWeb && Platform.isAndroid;
+  /// iOS (19/11/2026) : une tâche d'arrière-plan bornée par le système.
+  static bool get _disponible =>
+      !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
   /// Branche le service sur l'activité du centre de transferts.
   ///

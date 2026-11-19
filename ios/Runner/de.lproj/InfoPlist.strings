@@ -1,0 +1,10 @@
+/* Textes d'autorisation d'Alanya Work (19/11/2026). */
+"CFBundleDisplayName" = "Alanya Work";
+"NSCameraUsageDescription" = "Alanya Work verwendet die Kamera für Videoanrufe, für die Fotos und Videos, die Sie senden, und zum Scannen von QR-Codes.";
+"NSFaceIDUsageDescription" = "Alanya Work verwendet Face ID, um die App zu sperren und Ihre Unterhaltungen zu schützen.";
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "Nur für Außendienstmitarbeitende: Ihre Organisation verfolgt Ihren Standort während der Arbeitszeit, auch bei geschlossener App, um Einsätze zu koordinieren und Ihre Sicherheit zu gewährleisten. Sie können dies unter Einstellungen › Sicherheit ausschalten.";
+"NSLocationAlwaysUsageDescription" = "Nur für Außendienstmitarbeitende: Ihre Organisation verfolgt Ihren Standort während der Arbeitszeit, auch bei geschlossener App, um Einsätze zu koordinieren und Ihre Sicherheit zu gewährleisten. Sie können dies unter Einstellungen › Sicherheit ausschalten.";
+"NSLocationWhenInUseUsageDescription" = "Alanya Work verwendet Ihren Standort, wenn Sie ihn in einer Unterhaltung teilen, und bei Außendienstmitarbeitenden, um ihn an Ihre Organisation zu senden.";
+"NSMicrophoneUsageDescription" = "Alanya Work verwendet das Mikrofon für Audio- und Videoanrufe und für Sprachnachrichten.";
+"NSPhotoLibraryAddUsageDescription" = "Alanya Work speichert die heruntergeladenen Fotos und Videos in Ihrer Mediathek.";
+"NSPhotoLibraryUsageDescription" = "Alanya Work zeigt Ihre Fotos und Videos an, damit Sie auswählen können, welche Sie senden.";

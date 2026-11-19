@@ -23,8 +23,10 @@ class Agb1Natif {
   static final Map<int, void Function(double)> _progressions = {};
   static bool _ecoute = false;
 
+  /// Android et, depuis le 19/11/2026, iOS (`ChiffrementAgb1.swift`, mêmes
+  /// octets par CryptoKit).
   static bool get disponible =>
-      !_horsService && !kIsWeb && Platform.isAndroid;
+      !_horsService && !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
   static void _ecouter() {
     if (_ecoute) return;
