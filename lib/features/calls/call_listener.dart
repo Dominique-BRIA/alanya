@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:alanya_telecom/alanya_telecom.dart';
 import 'package:flutter/material.dart';
@@ -146,6 +147,12 @@ class _CallListenerState extends State<CallListener>
         // Refus : le NATIF l'envoie lui-même (AlanyaApplication →
         // CallRejectHelper). On nettoie sans le renvoyer, puis on reprend la
         // file un peu plus tard au cas où il aurait échoué (jeton expiré).
+        // iPhone (19/11/2026) : un retrait décidé par l'application arrive
+        // ici comme un refus — on l'ignore (voir `estRetraitProgramme`).
+        case CallEventActionCallDecline(:final callKitParams)
+            when Platform.isIOS &&
+                CallUiNative.estRetraitProgramme(_idServeur(callKitParams)):
+          break;
         case CallEventActionCallDecline(:final callKitParams):
           _onCallAction('call_reject', _idServeur(callKitParams),
               dejaTransmis: true);
@@ -154,6 +161,20 @@ class _CallListenerState extends State<CallListener>
           }));
         // Sonnerie expirée : PAS un refus, comme dans la référence — le
         // minuteur du serveur la classe lui-même. État local seulement.
+        // iPhone (19/11/2026) : la notification VoIP déclare TOUJOURS l'appel
+        // à CallKit, même application ouverte. Si l'écran Flutter présente
+        // déjà cet appel, l'entrée CallKit est retirée sans refus : un seul
+        // écran sonne. (Arrivée AVANT le socket : `prendreLaSonnerie` la
+        // retirera de la même façon.)
+        case CallEventActionCallIncoming(:final callKitParams)
+            when Platform.isIOS:
+          final id = _idServeur(callKitParams);
+          final cc = context.read<CallController>();
+          if (_auPremierPlan &&
+              cc.incoming?.callId == id &&
+              !cc.ecranNatifAffiche) {
+            unawaited(CallUiNative.masquerSilencieusement(id));
+          }
         case CallEventActionCallTimeout(:final id):
           unawaited(context.read<CallController>().finSignaleeParLeNatif(id));
         case CallEventActionCallEnded(:final callKitParams):

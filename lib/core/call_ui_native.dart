@@ -141,15 +141,39 @@ class CallUiNative {
   /// retrait non accepté pour un refus — et refuse au serveur un appel qui
   /// sonne peut-être encore ailleurs.
   static Future<void> _marquerRetraitProgrammatique(List<String> ids) async {
-    if (!Platform.isAndroid) return;
     final liste = ids.where((id) => id.trim().isNotEmpty).toList();
     if (liste.isEmpty) return;
+    /*
+     * iPhone (19/11/2026) : retirer un appel de CallKit (`endCall`) passe par
+     * la même action qu'un refus de l'utilisateur, et le module la signale
+     * comme un REFUS tant que l'appel n'a pas été décroché. Le marquage sert
+     * des deux côtés : le natif n'envoie pas de refus au serveur
+     * (`AppelsVoip.swift`), et l'écouteur Dart ignore ce faux refus
+     * ([estRetraitProgramme]).
+     */
+    final maintenant = DateTime.now();
+    for (final id in liste) {
+      _retraitsProgrammes[id] = maintenant;
+    }
+    _retraitsProgrammes.removeWhere(
+        (_, t) => maintenant.difference(t) > const Duration(seconds: 30));
+    if (!Platform.isAndroid && !Platform.isIOS) return;
     try {
       await _natif.invokeMethod<void>(
           'markProgrammaticDismiss', {'callIds': liste});
     } catch (e) {
       debugPrint('[CallUiNative] markProgrammaticDismiss : $e');
     }
+  }
+
+  static final Map<String, DateTime> _retraitsProgrammes = {};
+
+  /// Ce retrait de CallKit vient-il de l'application (et non d'un refus de
+  /// l'utilisateur) ? Valable 30 secondes.
+  static bool estRetraitProgramme(String callId) {
+    final t = _retraitsProgrammes[callId.trim()];
+    return t != null &&
+        DateTime.now().difference(t) <= const Duration(seconds: 30);
   }
 
   /// Retire l'écran d'appel de [callId] — et lui seul : appelant qui

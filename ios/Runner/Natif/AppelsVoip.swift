@@ -102,6 +102,9 @@ enum AppelsVoip {
   static func refuser(_ data: flutter_callkit_incoming.Data) {
     let extra = data.extra as? [String: Any] ?? [:]
     let callId = (extra["callId"] as? String) ?? data.uuid
+    // Retrait décidé par l'application (l'écran Flutter reprend l'appel,
+    // appel terminé ailleurs…) : ce n'est pas un refus.
+    if estRetraitProgramme(callId) { return }
     let jetonRefus = (extra["jetonRefus"] as? String) ?? ""
     marquerTermine(callId)
     let prefs = UserDefaults.standard
@@ -161,6 +164,26 @@ enum AppelsVoip {
   /// l'écouteur d'appel peut ne pas être monté. Voir `appels_ios.dart`.
   static func reveillerFlutter() {
     CanauxAlanya.appelsIos?.invokeMethod("decroche", arguments: nil)
+  }
+
+  // MARK: - Retraits décidés par l'application
+
+  private static var retraits: [String: Date] = [:]
+  private static let verrou = NSLock()
+
+  static func marquerRetraitProgramme(_ ids: [String]) {
+    verrou.lock()
+    defer { verrou.unlock() }
+    let maintenant = Date()
+    for id in ids { retraits[id] = maintenant }
+    retraits = retraits.filter { maintenant.timeIntervalSince($0.value) < 30 }
+  }
+
+  private static func estRetraitProgramme(_ callId: String) -> Bool {
+    verrou.lock()
+    defer { verrou.unlock() }
+    guard let t = retraits[callId] else { return false }
+    return Date().timeIntervalSince(t) < 30
   }
 
   // MARK: - Préférences partagées avec le Dart (SharedPreferences = UserDefaults, préfixe « flutter. »)

@@ -91,6 +91,16 @@ enum CanauxAlanya {
     _ = canal("alanya/sonneries") { appel, resultat in SonneriesIos.traiter(appel, resultat) }
 
     appelsIos = canal("alanya/appels_ios") { _, resultat in resultat(nil) }
+
+    // Le Dart prévient avant de retirer lui-même un appel de CallKit : ce
+    // retrait ne doit pas partir au serveur comme un refus.
+    _ = canal("com.alanya/call_native") { appel, resultat in
+      if appel.method == "markProgrammaticDismiss",
+         let ids = (appel.arguments as? [String: Any])?["callIds"] as? [String] {
+        AppelsVoip.marquerRetraitProgramme(ids)
+      }
+      resultat(nil)
+    }
   }
 
   /// L'identifiant du modèle (« iPhone15,2 »), comme `Build.MODEL` sur Android.
