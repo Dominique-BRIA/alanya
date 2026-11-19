@@ -96,3 +96,41 @@ workflows:
         notify:
           success: true
           failure: true
+
+  # L'APPLICATION iPHONE, SIGNÉE ET ENVOYÉE SUR TESTFLIGHT (19/11/2026).
+  #
+  # Ne part qu'à la main (aucun déclencheur) : le flux Android ci-dessus ne
+  # change pas. À faire une fois le compte Apple Developer ouvert :
+  #   1. Codemagic > Teams > Integrations > Developer Portal : ajouter une clé
+  #      API App Store Connect nommée « Alanya App Store Connect » ;
+  #   2. App Store Connect : créer l'application com.alanya237.work ;
+  #   3. déposer ios/Runner/GoogleService-Info.plist (console Firebase).
+  # La signature (certificat, profils de l'application ET de l'extension de
+  # partage com.alanya237.work.ShareExtension) est récupérée automatiquement.
+  ios-testflight:
+    name: iOS — TestFlight
+    max_build_duration: 90
+    instance_type: mac_mini_m2
+    integrations:
+      app_store_connect: Alanya App Store Connect
+    environment:
+      flutter: 3.44.6
+      xcode: latest
+      cocoapods: default
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.alanya237.work
+    scripts:
+      - name: Dépendances
+        script: flutter pub get
+      - name: Profils de signature
+        script: xcode-project use-profiles
+      - name: Construction de l'IPA
+        script: |
+          flutter build ipa --release --build-number=$((BUILD_NUMBER + 1000)) --export-options-plist=/Users/builder/export_options.plist
+    artifacts:
+      - build/ios/ipa/*.ipa
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true

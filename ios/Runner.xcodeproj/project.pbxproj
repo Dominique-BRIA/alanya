@@ -258,6 +258,7 @@
 				97C146EA1CF9000F007C117D /* Sources */,
 				97C146EB1CF9000F007C117D /* Frameworks */,
 				97C146EC1CF9000F007C117D /* Resources */,
+				A1A7B0000000000000000001 /* Firebase GoogleService-Info.plist */,
 				9705A1C41CF9048500538489 /* Embed Frameworks */,
 				A1A7A0000000000000000031 /* Embed Foundation Extensions */,
 				3B06AD1E1E4923F5004D2608 /* Thin Binary */,
@@ -407,6 +408,28 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "/bin/sh \"$FLUTTER_ROOT/packages/flutter_tools/bin/xcode_backend.sh\" build";
+		};
+		A1A7B0000000000000000001 /* Firebase GoogleService-Info.plist */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Firebase GoogleService-Info.plist";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Le fichier Firebase de l'iPhone (19/11/2026) : copie s'il est present.
+SOURCE=\"${SRCROOT}/Runner/GoogleService-Info.plist\"
+if [ -f \"$SOURCE\" ]; then
+  cp \"$SOURCE\" \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/GoogleService-Info.plist\"
+else
+  echo \"warning: GoogleService-Info.plist absent : notifications inactives sur iPhone\"
+fi
+";
 		};
 /* End PBXShellScriptBuildPhase section */
 
