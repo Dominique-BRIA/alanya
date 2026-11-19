@@ -195,6 +195,12 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  # iPhone (19/11/2026) : CocoaPods seulement. La plupart de nos modules
+  # (WebRTC, ML Kit, notifications locales...) ne connaissent pas encore
+  # Swift Package Manager, et le mélange des deux échouait à la
+  # compilation. Sans effet sur Android.
+  config:
+    enable-swift-package-manager: false
   assets:
     - assets/images/
     # Les images des badges, embarquées : le badge s'affiche tout de suite et
