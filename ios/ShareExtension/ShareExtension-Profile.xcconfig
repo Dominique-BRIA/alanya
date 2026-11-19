@@ -1,2 +1,2 @@
-#include? "../Pods/Target Support Files/Pods-Runner-ShareExtension/Pods-Runner-ShareExtension.profile.xcconfig"
+#include? "../Pods/Target Support Files/Pods-ShareExtension/Pods-ShareExtension.profile.xcconfig"
 #include "../Flutter/Generated.xcconfig"
