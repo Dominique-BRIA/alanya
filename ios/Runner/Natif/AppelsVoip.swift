@@ -105,6 +105,9 @@ enum AppelsVoip {
     // Retrait décidé par l'application (l'écran Flutter reprend l'appel,
     // appel terminé ailleurs…) : ce n'est pas un refus.
     if estRetraitProgramme(callId) { return }
+    // Appel déjà terminé (annulé par l'appelant, décroché ailleurs) : le Dart
+    // l'a noté avant de le retirer de CallKit. Rien à refuser.
+    if estTermine(callId) { return }
     let jetonRefus = (extra["jetonRefus"] as? String) ?? ""
     marquerTermine(callId)
     let prefs = UserDefaults.standard
