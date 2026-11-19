@@ -59,6 +59,24 @@ jobs:
             | while IFS= read -r ligne; do echo "::error::${ligne:0:1000}"; done
           echo "::error::$(tail -n 25 build-ios.log | tr '\n' '|' | cut -c1-3000)"
 
+      # Diagnostic : Flutter résume l'échec d'Xcode en une ligne. On relance
+      # pod install et xcodebuild à nu pour savoir QUELLE cible échoue et
+      # pourquoi, et on publie les lignes utiles en annotations.
+      - name: Diagnostic Xcode
+        if: failure()
+        run: |
+          cd ios
+          pod install 2>&1 | tee pod.log || true
+          grep -E '\[!\]|warning|error' pod.log | sort -u | head -15 \
+            | while IFS= read -r ligne; do echo "::warning::POD ${ligne:0:900}"; done
+          xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build \
+            > xcb.log 2>&1 || true
+          grep -E 'error:|\(in target|BUILD FAILED|Manifest.lock|PODS_ROOT' xcb.log | sort -u | head -40 \
+            | while IFS= read -r ligne; do echo "::error::XCB ${ligne:0:1000}"; done
+          grep -B3 -A3 'sandbox is not in sync' xcb.log | head -30 | tr '\n' '|' | cut -c1-3000 \
+            | while IFS= read -r ligne; do echo "::error::CTX ${ligne}"; done
+
       - name: Application non signée
         run: |
           cd build/ios/iphoneos
