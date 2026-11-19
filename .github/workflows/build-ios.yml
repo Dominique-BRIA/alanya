@@ -54,9 +54,10 @@ jobs:
       - name: Erreurs de compilation
         if: failure()
         run: |
-          grep -E "error:|Error \(Xcode\)|❌|Fatal|fatal error|\[!\]" build-ios.log             | sed -E 's/^.*(ios\/Runner|ios\/ShareExtension|Pods\/)//'             | sort -u | head -45             | while IFS= read -r ligne; do echo "::error::${ligne:0:1000}"; done
-          echo "::error::$(tail -n 25 build-ios.log | tr '
-' '|' | cut -c1-3000)"
+          grep -E 'error:|Error \(Xcode\)|Fatal|fatal error|\[!\]' build-ios.log \
+            | sort -u | head -45 \
+            | while IFS= read -r ligne; do echo "::error::${ligne:0:1000}"; done
+          echo "::error::$(tail -n 25 build-ios.log | tr '\n' '|' | cut -c1-3000)"
 
       - name: Application non signée
         run: |
