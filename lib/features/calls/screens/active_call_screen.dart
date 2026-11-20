@@ -1679,69 +1679,80 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
     }
     // Appel actif (en connexion ou connecté) : barre de contrôles + raccrocher.
     final isVideo = _estVideo(cc);
+    // Une rangée : chaque bouton dans une case de même largeur, centrée.
+    Widget rangee(List<Widget> boutons) => Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [for (final b in boutons) Expanded(child: Center(child: b))],
+        );
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         if (cc.passageVideoPar != null) _invitationVideo(cc),
-        Wrap(
-          alignment: WrapAlignment.center,
-          spacing: 10,
-          runSpacing: 12,
-          children: [
+        /*
+         * DEUX RANGÉES FIXES (20/11/2026, demande du user) : en haut ce qui
+         * agit sur la communication — micro, haut-parleur, vidéo (et le
+         * changement de caméra pendant une vidéo) ; en bas ce qui agit sur
+         * l'appel — message, inviter, transférer. Chaque bouton garde sa place
+         * d'un appel à l'autre, au lieu de glisser d'une ligne à l'autre selon
+         * le nombre de boutons présents.
+         */
+        rangee([
+          _controlBtn(
+            icon: cc.isMuted ? Icons.mic_off : Icons.mic,
+            active: cc.isMuted,
+            label: cc.isMuted ? tr(context, 'muted') : tr(context, 'microphone'),
+            onPressed: cc.toggleMute,
+          ),
+          _boutonSortie(cc),
+          // Appel audio : passer en vidéo (06/11/2026).
+          if (!isVideo && cc.peutPasserEnVideo)
             _controlBtn(
-              icon: cc.isMuted ? Icons.mic_off : Icons.mic,
-              active: cc.isMuted,
-              label: cc.isMuted ? tr(context, 'muted') : tr(context, 'microphone'),
-              onPressed: cc.toggleMute,
-            ),
-            _boutonSortie(cc),
-            // Appel audio : passer en vidéo (06/11/2026).
-            if (!isVideo && cc.peutPasserEnVideo)
-              _controlBtn(
-                icon: Icons.videocam_outlined,
-                active: false,
-                label: tr(context, 'video'),
-                onPressed: () => cc.passerEnVideo(),
-              ),
-            if (isVideo)
-              _controlBtn(
-                icon: cc.isVideoEnabled ? Icons.videocam : Icons.videocam_off,
-                active: !cc.isVideoEnabled,
-                label: tr(context, 'video'),
-                onPressed: cc.toggleVideo,
-              ),
-            if (isVideo)
-              _controlBtn(
-                icon: Icons.cameraswitch,
-                active: false,
-                label: tr(context, 'camera_short'),
-                onPressed: () => cc.switchCamera(),
-              ),
-            _controlBtn(
-              icon: Icons.chat_bubble_outline,
+              icon: Icons.videocam_outlined,
               active: false,
-              label: tr(context, 'message'),
-              onPressed: () => _openChatDuringCall(cc),
+              label: tr(context, 'video'),
+              onPressed: () => cc.passerEnVideo(),
             ),
+          if (isVideo)
             _controlBtn(
-              icon: Icons.person_add_alt_1,
+              icon: cc.isVideoEnabled ? Icons.videocam : Icons.videocam_off,
+              active: !cc.isVideoEnabled,
+              label: tr(context, 'video'),
+              onPressed: cc.toggleVideo,
+            ),
+          if (isVideo)
+            _controlBtn(
+              icon: Icons.cameraswitch,
               active: false,
-              label: tr(context, 'invite'),
-              onPressed: () => _invite(cc),
+              label: tr(context, 'camera_short'),
+              onPressed: () => cc.switchCamera(),
             ),
-            _controlBtn(
-              icon: cc.isTransferring ? Icons.close : Icons.phone_forwarded,
-              active: cc.isTransferring,
-              label: cc.isTransferring ? tr(context, 'cancel') : tr(context, 'transfer_action'),
-              onPressed: cc.isTransferring
-                  ? () {
-                      cc.cancelTransfer(reason: tr(context, 'transfer_cancelled'));
-                      showAppSnackBar(tr(context, 'transfer_cancelled'));
-                    }
-                  : () => _transfer(cc),
-            ),
-          ],
-        ),
+        ]),
+        const SizedBox(height: 14),
+        rangee([
+          _controlBtn(
+            icon: Icons.chat_bubble_outline,
+            active: false,
+            label: tr(context, 'message'),
+            onPressed: () => _openChatDuringCall(cc),
+          ),
+          _controlBtn(
+            icon: Icons.person_add_alt_1,
+            active: false,
+            label: tr(context, 'invite'),
+            onPressed: () => _invite(cc),
+          ),
+          _controlBtn(
+            icon: cc.isTransferring ? Icons.close : Icons.phone_forwarded,
+            active: cc.isTransferring,
+            label: cc.isTransferring ? tr(context, 'cancel') : tr(context, 'transfer_action'),
+            onPressed: cc.isTransferring
+                ? () {
+                    cc.cancelTransfer(reason: tr(context, 'transfer_cancelled'));
+                    showAppSnackBar(tr(context, 'transfer_cancelled'));
+                  }
+                : () => _transfer(cc),
+          ),
+        ]),
         const SizedBox(height: 24),
         _roundBtn(
           icon: Icons.call_end,

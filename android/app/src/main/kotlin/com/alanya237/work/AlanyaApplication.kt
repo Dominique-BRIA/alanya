@@ -93,12 +93,58 @@ class AlanyaApplication : Application() {
                 AffichageAppel.ecranAppelVisible = false
                 AffichageAppel.ecranQuitte(this@AlanyaApplication, appelDe(a), a.isFinishing)
             }
-            override fun onActivityCreated(a: android.app.Activity, b: android.os.Bundle?) {}
+            override fun onActivityCreated(a: android.app.Activity, b: android.os.Bundle?) {
+                if (!estEcranAppel(a)) return
+                val id = appelDe(a)
+                if (id.isNotEmpty()) synchronized(ecransAppel) { ecransAppel[id] = java.lang.ref.WeakReference(a) }
+            }
             override fun onActivityStarted(a: android.app.Activity) {}
             override fun onActivityStopped(a: android.app.Activity) {}
             override fun onActivitySaveInstanceState(a: android.app.Activity, b: android.os.Bundle) {}
-            override fun onActivityDestroyed(a: android.app.Activity) {}
+            override fun onActivityDestroyed(a: android.app.Activity) {
+                if (!estEcranAppel(a)) return
+                synchronized(ecransAppel) { ecransAppel.entries.removeAll { it.value.get() === a || it.value.get() == null } }
+            }
         })
+    }
+
+    /**
+     * LES ÉCRANS D'APPEL NATIFS OUVERTS, par appel (20/11/2026).
+     *
+     * 🐛 A APPELLE B, L'ÉCRAN NATIF S'OUVRE CHEZ B, A RACCROCHE : L'ÉCRAN DE B
+     * CONTINUAIT DE SONNER. L'annulation (push `call_cancelled`, ou Flutter)
+     * retirait bien l'appel de CallKit et coupait NOTRE sonnerie, mais :
+     *  - l'écran du plugin ne se fermait pas : son ordre de fermeture est un
+     *    broadcast adressé à la classe de l'activité, que le receiver qu'elle
+     *    enregistre elle-même ne reçoit pas ;
+     *  - la sonnerie que l'écran relance lui-même (`keepRingingOnFullScreen`,
+     *    gestionnaire de son DU PLUGIN) continuait.
+     * L'appel retiré de la liste (quel que soit le chemin : push, Flutter,
+     * expiration), son écran est donc fermé ICI et cette sonnerie coupée.
+     */
+    private val ecransAppel = HashMap<String, java.lang.ref.WeakReference<android.app.Activity>>()
+    private val principal = android.os.Handler(android.os.Looper.getMainLooper())
+
+    private fun fermerEcranAppel(id: String) {
+        val activite = synchronized(ecransAppel) { ecransAppel.remove(id)?.get() } ?: return
+        principal.post {
+            try {
+                if (!activite.isFinishing && !activite.isDestroyed) {
+                    Log.i(TAG, "écran d'appel fermé : appel retiré id=$id")
+                    activite.finishAndRemoveTask()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "fermeture de l'écran d'appel impossible", e)
+            }
+        }
+    }
+
+    private fun couperSonnerieDuPlugin() {
+        try {
+            FlutterCallkitIncomingPlugin.getInstance()?.getCallkitSoundPlayerManager()?.stop()
+        } catch (e: Exception) {
+            Log.e(TAG, "sonnerie du plugin non coupée", e)
+        }
     }
 
     private fun onActiveCallsChanged() {
@@ -118,6 +164,7 @@ class AlanyaApplication : Application() {
         }
         if (!hasRingingIncoming) {
             CallIncomingHelper.stopSound()
+            couperSonnerieDuPlugin()
             // Même condition que la sonnerie native : couper aussi la sonnerie
             // de liste jouée nativement (accept / decline / timeout / ended, y
             // compris depuis la notification CallKit).
@@ -160,6 +207,9 @@ class AlanyaApplication : Application() {
                 after.optJSONObject(j)?.optString("id") == id
             }
             if (stillThere) continue
+
+            // Appel retiré : son écran d'appel natif se ferme (voir ecransAppel).
+            fermerEcranAppel(id)
 
             // Appel retiré : annuler ses DEUX notifications possibles.
             //
