@@ -1,7 +1,16 @@
+import 'dart:ui' show ImageFilter;
+
 import 'package:flutter/material.dart';
 import '../theme/alanya_theme.dart';
 
 /// NavigationBar flottante style Telegram — arrondie, avec indicateur animé.
+///
+/// ELLE PLANE (20/11/2026, demande du user, à l'identique sur le web) : fond
+/// translucide et flouté, la liste défile DESSOUS et se voit à travers et à
+/// côté d'elle. Le Scaffold de l'accueil passe donc `extendBody: true` : le
+/// contenu descend jusqu'en bas de l'écran au lieu de s'arrêter au-dessus de
+/// la barre, et les listes reçoivent la hauteur de la barre en marge basse
+/// par le MediaQuery, pour que leur dernier élément reste atteignable.
 class AlanyaNavBar extends StatelessWidget {
   const AlanyaNavBar({
     super.key,
@@ -18,23 +27,44 @@ class AlanyaNavBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
+    final fond =
+        themed(context, light: Colors.white, dark: surfacesOf(context).surface);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-      child: Container(
-        height: 64,
+      // SafeArea en bas seulement : la barre reste au-dessus de la barre de
+      // gestes, puisque le contenu passe désormais derrière elle.
+      child: SafeArea(
+        top: false,
+        child: DecoratedBox(
+        // L'ombre reste HORS du flou : posée sur la même boîte que le fond
+        // translucide, elle se verrait à travers et le salirait.
         decoration: BoxDecoration(
-          // Nuit : barre d'onglets en nuit-2, cernée d'un filet indigo.
-          color: themed(context, light: Colors.white, dark: surfacesOf(context).surface),
           borderRadius: BorderRadius.circular(20),
-          border:
-              isDark ? Border.all(color: AlanyaColors.ligne, width: 0.5) : null,
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: isDark ? 0.45 : 0.08),
+              color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.08),
               blurRadius: 20,
               offset: const Offset(0, 4),
             ),
           ],
+        ),
+        child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+        child: Container(
+        height: 64,
+        decoration: BoxDecoration(
+          // Translucide : 62 % de la surface du thème, le reste laisse voir
+          // la liste floutée. Nuit : nuit-2, cernée d'un filet indigo.
+          color: fond.withValues(alpha: 0.62),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isDark
+                ? AlanyaColors.ligne
+                : Colors.white.withValues(alpha: 0.7),
+            width: isDark ? 0.5 : 1,
+          ),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -48,6 +78,10 @@ class AlanyaNavBar extends StatelessWidget {
               ),
             );
           }),
+        ),
+        ),
+        ),
+        ),
         ),
       ),
     );
