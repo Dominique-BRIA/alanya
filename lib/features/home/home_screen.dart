@@ -450,8 +450,6 @@ class _HomeScreenState extends State<HomeScreen> {
         if (!aQuitte) _allerOnglet(0);
       },
       child: Scaffold(
-      // La barre du bas plane : le contenu passe dessous (voir AlanyaNavBar).
-      extendBody: true,
       appBar: AppBar(
         // letterSpacing réduit de 4 à 2 : « ALANYA WORK » fait onze
         // caractères, et l'AppBar porte aussi des actions.
