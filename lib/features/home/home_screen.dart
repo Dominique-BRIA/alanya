@@ -450,6 +450,12 @@ class _HomeScreenState extends State<HomeScreen> {
         if (!aQuitte) _allerOnglet(0);
       },
       child: Scaffold(
+      // La barre du bas flotte au-dessus du contenu (20/11/2026, demande du
+      // user) : la liste passe sous ses marges et se voit à côté et en dessous
+      // d'elle, au lieu d'une bande pleine tout autour. La barre elle-même
+      // reste opaque. Les listes reçoivent sa hauteur en marge basse par le
+      // MediaQuery : leur dernier élément reste atteignable.
+      extendBody: true,
       appBar: AppBar(
         // letterSpacing réduit de 4 à 2 : « ALANYA WORK » fait onze
         // caractères, et l'AppBar porte aussi des actions.
