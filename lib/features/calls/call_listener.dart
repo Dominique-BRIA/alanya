@@ -263,6 +263,60 @@ class _CallListenerState extends State<CallListener>
       }
       InAppNotifier.instance.dismissCall();
     } else if (actionId == 'call_accept') {
+      // Appel VIDÉO décroché depuis la NOTIFICATION : l'écran de sonnerie
+      // s'ouvre à la place, pour couper sa caméra si on le veut (20/11/2026).
+      // Décroché depuis l'écran plein natif, le choix y a déjà été offert.
+      unawaited(_decrocherOuSonner(cc, callId));
+      return;
+    }
+  }
+
+  /// Le « Répondre » d'un appel entrant, venu du natif ou de la notification.
+  ///
+  /// L'écran plein natif offre « Désactiver la vidéo » : décroché depuis lui
+  /// (écran VU pour cet appel, voir `ChoixCameraAppel.kt`), l'appel part avec
+  /// le choix fait. La notification ne l'offre pas : pour un appel VIDÉO, on
+  /// rouvre alors notre écran de sonnerie — aperçu et bouton caméra — au lieu
+  /// de décrocher caméra allumée. Un appel audio décroche toujours.
+  Future<void> _decrocherOuSonner(CallController cc, String? callId) async {
+    final inc = cc.incoming;
+    final id = (callId != null && callId.isNotEmpty) ? callId : inc?.callId;
+    if (id != null && id.isNotEmpty) {
+      bool? video = (inc != null && inc.callId == id) ? inc.callType == "VIDEO" : null;
+      Map<String, dynamic>? natif;
+      if (video == null) {
+        natif = await CallUiNative.appelActif();
+        if (natif != null && natif['callId']?.toString() == id) {
+          video = natif['isVideo'] == true;
+        }
+      }
+      final choix = await CallUiNative.choixCamera(id);
+      if (!mounted) return;
+      if (video == true && !choix.vu) {
+        DebugOverlay.log("CL 📞 vidéo décrochée depuis la notification → écran de sonnerie");
+        await CallUiNative.masquerSilencieusement(id);
+        if (!mounted) return;
+        if (cc.incoming?.callId != id && natif != null) {
+          cc.adopterAppelNatif({...natif, 'isAccepted': false});
+        }
+        if (cc.incoming?.callId == id) {
+          await ouvrirEcranSonnerie(cc);
+          unawaited(cc.prendreLaSonnerie(id));
+          return;
+        }
+        // Rien à reprendre : l'appel est fini ou la trame n'est pas arrivée.
+        // On attend la trame, qui ouvrira l'écran de sonnerie (pas de
+        // décrochage automatique pour une vidéo).
+        _pendingAccept = false;
+        return;
+      }
+    }
+    if (!mounted) return;
+    _accepterMaintenant(cc, callId);
+  }
+
+  void _accepterMaintenant(CallController cc, String? callId) {
+    {
       final inc = cc.incoming;
       if (inc != null &&
           (callId == null || callId.isEmpty || inc.callId == callId)) {
@@ -403,11 +457,13 @@ class _CallListenerState extends State<CallListener>
       DebugOverlay.log("CL 📞 appel entrant: $title (auto=$autoAccept)");
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         if (!mounted || cc.incoming?.callId != inc.callId) return;
-        if (autoAccept) {
+        if (autoAccept && !isVideo) {
           // Accepté depuis le bouton « Répondre » de la notification système.
+          // Pas pour une VIDÉO : elle passe par l'écran de sonnerie, qui
+          // permet de couper sa caméra avant de décrocher (20/11/2026).
           await cc.acceptIncoming();
           if (mounted) _openCallScreen();
-        } else if (_auPremierPlan) {
+        } else if (autoAccept || _auPremierPlan) {
           // L'ÉCRAN PLEIN, AUDIO COMME VIDÉO (06/11/2026). L'appel audio
           // n'avait qu'un bandeau en haut de l'écran, qu'on prenait pour une
           // notification de message. Le bandeau reste, mais comme forme

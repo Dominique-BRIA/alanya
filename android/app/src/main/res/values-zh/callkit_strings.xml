@@ -2,4 +2,7 @@
 <resources>
     <!-- Pilule de l'écran d'appel natif (callkit_incoming_content.xml). -->
     <string name="callkit_incoming_label">来电</string>
+    <!-- Bouton caméra de l'écran d'appel natif (BoutonCameraAppel). -->
+    <string name="callkit_camera_off">关闭视频</string>
+    <string name="callkit_camera_on">开启视频</string>
 </resources>

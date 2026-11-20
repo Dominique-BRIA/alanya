@@ -74,11 +74,43 @@ class ApercuCameraAppel @JvmOverloads constructor(
     private fun cameraAutorisee(): Boolean =
         context.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
 
+    private fun callId(): String = try {
+        (context as? Activity)?.intent
+            ?.getBundleExtra(CallkitConstants.EXTRA_CALLKIT_INCOMING_DATA)
+            ?.getString(CallkitConstants.EXTRA_CALLKIT_ID, "") ?: ""
+    } catch (_: Exception) {
+        ""
+    }
+
+    /** Caméra coupée par « Désactiver la vidéo » : l'aperçu ne s'ouvre pas. */
+    private var coupee = false
+
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
+        // L'écran plein a été VU pour cet appel : son « Répondre » vaut choix
+        // de la caméra (voir ChoixCameraAppel).
+        ChoixCameraAppel.marquerVu(context, callId())
         if (!estAppelVideo() || !cameraAutorisee()) return
+        coupee = ChoixCameraAppel.estCoupee(context, callId())
+        if (coupee) return
         visibility = VISIBLE
         demarrer()
+    }
+
+    /**
+     * « Désactiver la vidéo » (20/11/2026) : la caméra est RENDUE, pas
+     * seulement masquée — elle ne doit plus filmer du tout. « Activer » la
+     * rouvre.
+     */
+    fun appliquerCoupure(coupe: Boolean) {
+        coupee = coupe
+        if (coupe) {
+            arreter()
+            visibility = GONE
+        } else if (estAppelVideo() && cameraAutorisee()) {
+            visibility = VISIBLE
+            demarrer()
+        }
     }
 
     override fun onDetachedFromWindow() {
@@ -90,7 +122,7 @@ class ApercuCameraAppel @JvmOverloads constructor(
         super.onWindowVisibilityChanged(visibility)
         // Écran quitté sans être fermé : la caméra se rend, et revient au retour.
         if (visibility != VISIBLE) arreter()
-        else if (this.visibility == VISIBLE) demarrer()
+        else if (this.visibility == VISIBLE && !coupee) demarrer()
     }
 
     private fun demarrer() {

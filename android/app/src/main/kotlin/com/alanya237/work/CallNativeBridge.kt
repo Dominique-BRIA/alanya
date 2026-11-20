@@ -74,6 +74,18 @@ object CallNativeBridge {
                         val quoi = call.argument<String>("quoi") ?: ""
                         result.success(activite != null && AffichageAppel.ouvrir(activite, quoi))
                     }
+                    // Le choix de la caméra fait sur l'écran d'appel natif
+                    // (20/11/2026) : écran vu pour cet appel, et vidéo coupée.
+                    "choixCameraAppel" -> {
+                        val ctx = appContext
+                        val callId = call.argument<String>("callId")?.trim() ?: ""
+                        result.success(
+                            mapOf(
+                                "vu" to (ctx != null && ChoixCameraAppel.estVu(ctx, callId)),
+                                "coupee" to (ctx != null && ChoixCameraAppel.estCoupee(ctx, callId)),
+                            )
+                        )
+                    }
                     // Mode de sonnerie du téléphone : 0 silencieux, 1 vibreur,
                     // 2 normal.
                     "getRingerMode" -> {

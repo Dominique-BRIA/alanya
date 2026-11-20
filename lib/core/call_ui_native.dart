@@ -255,6 +255,22 @@ class CallUiNative {
     return null;
   }
 
+  /// LE CHOIX DE LA CAMÉRA FAIT SUR L'ÉCRAN NATIF (20/11/2026) : l'écran plein
+  /// a-t-il été VU pour [callId], et « Désactiver la vidéo » y a-t-il été
+  /// pressé ? (`ChoixCameraAppel.kt`). Hors Android, ou si le natif ne répond
+  /// pas : ni vu, ni coupée.
+  static Future<({bool vu, bool coupee})> choixCamera(String callId) async {
+    final id = callId.trim();
+    if (!Platform.isAndroid || id.isEmpty) return (vu: false, coupee: false);
+    try {
+      final r = await _natif.invokeMapMethod<String, dynamic>('choixCameraAppel', {'callId': id});
+      return (vu: r?['vu'] == true, coupee: r?['coupee'] == true);
+    } catch (e) {
+      debugPrint('[CallUiNative] choixCameraAppel : $e');
+      return (vu: false, coupee: false);
+    }
+  }
+
   /// L'écran d'appel peut-il s'ouvrir par-dessus le verrouillage ?
   ///
   /// Renvoie vrai sous Android 14, où l'autorisation est acquise d'office, et

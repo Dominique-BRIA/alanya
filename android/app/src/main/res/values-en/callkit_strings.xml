@@ -2,4 +2,7 @@
 <resources>
     <!-- Pilule de l'écran d'appel natif (callkit_incoming_content.xml). -->
     <string name="callkit_incoming_label">INCOMING CALL</string>
+    <!-- Bouton caméra de l'écran d'appel natif (BoutonCameraAppel). -->
+    <string name="callkit_camera_off">Turn off video</string>
+    <string name="callkit_camera_on">Turn on video</string>
 </resources>

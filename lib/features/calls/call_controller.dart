@@ -1260,9 +1260,20 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
     _rt.ivrBack(session.callId);
   }
 
+  /// « Désactiver la vidéo » pressé sur l'écran d'appel NATIF (20/11/2026) :
+  /// l'appel commence caméra coupée, comme depuis l'écran Flutter.
+  Future<void> _appliquerChoixCameraNatif(String callId) async {
+    final choix = await CallUiNative.choixCamera(callId);
+    if (choix.coupee) {
+      cameraEntranteActive = false;
+      traceAppel("appel $callId décroché caméra coupée (écran natif)");
+    }
+  }
+
   Future<void> acceptIncoming() async {
     final inc = incoming;
     if (inc == null || myUserId == null) return;
+    await _appliquerChoixCameraNatif(inc.callId);
 
     // ⚠️ MÊME GARDE QUE `acceptById`, et pour la même raison. Ces deux méthodes
     // acceptent le même appel par des chemins différents — l'interface pour
@@ -1406,6 +1417,7 @@ class CallController extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<bool> acceptById(String callId, {String? nomAffiche}) async {
     if (myUserId == null) return false;
+    await _appliquerChoixCameraNatif(callId);
     // Un appel déjà en cours signifie que la trame est arrivée entre-temps et
     // que le chemin normal a fait le travail : ne rien refaire.
     if (activeCallId == callId) return true;

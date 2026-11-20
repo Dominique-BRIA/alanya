@@ -51,6 +51,7 @@
       Voir ApercuCameraAppel.kt.
     -->
     <com.alanya237.work.ApercuCameraAppel
+        android:id="@+id/apercuCameraAppel"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
@@ -196,6 +197,20 @@
       `MainAxisAlignment.spaceEvenly` de la Row Flutter, dont l'écart fixe de
       64 dp compte comme un troisième enfant.
     -->
+    <!--
+      Ajout d'Alanya Work (20/11/2026) : « Désactiver la vidéo », au-dessus de
+      Refuser / Répondre, comme sur l'écran Flutter et sur le web. Visible pour
+      un appel vidéo seulement ; coupée, l'aperçu s'éteint et l'appel commence
+      caméra coupée. Voir BoutonCameraAppel.kt.
+    -->
+    <com.alanya237.work.BoutonCameraAppel
+        android:id="@+id/btnCameraAppel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_above="@+id/llAction"
+        android:layout_centerHorizontal="true"
+        android:layout_marginBottom="28dp" />
+
     <LinearLayout
         android:id="@+id/llAction"
         android:layout_width="match_parent"

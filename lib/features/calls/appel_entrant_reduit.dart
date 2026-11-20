@@ -27,6 +27,14 @@ void afficherAppelEntrantReduit(CallController cc) {
       ouvrirEcranSonnerie(cc);
     },
     onAccept: () async {
+      // VIDÉO : « Répondre » rouvre l'écran de sonnerie, le seul qui permette
+      // de couper sa caméra avant de décrocher (20/11/2026, sécurité). Un
+      // appel audio décroche toujours en un geste.
+      if (inc.callType == "VIDEO") {
+        InAppNotifier.instance.dismissCall();
+        await ouvrirEcranSonnerie(cc);
+        return;
+      }
       await cc.acceptIncoming();
       await ouvrirEcranSonnerie(cc);
     },
