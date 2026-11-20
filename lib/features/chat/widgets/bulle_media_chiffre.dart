@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' show ImageFilter;
 
@@ -527,39 +526,10 @@ class MediaChiffreIndisponible extends StatelessWidget {
   final Color couleur;
 
   @override
-  Widget build(BuildContext context) {
-    // Mêmes bornes que `.mc-visuel` côté web : la bulle ne change pas de
-    // largeur selon qu'on a la clé ou non.
-    final largeur = math.min(260.0, MediaQuery.sizeOf(context).width * 0.7);
-    return Container(
-      width: largeur,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
-      decoration: BoxDecoration(
-        color: couleur.withValues(alpha: 0.07),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.no_encryption_outlined,
-              size: 26, color: couleur.withValues(alpha: 0.75)),
-          const SizedBox(height: 8),
-          // Le filet du milieu — ce que le professeur disait avoir vu disparaître.
-          Container(
-            width: 44,
-            height: 1,
-            color: couleur.withValues(alpha: 0.25),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            tr(context, 'e2ee_media_indisponible'),
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 12, height: 1.35, color: couleur),
-          ),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Text(
+    tr(context, 'e2ee_media_indisponible'),
+    style: TextStyle(fontStyle: FontStyle.italic, fontSize: 13, color: couleur),
+  );
 }
 
 class _ImagePleinEcran extends StatelessWidget {
