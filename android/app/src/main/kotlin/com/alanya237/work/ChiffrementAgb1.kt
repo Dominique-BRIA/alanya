@@ -54,7 +54,7 @@ class ChiffrementAgb1(private val canal: MethodChannel) {
                         jeton = appel.argument<Int>("jeton") ?: 0,
                     )
                     principal.post { resultat.success(r) }
-                } catch (e: Exception) {
+                } catch (e: Throwable) {
                     principal.post { resultat.error("ECHEC", e.message, null) }
                 }
             }
@@ -69,7 +69,7 @@ class ChiffrementAgb1(private val canal: MethodChannel) {
                     principal.post { resultat.success(clair) }
                 } catch (e: FichierInvalide) {
                     principal.post { resultat.error("INVALIDE", e.message, null) }
-                } catch (e: Exception) {
+                } catch (e: Throwable) {
                     principal.post { resultat.error("ECHEC", e.message, null) }
                 }
             }
@@ -86,7 +86,7 @@ class ChiffrementAgb1(private val canal: MethodChannel) {
                     principal.post { resultat.success(true) }
                 } catch (e: FichierInvalide) {
                     principal.post { resultat.error("INVALIDE", e.message, null) }
-                } catch (e: Exception) {
+                } catch (e: Throwable) {
                     principal.post { resultat.error("ECHEC", e.message, null) }
                 }
             }

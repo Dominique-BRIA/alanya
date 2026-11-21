@@ -71,6 +71,15 @@ class TransferForegroundService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /**
+     * Android 15 : un service « dataSync » a droit à 6 h par jour. Au bout,
+     * le système appelle ceci et ferme l'application si le service ne s'arrête
+     * pas dans les secondes qui suivent (21/11/2026).
+     */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        arreteTout()
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_ARRETER -> {
@@ -104,14 +113,23 @@ class TransferForegroundService : Service() {
             .setContentIntent(pending)
             .build()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIF_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
-            )
-        } else {
-            startForeground(NOTIF_ID, notification)
+        // Refus du système (quota de 6 h atteint, arrière-plan) : rattrapé,
+        // l'exception fermait l'application. Le transfert continue sans la
+        // protection du service.
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIF_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+                )
+            } else {
+                startForeground(NOTIF_ID, notification)
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("TransferForegroundService", "service refusé", e)
+            stopSelf()
+            return
         }
 
         prendLesVerrous()

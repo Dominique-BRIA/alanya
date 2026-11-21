@@ -12,6 +12,7 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.util.Log
 import android.os.IBinder
 import android.os.PowerManager
 
@@ -109,7 +110,23 @@ class CallForegroundService : Service() {
             ) {
                 type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
             }
-            startForeground(NOTIF_ID, notification, type)
+            // 🐛 CRASH POSSIBLE (21/11/2026) : Android 14+ refuse un service
+            // micro ou caméra que l'application ne peut pas tenir à ce moment
+            // (hors de l'écran, permission retirée) — l'exception levée ici
+            // fermait l'application. On retente au micro seul, puis on renonce
+            // proprement : l'appel continue sans la protection du service.
+            try {
+                startForeground(NOTIF_ID, notification, type)
+            } catch (e: Exception) {
+                Log.w("CallForegroundService", "type $type refusé", e)
+                try {
+                    startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+                } catch (e2: Exception) {
+                    Log.w("CallForegroundService", "service d'appel refusé", e2)
+                    stopSelf()
+                    return
+                }
+            }
         } else {
             startForeground(NOTIF_ID, notification)
         }

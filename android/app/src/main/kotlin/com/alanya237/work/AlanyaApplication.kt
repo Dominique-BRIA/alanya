@@ -63,6 +63,8 @@ class AlanyaApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // En premier : un crash pendant la suite du démarrage doit être noté.
+        JournalCrash.installer(this)
         callkitPrefs = getSharedPreferences(CALLKIT_PREFS, MODE_PRIVATE)
         activeCallsSnapshot = readActiveCalls()
         callkitPrefs.registerOnSharedPreferenceChangeListener(activeCallsListener)

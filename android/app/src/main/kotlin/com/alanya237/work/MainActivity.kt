@@ -139,13 +139,18 @@ class MainActivity : FlutterFragmentActivity() {
                             putExtra(CallForegroundService.EXTRA_TITRE, titre)
                             putExtra(CallForegroundService.EXTRA_VIDEO, video)
                         }
-                        // startForegroundService à partir d'Android 8 : le
-                        // service doit alors appeler startForeground() dans les
-                        // 5 s, sinon le système le tue avec une ANR.
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            startForegroundService(i)
+                        // 🐛 CRASH POSSIBLE (21/11/2026) : la communication
+                        // s'établit parfois application en arrière-plan (on
+                        // appelle puis on quitte l'écran). Android 14+ refuse
+                        // alors un service micro/caméra, et l'exception levée
+                        // DANS le service ferme l'application. Hors de l'écran,
+                        // le démarrage attend donc le retour au premier plan
+                        // (onStart) ; et tout refus est rattrapé ici.
+                        if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) {
+                            serviceAppelEnAttente = null
+                            demarrerServiceAppel(i)
                         } else {
-                            startService(i)
+                            serviceAppelEnAttente = i
                         }
                         resultat.success(true)
                     }
@@ -204,11 +209,14 @@ class MainActivity : FlutterFragmentActivity() {
                         resultat.success(true)
                     }
                     "arreterServiceAppel" -> {
-                        startService(
-                            Intent(this, CallForegroundService::class.java).apply {
-                                action = CallForegroundService.ACTION_ARRETER
-                            },
-                        )
+                        serviceAppelEnAttente = null
+                        runCatching {
+                            startService(
+                                Intent(this, CallForegroundService::class.java).apply {
+                                    action = CallForegroundService.ACTION_ARRETER
+                                },
+                            )
+                        }
                         resultat.success(true)
                     }
                     else -> resultat.notImplemented()
@@ -414,6 +422,31 @@ class MainActivity : FlutterFragmentActivity() {
     override fun onStart() {
         super.onStart()
         detecteurCapture?.demarrer()
+        // Service d'appel demandé pendant que l'application était hors de
+        // l'écran : on le démarre maintenant qu'elle est revenue.
+        serviceAppelEnAttente?.let {
+            serviceAppelEnAttente = null
+            demarrerServiceAppel(it)
+        }
+    }
+
+    /** Service d'appel demandé hors de l'écran, démarré au retour (voir onStart). */
+    private var serviceAppelEnAttente: Intent? = null
+
+    private fun demarrerServiceAppel(i: Intent) {
+        // startForegroundService à partir d'Android 8 : le service doit alors
+        // appeler startForeground() dans les 5 s. Un refus du système
+        // (ForegroundServiceStartNotAllowedException) ne doit pas fermer
+        // l'application : l'appel continue, simplement moins protégé.
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(i)
+            } else {
+                startService(i)
+            }
+        } catch (e: Exception) {
+            Log.w("MainActivity", "service d'appel refusé par le système", e)
+        }
     }
 
     override fun onStop() {

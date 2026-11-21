@@ -86,6 +86,15 @@ object CallNativeBridge {
                             )
                         )
                     }
+                    // Le dernier crash noté par JournalCrash (21/11/2026).
+                    "lireDernierCrash" -> {
+                        val ctx = appContext
+                        result.success(if (ctx != null) JournalCrash.lire(ctx) else null)
+                    }
+                    "effacerDernierCrash" -> {
+                        appContext?.let { JournalCrash.effacer(it) }
+                        result.success(null)
+                    }
                     // Mode de sonnerie du téléphone : 0 silencieux, 1 vibreur,
                     // 2 normal.
                     "getRingerMode" -> {

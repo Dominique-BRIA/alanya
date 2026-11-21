@@ -1,3 +1,4 @@
+import '../../core/crash_journal.dart';
 import 'dart:async';
 import '../../l10n/app_localizations.dart';
 
@@ -279,6 +280,10 @@ class _HomeScreenState extends State<HomeScreen> {
       // Réglages dont dépend l'affichage d'un appel (07/11/2026) : rappelés
       // tant qu'un point critique manque, voir FiabiliteAppels.
       await FiabiliteAppels.verifierAuDemarrage(context);
+      if (!mounted) return;
+      // La dernière fermeture brutale, s'il y en a eu une : montrée une fois,
+      // à partager (voir CrashJournal).
+      await CrashJournal.verifierAuDemarrage(context);
       if (!mounted) return;
       await _assureLeSuiviDePosition();
       // Le lien Alanya qui a lancé l'application passe APRÈS les questions
