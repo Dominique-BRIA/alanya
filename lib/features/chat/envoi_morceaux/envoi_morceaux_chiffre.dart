@@ -10,6 +10,7 @@ import '../../../services/e2ee/e2ee_apercus.dart';
 import '../../../services/e2ee/e2ee_fil.dart';
 import '../../../services/e2ee/e2ee_groupe_fil.dart' show uuidV4;
 import '../../../services/e2ee/e2ee_media.dart';
+import '../../../services/e2ee/e2ee_media_envoi.dart' show EnvoiAnnule;
 import '../../../services/e2ee/e2ee_media_fichier.dart';
 import '../../../widgets/media/media_picker_sheet.dart' show MediaPickResult;
 import 'decoupage_morceaux.dart';
@@ -155,6 +156,11 @@ class SuiviEnvoisMorceaux {
     /// L'avancement du CHIFFREMENT, de 0 à 1 : la bulle l'affiche avant que le
     /// premier octet parte (chapitre 47).
     void Function(double fraction)? onPreparation,
+    /// Vrai quand l'utilisateur a annulé pendant la préparation (21/11/2026).
+    /// Regardé après le chiffrement, puis après la réservation — AVANT que le
+    /// cliquet n'avance et que le message ne soit préparé. Lève alors
+    /// [EnvoiAnnule] ; le chiffré provisoire et la réservation sont effacés.
+    bool Function()? annule,
   }) async {
     final api = _api!, transport = _transport!, racine = _racine!;
     final mime = fichier.mimeType;
@@ -177,6 +183,7 @@ class SuiviEnvoisMorceaux {
 
     ReservationEnvoi? r;
     try {
+      if (annule?.call() == true) throw const EnvoiAnnule();
       // 3. Réservation.
       r = await api.reserver(
         taille: f.taille,
@@ -202,6 +209,8 @@ class SuiviEnvoisMorceaux {
         sensible: fichier.sensible,
         protection: fichier.sensible ? fichier.protectionPdf : null,
       );
+
+      if (annule?.call() == true) throw const EnvoiAnnule();
 
       // 5. Préparation (le cliquet avance ICI) et programmation.
       final publication = await fil.preparerMedia(
@@ -353,7 +362,8 @@ class SuiviEnvoisMorceaux {
     await _api?.abandonner(r.id, r.jeton).catchError((_) {});
     await _effacerDossier('$_racine/$dossierEnvoisMorceaux/${r.id}');
     if (s != null && !s._fin.isCompleted) {
-      s._fin.completeError(StateError('envoi abandonné'));
+      // Un abandon voulu, que les appelants reconnaissent (21/11/2026).
+      s._fin.completeError(const EnvoiAnnule());
     }
   }
 

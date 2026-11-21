@@ -13,6 +13,14 @@ import 'e2ee_media.dart';
 import 'e2ee_media_fichier.dart';
 import 'e2ee_media_ouverture.dart';
 
+/// Un envoi annulé par l'utilisateur (21/11/2026) : ce n'est pas un échec,
+/// rien à signaler, rien à relancer.
+class EnvoiAnnule implements Exception {
+  const EnvoiAnnule();
+  @override
+  String toString() => 'EnvoiAnnule';
+}
+
 /// ENVOYER UN MÉDIA CHIFFRÉ DEPUIS LE TÉLÉPHONE — cours, chapitre 25 (lot C).
 ///
 /// Jumeau de `envoyerMediaChiffre` côté web, dans le même ordre et pour les
@@ -49,6 +57,11 @@ class EnvoiMediaChiffre {
     void Function(double ratio)? onProgression,
     /// Une réponse vocale à un statut (01/11/2026).
     String? statutCite,
+    /// Vrai quand l'utilisateur a annulé (21/11/2026) : regardé après le
+    /// chiffrement et après le téléversement — on n'interrompt pas un
+    /// chiffrement au milieu, on ne va simplement pas plus loin. Lève alors
+    /// [EnvoiAnnule].
+    bool Function()? annule,
   }) async {
     /*
      * 🔴 UN FICHIER RESTÉ SUR LE DISQUE N'EST JAMAIS CHARGÉ (21/11/2026).
@@ -81,9 +94,11 @@ class EnvoiMediaChiffre {
     // nom et type neutres.
     final ({String id, String cle, String empreinte, int taille}) chiffre;
     if (source != null) {
-      chiffre = await _chiffrerEtTeleverserDepuisLeDisque(medias, source, avancement);
+      chiffre = await _chiffrerEtTeleverserDepuisLeDisque(
+          medias, source, avancement, annule);
     } else {
       final f = await chiffrerHorsDuFil(octets!);
+      if (annule?.call() == true) throw const EnvoiAnnule();
       final envoye = await medias.upload(
         f.chiffre,
         'chiffre.bin',
@@ -94,6 +109,10 @@ class EnvoiMediaChiffre {
       chiffre = (id: envoye.id, cle: f.cle, empreinte: f.empreinte, taille: octets.length);
     }
     onProgression?.call(1);
+    // Annulé pendant le téléversement : le fichier chiffré reste orphelin chez
+    // le serveur (illisible sans sa clé, qui n'est allée nulle part), et
+    // aucun message ne part.
+    if (annule?.call() == true) throw const EnvoiAnnule();
 
     final d = DescripteurMedia(
       id: chiffre.id,
@@ -146,6 +165,7 @@ class EnvoiMediaChiffre {
     MediaRepository medias,
     String source,
     void Function(int, int)? avancement,
+    bool Function()? annule,
   ) async {
     final dossier = await getTemporaryDirectory();
     final provisoire =
@@ -153,6 +173,7 @@ class EnvoiMediaChiffre {
     try {
       final f = await chiffrerVersFichierHorsDuFil(
           destination: provisoire, source: source);
+      if (annule?.call() == true) throw const EnvoiAnnule();
       final envoye = await medias.uploadFromFile(
         provisoire,
         'chiffre.bin',

@@ -806,6 +806,10 @@ class EnvoiChiffreEnCours extends StatelessWidget {
     required this.progression,
     this.preparation,
     this.libellePreparation,
+    this.attenteReseau = false,
+    this.erreur,
+    this.onReessayer,
+    this.onSupprimer,
     this.enPause,
     this.onPause,
     this.onReprendre,
@@ -816,6 +820,16 @@ class EnvoiChiffreEnCours extends StatelessWidget {
   /// par défaut, « Compression… » quand une vidéo se compresse encore
   /// (21/11/2026).
   final String? libellePreparation;
+
+  /// L'envoi attend le réseau et repartira seul (21/11/2026) : une horloge,
+  /// pas une croix — rien n'est perdu.
+  final bool attenteReseau;
+
+  /// L'envoi a échoué : non nul, la bulle le dit et propose [onReessayer] et
+  /// [onSupprimer] (21/11/2026). Vide : le message générique.
+  final String? erreur;
+  final VoidCallback? onReessayer;
+  final VoidCallback? onSupprimer;
 
   /// Pause, reprise et annulation d'un envoi en morceaux (29/10/2026). Nuls
   /// tant que l'envoi n'est pas confié à Android (préparation) : pas de bouton.
@@ -868,7 +882,18 @@ class EnvoiChiffreEnCours extends StatelessWidget {
           Center(
             child: ListenableBuilder(
               listenable: Listenable.merge([progression, preparation, enPause]),
-              builder: (context, _) => enPause?.value == true
+              builder: (context, _) => onReessayer != null
+                  ? _echec(context)
+                  : attenteReseau
+                  ? Column(mainAxisSize: MainAxisSize.min, children: [
+                      const Icon(Icons.schedule, size: 40, color: Colors.white),
+                      const SizedBox(height: 4),
+                      Text(tr(context, 'waiting_for_connection'),
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 12)),
+                    ])
+                  : enPause?.value == true
                   ? Column(mainAxisSize: MainAxisSize.min, children: [
                       const Icon(Icons.pause_circle_outline,
                           size: 40, color: Colors.white),
@@ -912,6 +937,41 @@ class EnvoiChiffreEnCours extends StatelessWidget {
         ]),
       ),
     );
+  }
+
+  /// Un envoi échoué : la raison, puis « Réessayer » et « Supprimer ».
+  Widget _echec(BuildContext context) {
+    final texte = (erreur ?? '').trim().isEmpty
+        ? tr(context, 'send_failed_media')
+        : erreur!;
+    Widget bouton(IconData icone, String libelle, VoidCallback? surAppui) =>
+        TextButton.icon(
+          onPressed: surAppui,
+          style: TextButton.styleFrom(
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            visualDensity: VisualDensity.compact,
+          ),
+          icon: Icon(icone, size: 18),
+          label: Text(libelle, style: const TextStyle(fontSize: 12)),
+        );
+    return Column(mainAxisSize: MainAxisSize.min, children: [
+      const Icon(Icons.error_outline, size: 34, color: Colors.white),
+      const SizedBox(height: 4),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        child: Text(texte,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.white, fontSize: 12)),
+      ),
+      const SizedBox(height: 4),
+      Row(mainAxisSize: MainAxisSize.min, children: [
+        bouton(Icons.refresh, tr(context, 'retry'), onReessayer),
+        bouton(Icons.delete_outline, tr(context, 'delete'), onSupprimer),
+      ]),
+    ]);
   }
 
   /// L'anneau, son pourcentage, et l'étape en cours sous lui : « Chiffrement

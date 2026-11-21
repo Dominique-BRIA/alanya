@@ -13,6 +13,7 @@ import '../../core/compression_envoi.dart';
 import '../../core/compression_image.dart' show ResultatCompression;
 import '../../core/connectivity_service.dart';
 import '../../core/locale_controller.dart';
+import '../../core/message_cache.dart';
 import '../../core/plafond_media.dart';
 import '../../core/realtime_client.dart';
 import '../../l10n/app_localizations.dart';
@@ -25,31 +26,42 @@ import 'envoi_media.dart';
 import 'envoi_media_store.dart';
 import 'envoi_morceaux/envoi_morceaux_chiffre.dart';
 
-/// LES ENVOIS QUI ATTENDENT LA FIN D'UNE COMPRESSION (21/11/2026).
+/// LES ENVOIS DE MÉDIAS QUI VIVENT HORS DE L'ÉCRAN DE DISCUSSION (21/11/2026).
 ///
 /// 🔴 « LA COMPRESSION DOIT CONTINUER MÊME SI ON QUITTE LA CONVERSATION, MÊME
 /// SI L'APPLICATION EST FERMÉE, MÊME SI ON SORT DE L'APPLICATION » (user).
+/// Puis : « si on veut annuler l'envoi d'un fichier, ou s'il échoue, un moyen
+/// de le relancer existe ? » (user, même jour).
 ///
-/// On appuie sur Envoyer pendant que la vidéo se compresse : l'écran d'aperçu
-/// se ferme, et c'est CE SERVICE, et non l'écran de discussion, qui attend la
-/// fin de la compression puis lance l'envoi ordinaire — le magasin des envois
-/// en clair, ou l'envoi chiffré en morceaux. Aucun écran n'est nécessaire :
+/// Ce service porte un envoi de médias à travers quatre états, sans écran :
 ///
-///   · on quitte la discussion → rien ne change, elle remontre la bulle
-///     « Compression… » quand on y revient ;
-///   · on sort de l'application → une entrée du [CentreTransferts] tient le
-///     service Android de premier plan, donc le processus, donc la
-///     compression ;
-///   · Android ferme quand même l'application → l'envoi est RANGÉ SUR LE
-///     DISQUE dès le départ, et repris au lancement suivant ([reprendre]) :
-///     la vidéo est recompressée depuis l'original, puis envoyée.
+///   · [EtatPreparation.compression] : Envoyer a été pressé pendant la
+///     compression de ses vidéos ; on attend qu'elle finisse ;
+///   · [EtatPreparation.envoi] : le fichier se chiffre et part, par les
+///     chemins habituels — magasin des envois en clair, envoi chiffré en
+///     morceaux (Android continue application fermée), repli d'un seul bloc ;
+///   · [EtatPreparation.attenteReseau] : pas de réseau ; il repart seul au
+///     retour du réseau ;
+///   · [EtatPreparation.echec] : un refus ; la bulle propose « Réessayer » et
+///     « Supprimer ».
 ///
-/// ⚠️ RIEN NE PART AVANT LA FIN DE LA COMPRESSION : l'original enverrait les
-/// mégaoctets qu'on est justement en train de retirer.
+/// Il reçoit aussi les envois CHIFFRÉS ratés de l'écran de discussion : ils
+/// n'avaient ni file hors ligne ni « Réessayer », la bulle disparaissait.
 ///
-/// ⚠️ LE CHIFFREMENT NE CHANGE PAS : un fil chiffré passe par les mêmes
-/// fonctions que l'écran de discussion (`SuiviEnvoisMorceaux.lancer`, repli
-/// `EnvoiMediaChiffre.envoyer`), qui ne dépendaient déjà d'aucun écran.
+/// ⚠️ TENIR SANS ÉCRAN :
+///   · une entrée du [CentreTransferts] pendant la compression tient le
+///     service Android de premier plan, donc le processus ;
+///   · l'envoi est RANGÉ SUR LE DISQUE (stockage privé de l'application) et
+///     repris au lancement suivant si Android ferme quand même l'application.
+///
+/// ⚠️ MÉMOIRE : une vidéo n'est jamais lue ici. Seuls les fichiers qui
+/// n'existaient déjà qu'en mémoire (photos réduites, quelques Mo) sont écrits
+/// sur le disque pour être rangés, et relus à la reprise.
+///
+/// ⚠️ CHIFFREMENT : rien n'est chiffré ici. Un fil chiffré passe par les mêmes
+/// fonctions que l'écran (`SuiviEnvoisMorceaux.lancer`,
+/// `EnvoiMediaChiffre.envoyer`) ; un nouvel essai rechiffre avec une clé
+/// neuve. Rien ne part jamais en clair vers le serveur dans un fil chiffré.
 class PreparationsEnvoi extends ChangeNotifier {
   PreparationsEnvoi._();
   static final instance = PreparationsEnvoi._();
@@ -66,8 +78,7 @@ class PreparationsEnvoi extends ChangeNotifier {
   PileE2ee? Function()? _pile;
   bool _relu = false;
 
-  /// Les envois en préparation d'une conversation : l'écran en fait des
-  /// bulles « Compression… ».
+  /// Les envois d'une conversation : l'écran en fait des bulles.
   List<PreparationEnCours> pour(String convId) =>
       _enCours.values.where((p) => p.convId == convId).toList();
 
@@ -99,16 +110,20 @@ class PreparationsEnvoi extends ChangeNotifier {
     await _reprendreDuDisque();
   }
 
-  /// Lance un envoi pressé PENDANT la compression de ses vidéos.
+  // ═══════════════════════ LES ENTRÉES ═══════════════════════
+
+  /// Un envoi pressé PENDANT la compression de ses vidéos.
   ///
   /// [fichiers] : la liste telle qu'à l'appui sur Envoyer (des originaux) ;
-  /// [compresses] : la même, compressée, quand la compression a fini.
+  /// [compresses] : la même, compressée, quand la compression a fini ;
+  /// [annulerCompression] : arrête la compression (« Annuler » de la bulle).
   /// [chiffre] : le fil est chiffré — [pairId] nul pour un groupe.
   Future<void> lancer({
     required String convId,
     required List<MediaPickResult> fichiers,
     required Future<List<MediaPickResult>> compresses,
     required ValueListenable<double> avancement,
+    VoidCallback? annulerCompression,
     required String? legende,
     required List<Map<String, String>> mentions,
     required String? replyToId,
@@ -118,7 +133,7 @@ class PreparationsEnvoi extends ChangeNotifier {
     required String? moi,
   }) async {
     final p = PreparationEnCours._(
-      id: "tmp-compression-${DateTime.now().microsecondsSinceEpoch}",
+      id: "tmp-preparation-${DateTime.now().microsecondsSinceEpoch}",
       convId: convId,
       fichiers: fichiers,
       legende: legende,
@@ -129,7 +144,9 @@ class PreparationsEnvoi extends ChangeNotifier {
       pairId: pairId,
       moi: moi,
       creeA: DateTime.now(),
+      etat: EtatPreparation.compression,
     );
+    p._annulerCompression = annulerCompression;
     _enCours[p.id] = p;
     notifyListeners();
     _annoncer(p);
@@ -148,59 +165,136 @@ class PreparationsEnvoi extends ChangeNotifier {
     } finally {
       avancement.removeListener(suivre);
     }
-    p._prets = prets;
-    await _envoyer(p, prets);
+    _retirerAnnonce(p);
+    if (p.annule) return;
+    p.fichiers = prets;
+    p.compresses = true;
+    await _ranger(p);
+    await _envoyer(p);
+  }
+
+  /// Un envoi CHIFFRÉ que l'écran de discussion n'a pas pu faire partir : il
+  /// attend le réseau ([reseau]) ou montre son échec, avec « Réessayer ».
+  ///
+  /// [fichier] est déjà prêt (compressé) : il repart tel quel, chiffré de
+  /// nouveau avec une clé neuve.
+  Future<void> confierApresEchec({
+    required String convId,
+    required MediaPickResult fichier,
+    required String legende,
+    required String? replyToId,
+    required bool vueUnique,
+    required String? pairId,
+    required String moi,
+    required bool reseau,
+    String? erreur,
+  }) async {
+    final p = PreparationEnCours._(
+      id: "tmp-preparation-${DateTime.now().microsecondsSinceEpoch}",
+      convId: convId,
+      fichiers: [fichier],
+      legende: legende.isEmpty ? null : legende,
+      mentions: const [],
+      replyToId: replyToId,
+      vueUnique: vueUnique,
+      chiffre: true,
+      pairId: pairId,
+      moi: moi,
+      creeA: DateTime.now(),
+      etat: reseau ? EtatPreparation.attenteReseau : EtatPreparation.echec,
+    );
+    p.compresses = true;
+    p.erreur = erreur;
+    _enCours[p.id] = p;
+    notifyListeners();
+    await _ranger(p);
+    // Le réseau est peut-être déjà revenu entre-temps.
+    if (reseau) _auRetourDuReseau();
+  }
+
+  // ═══════════════════════ LES GESTES ═══════════════════════
+
+  /// « Annuler » ou « Supprimer » : la compression s'arrête, rien ne part, et
+  /// l'envoi est oublié — y compris de la reprise au prochain lancement.
+  Future<void> annuler(String id) async {
+    final p = _enCours[id];
+    if (p == null) return;
+    p.annule = true;
+    p._annulerCompression?.call();
+    await _oublier(p);
+  }
+
+  /// « Réessayer » sur un envoi échoué.
+  void reessayer(String id) {
+    final p = _enCours[id];
+    if (p == null || p.etat != EtatPreparation.echec) return;
+    unawaited(p.compresses ? _envoyer(p) : _recompresserPuisEnvoyer(p));
   }
 
   // ═══════════════════════ L'ENVOI ═══════════════════════
 
-  Future<void> _envoyer(PreparationEnCours p, List<MediaPickResult> prets) async {
-    if (p._envoiEnCours) return;
+  Future<void> _envoyer(PreparationEnCours p) async {
+    if (p.annule || p._envoiEnCours) return;
     p._envoiEnCours = true;
-    _avancer(p, 1);
+    p.etat = EtatPreparation.envoi;
+    p.erreur = null;
+    p.avancement.value = 0;
+    notifyListeners();
     try {
       // Le plafond se mesure APRÈS la compression, comme à l'écran d'aperçu.
       final tropGros = [
-        for (final f in prets)
+        for (final f in p.fichiers)
           if (depassePlafondMedia(f.taille)) f.fileName
       ];
-      final aEnvoyer = [
-        for (final f in prets)
+      p.fichiers = [
+        for (final f in p.fichiers)
           if (!depassePlafondMedia(f.taille)) f
       ];
       if (tropGros.isNotEmpty) showAppSnackBar(_avisEcartes(tropGros));
 
-      if (aEnvoyer.isNotEmpty) {
+      if (p.fichiers.isNotEmpty) {
         if (p.chiffre) {
-          await _envoyerChiffre(p, aEnvoyer);
+          await _envoyerChiffre(p);
         } else {
-          await _envoyerEnClair(p, aEnvoyer);
+          _envoyerEnClair(p);
         }
       }
       await _oublier(p);
     } catch (e) {
       p._envoiEnCours = false;
-      if (_estPanneReseau(e)) {
-        // Pas de réseau : l'envoi reste rangé et repart au retour du réseau.
-        p._attendReseau = true;
+      if (p.annule || e is EnvoiAnnule) {
+        await _oublier(p);
         return;
       }
-      showAppSnackBar(_texte('send_failed'));
-      await _oublier(p);
+      final attendre = e is _PasEncorePret || _estPanneReseau(e);
+      p.etat = attendre ? EtatPreparation.attenteReseau : EtatPreparation.echec;
+      p.erreur = e is ApiException ? e.message : null;
+      notifyListeners();
+      await _ranger(p);
+      // Le chiffrement démarre juste après la connexion : un envoi repris au
+      // lancement peut arriver avant lui. Le réseau, lui, est peut-être là et
+      // ne changera pas — on réessaie donc seul, dans quelques secondes.
+      if (e is _PasEncorePret) {
+        Timer(const Duration(seconds: 10), _auRetourDuReseau);
+      }
     }
   }
 
   /// Fil EN CLAIR : le magasin des envois, comme l'écran — par paquets de 10,
-  /// la limite du serveur. Il garde lui-même ses envois sur le disque.
-  Future<void> _envoyerEnClair(PreparationEnCours p, List<MediaPickResult> fichiers) async {
+  /// la limite du serveur. Il a ses propres bulles, son « Annuler », son
+  /// « Réessayer » et sa file hors ligne : on lui confie l'envoi SANS
+  /// l'attendre, sans quoi deux bulles montreraient le même fichier.
+  void _envoyerEnClair(PreparationEnCours p) {
     final medias = _medias, chat = _chat, rt = _rt, conn = _conn;
     if (medias == null || chat == null || rt == null || conn == null) {
-      throw StateError('Services non branchés');
+      throw const _PasEncorePret();
     }
+    final fichiers = p.fichiers;
+    final lots = <EnvoiMedia>[];
     for (var debut = 0; debut < fichiers.length; debut += 10) {
       final lot = fichiers.sublist(
           debut, debut + 10 > fichiers.length ? fichiers.length : debut + 10);
-      final envoi = EnvoiMedia(
+      lots.add(EnvoiMedia(
         tempId: "tmp-${DateTime.now().microsecondsSinceEpoch}-$debut",
         convId: p.convId,
         fichiers: lot,
@@ -208,36 +302,46 @@ class PreparationsEnvoi extends ChangeNotifier {
         legende: debut == 0 ? p.legende : null,
         mentions: debut == 0 ? p.mentions : null,
         replyToId: debut == 0 ? p.replyToId : null,
+        // Une vue unique n'a qu'un fichier : le paquet est forcément le seul.
         vueUnique: p.vueUnique && lot.length == 1,
-      );
-      await EnvoiMediaStore.instance.lancer(
-        envoi,
-        media: medias,
-        chat: chat,
-        rt: rt,
-        messageErreurGenerique: () => _texte('send_failed'),
-        conn: conn,
-      );
+      ));
     }
+    // Un paquet après l'autre : dix téléversements en parallèle sur une
+    // connexion mobile les ralentiraient tous.
+    unawaited(() async {
+      for (final envoi in lots) {
+        await EnvoiMediaStore.instance.lancer(
+          envoi,
+          media: medias,
+          chat: chat,
+          rt: rt,
+          messageErreurGenerique: () => _texte('send_failed'),
+          conn: conn,
+        );
+      }
+    }());
   }
 
   /// Fil CHIFFRÉ : un message par fichier, comme l'écran. En morceaux d'abord
-  /// (Android continue application fermée), d'un seul bloc en repli.
-  Future<void> _envoyerChiffre(PreparationEnCours p, List<MediaPickResult> fichiers) async {
+  /// (Android continue application fermée), d'un seul bloc en repli. Un
+  /// fichier parti est retiré de la liste : un nouvel essai ne renvoie que ce
+  /// qui reste, et la légende ne part qu'une fois.
+  Future<void> _envoyerChiffre(PreparationEnCours p) async {
     final pile = _pile?.call();
     final medias = _medias;
     final moi = p.moi;
     if (pile == null || medias == null || moi == null) {
-      throw const SocketException('Chiffrement pas encore prêt');
+      throw const _PasEncorePret();
     }
-    final vueUnique = p.vueUnique && fichiers.length == 1;
-    for (var i = 0; i < fichiers.length; i++) {
-      final f = fichiers[i];
-      final legende = i == 0 ? (p.legende ?? '') : '';
-      final replyToId = i == 0 ? p.replyToId : null;
+    final vueUnique = p.vueUnique && p.fichiers.length == 1;
+    while (p.fichiers.isNotEmpty) {
+      final f = p.fichiers.first;
+      final legende = p.legendeEnvoyee ? '' : (p.legende ?? '');
+      final replyToId = p.legendeEnvoyee ? null : p.replyToId;
+      EnvoiMorceauxSuivi? suivi;
       if (SuiviEnvoisMorceaux.instance.pret) {
         try {
-          await SuiviEnvoisMorceaux.instance.lancer(
+          suivi = await SuiviEnvoisMorceaux.instance.lancer(
             fil: pile.fil,
             convId: p.convId,
             pairId: p.pairId,
@@ -245,6 +349,8 @@ class PreparationsEnvoi extends ChangeNotifier {
             legende: legende,
             replyToId: replyToId,
             vueUnique: vueUnique,
+            annule: () => p.annule,
+            onPreparation: (v) => p.avancement.value = v,
             rangerMaCopie: (id, d) => EnvoiMediaChiffre.rangerMaCopie(
               pile: pile,
               convId: p.convId,
@@ -258,22 +364,93 @@ class PreparationsEnvoi extends ChangeNotifier {
               cheminClair: f.fichierContenu,
             ),
           );
-          continue;
         } on ApiException catch (e) {
           // Un serveur sans envoi en morceaux : un seul bloc.
           if (e.statusCode != 404) rethrow;
         }
       }
-      await EnvoiMediaChiffre.envoyer(
-        pile: pile,
-        medias: medias,
-        convId: p.convId,
-        pairId: p.pairId,
-        moi: moi,
-        fichier: f,
+      if (suivi != null) {
+        unawaited(_suivreJusquAuBout(
+          suivi,
+          pile: pile,
+          convId: p.convId,
+          pairId: p.pairId,
+          moi: moi,
+          fichier: f,
+          legende: legende,
+          replyToId: replyToId,
+          vueUnique: vueUnique,
+        ));
+      } else {
+        await EnvoiMediaChiffre.envoyer(
+          pile: pile,
+          medias: medias,
+          convId: p.convId,
+          pairId: p.pairId,
+          moi: moi,
+          fichier: f,
+          legende: legende,
+          replyToId: replyToId,
+          vueUnique: vueUnique,
+          annule: () => p.annule,
+        );
+      }
+      p.fichiers = p.fichiers.sublist(1);
+      p.legendeEnvoyee = true;
+    }
+  }
+
+  /// Un envoi en morceaux lancé d'ici : Android l'envoie, le serveur le
+  /// publie. Comme l'écran ([_suivreEnvoiMorceaux] de la discussion) :
+  ///   · publication refusée (clé de groupe changée en route) → le message
+  ///     repart par le chemin ordinaire, avec le MÊME média déjà arrivé ;
+  ///   · échec → « Réessayer », sauf si l'utilisateur l'a annulé.
+  Future<void> _suivreJusquAuBout(
+    EnvoiMorceauxSuivi suivi, {
+    required PileE2ee pile,
+    required String convId,
+    required String? pairId,
+    required String moi,
+    required MediaPickResult fichier,
+    required String legende,
+    required String? replyToId,
+    required bool vueUnique,
+  }) async {
+    try {
+      final etat = await suivi.fin;
+      if (etat.publie) return;
+      final d = suivi.message!.mediaChiffre!;
+      final id = await pile.fil.envoyerMedia(
+        convId: convId,
+        pairId: pairId,
+        media: d,
         legende: legende,
         replyToId: replyToId,
         vueUnique: vueUnique,
+      );
+      await EnvoiMediaChiffre.rangerMaCopie(
+        pile: pile,
+        convId: convId,
+        moi: moi,
+        id: id,
+        d: d,
+        legende: legende,
+        replyToId: replyToId,
+        vueUnique: vueUnique,
+      );
+    } catch (e) {
+      if (e is EnvoiAnnule) return;
+      await abandonnerEnvoiMorceaux(suivi);
+      await confierApresEchec(
+        convId: convId,
+        fichier: fichier,
+        legende: legende,
+        replyToId: replyToId,
+        vueUnique: vueUnique,
+        pairId: pairId,
+        moi: moi,
+        reseau: _estPanneReseau(e),
+        erreur: e is ApiException ? e.message : null,
       );
     }
   }
@@ -283,15 +460,14 @@ class PreparationsEnvoi extends ChangeNotifier {
   void _auRetourDuReseau() {
     if (_conn?.isOnline != true) return;
     for (final p in _enCours.values.toList()) {
-      if (p._attendReseau && p._prets != null) {
-        p._attendReseau = false;
-        unawaited(_envoyer(p, p._prets!));
-      }
+      if (p.etat != EtatPreparation.attenteReseau || p._envoiEnCours) continue;
+      unawaited(p.compresses ? _envoyer(p) : _recompresserPuisEnvoyer(p));
     }
   }
 
   /// Ce qui attendait quand l'application a été fermée : recompressé depuis
-  /// les originaux, puis envoyé.
+  /// les originaux si besoin, puis envoyé. Un échec reste un échec, avec son
+  /// « Réessayer ».
   Future<void> _reprendreDuDisque() async {
     final racine = await _racine();
     if (racine == null || !await racine.exists()) return;
@@ -306,8 +482,9 @@ class PreparationsEnvoi extends ChangeNotifier {
         if (_enCours.containsKey(p.id)) continue;
         _enCours[p.id] = p;
         notifyListeners();
-        _annoncer(p);
-        unawaited(_recompresserPuisEnvoyer(p));
+        if (p.etat == EtatPreparation.echec) continue;
+        if (p.etat == EtatPreparation.attenteReseau && _conn?.isOnline != true) continue;
+        unawaited(p.compresses ? _envoyer(p) : _recompresserPuisEnvoyer(p));
       } catch (e) {
         debugPrint('[preparations] envoi illisible, abandonné : $e');
         try {
@@ -318,10 +495,15 @@ class PreparationsEnvoi extends ChangeNotifier {
   }
 
   Future<void> _recompresserPuisEnvoyer(PreparationEnCours p) async {
+    if (p.annule || p._envoiEnCours) return;
+    p.etat = EtatPreparation.compression;
+    notifyListeners();
+    _annoncer(p);
     final aFaire = [for (final f in p.fichiers) if (!f.compresse && f.estVideo) f];
     final prets = <MediaPickResult>[];
     var n = 0;
     for (final f in p.fichiers) {
+      if (p.annule) break;
       if (!aFaire.contains(f)) {
         prets.add(f);
         continue;
@@ -340,8 +522,12 @@ class PreparationsEnvoi extends ChangeNotifier {
         prets.add(f);
       }
     }
-    p._prets = prets;
-    await _envoyer(p, prets);
+    _retirerAnnonce(p);
+    if (p.annule) return;
+    p.fichiers = prets;
+    p.compresses = true;
+    await _ranger(p);
+    await _envoyer(p);
   }
 
   // ═══════════════════════ LE DISQUE ═══════════════════════
@@ -357,9 +543,10 @@ class PreparationsEnvoi extends ChangeNotifier {
   }
 
   /// Range l'envoi : sa description, et les octets des fichiers qui n'existent
-  /// qu'en mémoire (les photos déjà réduites). Une vidéo n'est jamais
-  /// recopiée : son original reste où il est.
+  /// qu'en mémoire (photos déjà réduites). Une vidéo n'est jamais recopiée :
+  /// on garde son chemin.
   Future<void> _ranger(PreparationEnCours p) async {
+    if (p.annule) return;
     final racine = await _racine();
     if (racine == null) return;
     try {
@@ -370,8 +557,9 @@ class PreparationsEnvoi extends ChangeNotifier {
         final f = p.fichiers[i];
         String? octets;
         if (!f.surDisque && f.bytes.isNotEmpty) {
-          octets = 'octets-$i';
-          await File('${dossier.path}/$octets').writeAsBytes(f.bytes, flush: true);
+          octets = 'octets-${identityHashCode(f)}';
+          final o = File('${dossier.path}/$octets');
+          if (!await o.exists()) await o.writeAsBytes(f.bytes, flush: true);
         }
         fichiers.add({
           'nom': f.fileName,
@@ -389,6 +577,7 @@ class PreparationsEnvoi extends ChangeNotifier {
         'id': p.id,
         'convId': p.convId,
         'legende': p.legende,
+        'legendeEnvoyee': p.legendeEnvoyee,
         'mentions': p.mentions,
         'replyToId': p.replyToId,
         'vueUnique': p.vueUnique,
@@ -396,9 +585,15 @@ class PreparationsEnvoi extends ChangeNotifier {
         'pairId': p.pairId,
         'moi': p.moi,
         'creeA': p.creeA.millisecondsSinceEpoch,
+        'compresses': p.compresses,
+        'etat': p.etat.name,
+        if (p.erreur != null) 'erreur': p.erreur,
         'fichiers': fichiers,
       };
-      await File('${dossier.path}/envoi.json').writeAsString(jsonEncode(meta), flush: true);
+      final f = File('${dossier.path}/envoi.json');
+      final provisoire = File('${dossier.path}/envoi.json.tmp');
+      await provisoire.writeAsString(jsonEncode(meta), flush: true);
+      await provisoire.rename(f.path);
     } catch (e) {
       debugPrint('[preparations] rangement impossible : $e');
     }
@@ -408,11 +603,14 @@ class PreparationsEnvoi extends ChangeNotifier {
     final f = File('${dossier.path}/envoi.json');
     if (!await f.exists()) return null;
     final m = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
+    var compresses = m['compresses'] == true;
     final fichiers = <MediaPickResult>[];
     for (final brut in (m['fichiers'] as List)) {
       final x = brut as Map<String, dynamic>;
       final octetsNom = x['octets'] as String?;
       final chemin = x['chemin'] as String?;
+      var cheminContenu = x['cheminContenu'] as String?;
+      var compresse = x['compresse'] == true;
       Uint8List octets = Uint8List(0);
       int? tailleSurDisque = (x['tailleSurDisque'] as num?)?.toInt();
       if (octetsNom != null) {
@@ -420,8 +618,15 @@ class PreparationsEnvoi extends ChangeNotifier {
         if (!await o.exists()) continue;
         octets = await o.readAsBytes();
       } else {
-        // Un fichier sur disque disparu entre-temps (cache vidé) : écarté.
-        final source = (x['cheminContenu'] as String?) ?? chemin;
+        // La vidéo compressée a disparu (cache vidé) mais l'original est là :
+        // on la recompressera.
+        if (cheminContenu != null && !await File(cheminContenu).exists()) {
+          cheminContenu = null;
+          compresse = false;
+          compresses = false;
+          tailleSurDisque = null;
+        }
+        final source = cheminContenu ?? chemin;
         if (source == null || !await File(source).exists()) continue;
         tailleSurDisque ??= await File(source).length();
       }
@@ -431,14 +636,18 @@ class PreparationsEnvoi extends ChangeNotifier {
         mimeType: x['mime'] as String,
         durationMs: (x['dureeMs'] as num?)?.toInt(),
         path: chemin,
-        cheminContenu: x['cheminContenu'] as String?,
+        cheminContenu: cheminContenu,
         tailleSurDisque: octetsNom != null ? null : tailleSurDisque,
-        compresse: x['compresse'] == true,
+        compresse: compresse,
         sensible: x['sensible'] == true,
       ));
     }
     if (fichiers.isEmpty) return null;
-    return PreparationEnCours._(
+    final etat = EtatPreparation.values.firstWhere(
+      (e) => e.name == m['etat'],
+      orElse: () => EtatPreparation.attenteReseau,
+    );
+    final p = PreparationEnCours._(
       id: m['id'] as String,
       convId: m['convId'] as String,
       fichiers: fichiers,
@@ -453,12 +662,19 @@ class PreparationsEnvoi extends ChangeNotifier {
       pairId: m['pairId'] as String?,
       moi: m['moi'] as String?,
       creeA: DateTime.fromMillisecondsSinceEpoch((m['creeA'] as num).toInt()),
+      // Une compression ou un envoi coupés par la fermeture repartent ; un
+      // échec reste un échec.
+      etat: etat == EtatPreparation.echec ? etat : EtatPreparation.attenteReseau,
     );
+    p.compresses = compresses;
+    p.legendeEnvoyee = m['legendeEnvoyee'] == true;
+    p.erreur = m['erreur'] as String?;
+    return p;
   }
 
   Future<void> _oublier(PreparationEnCours p) async {
     _enCours.remove(p.id);
-    CentreTransferts.instance.reussir(p.id);
+    _retirerAnnonce(p);
     // L'anneau n'est pas libéré : une bulle peut l'écouter jusqu'à son
     // prochain dessin. Il part avec l'envoi.
     notifyListeners();
@@ -472,9 +688,13 @@ class PreparationsEnvoi extends ChangeNotifier {
 
   // ═══════════════════════ OUTILS ═══════════════════════
 
-  /// L'entrée du centre des transferts : c'est ELLE qui tient le service
-  /// Android de premier plan, donc l'application en vie hors de l'écran.
+  /// L'entrée du centre des transferts pendant la compression : c'est ELLE
+  /// qui tient le service Android de premier plan, donc l'application en vie
+  /// hors de l'écran. Retirée dès la fin : attendre le réseau ne doit pas
+  /// garder ce service (et la batterie) en marche.
   void _annoncer(PreparationEnCours p) {
+    if (p._annonce) return;
+    p._annonce = true;
     CentreTransferts.instance.demarrer(
       id: p.id,
       sorte: SorteTransfert.envoi,
@@ -482,13 +702,22 @@ class PreparationsEnvoi extends ChangeNotifier {
     );
   }
 
+  void _retirerAnnonce(PreparationEnCours p) {
+    if (!p._annonce) return;
+    p._annonce = false;
+    CentreTransferts.instance.reussir(p.id);
+  }
+
   void _avancer(PreparationEnCours p, double v) {
     final x = v.clamp(0.0, 1.0);
     p.avancement.value = x;
-    CentreTransferts.instance.avancer(p.id, x);
+    if (p._annonce) CentreTransferts.instance.avancer(p.id, x);
   }
 
-  bool _estPanneReseau(Object e) {
+  bool _estPanneReseau(Object e) => estPanneReseau(e);
+
+  /// Une coupure (et non un refus du serveur) : l'envoi attend le réseau.
+  static bool estPanneReseau(Object e) {
     if (e is ApiException) return false;
     return e is SocketException || e is ClientException || e is TimeoutException;
   }
@@ -512,7 +741,16 @@ class PreparationsEnvoi extends ChangeNotifier {
   }
 }
 
-/// Un envoi qui attend la fin de la compression de ses vidéos.
+/// La pile de chiffrement ou les services ne sont pas encore prêts (juste
+/// après le lancement) : l'envoi attend et réessaie seul.
+class _PasEncorePret implements Exception {
+  const _PasEncorePret();
+}
+
+/// Où en est un envoi de [PreparationsEnvoi].
+enum EtatPreparation { compression, envoi, attenteReseau, echec }
+
+/// Un envoi de médias porté par [PreparationsEnvoi].
 class PreparationEnCours {
   PreparationEnCours._({
     required this.id,
@@ -526,14 +764,16 @@ class PreparationEnCours {
     required this.pairId,
     required this.moi,
     required this.creeA,
-  });
+    required this.etat,
+  }) : premier = fichiers.first;
 
-  /// Identifiant de la bulle « Compression… ».
+  /// Identifiant de la bulle.
   final String id;
   final String convId;
 
-  /// Les fichiers tels qu'à l'appui sur Envoyer (originaux pour les vidéos).
-  final List<MediaPickResult> fichiers;
+  /// Ce qui reste à envoyer : originaux avant la compression, versions
+  /// compressées ensuite, et seulement ce qui n'est pas encore parti.
+  List<MediaPickResult> fichiers;
   final String? legende;
   final List<Map<String, String>> mentions;
   final String? replyToId;
@@ -543,11 +783,16 @@ class PreparationEnCours {
   final String? moi;
   final DateTime creeA;
 
-  /// L'avancement de la compression, de 0 à 1 : l'anneau de la bulle.
+  EtatPreparation etat;
+
+  /// Le message du serveur, quand il a refusé.
+  String? erreur;
+
+  /// L'avancement en cours (compression, puis chiffrement) : l'anneau.
   final ValueNotifier<double> avancement = ValueNotifier<double>(0);
 
   /// Le premier fichier : la vignette et le type de la bulle.
-  MediaPickResult get premier => fichiers.first;
+  final MediaPickResult premier;
 
   String get msgType {
     final mime = premier.mimeType;
@@ -557,9 +802,33 @@ class PreparationEnCours {
     return 'FILE';
   }
 
+  /// Les vidéos sont-elles déjà compressées ?
+  bool compresses = false;
+
+  /// La légende est partie avec un premier fichier.
+  bool legendeEnvoyee = false;
+
+  /// « Annuler » ou « Supprimer » a été pressé.
+  bool annule = false;
+
+  VoidCallback? _annulerCompression;
   bool _envoiEnCours = false;
-  bool _attendReseau = false;
-  List<MediaPickResult>? _prets;
+  bool _annonce = false;
+}
+
+/// Abandonne un envoi en morceaux raté : fichier partiel et publication prévue
+/// effacés chez le serveur, copie locale du message retirée — il ne partira
+/// jamais sous cet identifiant.
+Future<void> abandonnerEnvoiMorceaux(EnvoiMorceauxSuivi suivi) async {
+  try {
+    await SuiviEnvoisMorceaux.instance.abandonner(suivi.reservation);
+  } catch (_) {}
+  final id = suivi.messageId;
+  if (id != null) {
+    try {
+      await MessageCache.remove(id);
+    } catch (_) {}
+  }
 }
 
 /// Remplace [m] par le résultat de sa compression — la règle de l'écran

@@ -619,6 +619,15 @@ Future<String?> _transcoder(
   }
 }
 
+/// Arrête la conversion vidéo en cours (« Annuler » sur la bulle
+/// « Compression… », 21/11/2026) : la conversion attendue rend `null`, comme
+/// une vidéo qu'on n'a pas su réduire. Ne lève jamais.
+Future<void> annulerCompressionVideo() async {
+  try {
+    await _canal.invokeMethod<void>('annuler');
+  } catch (_) {}
+}
+
 String _enMp4(String nom) {
   final point = nom.lastIndexOf('.');
   final base = point > 0 ? nom.substring(0, point) : nom;

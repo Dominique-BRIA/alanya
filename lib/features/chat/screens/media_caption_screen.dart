@@ -10,7 +10,8 @@ import '../../../core/app_snackbar.dart';
 import '../../../core/compression_envoi.dart';
 import '../../../core/plafond_media.dart';
 import '../../../core/compression_image.dart';
-import '../../../core/compression_video.dart' show videoBordCourtHaute;
+import '../../../core/compression_video.dart'
+    show annulerCompressionVideo, videoBordCourtHaute;
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/media/avancement_compression.dart';
 import '../../../widgets/media/media_picker_sheet.dart';
@@ -64,7 +65,15 @@ class MediaCaptionResult {
 /// lui. Rien ne part avant qu'elle soit finie — partir avec l'original
 /// enverrait les mégaoctets qu'on est justement en train de retirer.
 class PreparationEnvoi {
-  const PreparationEnvoi({required this.fichiers, required this.avancement});
+  const PreparationEnvoi({
+    required this.fichiers,
+    required this.avancement,
+    required this.annuler,
+  });
+
+  /// Arrête les compressions (« Annuler » sur la bulle) : la vidéo en cours
+  /// s'interrompt, les suivantes ne commencent pas.
+  final VoidCallback annuler;
 
   /// La liste à envoyer, chaque vidéo remplacée par sa version compressée (ou
   /// laissée telle quelle si la compression n'a rien gagné).
@@ -177,6 +186,9 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
   /// La compression en cours, attendue par un envoi pressé avant sa fin.
   Future<void> _compression = Future<void>.value();
 
+  /// « Annuler » sur la bulle « Compression… » : on s'arrête.
+  bool _compressionAnnulee = false;
+
   /// Vrai tant qu'un fichier attend sa première compression : l'envoi patiente.
   bool _enPreparation = false;
 
@@ -210,6 +222,7 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
     if (mounted) setState(() => _enPreparation = true);
 
     for (var n = 0; n < aFaire.length; n++) {
+      if (_compressionAnnulee) break;
       final m = aFaire[n];
       // Retiré de l'envoi entre-temps : rien à compresser.
       if (!_fichiers.contains(m)) continue;
@@ -368,6 +381,10 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
             fichiers: _compression
                 .then((_) => [for (final f in envoyes) _remplacements[f] ?? f]),
             avancement: _avancementGlobal,
+            annuler: () {
+              _compressionAnnulee = true;
+              unawaited(annulerCompressionVideo());
+            },
           )
         : null;
     final vueUnique = _vueUnique && _vueUniquePossible;

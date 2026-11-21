@@ -498,6 +498,11 @@ class _ChatScreenState extends State<ChatScreen>
   /// Les envois que j'ai annulés : leur fin en erreur ne mérite pas d'alerte.
   final Set<String> _annulesParMoi = {};
 
+  /// Envois chiffrés annulés PENDANT leur préparation (21/11/2026), par
+  /// identifiant de bulle : l'envoi s'arrête à l'étape suivante, sans que le
+  /// cliquet avance ni qu'aucun message parte.
+  final Set<String> _annuleesEnPreparation = {};
+
   /// L'envoi en morceaux derrière une bulle d'attente, une fois confié.
   EnvoiMorceauxSuivi? _envoiDeBulle(String tempId) {
     for (final e in _bulleDeMessage.entries) {
@@ -4276,6 +4281,7 @@ class _ChatScreenState extends State<ChatScreen>
       fichiers: apercu.fichiers,
       compresses: preparation.fichiers,
       avancement: preparation.avancement,
+      annulerCompression: preparation.annuler,
       legende: legende,
       mentions: apercu.mentions,
       replyToId: replyId,
@@ -4448,21 +4454,7 @@ class _ChatScreenState extends State<ChatScreen>
         // Tant que son envoi existe, quel que soit l'état affiché (30/10/2026).
         else if (d == null &&
             (m.status == "PENDING" || _envoisChiffres.containsKey(m.id)))
-          _envoiChiffreEnCours(
-            suivi: _envoiDeBulle(m.id),
-            octets: _envoisChiffres[m.id]?.fichier.bytes ??
-                PreparationsEnvoi.instance.parId(m.id)?.premier.bytes,
-            mime: _envoisChiffres[m.id]?.fichier.mimeType ??
-                PreparationsEnvoi.instance.parId(m.id)?.premier.mimeType ??
-                '',
-            progression: _envoisChiffres[m.id]?.progression ??
-                ValueNotifier<double>(0),
-            preparation: _envoisChiffres[m.id]?.preparation ??
-                PreparationsEnvoi.instance.parId(m.id)?.avancement,
-            libellePreparation: PreparationsEnvoi.instance.parId(m.id) != null
-                ? tr(context, 'envoi_compression')
-                : null,
-          )
+          _bulleEnvoiEnCours(m)
         else if (d != null)
           BulleMediaChiffre(
             descripteur: d,
@@ -4583,12 +4575,19 @@ class _ChatScreenState extends State<ChatScreen>
               cheminClair: fichier.fichierContenu,
             ),
             onPreparation: (f) => suivi.preparation.value = f,
+            annule: () => _annuleesEnPreparation.contains(tempId),
           );
         } on ApiException catch (e) {
           // Un serveur qui ne connaît pas encore l'envoi en morceaux : on
           // retombe sur l'envoi d'un seul bloc, qui marchait avant.
           if (e.statusCode != 404) rethrow;
         }
+      }
+      // ✕ pressé juste après la dernière vérification : l'envoi vient d'être
+      // confié à Android, on l'abandonne comme le ✕ ordinaire.
+      if (enMorceaux != null && _annuleesEnPreparation.contains(tempId)) {
+        await abandonnerEnvoiMorceaux(enMorceaux);
+        throw const EnvoiAnnule();
       }
       if (enMorceaux != null) {
         confie = true;
@@ -4619,6 +4618,7 @@ class _ChatScreenState extends State<ChatScreen>
         replyToId: replyToId,
         vueUnique: vueUnique,
         onProgression: (r) => suivi.progression.value = r,
+        annule: () => _annuleesEnPreparation.contains(tempId),
       );
       if (!mounted) return;
       setState(() {
@@ -4628,16 +4628,88 @@ class _ChatScreenState extends State<ChatScreen>
         _rebuildCombined();
       });
     } catch (e) {
+      final annule = e is EnvoiAnnule || _annuleesEnPreparation.contains(tempId);
+      /*
+       * 🔁 UN ÉCHEC NE FAIT PLUS DISPARAÎTRE LE FICHIER (21/11/2026). La bulle
+       * partait avec une alerte, et il fallait tout rechoisir. L'envoi passe
+       * au service hors écran : sans réseau, il attend et repart seul ; sur
+       * un refus, sa bulle propose « Réessayer » et « Supprimer ». Le fichier
+       * repartira chiffré de nouveau, avec une clé neuve — jamais en clair.
+       */
+      if (!annule) {
+        unawaited(PreparationsEnvoi.instance.confierApresEchec(
+          convId: widget.convId,
+          fichier: fichier,
+          legende: legende,
+          replyToId: replyToId,
+          vueUnique: vueUnique,
+          pairId: pair,
+          moi: moi,
+          reseau: PreparationsEnvoi.estPanneReseau(e),
+          erreur: e is ApiException ? e.message : null,
+        ));
+      }
       if (!mounted) return;
       setState(() {
         _messages = _messages.where((m) => m.id != tempId).toList();
         _rebuildCombined();
       });
-      showAppSnackBar("$erreur : $e");
     } finally {
+      _annuleesEnPreparation.remove(tempId);
       // Confié en morceaux : c'est le suivi qui libérera la bulle.
       if (!confie) _libererSuiviChiffre(tempId);
     }
+  }
+
+  /// La bulle d'un envoi pas encore publié : celui de cet écran, ou celui du
+  /// service des envois hors écran (compression, attente du réseau, échec).
+  Widget _bulleEnvoiEnCours(Message m) {
+    final p = PreparationsEnvoi.instance.parId(m.id);
+    if (p != null) {
+      final etat = p.etat;
+      return _envoiChiffreEnCours(
+        suivi: null,
+        octets: p.premier.bytes,
+        mime: p.premier.mimeType,
+        progression: ValueNotifier<double>(0),
+        preparation: p.avancement,
+        libellePreparation: etat == EtatPreparation.compression
+            ? tr(context, 'envoi_compression')
+            : (p.chiffre ? null : tr(context, 'sending')),
+        attenteReseau: etat == EtatPreparation.attenteReseau,
+        erreur: etat == EtatPreparation.echec ? p.erreur : null,
+        onReessayer: etat == EtatPreparation.echec
+            ? () => PreparationsEnvoi.instance.reessayer(p.id)
+            : null,
+        onSupprimer: etat == EtatPreparation.echec
+            ? () => unawaited(PreparationsEnvoi.instance.annuler(p.id))
+            : null,
+        onAnnulerPreparation: () =>
+            unawaited(PreparationsEnvoi.instance.annuler(p.id)),
+      );
+    }
+    return _envoiChiffreEnCours(
+      suivi: _envoiDeBulle(m.id),
+      octets: _envoisChiffres[m.id]?.fichier.bytes,
+      mime: _envoisChiffres[m.id]?.fichier.mimeType ?? '',
+      progression:
+          _envoisChiffres[m.id]?.progression ?? ValueNotifier<double>(0),
+      preparation: _envoisChiffres[m.id]?.preparation,
+      onAnnulerPreparation: _envoisChiffres.containsKey(m.id)
+          ? () => _annulerPreparationChiffree(m.id)
+          : null,
+    );
+  }
+
+  /// ✕ sur un envoi chiffré qui se prépare encore (21/11/2026) : la bulle part
+  /// tout de suite ; l'envoi s'arrête à l'étape suivante — voir l'argument
+  /// `annule` de `SuiviEnvoisMorceaux.lancer` et de `EnvoiMediaChiffre.envoyer`.
+  void _annulerPreparationChiffree(String tempId) {
+    _annuleesEnPreparation.add(tempId);
+    setState(() {
+      _messages = _messages.where((m) => m.id != tempId).toList();
+      _rebuildCombined();
+    });
   }
 
   /// La bulle d'un envoi chiffré, avec pause, reprise et annulation dès qu'il
@@ -4649,6 +4721,13 @@ class _ChatScreenState extends State<ChatScreen>
     required ValueListenable<double> progression,
     ValueListenable<double>? preparation,
     String? libellePreparation,
+    bool attenteReseau = false,
+    String? erreur,
+    VoidCallback? onReessayer,
+    VoidCallback? onSupprimer,
+    /// ✕ avant que l'envoi soit confié à Android (préparation, compression,
+    /// attente du réseau). Ensuite, c'est l'annulation de l'envoi en morceaux.
+    VoidCallback? onAnnulerPreparation,
   }) {
     final moteur = SuiviEnvoisMorceaux.instance;
     return EnvoiChiffreEnCours(
@@ -4657,10 +4736,16 @@ class _ChatScreenState extends State<ChatScreen>
       progression: progression,
       preparation: preparation,
       libellePreparation: libellePreparation,
+      attenteReseau: attenteReseau,
+      erreur: erreur,
+      onReessayer: onReessayer,
+      onSupprimer: onSupprimer,
       enPause: suivi?.enPause,
       onPause: suivi == null ? null : () => unawaited(moteur.mettreEnPause(suivi)),
       onReprendre: suivi == null ? null : () => unawaited(moteur.relancer(suivi)),
-      onAnnuler: suivi == null ? null : () => unawaited(_annulerEnvoiChiffre(suivi)),
+      onAnnuler: suivi != null
+          ? () => unawaited(_annulerEnvoiChiffre(suivi))
+          : (onReessayer != null ? null : onAnnulerPreparation),
     );
   }
 
@@ -4728,13 +4813,32 @@ class _ChatScreenState extends State<ChatScreen>
       });
     } catch (e) {
       // Annulé par moi : la bulle part, sans alerte.
-      final annule = _annulesParMoi.remove(envoi.reservation.id);
+      final annule =
+          _annulesParMoi.remove(envoi.reservation.id) || e is EnvoiAnnule;
+      // Raté : abandonné proprement, puis confié au service, qui propose
+      // « Réessayer » (ou attend le réseau). Fait même écran fermé.
+      final fichier = _envoisChiffres[tempId]?.fichier;
+      if (!annule && fichier != null) {
+        await abandonnerEnvoiMorceaux(envoi);
+        unawaited(PreparationsEnvoi.instance.confierApresEchec(
+          convId: widget.convId,
+          fichier: fichier,
+          legende: legende,
+          replyToId: replyToId,
+          vueUnique: vueUnique,
+          pairId: pair,
+          moi: moi,
+          reseau: PreparationsEnvoi.estPanneReseau(e),
+          erreur: e is ApiException ? e.message : null,
+        ));
+      } else if (!annule) {
+        showAppSnackBar("$erreur : $e");
+      }
       if (!mounted) return;
       setState(() {
         _messages = _messages.where((m) => m.id != tempId).toList();
         _rebuildCombined();
       });
-      if (!annule) showAppSnackBar("$erreur : $e");
     } finally {
       _bulleDeMessage.remove(envoi.messageId);
       envoi.progression.removeListener(relayer);

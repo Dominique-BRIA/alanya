@@ -357,6 +357,11 @@ class MainActivity : FlutterFragmentActivity() {
                         )
                     }
                 }
+                // « Annuler » sur la bulle « Compression… » (21/11/2026).
+                "annuler" -> {
+                    CompresseurVideo.annuler()
+                    resultat.success(null)
+                }
                 else -> resultat.notImplemented()
             }
         }

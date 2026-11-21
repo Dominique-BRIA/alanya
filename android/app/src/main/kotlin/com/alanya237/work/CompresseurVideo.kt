@@ -99,6 +99,20 @@ object CompresseurVideo {
     /** Une conversion Media3 en cours. */
     private var media3EnCours = false
 
+    /**
+     * Arrête la conversion en cours (21/11/2026, « Annuler » sur la bulle
+     * « Compression… »). Nul quand rien ne tourne.
+     */
+    private var annulation: (() -> Unit)? = null
+
+    /**
+     * Annule la conversion en cours : le moteur s'arrête, le fichier partiel
+     * est effacé, et Dart reçoit `null` — jamais le repli sur l'autre moteur.
+     */
+    fun annuler() {
+        annulation?.invoke()
+    }
+
     /** Y a-t-il déjà un transcodage en cours ? */
     fun occupe(): Boolean = media3EnCours || enCours?.isDone == false
 
@@ -147,12 +161,25 @@ object CompresseurVideo {
         val repondre = { resultat: String? ->
             if (!repondu) {
                 repondu = true
+                annulation = null
                 surFin(resultat)
             }
         }
 
-        val lance = try {
+        var annule = false
+        var transformer: Transformer? = null
+        annulation = {
+            annule = true
+            try { transformer?.cancel() } catch (_: Throwable) {}
+            try { enCours?.cancel(true) } catch (_: Throwable) {}
+            media3EnCours = false
+            sortie.delete()
+            repondre(null)
+        }
+
+        transformer = try {
             parMedia3(contexte, chemin, sortie, bordCourt, bordLong, debit, surProgression) { reussi ->
+                if (annule) return@parMedia3
                 if (reussi) {
                     repondre(sortie.absolutePath)
                 } else {
@@ -160,13 +187,14 @@ object CompresseurVideo {
                     parTranscoder(contexte, chemin, sortie, bordCourt, bordLong, debit, surProgression, repondre)
                 }
             }
-            true
         } catch (e: Throwable) {
             Log.w(TAG, "Media3 indisponible, repli : ${e.message}")
             media3EnCours = false
-            false
+            null
         }
-        if (!lance) parTranscoder(contexte, chemin, sortie, bordCourt, bordLong, debit, surProgression, repondre)
+        if (transformer == null && !annule) {
+            parTranscoder(contexte, chemin, sortie, bordCourt, bordLong, debit, surProgression, repondre)
+        }
     }
 
     /**
@@ -183,7 +211,7 @@ object CompresseurVideo {
         debit: Long,
         surProgression: (Double) -> Unit,
         surFin: (Boolean) -> Unit,
-    ) {
+    ): Transformer {
         val source = if (chemin.contains("://")) Uri.parse(chemin) else Uri.fromFile(File(chemin))
         val (largeur, hauteur) = dimensionsEcran(contexte, source)
         // Le grand côté de la consigne suit le grand côté de l'IMAGE AFFICHÉE
@@ -220,6 +248,7 @@ object CompresseurVideo {
             .setEncoderFactory(encodeurs)
             .addListener(object : Transformer.Listener {
                 override fun onCompleted(composition: Composition, exportResult: ExportResult) {
+                    if (fini) return
                     fini = true
                     media3EnCours = false
                     surProgression(1.0)
@@ -231,6 +260,7 @@ object CompresseurVideo {
                     exportResult: ExportResult,
                     exportException: ExportException,
                 ) {
+                    if (fini) return
                     fini = true
                     media3EnCours = false
                     Log.w(TAG, "Media3 a refusé la vidéo, repli : ${exportException.message}")
@@ -247,15 +277,20 @@ object CompresseurVideo {
         principal.postDelayed(object : Runnable {
             override fun run() {
                 if (fini) return
-                try {
-                    if (transformer.getProgress(prise) == Transformer.PROGRESS_STATE_AVAILABLE) {
-                        surProgression((prise.progress / 100.0).coerceIn(0.0, 1.0))
-                    }
+                val etat = try {
+                    transformer.getProgress(prise)
                 } catch (_: Throwable) {
+                    Transformer.PROGRESS_STATE_NOT_STARTED
+                }
+                // Plus rien ne tourne (annulée, ou finie) : on cesse de relire.
+                if (etat == Transformer.PROGRESS_STATE_NOT_STARTED) return
+                if (etat == Transformer.PROGRESS_STATE_AVAILABLE) {
+                    surProgression((prise.progress / 100.0).coerceIn(0.0, 1.0))
                 }
                 principal.postDelayed(this, 250)
             }
         }, 250)
+        return transformer
     }
 
     /** Largeur et hauteur de l'image AFFICHÉE (rotation appliquée). */

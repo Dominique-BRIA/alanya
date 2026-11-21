@@ -1,0 +1,47 @@
+name: Tests Flutter
+
+# LES TESTS SUR GITHUB, À CÔTÉ DE L'APK (21/11/2026).
+#
+# La suite complète prenait plus de dix minutes sur la machine de développement,
+# qu'elle occupait pendant ce temps. Elle tourne ici à chaque poussée, en
+# PARALLÈLE de la construction de l'APK (`build-android.yml`) : l'APK n'attend
+# pas les tests, et un test qui tombe se voit dans l'onglet Actions.
+#
+# ⚠️ LES MÊMES BRANCHES QUE L'APK, ET PAS `main` : le même commit est poussé sur
+# `main` et sur `feat/appels-avances` ; le tester deux fois ne servirait à rien.
+on:
+  push:
+    branches: [arena/01a09534-alanya, feature/vocal-attente-loop, feat/chip-appel-callstyle, feat/ecran-profil, feat/fluidite-cache, feat/appels-avances, feat/ios]
+  workflow_dispatch:
+
+# Deux poussées rapprochées : les tests de la première ne servent plus à rien.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Tests Flutter
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.6'
+          channel: 'stable'
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      # `--reporter expanded` : une ligne par test, et le test qui tombe nommé
+      # dans le journal, sans avoir à télécharger quoi que ce soit.
+      - name: Tests
+        run: flutter test --reporter expanded
