@@ -17,15 +17,27 @@
 /// deux fils pour le serveur.
 library;
 
+import 'dart:io';
 import 'dart:typed_data';
 
+import '../../core/api_client.dart';
 import '../../core/message_cache.dart';
 import '../../models/conversation.dart';
 import '../../models/message.dart';
 import '../../services/e2ee/e2ee_fournisseur.dart';
 import '../../services/e2ee/e2ee_media_envoi.dart';
+import '../../widgets/media/media_picker_sheet.dart';
 import '../media/media_repository.dart';
 import 'chat_repository.dart';
+import 'envoi_morceaux/envoi_morceaux_chiffre.dart';
+
+/// Le fichier EN CLAIR d'un message, sur le disque (déchiffré ou téléchargé).
+///
+/// 🐛 CRASH SUR LES GROSSES VIDÉOS (21/11/2026) : il était rendu en OCTETS —
+/// une vidéo de 300 Mo entière en mémoire, puis une seconde fois chiffrée, et
+/// le système fermait l'application. On rend son CHEMIN : au-delà de
+/// [seuilSurDisque], il n'est plus jamais lu en entier.
+typedef FichierEnClair = ({String chemin, String nom, String mime, int? dureeMs});
 
 /// Le transfert de [m] vers [cible] doit-il passer par l'appareil ?
 ///
@@ -49,7 +61,7 @@ String? correspondantDe(Conversation c, String moi) {
 
 /// Renvoie [m] dans [cible], depuis le contenu en clair de cet appareil.
 ///
-/// [octetsDuMedia] rend le fichier EN CLAIR du message (déchiffré, ou
+/// [fichierDuMedia] rend le fichier EN CLAIR du message (déchiffré, ou
 /// téléchargé) ; il n'est appelé que si le message porte un média. Lève en
 /// cas d'échec : l'appelant le dit.
 Future<void> transfererDepuisLAppareil({
@@ -59,8 +71,7 @@ Future<void> transfererDepuisLAppareil({
   required PileE2ee? pile,
   required ChatRepository chat,
   required MediaRepository medias,
-  required Future<({Uint8List octets, String nom, String mime, int? dureeMs})> Function()
-      octetsDuMedia,
+  required Future<FichierEnClair> Function() fichierDuMedia,
 }) async {
   final texte = m.content ?? '';
   final aUnMedia = m.mediaChiffre != null || m.media.isNotEmpty;
@@ -114,21 +125,67 @@ Future<void> transfererDepuisLAppareil({
   }
 
   // ── Un média : le fichier en clair, renvoyé ──
-  final f = await octetsDuMedia();
-  if (cible.e2eeActif) {
-    await EnvoiMediaChiffre.envoyer(
-      pile: pile!,
-      medias: medias,
-      convId: cible.id,
-      pairId: pair,
-      moi: moi,
-      fichier: fichierDepuisOctets(f.octets, f.nom, f.mime, dureeMs: f.dureeMs),
-      legende: texte,
-    );
-  } else {
-    final envoye = await medias.upload(f.octets, f.nom, f.mime, durationMs: f.dureeMs);
+  final f = await fichierDuMedia();
+  final taille = await File(f.chemin).length();
+  final lourd = taille > seuilSurDisque;
+  // Petit : en mémoire, comme avant (l'aperçu d'une photo lit des octets).
+  // Lourd : il reste sur le disque, chiffré et envoyé en flux.
+  final fichier = lourd
+      ? MediaPickResult(
+          bytes: Uint8List(0),
+          fileName: f.nom,
+          mimeType: f.mime,
+          durationMs: f.dureeMs,
+          path: f.chemin,
+          tailleSurDisque: taille,
+        )
+      : fichierDepuisOctets(await File(f.chemin).readAsBytes(), f.nom, f.mime,
+          dureeMs: f.dureeMs);
+
+  if (!cible.e2eeActif) {
+    final envoye = lourd
+        ? await medias.uploadFromFile(f.chemin, f.nom, f.mime, durationMs: f.dureeMs)
+        : await medias.upload(fichier.bytes, f.nom, f.mime, durationMs: f.dureeMs);
     await chat.sendMultiMedia(cible.id, [envoye.id], typePourMime(f.mime), content: texte);
+    return;
   }
+
+  // Chiffré et lourd : EN MORCEAUX, comme un envoi ordinaire — chiffré de
+  // fichier à fichier, puis confié à Android, qui continue application fermée.
+  // La conversation visée le remontre en bulle quand on l'ouvre.
+  if (lourd && SuiviEnvoisMorceaux.instance.pret) {
+    try {
+      await SuiviEnvoisMorceaux.instance.lancer(
+        fil: pile!.fil,
+        convId: cible.id,
+        pairId: pair,
+        fichier: fichier,
+        legende: texte,
+        rangerMaCopie: (id, d) => EnvoiMediaChiffre.rangerMaCopie(
+          pile: pile,
+          convId: cible.id,
+          moi: moi,
+          id: id,
+          d: d,
+          legende: texte,
+          cheminClair: f.chemin,
+        ),
+      );
+      return;
+    } on ApiException catch (e) {
+      // Un serveur qui ne connaît pas l'envoi en morceaux : envoi d'un bloc.
+      if (e.statusCode != 404) rethrow;
+    }
+  }
+  await EnvoiMediaChiffre.envoyer(
+    pile: pile!,
+    medias: medias,
+    convId: cible.id,
+    pairId: pair,
+    moi: moi,
+    fichier: fichier,
+    legende: texte,
+  );
 }
 
 /// Le type de message que le serveur attend pour un fichier de ce type.

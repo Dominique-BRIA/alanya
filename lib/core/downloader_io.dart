@@ -51,6 +51,23 @@ Future<String?> downloadOnly(String url, String filename,
 /// Ouvre un fichier local avec l'application système appropriée.
 Future<void> openLocalFile(String path) async => _openFile(path);
 
+/// Enregistre le FICHIER [chemin] dans le dossier public Alanya, comme un
+/// téléchargement, sans le charger en mémoire (21/11/2026) : relire une vidéo
+/// déchiffrée de 300 Mo pour l'enregistrer faisait fermer l'application.
+/// [chemin] n'est pas touché.
+Future<String?> enregistrerFichier(String chemin, String filename) async {
+  try {
+    final tmpDir = await getTemporaryDirectory();
+    final copie = File('${tmpDir.path}/enreg_${DateTime.now().microsecondsSinceEpoch}_$filename');
+    await File(chemin).copy(copie.path);
+    if (Platform.isAndroid) return _saveAndroidFichier(copie, filename);
+    return _saveAppDocumentsFichier(copie, filename);
+  } catch (e) {
+    debugPrint('[Alanya] Erreur enregistrement: $e');
+    return null;
+  }
+}
+
 /// Enregistre des octets DÉJÀ EN MAIN dans le dossier public Alanya, comme un
 /// téléchargement. Sert aux médias CHIFFRÉS : le fichier du serveur est
 /// illisible, c'est le clair déchiffré sur l'appareil qu'on enregistre.
@@ -86,14 +103,13 @@ Future<String?> downloadToCache(String url, String filename,
     final existing = await getCachedFile(filename);
     if (existing != null) return existing;
 
-    final bytes = await _octetsAvecProgression(url, surProgression);
-    if (bytes == null) return null;
-
     final dir = await _appCacheDir();
     if (!await dir.exists()) await dir.create(recursive: true);
     final path = '${dir.path}/$filename';
-    await File(path).writeAsBytes(bytes);
-    return path;
+    // Écrit à côté puis renommé : un téléchargement coupé ne doit pas passer,
+    // au prochain appel, pour un fichier déjà en cache.
+    final ok = await _versFichier(url, File(path), surProgression);
+    return ok ? path : null;
   } catch (e) {
     debugPrint('[Alanya] downloadToCache erreur: $e');
     return null;
@@ -108,22 +124,28 @@ Future<String?> _downloadTo(
     String url, String filename, SurProgression? surProgression) async {
   try {
     debugPrint('[Alanya] Téléchargement: $filename');
-    final bytes = await _octetsAvecProgression(url, surProgression);
-    if (bytes == null) return null;
-    debugPrint('[Alanya] Reçu ${bytes.length} octets');
+    final tmpDir = await getTemporaryDirectory();
+    final tmp = File('${tmpDir.path}/dl_${DateTime.now().microsecondsSinceEpoch}_$filename');
+    if (!await _versFichier(url, tmp, surProgression)) return null;
 
     if (Platform.isAndroid) {
-      return _saveAndroid(bytes, filename);
+      return _saveAndroidFichier(tmp, filename);
     }
     // iOS / desktop / autres : dossier documents de l'app
-    return _saveAppDocuments(bytes, filename);
+    return _saveAppDocumentsFichier(tmp, filename);
   } catch (e) {
     debugPrint('[Alanya] Erreur téléchargement: $e');
     return null;
   }
 }
 
-/// Lit le corps de la réponse EN FLUX, en rapportant l'avancement.
+/// Écrit le corps de la réponse EN FLUX dans [destination], en rapportant
+/// l'avancement. `false` si le serveur refuse.
+///
+/// 🐛 CRASH SUR LES GROSSES VIDÉOS (21/11/2026) : le corps s'accumulait dans
+/// une `List<int>` — 8 octets de mémoire PAR OCTET reçu. Une vidéo de 200 Mo
+/// en demandait 1,6 Go, et le système fermait l'application. Chaque morceau
+/// part maintenant sur le disque dès qu'il arrive.
 ///
 /// ⚠️ `Content-Length` peut manquer — compression à la volée, transfert par
 /// morceaux. On rapporte alors `null` plutôt qu'un pourcentage inventé : une
@@ -133,23 +155,25 @@ Future<String?> _downloadTo(
 /// ⚠️ Le rapport est LIMITÉ À UN PAR POUR CENT. Sans cela, un fichier de 40 Mo
 /// déclencherait des milliers de rafraîchissements — et, une fois branché sur
 /// les notifications, autant d'allers-retours vers le système.
-Future<List<int>?> _octetsAvecProgression(
-    String url, SurProgression? surProgression) async {
+Future<bool> _versFichier(
+    String url, File destination, SurProgression? surProgression) async {
   final client = http.Client();
+  final partiel = File('${destination.path}.part');
+  IOSink? sortie;
   try {
     final requete = http.Request('GET', Uri.parse(url));
     final reponse = await client.send(requete);
     if (reponse.statusCode != 200) {
       debugPrint('[Alanya] Échec HTTP ${reponse.statusCode}');
-      return null;
+      return false;
     }
     final total = reponse.contentLength;
-    final octets = <int>[];
+    sortie = partiel.openWrite();
     var recus = 0;
     var dernierPourcent = -1;
     surProgression?.call(total == null || total <= 0 ? null : 0);
     await for (final morceau in reponse.stream) {
-      octets.addAll(morceau);
+      sortie.add(morceau);
       recus += morceau.length;
       if (surProgression == null) continue;
       if (total == null || total <= 0) continue;
@@ -159,7 +183,20 @@ Future<List<int>?> _octetsAvecProgression(
         surProgression(pourcent / 100);
       }
     }
-    return octets;
+    await sortie.flush();
+    await sortie.close();
+    sortie = null;
+    if (await destination.exists()) await destination.delete();
+    await partiel.rename(destination.path);
+    return true;
+  } catch (_) {
+    try {
+      await sortie?.close();
+    } catch (_) {}
+    try {
+      if (await partiel.exists()) await partiel.delete();
+    } catch (_) {}
+    rethrow;
   } finally {
     client.close();
   }
@@ -167,12 +204,16 @@ Future<List<int>?> _octetsAvecProgression(
 
 /// Sauvegarde Android via MediaStore (dossier public visible).
 Future<String?> _saveAndroid(List<int> bytes, String filename) async {
-  try {
-    // 1) Écrit d'abord dans un fichier temporaire (MediaStore attend un path).
-    final tmpDir = await getTemporaryDirectory();
-    final tmpFile = File('${tmpDir.path}/$filename');
-    await tmpFile.writeAsBytes(bytes);
+  // MediaStore attend un chemin : les octets passent d'abord par un fichier.
+  final tmpDir = await getTemporaryDirectory();
+  final tmpFile = File('${tmpDir.path}/$filename');
+  await tmpFile.writeAsBytes(bytes);
+  return _saveAndroidFichier(tmpFile, filename);
+}
 
+/// Sauvegarde Android du fichier temporaire [tmpFile], qui est ensuite effacé.
+Future<String?> _saveAndroidFichier(File tmpFile, String filename) async {
+  try {
     // 2) Choisit le dossier public standard selon le type.
     final ext = _ext(filename).toLowerCase();
     final (dirType, dirName) = _mediaStoreTargetFor(ext);
@@ -202,7 +243,7 @@ Future<String?> _saveAndroid(List<int> bytes, String filename) async {
   } catch (e) {
     debugPrint('[Alanya] Erreur MediaStore, fallback appDocs : $e');
     // Fallback : sauvegarde privée de l'app (au moins ça marche).
-    return _saveAppDocuments(bytes, filename);
+    return _saveAppDocumentsFichier(tmpFile, filename);
   }
 }
 
@@ -214,6 +255,28 @@ Future<String?> _saveAppDocuments(List<int> bytes, String filename) async {
     if (!await dir.exists()) await dir.create(recursive: true);
     final path = await _uniquePath(dir.path, filename);
     await File(path).writeAsBytes(bytes);
+    debugPrint('[Alanya] Sauvegardé (appDocs) : $path');
+    return path;
+  } catch (e) {
+    debugPrint('[Alanya] Erreur appDocs : $e');
+    return null;
+  }
+}
+
+/// Comme [_saveAppDocuments], pour un fichier temporaire déplacé (pas relu).
+Future<String?> _saveAppDocumentsFichier(File tmpFile, String filename) async {
+  try {
+    final base = await getApplicationDocumentsDirectory();
+    final dir = Directory('${base.path}/$_publicFolder');
+    if (!await dir.exists()) await dir.create(recursive: true);
+    final path = await _uniquePath(dir.path, filename);
+    try {
+      await tmpFile.rename(path);
+    } on FileSystemException {
+      // Autre volume : copie, puis le temporaire s'en va.
+      await tmpFile.copy(path);
+      await tmpFile.delete();
+    }
     debugPrint('[Alanya] Sauvegardé (appDocs) : $path');
     return path;
   } catch (e) {

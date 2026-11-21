@@ -94,7 +94,7 @@ class _MediaGalleryViewerState extends State<MediaGalleryViewer> {
        */
       try {
         final f = await ouvrirMediaChiffre(context, d);
-        path = await enregistrerOctets(await f.readAsBytes(), nom);
+        path = await enregistrerFichier(f.path, nom);
       } catch (_) {
         path = null;
       }

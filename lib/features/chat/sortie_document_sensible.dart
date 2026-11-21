@@ -82,7 +82,7 @@ class SortieDocumentSensible {
       convId: convId,
       expediteurId: expediteurId,
     );
-    final chemin = await enregistrerOctets(await c.fichier.readAsBytes(), c.nom);
+    final chemin = await enregistrerFichier(c.fichier.path, c.nom);
     return (chemin: chemin, copie: c);
   }
 

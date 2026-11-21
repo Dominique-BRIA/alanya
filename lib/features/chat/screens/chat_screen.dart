@@ -5736,7 +5736,7 @@ class _ChatScreenState extends State<ChatScreen>
     }
     // Le fichier n'est lu (déchiffré ou téléchargé) qu'une fois, quel que
     // soit le nombre de fils chiffrés visés.
-    ({Uint8List octets, String nom, String mime, int? dureeMs})? fichier;
+    FichierEnClair? fichier;
     for (final c in parLAppareil) {
       try {
         await transfererDepuisLAppareil(
@@ -5746,7 +5746,7 @@ class _ChatScreenState extends State<ChatScreen>
           pile: pile,
           chat: chat,
           medias: medias,
-          octetsDuMedia: () async => fichier ??= await _fichierEnClair(m),
+          fichierDuMedia: () async => fichier ??= await _fichierEnClair(m),
         );
       } catch (_) {
         echecs++;
@@ -5783,7 +5783,9 @@ class _ChatScreenState extends State<ChatScreen>
       final dossier = await getTemporaryDirectory();
       final chemin =
           '${dossier.path}/partage_${DateTime.now().millisecondsSinceEpoch}_${f.nom}';
-      await File(chemin).writeAsBytes(f.octets, flush: true);
+      // Copié de fichier à fichier : relire une grosse vidéo en mémoire pour
+      // la réécrire fermait l'application (21/11/2026).
+      await File(f.chemin).copy(chemin);
       final legende = (m.content ?? '').trim();
       await SharePlus.instance.share(ShareParams(
         files: [XFile(chemin, mimeType: f.mime)],
@@ -5817,9 +5819,9 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   /// Le fichier EN CLAIR d'un message, pour le renvoyer d'ici : déchiffré
-  /// (média chiffré, clair en cache ou téléchargé), ou téléchargé.
-  Future<({Uint8List octets, String nom, String mime, int? dureeMs})>
-      _fichierEnClair(Message m) async {
+  /// (média chiffré, clair en cache ou téléchargé), ou téléchargé. Rendu par
+  /// son CHEMIN, jamais lu en entier ici (voir [FichierEnClair]).
+  Future<FichierEnClair> _fichierEnClair(Message m) async {
     final d = m.mediaChiffre;
     if (d != null) {
       final f = await OuvertureMediaChiffre.ouvrir(
@@ -5829,7 +5831,7 @@ class _ChatScreenState extends State<ChatScreen>
         jeton: fournisseurJeton(context),
       );
       return (
-        octets: await f.readAsBytes(),
+        chemin: f.path,
         nom: nomPourEnregistrer(d),
         mime: d.mime,
         dureeMs: d.dureeMs,
@@ -5843,7 +5845,7 @@ class _ChatScreenState extends State<ChatScreen>
         '$_baseUrl${media.url}?token=$_token', 'fwd_${media.id}_$nom');
     if (chemin == null) throw StateError('Téléchargement impossible');
     return (
-      octets: await File(chemin).readAsBytes(),
+      chemin: chemin,
       nom: nom,
       mime: media.mimeType,
       dureeMs: media.durationMs,
