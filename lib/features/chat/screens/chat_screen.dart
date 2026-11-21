@@ -8114,9 +8114,15 @@ class _ChatScreenState extends State<ChatScreen>
     return spans;
   }
 
+  /// Pas de traduction du tout dans un GROUPE ni chez le compte OFFICIEL
+  /// (21/11/2026, demande du user) : ni mention, ni appui, ni traduction
+  /// automatique, ni traduction déjà rangée en cache. Retirer l'appui seul
+  /// avait laissé la traduction automatique sans moyen de la fermer.
+  bool get _sansTraduction => widget.isGroup || _officiel;
+
   Widget _textBubble(Message m, bool mine) {
-    final translated = _translations[m.id];
-    final isTranslating = _translating.contains(m.id);
+    final translated = _sansTraduction ? null : _translations[m.id];
+    final isTranslating = !_sansTraduction && _translating.contains(m.id);
     final onTextColor = _bubbleTextColor(mine);
     final onSubColor = mine ? Colors.white70 : _muted45;
     return GestureDetector(
@@ -8364,7 +8370,7 @@ class _ChatScreenState extends State<ChatScreen>
   /// l'utilisateur, avec la confirmation habituelle qui annonce le poids.
   Widget _bandeauLangueManquante() {
     final langue = _langueManquante;
-    if (langue == null || !TraductionAuto.instance.activee) {
+    if (langue == null || !TraductionAuto.instance.activee || _sansTraduction) {
       return const SizedBox.shrink();
     }
     // Un groupe n'a pas UN interlocuteur : plusieurs personnes y écrivent, et
@@ -8531,6 +8537,7 @@ class _ChatScreenState extends State<ChatScreen>
   /// message par message.
   Future<void> _traduitAutomatiquement() async {
     if (!TraductionAuto.instance.activee || !moteurAppareilPresent) return;
+    if (_sansTraduction) return;
     if (_autoEnCours || !mounted) return;
     _autoEnCours = true;
     try {
