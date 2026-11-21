@@ -115,9 +115,19 @@ class PublicationStatuts {
         final attente = await StatutsPersistes.charger();
         for (final s in attente) {
           if (!conn.isOnline) break;
+          // Lu ICI, un seul à la fois, et pas du tout s'il est déjà
+          // téléversé : seule la déclaration reste alors à faire, et le
+          // fichier rangé suffit si elle échoue encore.
+          final Uint8List octets;
+          try {
+            octets = s.mediaId != null ? Uint8List(0) : await s.lireOctets();
+          } catch (_) {
+            await StatutsPersistes.oublier(s.id);
+            continue;
+          }
           await _televerserEtDeclarer(
             id: s.id,
-            octets: s.octets,
+            octets: octets,
             nom: s.nomFichier,
             mime: s.mimeType,
             durationMs: s.durationMs,

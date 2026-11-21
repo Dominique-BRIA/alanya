@@ -1,3 +1,4 @@
+import '../../../core/decodage_image.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -271,7 +272,12 @@ class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
                 else
                   Container(color: Colors.black12),
                 if (_image && _fichier != null)
-                  Image.file(_fichier!, fit: BoxFit.cover),
+                  // Décodée à la taille de la bulle, pas à celle de la photo (21/11/2026) :
+                  // une photo en « Meilleure qualité » décodée en entier coûte
+                  // près de 50 Mo, et une discussion pleine de photos finissait
+                  // par faire fermer l'application sur un téléphone modeste.
+                  Image.file(_fichier!,
+                      fit: BoxFit.cover, cacheWidth: largeurDecodageBulle(context)),
                 if (_retenu && _etat != _Etat.chargement)
                   Center(child: BoutonTelechargerMedia(taille: d.taille)),
                 if (_etat == _Etat.chargement)
@@ -748,7 +754,9 @@ class _TuileMediaChiffreState extends State<TuileMediaChiffre> {
           )
         else
           Container(color: Colors.black12),
-        if (_fichier != null && _image) Image.file(_fichier!, fit: BoxFit.cover),
+        if (_fichier != null && _image)
+          Image.file(_fichier!,
+              fit: BoxFit.cover, cacheWidth: largeurDecodageBulle(context)),
         if (_retenu && !_charge)
           Center(child: BoutonTelechargerMedia(taille: d.taille, compact: true)),
         if (_charge)

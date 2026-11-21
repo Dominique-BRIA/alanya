@@ -120,19 +120,31 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
       return;
     }
 
-    final octets = await fichier.readAsBytes();
-    if (!mounted) return;
     /*
      * ⚠️ LA DURÉE NE BORNE PAS LE POIDS. `maxDuration` coupe à une minute, mais
      * une minute filmée en haute définition dépasse largement le plafond du
      * serveur sur un téléphone récent. Le refus arrivait donc après le
      * téléversement complet, sur un 413 que rien n'annonçait.
+     *
+     * 🐛 LA TAILLE SE LIT SUR LE DISQUE, AVANT D'OUVRIR LE FICHIER
+     * (21/11/2026) : la vidéo était chargée en entier pour être mesurée — une
+     * minute en 4K, et l'application se fermait avant même le refus.
      */
-    if (depassePlafondMedia(octets.length)) {
+    final int taille;
+    try {
+      taille = await fichier.length();
+    } catch (_) {
+      _refermeSiEntreeMedia();
+      return;
+    }
+    if (!mounted) return;
+    if (depassePlafondMedia(taille)) {
       _snack(tr(context, 'status_video_limit', {'n': '$plafondMediaMo'}));
       _refermeSiEntreeMedia();
       return;
     }
+    final octets = await fichier.readAsBytes();
+    if (!mounted) return;
     await _editerPuisPublier([
       MediaPickResult(
         bytes: octets,

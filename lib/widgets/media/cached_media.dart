@@ -1,3 +1,4 @@
+import '../../core/decodage_image.dart';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -304,6 +305,9 @@ class _CachedMediaState extends State<CachedMedia> {
         width: widget.width,
         height: widget.height,
         fit: widget.fit,
+        // À la largeur affichée quand on la connaît (vignettes, bulles) ; en
+        // entier sinon — les visionneuses, où l'on zoome. Voir decodage_image.
+        cacheWidth: largeurDecodage(context, widget.width),
         // Si le fichier est corrompu, on retombe sur l'icône d'erreur.
         errorBuilder: (_, __, ___) => _errorBox(),
       );

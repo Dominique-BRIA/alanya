@@ -1,3 +1,4 @@
+import '../../core/decodage_image.dart';
 import 'package:flutter/material.dart';
 
 import '../../features/chat/envoi_media.dart';
@@ -61,7 +62,9 @@ class SendingMediaBubble extends StatelessWidget {
                   width: 236,
                   height: 160,
                   child: estImage
-                      ? Image.memory(apercu.bytes, fit: BoxFit.cover)
+                      ? Image.memory(apercu.bytes,
+                          fit: BoxFit.cover,
+                          cacheWidth: largeurDecodage(context, 236))
                       : Container(
                           color: const Color(0xFF1A1A2E),
                           child: Center(

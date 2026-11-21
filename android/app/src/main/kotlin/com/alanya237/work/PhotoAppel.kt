@@ -58,7 +58,9 @@ object PhotoAppel {
         executeur.execute {
             val image = try {
                 lire(source)
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
+                // Throwable : une photo trop lourde (manque de mémoire) sur ce
+                // fil de fond fermait l'application (21/11/2026).
                 Log.w(TAG, "photo illisible pour $callId : $e")
                 null
             } ?: return@execute

@@ -28,6 +28,18 @@ import java.time.Instant
 class AlanyaFirebaseMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
+        // 🐛 CRASH POSSIBLE (21/11/2026) : ce service tourne application
+        // fermée, et une erreur non rattrapée ici (sonnerie de liste illisible,
+        // préférences abîmées…) fermait tout le processus. On la note et on
+        // s'arrête là : le canal Flutter reçoit le message de toute façon.
+        try {
+            traiter(message)
+        } catch (e: Throwable) {
+            Log.e(TAG, "message push non traité", e)
+        }
+    }
+
+    private fun traiter(message: RemoteMessage) {
         ensureFlutterContext()
 
         val data = message.data

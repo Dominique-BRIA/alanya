@@ -177,7 +177,7 @@ class StatutsPersistes {
           }
           sortie.add(StatutEnAttente(
             id: id,
-            octets: Uint8List.fromList(await f.readAsBytes()),
+            chemin: f.path,
             nomFichier: meta['nom'] as String,
             mimeType: meta['mime'] as String,
             durationMs: meta['dureeMs'] as int?,
@@ -198,10 +198,16 @@ class StatutsPersistes {
 }
 
 /// Un statut relu du disque, prêt à repartir.
+///
+/// 🐛 CRASH AU RETOUR DU RÉSEAU (21/11/2026) : [StatutsPersistes.charger]
+/// lisait TOUS les fichiers en attente d'un coup, chacun copié une seconde
+/// fois. Trois statuts vidéo suffisaient à faire fermer l'application — et
+/// cela recommençait à chaque retour du réseau. On ne garde plus que le
+/// CHEMIN : le fichier est lu au moment de partir, un seul à la fois.
 class StatutEnAttente {
   const StatutEnAttente({
     required this.id,
-    required this.octets,
+    required this.chemin,
     required this.nomFichier,
     required this.mimeType,
     required this.durationMs,
@@ -211,7 +217,13 @@ class StatutEnAttente {
   });
 
   final String id;
-  final Uint8List octets;
+
+  /// Le fichier rangé sur le disque.
+  final String chemin;
+
+  /// Le contenu, lu à la demande.
+  Future<Uint8List> lireOctets() => File(chemin).readAsBytes();
+
   final String nomFichier;
   final String mimeType;
   final int? durationMs;
