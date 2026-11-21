@@ -84,6 +84,51 @@ class E2eeService {
   Future<List<int>> ouvrirSessions(String pairId, {int? exclure}) =>
       _enSerie(() => _ouvrirSessions(pairId, exclure: exclure));
 
+  /*
+   * ⚡ LA LISTE DE MES APPAREILS, DEMANDÉE PLUS TÔT (21/11/2026, « l'envoi est
+   * lent », accord du user pour toucher à ce fichier).
+   *
+   * Chaque message chiffré demandait la liste des appareils du correspondant,
+   * PUIS celle de mes autres appareils : deux allers-retours en file. La
+   * seconde part désormais en même temps que la première
+   * ([prechargerAppareils]) et [_ouvrirSessions] la trouve prête.
+   *
+   * ⚠️ UNE SEULE FOIS, ET FRAÎCHE. Une liste préchargée sert au PREMIER
+   * [ouvrirSessions] qui la demande, dans les secondes qui suivent, puis
+   * disparaît : jamais d'un message à l'autre. Une liste gardée vingt
+   * secondes avait été essayée : un appareil RÉINSTALLÉ chez le correspondant
+   * (même numéro, clé neuve) recevait alors des messages chiffrés pour son
+   * ancienne clé, illisibles pour toujours — `e2ee_releve_test` ④ et
+   * `e2ee_renvois_test` l'ont montré.
+   *
+   * ⚠️ CE N'EST QUE DU RÉSEAU, hors de la file du coffre : numéros d'appareil
+   * et clés publiques. Le chiffrement ne change pas.
+   */
+  final _listesPrechargees =
+      <String, ({DateTime quand, Future<Map<String, dynamic>> reponse})>{};
+
+  static const _fraicheurPrechargement = Duration(seconds: 5);
+
+  Future<Map<String, dynamic>> _listeAppareils(String userId) {
+    final prete = _listesPrechargees.remove(userId);
+    if (prete != null &&
+        DateTime.now().difference(prete.quand) < _fraicheurPrechargement) {
+      return prete.reponse;
+    }
+    return api('GET', '/api/e2ee/cles/$userId?liste=1', null);
+  }
+
+  /// Demande DÈS MAINTENANT la liste des appareils de [userId], sans attendre
+  /// la file du coffre : le prochain [ouvrirSessions] de [userId] la trouvera
+  /// prête. Ne lève jamais.
+  void prechargerAppareils(String userId) {
+    final reponse = api('GET', '/api/e2ee/cles/$userId?liste=1', null);
+    // Une erreur ici ne remonte nulle part : [ouvrirSessions] la reverra, ou
+    // redemandera.
+    reponse.then((_) {}, onError: (_) {});
+    _listesPrechargees[userId] = (quand: DateTime.now(), reponse: reponse);
+  }
+
   Future<void> oublierSession(String pairId, int deviceId) =>
       _enSerie(() => _oublierSession(pairId, deviceId));
 
@@ -289,7 +334,7 @@ class E2eeService {
   ///     clé a changé — un appareil RÉINSTALLÉ garde son numéro, mais sa
   ///     session d'avant ne vaut plus rien (groupe ④, second test).
   Future<List<int>> _ouvrirSessions(String pairId, {int? exclure}) async {
-    final liste = await api('GET', '/api/e2ee/cles/$pairId?liste=1', null);
+    final liste = await _listeAppareils(pairId);
 
     // Serveur antérieur : il ignore `liste` et rend directement des paquets.
     if (liste['appareils'] is! List) {

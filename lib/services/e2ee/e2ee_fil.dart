@@ -242,6 +242,7 @@ class E2eeFil {
     if (pairId == null) {
       return groupe.envoyer(convId: convId, texte: texte, type: type, replyToId: replyToId);
     }
+    _prechargerMesAppareils();
     var appareils = await _service.ouvrirSessions(pairId);
 
     if (appareils.isEmpty) {
@@ -263,6 +264,8 @@ class E2eeFil {
      * rattacher serait orpheline ; un message sans enveloppe s'afficherait vide
      * chez le destinataire.
      */
+    // Mes autres appareils s'ouvrent PENDANT que la ligne se crée.
+    final miens = _mesAutresAppareils();
     final message = await _api('POST', '/api/conversations/$convId/messages', {
       'type': type,
       'chiffre': true,
@@ -285,7 +288,8 @@ class E2eeFil {
      */
     final enveloppes =
         await _enveloppesPour(pairId, appareils,
-            ecrireCharge(messageId, texte, null, replyToId, type == 'TEXT' ? null : type));
+            ecrireCharge(messageId, texte, null, replyToId, type == 'TEXT' ? null : type),
+            miens: miens);
 
     await _api('POST', '/api/e2ee/enveloppes', {
       'convId': convId,
@@ -339,11 +343,42 @@ class E2eeFil {
     return DateTime.tryParse('${r['editedAt']}');
   }
 
+  /*
+   * ⚡ DEUX ATTENTES DE MOINS PAR MESSAGE (21/11/2026, accord du user).
+   *
+   * La liste de MES appareils était demandée seulement après la ligne du
+   * message et le chiffrement pour le correspondant : un aller-retour de plus,
+   * en file. Elle part désormais dès le début ([_prechargerMesAppareils]), en
+   * même temps que celle du correspondant, et les sessions vers mes appareils
+   * s'ouvrent pendant que la ligne se crée ([_mesAutresAppareils]).
+   *
+   * ⚠️ RIEN NE CHANGE DE CE QUI EST CHIFFRÉ NI POUR QUI : mêmes appareils,
+   * mêmes sessions, mêmes enveloppes, dans le même ordre.
+   */
+  void _prechargerMesAppareils() {
+    final moi = monCompte;
+    if (moi != null) _service.prechargerAppareils(moi);
+  }
+
+  /// Les sessions vers MES autres appareils ; vide si rien n'est joignable —
+  /// un échec ici n'empêche jamais l'envoi au correspondant.
+  Future<List<int>> _mesAutresAppareils() async {
+    final moi = monCompte;
+    if (moi == null) return const [];
+    try {
+      return await _service.ouvrirSessions(moi, exclure: await _monDeviceId());
+    } catch (_) {
+      return const [];
+    }
+  }
+
   Future<List<Map<String, dynamic>>> _enveloppesPour(
     String pairId,
     List<int> appareils,
-    String clair,
-  ) async {
+    String clair, {
+    /// Mes autres appareils, déjà en cours d'ouverture ; sinon ouverts ici.
+    Future<List<int>>? miens,
+  }) async {
     final enveloppes = <Map<String, dynamic>>[];
     for (final deviceId in appareils) {
       final e = await _service.chiffrer(pairId, deviceId, clair);
@@ -374,9 +409,8 @@ class E2eeFil {
     final moi = monCompte;
     if (moi != null && moi != pairId) {
       try {
-        final miens =
-            await _service.ouvrirSessions(moi, exclure: await _monDeviceId());
-        for (final deviceId in miens) {
+        final mesAppareils = await (miens ?? _mesAutresAppareils());
+        for (final deviceId in mesAppareils) {
           final e = await _service.chiffrer(moi, deviceId, clair);
           enveloppes.add({
             'destinataireId': moi,
@@ -420,10 +454,12 @@ class E2eeFil {
         vueUnique: vueUnique,
       );
     }
+    _prechargerMesAppareils();
     final appareils = await _service.ouvrirSessions(pairId);
     if (appareils.isEmpty) {
       throw const E2eeImpossible('Aucun appareil chiffré chez ce correspondant.');
     }
+    final miens = _mesAutresAppareils();
     final message = await _api('POST', '/api/conversations/$convId/messages', {
       'type': typeMessagePour(media),
       'chiffre': true,
@@ -433,8 +469,9 @@ class E2eeFil {
       if (statutCite != null) 'statutCite': statutCite,
     });
     final messageId = message['id'] as String;
-    final enveloppes =
-        await _enveloppesPour(pairId, appareils, ecrireCharge(messageId, legende, media, replyToId));
+    final enveloppes = await _enveloppesPour(
+        pairId, appareils, ecrireCharge(messageId, legende, media, replyToId),
+        miens: miens);
     await _api('POST', '/api/e2ee/enveloppes', {
       'convId': convId,
       'deviceId': await _monDeviceId(),
