@@ -8299,7 +8299,13 @@ class _ChatScreenState extends State<ChatScreen>
               ),
             ),
           ),
-        if (!isTranslating &&
+        // Pas dans un GROUPE ni chez le compte OFFICIEL (21/11/2026, demande
+        // du user) : sous chaque message d'un fil à plusieurs voix, le
+        // pense-bête se répétait de bulle en bulle. L'appui sur la bulle
+        // traduit toujours.
+        if (!widget.isGroup &&
+            !_officiel &&
+            !isTranslating &&
             translated == null &&
             m.type == 'TEXT' &&
             (m.content ?? '').isNotEmpty)
