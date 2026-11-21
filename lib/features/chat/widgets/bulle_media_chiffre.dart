@@ -10,8 +10,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:video_player/video_player.dart';
+import 'package:video_thumbnail/video_thumbnail.dart';
 
 import '../../../core/authed_api.dart';
+import '../../../core/media_cache.dart';
 import '../../../core/media_helper.dart';
 import '../../../core/telechargement_auto.dart';
 import '../../settings/export_medias_repository.dart' show tailleLisible;
@@ -36,6 +38,45 @@ import '../../../services/e2ee/e2ee_media_ouverture.dart';
 /// toucher.
 ///
 /// ⚠️ UN FICHIER ALTÉRÉ LE DIT, au lieu d'afficher une image cassée.
+/// LA MINIATURE D'UNE VIDÉO ARRIVÉE SANS APERÇU (21/11/2026).
+///
+/// 🐛 « L'AFFICHAGE BIZARRE DANS LA CONVERSATION » (user) : une vidéo envoyée
+/// sans aperçu — il était jeté quand il dépassait le plafond de l'enveloppe —
+/// restait un rectangle vide des deux côtés, alors qu'elle se lisait. Dès que
+/// son clair est sur CET appareil (l'expéditeur le garde ; le destinataire
+/// l'a après une première lecture), on en tire la première image.
+///
+/// ⚠️ RIEN NE QUITTE L'APPAREIL : l'image est rangée dans le cache local, à
+/// côté du clair qui y est déjà. Jamais pour un document sensible.
+///
+/// ⚠️ MÉMOIRE : une petite image (~30 Ko), gardée pour au plus 60 vidéos.
+final Map<String, Uint8List?> _apercusLocaux = {};
+
+Future<Uint8List?> apercuLocalVideo(DescripteurMedia d, File clair) async {
+  if (_apercusLocaux.containsKey(d.id)) return _apercusLocaux[d.id];
+  final cle = 'apercu-local-${d.id}';
+  Uint8List? image;
+  try {
+    final garde = await MediaCache.get(cle, 'jpg');
+    if (garde != null) {
+      image = await File(garde).readAsBytes();
+    } else {
+      image = await VideoThumbnail.thumbnailData(
+        video: clair.path,
+        imageFormat: ImageFormat.JPEG,
+        maxWidth: 320,
+        quality: 60,
+      );
+      if (image != null) await MediaCache.put(cle, 'jpg', image);
+    }
+  } catch (_) {
+    image = null;
+  }
+  if (_apercusLocaux.length >= 60) _apercusLocaux.remove(_apercusLocaux.keys.first);
+  _apercusLocaux[d.id] = image;
+  return image;
+}
+
 class BulleMediaChiffre extends StatefulWidget {
   const BulleMediaChiffre({
     super.key,
@@ -75,6 +116,19 @@ enum _Etat { attente, chargement, pret, altere, echec }
 class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
   _Etat _etat = _Etat.attente;
   File? _fichier;
+
+  /// La première image tirée du clair, pour une vidéo arrivée sans aperçu.
+  Uint8List? _apercuLocal;
+
+  /// Vidéo sans aperçu, clair présent : on fabrique la miniature ici.
+  void _apercuLocalSiBesoin() {
+    final f = _fichier;
+    if (!_video || d.apercu != null || d.sensible || f == null) return;
+    if (_apercuLocal != null) return;
+    unawaited(apercuLocalVideo(d, f).then((image) {
+      if (image != null && mounted) setState(() => _apercuLocal = image);
+    }));
+  }
 
   DescripteurMedia get d => widget.descripteur;
   bool get _image => d.mime.startsWith('image/');
@@ -158,6 +212,7 @@ class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
       _etat = _Etat.pret;
       _retenu = false;
     });
+    _apercuLocalSiBesoin();
     return true;
   }
 
@@ -179,6 +234,7 @@ class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
         _fichier = f;
         _etat = _Etat.pret;
       });
+      _apercuLocalSiBesoin();
       return f;
     } on FichierInvalide {
       if (mounted) setState(() => _etat = _Etat.altere);
@@ -230,7 +286,7 @@ class _BulleMediaChiffreState extends State<BulleMediaChiffre> {
   }
 
   Widget _visuel(BuildContext context) {
-    final apercu = _apercu;
+    final apercu = _apercu ?? _apercuLocal;
     return GestureDetector(
       onLongPress: widget.onLongPress,
       onTap: () async {

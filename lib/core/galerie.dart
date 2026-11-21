@@ -47,7 +47,16 @@ import 'package:photo_manager/photo_manager.dart';
 /// `test/galerie_filtre_test.dart`.
 const dureeVideoMax = Duration(days: 20);
 
+///
+/// 🐛 « UNE CAPTURE D'ÉCRAN PRISE APPLICATION OUVERTE N'APPARAÎT PAS DANS LA
+/// GALERIE, IL FAUT FERMER L'APPLICATION » (user, 21/11/2026). photo_manager
+/// borne par défaut la date de création à `DateTime.now()` AU MOMENT OÙ LE
+/// FILTRE EST CONSTRUIT (`DateTimeCond.def()`). Construit une seule fois, il
+/// écartait tout ce qui avait été pris après — jusqu'au prochain lancement.
+/// On ignore donc la date ([DateTimeCond.ignore]) : un filtre de date n'a
+/// jamais été voulu ici, seulement l'ordre.
 final FilterOptionGroup ordreRecentDAbord = FilterOptionGroup(
+  createTimeCond: DateTimeCond.def().copyWith(ignore: true),
   imageOption: const FilterOption(
     sizeConstraint: SizeConstraint(ignoreSize: true),
   ),

@@ -80,12 +80,30 @@ Future<Apercu> _video(Uint8List octets, String? chemin, int? dureeMs) async {
     fichier = temporaire.path;
   }
   try {
-    final image = await VideoThumbnail.thumbnailData(
-      video: fichier,
-      imageFormat: ImageFormat.JPEG,
-      maxWidth: 320,
-      quality: 60,
-    );
+    /*
+     * 🐛 UNE VIDÉO PARTAIT SANS IMAGE (user, 21/11/2026 : bulle brune, rien
+     * qu'un bouton de lecture). Une première image très détaillée dépassait
+     * le plafond de l'enveloppe ([_apercuMax]) et l'aperçu était JETÉ d'un
+     * coup. Comme le web (`e2ee-apercus.ts`, `reduire`) : on la refait plus
+     * petite et moins lourde, et on n'abandonne qu'en dernier recours.
+     */
+    Uint8List? image;
+    String? b64;
+    for (final (largeur, qualite) in const [(320, 60), (240, 50), (180, 45), (120, 40)]) {
+      final essai = await VideoThumbnail.thumbnailData(
+        video: fichier,
+        imageFormat: ImageFormat.JPEG,
+        maxWidth: largeur,
+        quality: qualite,
+      );
+      if (essai == null) break;
+      image = essai;
+      final encode = base64Encode(essai);
+      if (encode.length <= _apercuMax) {
+        b64 = encode;
+        break;
+      }
+    }
     var duree = dureeMs;
     if (duree == null) {
       final c = VideoPlayerController.file(File(fichier));
@@ -98,12 +116,11 @@ Future<Apercu> _video(Uint8List octets, String? chemin, int? dureeMs) async {
     }
     if (image == null) return Apercu(dureeMs: duree);
     final dims = await _dimensions(image);
-    final b64 = base64Encode(image);
     return Apercu(
       largeur: dims?.$1,
       hauteur: dims?.$2,
       dureeMs: duree,
-      apercu: b64.length <= _apercuMax ? b64 : null,
+      apercu: b64,
     );
   } finally {
     if (temporaire != null && temporaire.existsSync())
