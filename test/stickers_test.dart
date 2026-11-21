@@ -275,7 +275,13 @@ void main() {
         )!,
         timestamp: '12:00',
       )));
-      await tester.tap(find.byType(ImageSticker));
+      // L'appui se fait sur la CASE qui porte le geste (le GestureDetector de
+      // la bulle), pas sur l'image : ici l'image n'est pas chargée, sa boîte
+      // est vide et ne reçoit pas l'appui — Flutter l'avertissait à chaque
+      // passage (« would not hit test on the specified widget »).
+      await tester.tap(find
+          .ancestor(of: find.byType(ImageSticker), matching: find.byType(GestureDetector))
+          .first);
       await tester.pumpAndSettle();
       // Le nom du pack dans la langue de l'appareil de test (fr ou en).
       expect(find.text('Salutations').evaluate().length + find.text('Greetings').evaluate().length, 1);
