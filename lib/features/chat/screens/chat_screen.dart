@@ -8118,7 +8118,13 @@ class _ChatScreenState extends State<ChatScreen>
     final onTextColor = _bubbleTextColor(mine);
     final onSubColor = mine ? Colors.white70 : _muted45;
     return GestureDetector(
-      onTap: m.type == 'TEXT' && (m.content ?? '').isNotEmpty
+      // Ni dans un GROUPE ni chez le compte OFFICIEL (21/11/2026, demande du
+      // user) : un appui sur la bulle ne traduit plus — la mention
+      // « Traduire » y a été retirée aussi.
+      onTap: !widget.isGroup &&
+              !_officiel &&
+              m.type == 'TEXT' &&
+              (m.content ?? '').isNotEmpty
           ? () => _translateMessage(m)
           : null,
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
