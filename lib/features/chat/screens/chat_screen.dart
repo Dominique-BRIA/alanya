@@ -6718,10 +6718,18 @@ class _ChatScreenState extends State<ChatScreen>
               icon: const Icon(Icons.search),
               onPressed: _openSearch)
         else ...[
-          IconButton(
-              tooltip: tr(context, 'translated'),
-              icon: const Icon(Icons.translate),
-              onPressed: _openTranslation),
+          // Chez le compte officiel, pas de traduction (21/11/2026, demande du
+          // user) : la loupe prend sa place, comme dans un groupe.
+          if (_officiel)
+            IconButton(
+                tooltip: tr(context, 'search'),
+                icon: const Icon(Icons.search),
+                onPressed: _openSearch)
+          else
+            IconButton(
+                tooltip: tr(context, 'translated'),
+                icon: const Icon(Icons.translate),
+                onPressed: _openTranslation),
           // Le compte officiel ne décroche jamais : pas de bouton d'appel.
           if (!_officiel) ...[
             IconButton(
