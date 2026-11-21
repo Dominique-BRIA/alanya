@@ -1,4 +1,6 @@
 import '../../core/crash_journal.dart';
+import '../chat/preparations_envoi.dart';
+import '../media/media_repository.dart';
 import 'dart:async';
 import '../../l10n/app_localizations.dart';
 
@@ -285,6 +287,15 @@ class _HomeScreenState extends State<HomeScreen> {
       // à partager (voir CrashJournal).
       await CrashJournal.verifierAuDemarrage(context);
       if (!mounted) return;
+      // Les envois qui attendaient la fin d'une compression quand
+      // l'application a été fermée repartent (voir PreparationsEnvoi).
+      unawaited(PreparationsEnvoi.instance.brancher(
+        medias: context.read<MediaRepository>(),
+        chat: context.read<ChatRepository>(),
+        rt: context.read<RealtimeClient>(),
+        conn: context.read<ConnectivityService>(),
+        pile: () => mounted ? context.e2ee : null,
+      ));
       await _assureLeSuiviDePosition();
       // Le lien Alanya qui a lancé l'application passe APRÈS les questions
       // ci-dessus, pour la même raison : une question à la fois.

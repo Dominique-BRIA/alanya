@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show ValueListenable, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
@@ -38,12 +38,40 @@ class MediaCaptionResult {
   /// Envoi À VUE UNIQUE (une seule photo ou vidéo, sans légende).
   final bool vueUnique;
 
+  /// Non nul quand Envoyer a été pressé PENDANT la compression : [fichiers]
+  /// contient alors encore des originaux, et la liste à envoyer est celle que
+  /// rend [PreparationEnvoi.fichiers].
+  final PreparationEnvoi? preparation;
+
   const MediaCaptionResult({
     required this.fichiers,
     this.legende,
     this.mentions = const [],
     this.vueUnique = false,
+    this.preparation,
   });
+}
+
+/// ENVOYER SANS ATTENDRE LA FIN DE LA COMPRESSION, comme WhatsApp (demande du
+/// user, 21/11/2026 : « la compression dure trop »).
+///
+/// On appuyait sur Envoyer, et rien ne se passait tant que la vidéo n'était
+/// pas compressée : il fallait regarder le pourcentage. L'écran se ferme
+/// maintenant tout de suite ; la discussion montre une bulle « Compression… »
+/// et l'envoi s'enchaîne à la fin, par le chemin habituel.
+///
+/// ⚠️ LA COMPRESSION CONTINUE ÉCRAN FERMÉ : le moteur natif ne dépend pas de
+/// lui. Rien ne part avant qu'elle soit finie — partir avec l'original
+/// enverrait les mégaoctets qu'on est justement en train de retirer.
+class PreparationEnvoi {
+  const PreparationEnvoi({required this.fichiers, required this.avancement});
+
+  /// La liste à envoyer, chaque vidéo remplacée par sa version compressée (ou
+  /// laissée telle quelle si la compression n'a rien gagné).
+  final Future<List<MediaPickResult>> fichiers;
+
+  /// L'avancement de toutes les compressions, de 0 à 1.
+  final ValueListenable<double> avancement;
 }
 
 /// Aperçu des médias avant l'envoi, façon WhatsApp : balayage entre les médias,
@@ -126,8 +154,28 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
   /// grille, doigt levé, sans que rien ne soit encore visible de ce qu'on
   /// envoie. Ici, la vidéo se regarde et la légende s'écrit pendant que le
   /// transcodage tourne — exactement ce que fait le web depuis toujours.
-  int? _compresse;
+  ///
+  /// ⚠️ SUIVI PAR LE FICHIER, PAS PAR SA PLACE (21/11/2026) : retirer un média
+  /// pendant la compression décalait les positions, et la vidéo compressée
+  /// était rangée à la place d'un autre fichier.
+  MediaPickResult? _fichierEnCompression;
+  int? get _compresse {
+    final f = _fichierEnCompression;
+    if (f == null) return null;
+    final i = _fichiers.indexOf(f);
+    return i < 0 ? null : i;
+  }
+
   double _avancementCompression = 0;
+
+  /// Chaque original compressé → sa version compressée.
+  final Map<MediaPickResult, MediaPickResult> _remplacements = {};
+
+  /// L'avancement de TOUTES les compressions (la bulle de la discussion).
+  final ValueNotifier<double> _avancementGlobal = ValueNotifier<double>(0);
+
+  /// La compression en cours, attendue par un envoi pressé avant sa fin.
+  Future<void> _compression = Future<void>.value();
 
   /// Vrai tant qu'un fichier attend sa première compression : l'envoi patiente.
   bool _enPreparation = false;
@@ -138,7 +186,7 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
     _fichiers = List.of(widget.files);
     _pages = PageController();
     _prepareVideo(0);
-    unawaited(_compresserCeQuiReste());
+    _compression = _compresserCeQuiReste();
   }
 
   /// Compresse les fichiers que le sélecteur a laissés intacts — les vidéos.
@@ -149,21 +197,28 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
   ///
   /// ⚠️ NE LÈVE JAMAIS. Une vidéo qui refuse de se transcoder part telle
   /// quelle : c'est la règle de tout le module de compression.
+  ///
+  /// ⚠️ CONTINUE ÉCRAN FERMÉ (21/11/2026) : un envoi pressé pendant la
+  /// compression attend [_compression]. D'où les `mounted` autour de chaque
+  /// `setState`, et jamais devant le travail lui-même.
   Future<void> _compresserCeQuiReste() async {
-    final aFaire = <int>[
-      for (var i = 0; i < _fichiers.length; i++)
-        if (!_fichiers[i].compresse && _fichiers[i].estVideo) i,
+    final aFaire = <MediaPickResult>[
+      for (final f in _fichiers)
+        if (!f.compresse && f.estVideo) f,
     ];
     if (aFaire.isEmpty) return;
     if (mounted) setState(() => _enPreparation = true);
 
-    for (final i in aFaire) {
-      if (!mounted) return;
-      final m = _fichiers[i];
-      setState(() {
-        _compresse = i;
-        _avancementCompression = 0;
-      });
+    for (var n = 0; n < aFaire.length; n++) {
+      final m = aFaire[n];
+      // Retiré de l'envoi entre-temps : rien à compresser.
+      if (!_fichiers.contains(m)) continue;
+      if (mounted) {
+        setState(() {
+          _fichierEnCompression = m;
+          _avancementCompression = 0;
+        });
+      }
       try {
         final pret = await compresserPourEnvoi(
           asset: m.asset,
@@ -172,14 +227,13 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
           mimeType: m.mimeType,
           chemin: m.path,
           onProgression: (v) {
+            _avancementGlobal.value = (n + v) / aFaire.length;
             if (mounted) setState(() => _avancementCompression = v);
           },
         );
-        if (!mounted) return;
-        setState(() {
-          // Restée sur le disque (29/10/2026) : le MP4 produit le remplace,
-          // sans passer en mémoire ; sans gain, l'original part tel quel.
-          _fichiers[i] = m.surDisque
+        // Restée sur le disque (29/10/2026) : le MP4 produit le remplace,
+        // sans passer en mémoire ; sans gain, l'original part tel quel.
+        final remplace = m.surDisque
               ? m.copieAvec(
                   cheminContenu: pret.cheminProduit,
                   tailleSurDisque:
@@ -200,15 +254,24 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
                   niveauSuperieurPossible: pret.niveauSuperieurPossible,
                   definitionAutreNiveau: pret.definitionAutreNiveau,
                 );
-        });
+        _remplacements[m] = remplace;
+        final i = _fichiers.indexOf(m);
+        if (i >= 0) {
+          if (mounted) {
+            setState(() => _fichiers[i] = remplace);
+          } else {
+            _fichiers[i] = remplace;
+          }
+        }
       } catch (_) {
         // La vidéo partira telle quelle.
       }
     }
+    _avancementGlobal.value = 1;
 
     if (!mounted) return;
     setState(() {
-      _compresse = null;
+      _fichierEnCompression = null;
       _enPreparation = false;
     });
 
@@ -291,18 +354,29 @@ class _MediaCaptionScreenState extends State<MediaCaptionScreen> {
      */
     if (_recompresse != null) return;
     /*
-     * ⚠️ PAS D'ENVOI TANT QU'UNE VIDÉO SE TRANSCODE. Partir avec les octets
+     * ⚠️ RIEN NE PART AVANT LA FIN DE LA COMPRESSION. Partir avec les octets
      * d'origine enverrait les 80 Mo qu'on est précisément en train de réduire —
-     * et le serveur les refuserait. L'utilisateur voit le pourcentage ; le
-     * bouton attend qu'il finisse.
+     * et le serveur les refuserait.
+     *
+     * ⚡ MAIS L'ÉCRAN N'ATTEND PLUS (21/11/2026) : il se ferme tout de suite et
+     * confie à la discussion une PRÉPARATION — la liste finale, rendue à la
+     * fin des compressions — qu'elle affiche en bulle « Compression… ».
      */
-    if (_enPreparation) return;
+    final envoyes = List<MediaPickResult>.of(_fichiers);
+    final preparation = _enPreparation
+        ? PreparationEnvoi(
+            fichiers: _compression
+                .then((_) => [for (final f in envoyes) _remplacements[f] ?? f]),
+            avancement: _avancementGlobal,
+          )
+        : null;
     final vueUnique = _vueUnique && _vueUniquePossible;
     // Une vue unique part SANS légende : elle resterait lisible bien après
     // l'effacement du média.
     final legende = vueUnique ? '' : _captionCtrl.text.trim();
     Navigator.of(context).pop(MediaCaptionResult(
-      fichiers: _fichiers,
+      fichiers: envoyes,
+      preparation: preparation,
       vueUnique: vueUnique,
       legende: legende.isEmpty ? null : legende,
       // Réduites à celles encore présentes dans la légende : effacer

@@ -123,6 +123,7 @@ import '../../../widgets/media/sending_media_bubble.dart';
 import '../chat_media_integration.dart';
 import '../../../widgets/media/gps_preview.dart';
 import 'media_gallery_viewer.dart';
+import '../preparations_envoi.dart';
 import '../transfert_appareil.dart';
 import '../sortie_document_sensible.dart';
 import '../../../services/e2ee/e2ee_media_ouverture.dart';
@@ -688,6 +689,7 @@ class _ChatScreenState extends State<ChatScreen>
     // qu'on n'en sorte : on s'abonne pour suivre leur progression, et
     // `_rebuildCombined` en refait les bulles.
     EnvoiMediaStore.instance.addListener(_surEnvois);
+    PreparationsEnvoi.instance.addListener(_surEnvois);
     _rtSub = rt.events.listen(_onRealtimeEvent);
     // ⚠️ Une relève faite par un AUTRE écran doit aussi remplir ce fil : une
     // enveloppe ne se relève qu’une fois. Voir `PileE2ee.releves`.
@@ -1058,6 +1060,7 @@ class _ChatScreenState extends State<ChatScreen>
     // téléversements en cours doivent continuer quand l'écran meurt. C'est tout
     // l'objet du magasin.
     EnvoiMediaStore.instance.removeListener(_surEnvois);
+    PreparationsEnvoi.instance.removeListener(_surEnvois);
     _rtSub?.cancel();
     _relevesSub?.cancel();
     _restaurationsSub?.cancel();
@@ -2141,6 +2144,27 @@ class _ChatScreenState extends State<ChatScreen>
             createdAt: e.creeA,
           ),
     ];
+    // Les envois qui attendent la fin d'une compression (21/11/2026) : leur
+    // bulle « Compression… » vit dans `PreparationsEnvoi`, pas ici.
+    for (final p in PreparationsEnvoi.instance.pour(widget.convId)) {
+      if (!_messages.any((m) => m.id == p.id)) {
+        provisoires.add(Message(
+          id: p.id,
+          convId: p.convId,
+          senderId: _myId ?? "",
+          content: p.legende,
+          type: p.msgType,
+          status: "PENDING",
+          replyToId: p.replyToId,
+          replyTo: null,
+          media: [
+            MessageMedia(
+                id: p.id, url: '', mimeType: 'application/octet-stream', chiffre: true)
+          ],
+          createdAt: p.creeA,
+        ));
+      }
+    }
     // 🐛 Même chose pour un envoi CHIFFRÉ en morceaux (27/10/2026, « je vois
     // les APK puis ils disparaissent ») : sa copie venait du cache, puis la
     // synchronisation l'effaçait — le serveur ne publie qu'au dernier morceau.
@@ -4214,8 +4238,53 @@ class _ChatScreenState extends State<ChatScreen>
     );
     if (apercu == null || apercu.fichiers.isEmpty) return; // annulé
 
-    await _lanceEnvoiMedias(
-        apercu.fichiers, apercu.legende, apercu.mentions, apercu.vueUnique);
+    await _lanceEnvoiApresApercu(apercu, apercu.legende);
+  }
+
+  /// Envoie ce que rend l'écran d'aperçu — tout de suite, ou à la fin des
+  /// compressions s'il a été fermé avant ([MediaCaptionResult.preparation]).
+  Future<void> _lanceEnvoiApresApercu(
+      MediaCaptionResult apercu, String? legende) async {
+    final preparation = apercu.preparation;
+    if (preparation == null) {
+      await _lanceEnvoiMedias(
+          apercu.fichiers, legende, apercu.mentions, apercu.vueUnique);
+      return;
+    }
+
+    /*
+     * ⚡ CONFIÉ AU SERVICE, PAS À CET ÉCRAN (21/11/2026, demande du user : « la
+     * compression doit continuer même si on quitte la conversation, même si
+     * l'application est fermée »). `PreparationsEnvoi` attend la fin de la
+     * compression puis lance l'envoi ordinaire ; cet écran n'en montre que la
+     * bulle « Compression… ». Même décision de chiffrement que
+     * [_lanceEnvoiMedias], prise ICI tant que l'écran est là.
+     */
+    _proposerEnHaut();
+    final replyId = _replyTo?.id;
+    if (_replyTo != null) setState(() => _replyTo = null);
+    final pileAvant = context.e2ee;
+    if (pileAvant != null && !_filChiffre && !pileAvant.fil.etatConnu(widget.convId)) {
+      await _lireEtatChiffrement();
+      if (!mounted) return;
+    }
+    final pile = context.e2ee;
+    final moi = _myId;
+    final chiffre = _filChiffre && pile != null && _cheminChiffre && moi != null;
+    unawaited(PreparationsEnvoi.instance.lancer(
+      convId: widget.convId,
+      fichiers: apercu.fichiers,
+      compresses: preparation.fichiers,
+      avancement: preparation.avancement,
+      legende: legende,
+      mentions: apercu.mentions,
+      replyToId: replyId,
+      vueUnique: apercu.vueUnique,
+      chiffre: chiffre,
+      pairId: widget.otherUserId,
+      moi: moi,
+    ));
+    _scrollToBottom();
   }
 
   // ══════════════════════════════════════════════
@@ -4381,11 +4450,18 @@ class _ChatScreenState extends State<ChatScreen>
             (m.status == "PENDING" || _envoisChiffres.containsKey(m.id)))
           _envoiChiffreEnCours(
             suivi: _envoiDeBulle(m.id),
-            octets: _envoisChiffres[m.id]?.fichier.bytes,
-            mime: _envoisChiffres[m.id]?.fichier.mimeType ?? '',
+            octets: _envoisChiffres[m.id]?.fichier.bytes ??
+                PreparationsEnvoi.instance.parId(m.id)?.premier.bytes,
+            mime: _envoisChiffres[m.id]?.fichier.mimeType ??
+                PreparationsEnvoi.instance.parId(m.id)?.premier.mimeType ??
+                '',
             progression: _envoisChiffres[m.id]?.progression ??
                 ValueNotifier<double>(0),
-            preparation: _envoisChiffres[m.id]?.preparation,
+            preparation: _envoisChiffres[m.id]?.preparation ??
+                PreparationsEnvoi.instance.parId(m.id)?.avancement,
+            libellePreparation: PreparationsEnvoi.instance.parId(m.id) != null
+                ? tr(context, 'envoi_compression')
+                : null,
           )
         else if (d != null)
           BulleMediaChiffre(
@@ -4572,6 +4648,7 @@ class _ChatScreenState extends State<ChatScreen>
     required String mime,
     required ValueListenable<double> progression,
     ValueListenable<double>? preparation,
+    String? libellePreparation,
   }) {
     final moteur = SuiviEnvoisMorceaux.instance;
     return EnvoiChiffreEnCours(
@@ -4579,6 +4656,7 @@ class _ChatScreenState extends State<ChatScreen>
       mime: mime,
       progression: progression,
       preparation: preparation,
+      libellePreparation: libellePreparation,
       enPause: suivi?.enPause,
       onPause: suivi == null ? null : () => unawaited(moteur.mettreEnPause(suivi)),
       onReprendre: suivi == null ? null : () => unawaited(moteur.relancer(suivi)),
@@ -4958,12 +5036,8 @@ class _ChatScreenState extends State<ChatScreen>
       monId: _myId,
     );
     if (apercu == null || apercu.fichiers.isEmpty || !mounted) return;
-    await _lanceEnvoiMedias(
-      apercu.fichiers,
-      apercu.legende ?? (texte.isEmpty ? null : texte),
-      apercu.mentions,
-      apercu.vueUnique,
-    );
+    await _lanceEnvoiApresApercu(
+        apercu, apercu.legende ?? (texte.isEmpty ? null : texte));
   }
 
   /// Contacts portés par un message, ou liste vide si la charge est illisible.

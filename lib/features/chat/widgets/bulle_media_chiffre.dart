@@ -805,11 +805,17 @@ class EnvoiChiffreEnCours extends StatelessWidget {
     required this.mime,
     required this.progression,
     this.preparation,
+    this.libellePreparation,
     this.enPause,
     this.onPause,
     this.onReprendre,
     this.onAnnuler,
   });
+
+  /// Ce que dit la bulle avant le téléversement : « Chiffrement en cours… »
+  /// par défaut, « Compression… » quand une vidéo se compresse encore
+  /// (21/11/2026).
+  final String? libellePreparation;
 
   /// Pause, reprise et annulation d'un envoi en morceaux (29/10/2026). Nuls
   /// tant que l'envoi n'est pas confié à Android (préparation) : pas de bouton.
@@ -947,7 +953,10 @@ class EnvoiChiffreEnCours extends StatelessWidget {
         ]),
       ),
       const SizedBox(height: 6),
-      Text(tr(context, enEnvoi ? 'sending' : 'envoi_preparation'),
+      Text(
+          enEnvoi
+              ? tr(context, 'sending')
+              : (libellePreparation ?? tr(context, 'envoi_preparation')),
           style: const TextStyle(color: Colors.white, fontSize: 11)),
     ]);
   }
