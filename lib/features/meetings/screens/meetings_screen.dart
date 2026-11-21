@@ -12,6 +12,7 @@ import '../meetings_repository.dart';
 import 'create_meeting_screen.dart';
 import 'meeting_detail_screen.dart';
 import '../../../l10n/app_localizations.dart';
+import '../../../widgets/marge_barre_nav.dart';
 
 /// Onglet "Réunions" intégré dans la barre de navigation du HomeScreen.
 class MeetingsScreen extends StatefulWidget {
@@ -221,10 +222,15 @@ class _MeetingsScreenState extends State<MeetingsScreen>
                   ),
                 ]),
               ),
-              floatingActionButton: FloatingActionButton(
-                backgroundColor: accentOf(context),
-                onPressed: _create,
-                child: const Icon(Icons.add, color: Colors.white),
+              // Au-dessus de la barre du bas flottante (21/11/2026) : il
+              // passait dessous, comme sur le web.
+              floatingActionButton: AuDessusDeLaBarre(
+                marge: margeBasseBarre(context),
+                child: FloatingActionButton(
+                  backgroundColor: accentOf(context),
+                  onPressed: _create,
+                  child: const Icon(Icons.add, color: Colors.white),
+                ),
               ),
             ),
     );
@@ -287,7 +293,8 @@ class _MeetingsScreenState extends State<MeetingsScreen>
     }
 
     return ListView(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+      // La dernière réunion reste au-dessus de la barre du bas et du bouton.
+      padding: EdgeInsets.fromLTRB(4, 8, 4, 8 + margeBasseBarre(context) + 72),
       children: [
         ...filtered.map(_tile),
         const SizedBox(height: 80),

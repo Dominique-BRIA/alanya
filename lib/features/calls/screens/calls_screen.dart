@@ -18,6 +18,7 @@ import '../calls_repository.dart';
 import 'dialer_screen.dart';
 import '../../chat/screens/chat_screen.dart';
 import '../../../l10n/app_localizations.dart';
+import '../../../widgets/marge_barre_nav.dart';
 
 class CallsScreen extends StatefulWidget {
   const CallsScreen({super.key});
@@ -199,7 +200,8 @@ class _CallsScreenState extends State<CallsScreen>
                   ),
                   Positioned(
                     right: 16,
-                    bottom: 16,
+                    // Au-dessus de la barre du bas flottante (21/11/2026).
+                    bottom: 16 + margeBasseBarre(context),
                     child: FloatingActionButton(
                       backgroundColor: AlanyaColors.logoVert,
                       onPressed: () => Navigator.of(context).push(

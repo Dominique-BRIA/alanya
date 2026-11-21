@@ -96,6 +96,7 @@ import '../status/statuts_en_direct.dart';
 // L'aperçu d'une ligne d'un message, commun aux quatre écrans qui en affichent
 // un — voir `apercuMessage`.
 import '../../models/message_payload.dart';
+import '../../widgets/marge_barre_nav.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -2981,12 +2982,16 @@ class _StatusTabState extends State<_StatusTab> {
       appBar: AppBar(
         title: Text(tr(context, 'status')),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _menuNouveauStatut,
-        backgroundColor: themed(context,
-            light: AlanyaColors.forest, dark: AlanyaColors.terracottaNuit),
-        tooltip: tr(context, 'status_new'),
-        child: const Icon(Icons.add, color: Colors.white),
+      // Au-dessus de la barre du bas flottante (21/11/2026).
+      floatingActionButton: AuDessusDeLaBarre(
+        marge: margeBasseBarre(context),
+        child: FloatingActionButton(
+          onPressed: _menuNouveauStatut,
+          backgroundColor: themed(context,
+              light: AlanyaColors.forest, dark: AlanyaColors.terracottaNuit),
+          tooltip: tr(context, 'status_new'),
+          child: const Icon(Icons.add, color: Colors.white),
+        ),
       ),
       body: MotifBackground(
         overlayOpacity: 0.92,

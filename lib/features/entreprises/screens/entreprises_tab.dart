@@ -9,6 +9,7 @@ import '../../../widgets/chargement.dart';
 import '../../auth/auth_controller.dart';
 import '../entreprises_repository.dart';
 import 'fiche_entreprise_screen.dart';
+import '../../../widgets/marge_barre_nav.dart';
 
 /// Onglet **Entreprises** : l'annuaire des standards qu'on peut appeler.
 ///
@@ -411,7 +412,8 @@ class _EntreprisesTabState extends State<EntreprisesTab> {
     if (types.isEmpty) return _message(tr(context, 'company_no_type'), muted, false);
 
     return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      // Le dernier type reste au-dessus de la barre du bas (21/11/2026).
+      padding: EdgeInsets.only(top: 6, bottom: 6 + margeBasseBarre(context)),
       itemCount: types.length,
       itemBuilder: (_, i) {
         final t = types[i];
@@ -453,7 +455,7 @@ class _EntreprisesTabState extends State<EntreprisesTab> {
     if (liste.isEmpty) return _message(messageVide, muted, false);
 
     return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: EdgeInsets.only(top: 6, bottom: 6 + margeBasseBarre(context)),
       itemCount: liste.length,
       itemBuilder: (_, i) {
         final e = liste[i];
