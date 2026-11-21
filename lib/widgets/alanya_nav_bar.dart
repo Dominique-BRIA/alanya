@@ -17,9 +17,21 @@ class AlanyaNavBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    /*
+     * 🐛 LA BARRE PASSAIT SOUS LES BOUTONS DU SYSTÈME (user, 21/11/2026 :
+     * retour, accueil, récents par-dessus les onglets). Depuis Android 15,
+     * l'application s'affiche d'un bord à l'autre : la barre de navigation
+     * d'Android se pose PAR-DESSUS le bas de l'écran. On remonte donc la barre
+     * de la hauteur réservée par le système — grande avec les trois boutons,
+     * fine avec les gestes —, et de 12 comme avant quand il n'y en a pas.
+     *
+     * `viewPadding` et non `padding` : le clavier ne doit pas la faire bouger.
+     */
+    final systeme = MediaQuery.viewPaddingOf(context).bottom;
+    final bas = systeme > 0 ? systeme + 8 : 12.0;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      padding: EdgeInsets.fromLTRB(16, 0, 16, bas),
       child: Container(
         height: 64,
         decoration: BoxDecoration(

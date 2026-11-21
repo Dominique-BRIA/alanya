@@ -46,4 +46,20 @@ void main() {
     expect(bouton.bottom <= barre.top, isTrue,
         reason: 'bouton ${bouton.bottom} / barre ${barre.top}');
   });
+
+  // 🐛 21/11/2026 : avec les trois boutons d'Android (retour, accueil,
+  // récents), la barre passait dessous. Elle doit rester au-dessus de la zone
+  // que le système réserve en bas.
+  testWidgets('la barre reste au-dessus des boutons du système', (tester) async {
+    tester.view.padding = const FakeViewPadding(bottom: 48 * 3);
+    tester.view.viewPadding = const FakeViewPadding(bottom: 48 * 3);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(accueil(remonte: true));
+    final ecran = tester.view.physicalSize.height / tester.view.devicePixelRatio;
+    final barre = tester.getRect(find.byWidgetPredicate(
+        (w) => w is Container && w.constraints?.maxHeight == 64));
+    expect(barre.bottom <= ecran - 48, isTrue,
+        reason: 'barre ${barre.bottom} / écran $ecran (48 réservés en bas)');
+  });
 }
