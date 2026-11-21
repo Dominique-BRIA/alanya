@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:io' show SocketException;
+import 'dart:io' show File, SocketException;
 import 'dart:typed_data';
 
 import 'package:http/http.dart' show ClientException;
@@ -115,19 +115,13 @@ class PublicationStatuts {
         final attente = await StatutsPersistes.charger();
         for (final s in attente) {
           if (!conn.isOnline) break;
-          // Lu ICI, un seul à la fois, et pas du tout s'il est déjà
-          // téléversé : seule la déclaration reste alors à faire, et le
-          // fichier rangé suffit si elle échoue encore.
-          final Uint8List octets;
-          try {
-            octets = s.mediaId != null ? Uint8List(0) : await s.lireOctets();
-          } catch (_) {
-            await StatutsPersistes.oublier(s.id);
-            continue;
-          }
+          // Jamais lu en mémoire : il repart EN FLUX depuis le fichier rangé,
+          // et pas du tout s'il est déjà téléversé — seule la déclaration
+          // reste alors à faire.
           await _televerserEtDeclarer(
             id: s.id,
-            octets: octets,
+            octets: Uint8List(0),
+            fichier: s.mediaId != null ? null : s.chemin,
             nom: s.nomFichier,
             mime: s.mimeType,
             durationMs: s.durationMs,
@@ -223,6 +217,19 @@ class PublicationStatuts {
     var octets = m.octets;
     var nom = m.nomFichier;
     var mime = m.mimeType;
+    /*
+     * 🔴 LE CONTENU PEUT ÊTRE UN FICHIER (21/11/2026). Une vidéo de la galerie
+     * ou de l'appareil photo et un fichier audio arrivent SANS octets, par
+     * leur chemin : les charger faisait fermer l'application. Ils sont
+     * compressés et envoyés depuis le disque, en flux.
+     *
+     * 🐛 ET C'ÉTAIT UN DÉFAUT EN PLUS : depuis que la galerie ne charge plus
+     * les vidéos (29/10), ce chemin envoyait des octets VIDES.
+     */
+    String? fichier = octets.isEmpty ? m.chemin : null;
+    // Le MP4 produit par la compression : à effacer une fois parti (il pèse
+    // des dizaines de Mo dans le cache) — jamais l'original de la galerie.
+    String? produit;
 
     try {
       if (estVideo) {
@@ -236,14 +243,26 @@ class PublicationStatuts {
           mimeType: m.mimeType,
           onProgression: (avancement) => centre.avancer(id, avancement * 0.5),
         );
-        octets = v.octets;
+        if (v.cheminProduit != null) {
+          produit = v.cheminProduit;
+          fichier = produit;
+          octets = Uint8List(0);
+        } else if (v.octets.isNotEmpty) {
+          octets = v.octets;
+          fichier = null;
+        }
         nom = v.nomFichier;
         mime = v.mimeType;
+      }
+      if (octets.isEmpty && fichier == null) {
+        centre.echouer(id);
+        return;
       }
 
       await _televerserEtDeclarer(
         id: id,
         octets: octets,
+        fichier: fichier,
         nom: nom,
         mime: mime,
         durationMs: m.durationMs,
@@ -260,6 +279,14 @@ class PublicationStatuts {
       // pas une affaire de réseau.
       centre.echouer(id);
       return;
+    } finally {
+      // Parti, ou recopié dans les statuts en attente : le MP4 du cache ne
+      // sert plus.
+      if (produit != null) {
+        try {
+          await File(produit).delete();
+        } catch (_) {}
+      }
     }
   }
 
@@ -271,6 +298,9 @@ class PublicationStatuts {
   Future<void> _televerserEtDeclarer({
     required String id,
     required Uint8List octets,
+    /// Le contenu est ce fichier ([octets] vide) : envoyé en flux depuis le
+    /// disque, jamais chargé.
+    String? fichier,
     required String nom,
     required String mime,
     required int? durationMs,
@@ -285,18 +315,17 @@ class PublicationStatuts {
     String? idMedia = mediaDeja;
     try {
       if (idMedia == null) {
-        final envoye = await media.upload(
-          octets,
-          nom,
-          mime,
-          durationMs: durationMs,
-          onProgress: (envoyes, total) {
-            if (total <= 0) return;
-            final part = envoyes / total;
-            centre.avancer(
-                id, partTranscodage + part * (1 - partTranscodage));
-          },
-        );
+        void avancer(int envoyes, int total) {
+          if (total <= 0) return;
+          final part = envoyes / total;
+          centre.avancer(id, partTranscodage + part * (1 - partTranscodage));
+        }
+
+        final envoye = fichier != null
+            ? await media.uploadFromFile(fichier, nom, mime,
+                durationMs: durationMs, onProgress: avancer)
+            : await media.upload(octets, nom, mime,
+                durationMs: durationMs, onProgress: avancer);
         idMedia = envoye.id;
 
       /*
@@ -314,7 +343,11 @@ class PublicationStatuts {
        * personne, et le téléchargement recommence.
        */
         try {
-          await MediaCache.put(idMedia, 'dat', octets);
+          if (fichier != null) {
+            await MediaCache.putFichier(idMedia, 'dat', fichier);
+          } else {
+            await MediaCache.put(idMedia, 'dat', octets);
+          }
         } catch (_) {
           // Un cache qui échoue ne doit pas faire échouer une publication.
         }
@@ -355,6 +388,7 @@ class PublicationStatuts {
         await StatutsPersistes.enregistrer(
           id: id,
           octets: octets,
+          source: fichier,
           nomFichier: nom,
           mimeType: mime,
           durationMs: durationMs,

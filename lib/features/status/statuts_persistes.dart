@@ -75,6 +75,9 @@ class StatutsPersistes {
   static Future<void> enregistrer({
     required String id,
     required Uint8List octets,
+    /// Le contenu est ce FICHIER plutôt que [octets] (vide alors) : il est
+    /// recopié de fichier à fichier, jamais chargé (21/11/2026).
+    String? source,
     required String nomFichier,
     required String mimeType,
     int? durationMs,
@@ -89,7 +92,13 @@ class StatutsPersistes {
       final cible = File(chemin);
       // Les octets ne sont écrits qu'une fois : cette méthode est rappelée à
       // chaque tentative ratée.
-      if (!await cible.exists()) await cible.writeAsBytes(octets, flush: true);
+      if (!await cible.exists()) {
+        if (source != null) {
+          await File(source).copy(chemin);
+        } else {
+          await cible.writeAsBytes(octets, flush: true);
+        }
+      }
 
       final db = await _base();
       final date = creeA ?? DateTime.now();
@@ -218,11 +227,9 @@ class StatutEnAttente {
 
   final String id;
 
-  /// Le fichier rangé sur le disque.
+  /// Le fichier rangé sur le disque : il repart de là, en flux, sans être lu
+  /// en mémoire.
   final String chemin;
-
-  /// Le contenu, lu à la demande.
-  Future<Uint8List> lireOctets() => File(chemin).readAsBytes();
 
   final String nomFichier;
   final String mimeType;

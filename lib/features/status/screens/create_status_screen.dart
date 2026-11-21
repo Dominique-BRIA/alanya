@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
@@ -139,11 +141,16 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
     }
     if (!mounted) return;
     if (depassePlafondMedia(taille)) {
-      _snack(tr(context, 'status_video_limit', {'n': '$plafondMediaMo'}));
+      // ⚠️ PAS `status_video_limit` : il parle de SECONDES (la durée). Il
+      // disait « ne peut pas dépasser 300 secondes » pour un fichier trop lourd.
+      _snack(tr(context, 'status_trop_lourd', {'n': '$plafondMediaMo'}));
       _refermeSiEntreeMedia();
       return;
     }
-    final octets = await fichier.readAsBytes();
+    // Une VIDÉO reste sur le disque : l'éditeur la lit par son chemin, la
+    // publication la compresse et l'envoie depuis le disque. Une photo, déjà
+    // réduite par l'appareil photo, se charge — l'éditeur la dessine.
+    final octets = video ? Uint8List(0) : await fichier.readAsBytes();
     if (!mounted) return;
     await _editerPuisPublier([
       MediaPickResult(
@@ -151,6 +158,7 @@ class _CreateStatusScreenState extends State<CreateStatusScreen> {
         fileName: fichier.name,
         mimeType: video ? 'video/mp4' : 'image/jpeg',
         path: fichier.path,
+        tailleSurDisque: video ? taille : null,
       ),
     ]);
   }

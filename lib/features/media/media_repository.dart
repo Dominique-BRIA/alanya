@@ -91,6 +91,9 @@ class MediaRepository {
     int? durationMs,
     UsageMedia? usage,
     void Function(int envoyes, int total)? onProgress,
+    /// Comme pour [upload] : fichier chiffré de bout en bout, rangé sous un
+    /// nom et un type neutres, jamais dans le stockage public.
+    bool chiffre = false,
   }) async {
     final data = await _api.uploadFile(
       "/api/media",
@@ -102,6 +105,7 @@ class MediaRepository {
         // Sans `usage`, le fichier va dans le stockage PRIVÉ — le bon défaut.
         // Le nommer est un choix délibéré, jamais un oubli.
         if (usage != null) "usage": usage.valeur,
+        if (chiffre) "chiffre": "1",
       },
       onProgress: onProgress,
     );

@@ -304,6 +304,31 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> {
     _videoRang = 0;
     for (final asset in _recentMedia) {
       if (!_selectedIds.contains(asset.id)) continue;
+      /*
+       * 🐛 UNE VIDÉO TRAVERSAIT TOUT ENTIÈRE ANDROID PUIS LE CANAL (21/11/2026).
+       * `originBytes` la copiait dans le tas Java, puis dans Dart : une vidéo
+       * de quelques centaines de Mo faisait fermer l'application avant même
+       * l'aperçu. La galerie plein écran avait été corrigée le 29/10, pas
+       * cette grille. Même règle ici : la vidéo reste sur le disque, seul son
+       * chemin voyage ; l'écran de légende la compresse depuis le disque et
+       * mesure le plafond une fois la compression finie.
+       */
+      if (asset.type == AssetType.video) {
+        final fichierVideo = await asset.file;
+        if (fichierVideo == null) continue;
+        final taille = await fichierVideo.length();
+        if (taille == 0) continue;
+        results.add(MediaPickResult(
+          bytes: Uint8List(0),
+          tailleSurDisque: taille,
+          fileName: asset.title ?? 'media_${asset.id}',
+          mimeType: _mimeFromAsset(asset),
+          durationMs: (asset.duration * 1000).toInt(),
+          path: fichierVideo.path,
+          asset: asset,
+        ));
+        continue;
+      }
       final bytes = await asset.originBytes;
       if (bytes == null) continue;
       final name = asset.title ?? 'media_${asset.id}';

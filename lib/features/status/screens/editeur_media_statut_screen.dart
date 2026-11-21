@@ -23,6 +23,8 @@ class MediaEdite {
     this.legende,
   });
 
+  /// VIDE quand le contenu est sur le disque, à [chemin] : une vidéo ou un
+  /// fichier audio n'est jamais chargé en mémoire (21/11/2026).
   final Uint8List octets;
   final String nomFichier;
   final String mimeType;

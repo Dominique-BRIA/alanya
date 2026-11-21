@@ -34,7 +34,9 @@ class FeuilleStatutAudio extends StatefulWidget {
   State<FeuilleStatutAudio> createState() => _FeuilleStatutAudioState();
 }
 
-typedef _AudioPret = ({Uint8List octets, int dureeMs, String nom, String mime});
+/// [octets] : l'enregistrement du micro ; VIDE pour un fichier choisi, qui
+/// reste sur le disque à [chemin] (21/11/2026).
+typedef _AudioPret = ({Uint8List octets, String? chemin, int dureeMs, String nom, String mime});
 
 class _FeuilleStatutAudioState extends State<FeuilleStatutAudio> {
   final _micro = VoiceRecorder();
@@ -80,6 +82,7 @@ class _FeuilleStatutAudioState extends State<FeuilleStatutAudio> {
       if (r != null) {
         _pret = (
           octets: r.bytes,
+          chemin: null,
           dureeMs: r.durationMs,
           nom: 'statut-audio.m4a',
           mime: 'audio/mp4',
@@ -130,10 +133,12 @@ class _FeuilleStatutAudioState extends State<FeuilleStatutAudio> {
           {'n': '${dureeVideoStatutMax.inSeconds}'}));
       return;
     }
-    final octets = await File(chemin).readAsBytes();
-    if (!mounted || octets.isEmpty) return;
+    // Le fichier n'est pas lu : il partira depuis le disque.
+    final taille = await File(chemin).length();
+    if (!mounted || taille == 0) return;
     setState(() => _pret = (
-          octets: octets,
+          octets: Uint8List(0),
+          chemin: chemin,
           dureeMs: dureeMs,
           nom: f.name,
           mime: _mimeDe(f.name),
@@ -147,7 +152,7 @@ class _FeuilleStatutAudioState extends State<FeuilleStatutAudio> {
       octets: p.octets,
       nomFichier: p.nom,
       mimeType: p.mime,
-      chemin: null,
+      chemin: p.chemin,
       durationMs: p.dureeMs,
     ));
   }
