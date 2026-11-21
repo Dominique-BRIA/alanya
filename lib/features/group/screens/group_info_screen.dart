@@ -1135,7 +1135,8 @@ class _GroupInfoScreenState extends State<GroupInfoScreen> {
         ],
       ),
       subtitle: online
-          ? Text("en ligne", style: TextStyle(fontSize: 12, color: positiveOf(context)))
+          ? Text(tr(context, 'presence_online'),
+              style: TextStyle(fontSize: 12, color: positiveOf(context)))
           : (numero.isEmpty
               ? null
               : Text('Alanya ID : ${formatAlanyaId(numero)}',

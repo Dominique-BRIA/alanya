@@ -6677,7 +6677,9 @@ class _ChatScreenState extends State<ChatScreen>
                         widget.otherLastSeen;
                     String? sub;
                     if (online) {
-                      sub = "en ligne";
+                      // Traduit (21/11/2026) : « en ligne » restait en français
+                      // sur un téléphone réglé dans une autre langue.
+                      sub = tr(context, 'presence_online');
                     } else if (ls != null) {
                       sub = _lastSeenLabel(ls);
                     } else if (widget.otherStatusMsg?.isNotEmpty == true) {

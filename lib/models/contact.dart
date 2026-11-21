@@ -1,4 +1,6 @@
 import '../core/alanya_id_formatter.dart';
+import '../core/locale_controller.dart';
+import '../l10n/app_localizations.dart';
 
 /// Résultat d'une recherche d'utilisateur par numéro public.
 class UserSearchResult {
@@ -74,13 +76,20 @@ class Contact {
   bool get online => isOnline == 1;
 
   String get onlineStatus {
-    if (online) return "en ligne";
+    // Dans la langue de l'application (21/11/2026) : ces phrases étaient
+    // écrites en français, quelle que soit la langue choisie.
+    final t = AppLocalizations(LocaleController.codeCourant);
+    if (online) return t.get('presence_online');
     if (lastSeen == null) return "";
     final diff = DateTime.now().difference(lastSeen!);
-    if (diff.inMinutes < 1) return "vu à l'instant";
-    if (diff.inMinutes < 60) return "vu il y a ${diff.inMinutes} min";
-    if (diff.inHours < 24) return "vu il y a ${diff.inHours}h";
-    return "vu il y a ${diff.inDays}j";
+    if (diff.inMinutes < 1) return t.get('presence_just_now');
+    if (diff.inMinutes < 60) {
+      return t.get('presence_min').replaceAll('{n}', '${diff.inMinutes}');
+    }
+    if (diff.inHours < 24) {
+      return t.get('presence_hour').replaceAll('{n}', '${diff.inHours}');
+    }
+    return t.get('presence_day').replaceAll('{n}', '${diff.inDays}');
   }
 
   factory Contact.fromJson(Map<String, dynamic> j) {
