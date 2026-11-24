@@ -717,21 +717,35 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
                           // routé par un centre (demande user 15/08/2026) — nul
                           // pour un appel ordinaire, ou décroché app tuée
                           // (`acceptById` n'a pas cette info).
-                          if (cc.activeIvrFromId != null)
-                            IconButton(
-                              icon: const Icon(
-                                Icons.groups_outlined,
-                                color: Colors.white70,
+                          Row(mainAxisSize: MainAxisSize.min, children: [
+                            if (cc.activeIvrFromId != null)
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.groups_outlined,
+                                  color: Colors.white70,
+                                ),
+                                tooltip: tr(context, 'queue'),
+                                onPressed: () {
+                                  QueueStatusSheet.show(
+                                    context,
+                                    centerAlanyaID: cc.activeIvrFromId!,
+                                    api: context.read<AuthedApi>(),
+                                  );
+                                },
                               ),
-                              tooltip: tr(context, 'queue'),
-                              onPressed: () {
-                                QueueStatusSheet.show(
-                                  context,
-                                  centerAlanyaID: cc.activeIvrFromId!,
-                                  api: context.read<AuthedApi>(),
-                                );
-                              },
-                            ),
+                            // Caméra avant / arrière, en haut à droite
+                            // (24/11/2026, demande du user) : elle n'encombre
+                            // plus la rangée micro, haut-parleur, vidéo.
+                            if (isVideo && !showIncoming)
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.cameraswitch,
+                                  color: Colors.white,
+                                ),
+                                tooltip: tr(context, 'camera_short'),
+                                onPressed: () => cc.switchCamera(),
+                              ),
+                          ]),
                         ],
                       ),
                       const SizedBox(height: 8),
@@ -960,7 +974,8 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
                   showActive &&
                   cc.localStream != null)
                 Positioned(
-                  top: 12,
+                  // Sous le bouton de changement de caméra (24/11/2026).
+                  top: 60,
                   right: 12,
                   width: 100,
                   height: 140,
@@ -1690,8 +1705,8 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
         if (cc.passageVideoPar != null) _invitationVideo(cc),
         /*
          * DEUX RANGÉES FIXES (20/11/2026, demande du user) : en haut ce qui
-         * agit sur la communication — micro, haut-parleur, vidéo (et le
-         * changement de caméra pendant une vidéo) ; en bas ce qui agit sur
+         * agit sur la communication — micro, haut-parleur, vidéo (le
+         * changement de caméra est monté en haut à droite le 24/11) ; en bas ce qui agit sur
          * l'appel — message, inviter, transférer. Chaque bouton garde sa place
          * d'un appel à l'autre, au lieu de glisser d'une ligne à l'autre selon
          * le nombre de boutons présents.
@@ -1718,13 +1733,6 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
               active: !cc.isVideoEnabled,
               label: tr(context, 'video'),
               onPressed: cc.toggleVideo,
-            ),
-          if (isVideo)
-            _controlBtn(
-              icon: Icons.cameraswitch,
-              active: false,
-              label: tr(context, 'camera_short'),
-              onPressed: () => cc.switchCamera(),
             ),
         ]),
         const SizedBox(height: 14),
@@ -1838,33 +1846,52 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
 
   /// Le correspondant est passé en vidéo : on le voit, il ne nous voit pas
   /// encore. Comme WhatsApp, l'écran propose d'allumer sa caméra.
+  ///
+  /// DEUX LIGNES (24/11/2026, demande du user) : sur une seule, le nom
+  /// s'écrasait en une colonne d'une syllabe par ligne. En haut la phrase et
+  /// l'icône de la caméra ; en bas « Plus tard » et « Activer la caméra ».
   Widget _invitationVideo(CallController cc) {
     return Container(
       margin: const EdgeInsets.only(bottom: 18),
-      padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+      padding: const EdgeInsets.fromLTRB(16, 12, 12, 10),
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.55),
         borderRadius: BorderRadius.circular(16),
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Icon(Icons.videocam, color: Colors.white),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              tr(context, 'call_peer_switched_video',
-                  {'name': cc.passageVideoPar ?? ''}),
-              style: const TextStyle(color: Colors.white, fontSize: 14),
-            ),
+          Row(
+            children: [
+              Flexible(
+                child: Text(
+                  tr(context, 'call_peer_switched_video',
+                      {'name': cc.passageVideoPar ?? ''}),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Icon(Icons.videocam, color: Colors.white, size: 20),
+            ],
           ),
-          TextButton(
-            onPressed: cc.ignorerPassageVideo,
-            child: Text(tr(context, 'call_not_now'),
-                style: const TextStyle(color: Colors.white70)),
-          ),
-          FilledButton(
-            onPressed: () => cc.passerEnVideo(),
-            child: Text(tr(context, 'call_turn_on_camera')),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: cc.ignorerPassageVideo,
+                child: Text(tr(context, 'call_not_now'),
+                    style: const TextStyle(color: Colors.white70)),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: () => cc.passerEnVideo(),
+                child: Text(tr(context, 'call_turn_on_camera')),
+              ),
+            ],
           ),
         ],
       ),
