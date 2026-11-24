@@ -1850,6 +1850,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
   /// DEUX LIGNES (24/11/2026, demande du user) : sur une seule, le nom
   /// s'écrasait en une colonne d'une syllabe par ligne. En haut la phrase et
   /// l'icône de la caméra ; en bas « Plus tard » et « Activer la caméra ».
+  /// Les deux lignes sont centrées (24/11/2026).
   Widget _invitationVideo(CallController cc) {
     return Container(
       margin: const EdgeInsets.only(bottom: 18),
@@ -1863,6 +1864,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Flexible(
                 child: Text(
@@ -1870,6 +1872,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
                       {'name': cc.passageVideoPar ?? ''}),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
                   style: const TextStyle(color: Colors.white, fontSize: 14),
                 ),
               ),
@@ -1879,7 +1882,7 @@ class _ActiveCallScreenState extends State<ActiveCallScreen>
           ),
           const SizedBox(height: 8),
           Row(
-            mainAxisAlignment: MainAxisAlignment.end,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               TextButton(
                 onPressed: cc.ignorerPassageVideo,
