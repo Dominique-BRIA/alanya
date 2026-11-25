@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import 'plafond_media.dart';
 import 'server_config.dart';
 
 /// LE MODE MAINTENANCE (24/10/2026).
@@ -36,6 +37,9 @@ class Maintenance {
           .get(Uri.parse('${ServerConfig.apiBase}/api/maintenance'))
           .timeout(const Duration(seconds: 10));
       final d = jsonDecode(r.body) as Map<String, dynamic>;
+      // La limite des médias voyage dans la même réponse (25/11/2026) : la
+      // lire ici évite un aller-retour de plus. Voir `plafond_media.dart`.
+      if (r.statusCode == 200) noterPlafondServeur(d['mediaMaxMo']);
       if (r.statusCode == 200 && d['maintenance'] == false) {
         _sondage?.cancel();
         _sondage = null;

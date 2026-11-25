@@ -67,6 +67,7 @@ import 'core/server_config.dart';
 import 'features/chat/envoi_morceaux/envoi_morceaux_api.dart';
 import 'features/chat/envoi_morceaux/envoi_morceaux_chiffre.dart';
 import 'features/chat/envoi_morceaux/transport_morceaux.dart';
+import 'core/maintenance.dart';
 import 'widgets/ecran_maintenance.dart';
 
 void main() async {
@@ -149,6 +150,12 @@ void main() async {
   await TraductionAuto.instance.load();
   // Les noms donnés aux contacts, avant le premier écran (voir `NomsDonnes`).
   await NomsDonnes.charger();
+  /*
+   * La limite des médias, demandée au serveur (25/11/2026). SANS `await` : un
+   * aller-retour réseau n'a pas à retarder le premier écran, et tant qu'elle
+   * n'est pas arrivée la valeur de secours fait le travail.
+   */
+  unawaited(Maintenance.verifier());
   // Liens Alanya (QR, lien partagé) : abonnement AVANT tout écran, sans quoi
   // le lien qui a lancé l'application serait perdu. Voir `LiensEntrants`.
   LiensEntrants.instance.demarrer();

@@ -23,11 +23,36 @@ import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
 
+/// La valeur de SECOURS, si le serveur ne dit rien.
+///
+/// 🔴 LA LIMITE VIENT DU SERVEUR DEPUIS LE 25/11/2026 (décision du user). Elle
+/// était écrite en dur à QUATRE endroits — serveur, relais, web, téléphone — et
+/// avait déjà divergé : 500 Mo côté web, 300 ici. `GET /api/maintenance`
+/// l'annonce maintenant, et [noterPlafondServeur] la pose.
+///
+/// ⚠️ ON GARDE CELLE-CI TANT QUE LE SERVEUR N'A RIEN DIT : hors ligne, ou face
+/// à un serveur plus ancien qui n'annonce rien, l'application doit continuer de
+/// refuser tôt plutôt que de téléverser pour rien.
+const int plafondMediaSecoursOctets = 300 * 1024 * 1024;
+
+int _plafondOctets = plafondMediaSecoursOctets;
+
 /// Taille maximale acceptée par le serveur, en octets.
-const int plafondMediaOctets = 300 * 1024 * 1024;
+int get plafondMediaOctets => _plafondOctets;
 
 /// La même, en mégaoctets, pour les messages destinés à l'utilisateur.
-const int plafondMediaMo = plafondMediaOctets ~/ (1024 * 1024);
+int get plafondMediaMo => _plafondOctets ~/ (1024 * 1024);
+
+/// Le serveur vient d'annoncer sa limite (`mediaMaxMo`).
+///
+/// ⚠️ LES GARDE-FOUS NE SONT PAS DE LA DÉFIANCE : un champ absent, un texte, un
+/// zéro — et l'application refuserait TOUS les envois sans que personne
+/// comprenne pourquoi. Une valeur qu'on ne sait pas lire est ignorée.
+void noterPlafondServeur(dynamic mo) {
+  final n = mo is num ? mo.toInt() : int.tryParse('$mo');
+  if (n == null || n < 1 || n > 5000) return;
+  _plafondOctets = n * 1024 * 1024;
+}
 
 /// Ce fichier est-il trop lourd pour être envoyé ?
 bool depassePlafondMedia(int octets) => octets > plafondMediaOctets;
