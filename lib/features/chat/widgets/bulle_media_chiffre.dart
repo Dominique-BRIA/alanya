@@ -1082,6 +1082,16 @@ class EnvoiChiffreEnCours extends StatelessWidget {
 /// La roue d'une ouverture en cours, avec son POURCENTAGE (27/10/2026) : elle
 /// suit `OuvertureMediaChiffre.avancement`, qui vit hors de la bulle. Sans
 /// avancement connu (déchiffrement), elle tourne simplement.
+///
+/// 🔴 ET SON BOUTON DE PAUSE (25/11/2026, demande du user : « on doit pouvoir
+/// mettre pause à un envoi ou même à un téléchargement »). Il est AU CENTRE de
+/// la roue : c'est la seule place disponible sur une tuile, et c'est là que le
+/// doigt va naturellement.
+///
+/// ⚠️ PAS DE BOUTON SUR UNE PETITE ROUE. Dans une tuile de grille, la roue
+/// mesure une vingtaine de pixels : l'icône y serait illisible et le toucher
+/// raterait une fois sur deux. En dessous de [coteMiniPause], la roue reste ce
+/// qu'elle était.
 class AvancementOuverture extends StatelessWidget {
   const AvancementOuverture({
     super.key,
@@ -1091,6 +1101,9 @@ class AvancementOuverture extends StatelessWidget {
     this.couleur,
   });
 
+  /// En dessous, pas de bouton : la roue est trop petite pour être touchée.
+  static const coteMiniPause = 34.0;
+
   final String mediaId;
   final double cote;
   final double epaisseur;
@@ -1099,27 +1112,73 @@ class AvancementOuverture extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final suivi = OuvertureMediaChiffre.avancement(mediaId);
-    Widget roue(double? v) => Column(mainAxisSize: MainAxisSize.min, children: [
-          SizedBox(
-            width: cote,
-            height: cote,
-            child: CircularProgressIndicator(
-              value: v == null || v <= 0 ? null : v,
+    final pause = OuvertureMediaChiffre.pauseDe(mediaId);
+    final avecBouton = pause != null && cote >= coteMiniPause;
+
+    Widget roue(double? v, bool enPause) {
+      /*
+       * ⚠️ EN PAUSE, LA ROUE SE FIGE À SA VALEUR. Une roue qui continue de
+       * tourner après le toucher ferait croire que la pause n'a pas pris —
+       * alors qu'elle a bel et bien coupé les octets.
+       */
+      final valeur = enPause ? (v ?? 0) : (v == null || v <= 0 ? null : v);
+      return Column(mainAxisSize: MainAxisSize.min, children: [
+        SizedBox(
+          width: cote,
+          height: cote,
+          child: Stack(alignment: Alignment.center, children: [
+            CircularProgressIndicator(
+              value: valeur,
               strokeWidth: epaisseur,
               color: couleur,
             ),
-          ),
-          if (v != null && v > 0)
-            Padding(
-              padding: const EdgeInsets.only(top: 2),
+            if (avecBouton)
+              Semantics(
+                button: true,
+                label: tr(context, enPause ? 'dl_reprendre' : 'dl_pause'),
+                child: GestureDetector(
+                  // `opaque` : tout le disque intérieur répond, pas seulement
+                  // les traits de l'icône.
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => OuvertureMediaChiffre.basculerPause(mediaId),
+                  child: SizedBox(
+                    width: cote,
+                    height: cote,
+                    child: Center(
+                      child: Icon(
+                        enPause ? Icons.play_arrow_rounded : Icons.pause_rounded,
+                        size: cote * 0.46,
+                        color: couleur,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ]),
+        ),
+        if (v != null && v > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Opacity(
+              // Le chiffre pâlit quand il ne bouge plus : l'arrêt se voit sans
+              // avoir à lire quoi que ce soit.
+              opacity: enPause ? 0.6 : 1,
               child: Text('${(v * 100).round()} %',
                   style: TextStyle(fontSize: 10, color: couleur)),
             ),
-        ]);
-    if (suivi == null) return roue(null);
+          ),
+      ]);
+    }
+
+    if (suivi == null) return roue(null, false);
     return ValueListenableBuilder<double?>(
       valueListenable: suivi,
-      builder: (_, v, __) => roue(v),
+      builder: (_, v, __) => pause == null
+          ? roue(v, false)
+          : ValueListenableBuilder<bool>(
+              valueListenable: pause,
+              builder: (_, enPause, __) => roue(v, enPause),
+            ),
     );
   }
 }

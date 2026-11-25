@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import '../../core/controle_transfert.dart';
 import '../../core/media_cache.dart';
 import 'e2ee_media.dart';
 
@@ -38,6 +39,14 @@ class OuvertureMediaChiffre {
   /// se retrouve par l'identifiant du média.
   static final _avancements = <String, ValueNotifier<double?>>{};
 
+  /// LA PAUSE D'UN TÉLÉCHARGEMENT EN COURS (25/11/2026), par média.
+  ///
+  /// ⚠️ TENUE ICI, HORS DE LA BULLE, pour la même raison que l'avancement :
+  /// quitter la conversation détruit la bulle mais pas le téléchargement, et
+  /// la bulle recréée au retour doit retrouver l'état exact — y compris
+  /// « en pause ».
+  static final _controles = <String, ControleTransfert>{};
+
   /// L'identifiant de chaque média dont le clair VIENT D'ARRIVER sur
   /// l'appareil : rangé à l'envoi, ou ouvert ailleurs (galerie, autre bulle).
   ///
@@ -66,6 +75,14 @@ class OuvertureMediaChiffre {
   static ValueListenable<double?>? avancement(String mediaId) =>
       _avancements[mediaId];
 
+  /// Le téléchargement de ce média est-il en pause ? `null` : rien en cours.
+  static ValueListenable<bool>? pauseDe(String mediaId) =>
+      _controles[mediaId]?.enPause;
+
+  /// Met en pause le téléchargement de ce média, ou le reprend.
+  static void basculerPause(String mediaId) =>
+      _controles[mediaId]?.basculer();
+
   /// Le fichier en clair, prêt à afficher. Lève [FichierInvalide] si le
   /// fichier reçu n'est pas celui annoncé, [MediaIndisponible] si le serveur ne
   /// l'a plus.
@@ -93,9 +110,14 @@ class OuvertureMediaChiffre {
      * déchiffrait sans passer par `ouvrir`, il ne pouvait pas le voir.
      */
     final avance = _avancements[d.id] = ValueNotifier<double?>(0);
-    final f = _ouvrir(d, baseUrl, token, jeton, avance).whenComplete(() {
+    final controle = _controles[d.id] = ControleTransfert();
+    final f = _ouvrir(d, baseUrl, token, jeton, avance, controle).whenComplete(() {
       _enCours.remove(d.id);
       _avancements.remove(d.id);
+      _controles.remove(d.id);
+      // ⚠️ LIBÉRER APRÈS AVOIR RETIRÉ DU REGISTRE : l'inverse laisserait une
+      // bulle écouter un `ValueNotifier` déjà disposé.
+      controle.liberer();
     });
     _enCours[d.id] = f;
     unawaited(f.then((_) => _arrivees.add(d.id), onError: (_) {}));
@@ -144,6 +166,7 @@ class OuvertureMediaChiffre {
     String? token,
     FournisseurJeton? jeton,
     ValueNotifier<double?> avance,
+    ControleTransfert controle,
   ) async {
     final garde = await MediaCache.get(_cle(d), _extension(d));
     if (garde != null) return File(garde);
@@ -162,6 +185,7 @@ class OuvertureMediaChiffre {
           final t = total ?? d.taille + (d.taille ~/ tailleBloc + 1) * 16;
           if (t > 0) avance.value = (recus / t).clamp(0.0, 1.0);
         },
+        controle,
       );
       avance.value = null;
       await dechiffrerFichierHorsDuFil(
@@ -220,12 +244,26 @@ class OuvertureMediaChiffre {
     FournisseurJeton? jeton,
     File cible,
     void Function(int recus, int? total) onRecu,
+    ControleTransfert controle,
   ) async {
     var courant = jeton != null ? await jeton() : token;
     var renouvele = false;
     var essai = 0;
     while (true) {
+      // Avant de (re)partir : on attend ici tant que c'est en pause.
+      await controle.point();
       final client = http.Client();
+      /*
+       * 🔴 LA PAUSE FERME LE CLIENT. C'est ce qui coupe les octets en vol : la
+       * boucle de lecture lève, le fichier partiel garde ce qui est écrit, et
+       * la reprise redemande la suite par `Range`. Sans cela, « pause »
+       * n'aurait rien arrêté avant la fin du fichier.
+       */
+      var coupeParPause = false;
+      final retirerArret = controle.inscrire(() {
+        coupeParPause = true;
+        client.close();
+      });
       /*
        * 🔴 REPRISE (27/10/2026). Ce qui est déjà dans [cible] n'est pas
        * redemandé : `Range` demande la suite. Le stockage (B2) répond 206 et
@@ -272,6 +310,8 @@ class OuvertureMediaChiffre {
       } on MediaIndisponible {
         rethrow;
       } catch (_) {
+        // Une pause n'use aucun essai : on attend, on n'échoue pas.
+        if (coupeParPause) continue;
         // Chaque essai reprend où le précédent s'est arrêté : on peut se
         // permettre d'insister davantage sur un réseau mobile.
         if (essai < 5) {
@@ -281,6 +321,7 @@ class OuvertureMediaChiffre {
         }
         rethrow;
       } finally {
+        retirerArret();
         // Fermer le client coupe aussi une connexion restée pendante.
         client.close();
       }
