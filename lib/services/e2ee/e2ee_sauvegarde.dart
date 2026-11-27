@@ -19,7 +19,7 @@ import 'e2ee_media.dart';
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart' show compute, visibleForTesting;
+import 'package:flutter/foundation.dart' show compute, debugPrint, visibleForTesting;
 
 import 'e2ee_coffre.dart';
 import 'e2ee_serrures.dart';
@@ -199,6 +199,9 @@ class E2eeSauvegarde {
     }
 
     _maitresse = await coffre.lireMaitresse();
+    // La clé maîtresse vient-elle de l'appareil (et non du mot de passe) ?
+    // Alors la serrure « mot de passe » n'a pas été éprouvée : voir ②.
+    final dejaSurAppareil = _maitresse != null;
 
     if (_maitresse == null) {
       final mdp = etat.serrures.where((s) => s.type == 'motdepasse');
@@ -221,10 +224,24 @@ class E2eeSauvegarde {
     /* ── ② COMPLÉTER LES SERRURES ────────────────────────────────── */
     // Le seul moment où le mot de passe existe : on pose sa serrure s'il n'y
     // en a pas. Un échec ici n'empêche pas de restaurer.
-    if (!etat.serrures.any((s) => s.type == 'motdepasse')) {
+    final serruresMdp = etat.serrures.where((s) => s.type == 'motdepasse').toList();
+    if (serruresMdp.isEmpty) {
       try {
         await _poser(await compute(_poserIsole, (_maitresse!, motDePasse)));
       } catch (_) {}
+    } else if (dejaSurAppareil) {
+      /*
+       * 🔴 UNE SERRURE PÉRIMÉE SE RÉPARE ICI (27/11/2026). Après un mot de
+       * passe oublié, ou un changement dont la serrure n'a pas suivi, la
+       * serrure garde l'ANCIEN mot de passe : tout nouvel appareil trouvait
+       * l'archive fermée. Cet appareil-ci l'ouvre avec sa clé maîtresse, sans
+       * passer par la serrure — personne ne la réparait.
+       *
+       * On l'éprouve avec le mot de passe qu'on vient de taper ; si elle
+       * refuse, on la refait. EN FOND : Argon2id prend une à deux secondes,
+       * l'entrée n'attend pas.
+       */
+      unawaited(_reparerSerrureSiPerimee(motDePasse, serruresMdp.first));
     }
 
     /* ── ③ RESTAURER ─────────────────────────────────────────────── */
@@ -264,12 +281,67 @@ class E2eeSauvegarde {
        * elle, la prochaine connexion sur un AUTRE appareil redemanderait les
        * douze mots.
        */
-      if (motDePasse != null &&
-          motDePasse.isNotEmpty &&
-          !etat.serrures.any((s) => s.type == 'motdepasse')) {
+      /*
+       * 🔴 MÊME SI UNE SERRURE EXISTE (27/11/2026) : après un mot de passe
+       * oublié, celle qui existe est PÉRIMÉE — c'est justement pour cela qu'on
+       * a eu besoin des 12 mots. La garder ferait redemander les 12 mots sur
+       * chaque nouvel appareil.
+       */
+      if (motDePasse != null && motDePasse.isNotEmpty) {
         await _poser(poserSerrure(cle, TypeSerrure.motdepasse, motDePasse));
       }
       return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// La serrure « mot de passe » refuse-t-elle [motDePasse] ? Alors elle est
+  /// périmée : on la refait avec la clé maîtresse de cet appareil. Ne lève
+  /// jamais.
+  Future<void> _reparerSerrureSiPerimee(String motDePasse, Serrure serrure) async {
+    try {
+      await compute(_ouvrirIsole, (motDePasse, serrure));
+      return; // Elle s'ouvre : rien à faire.
+    } catch (_) {
+      // Elle refuse ce mot de passe : périmée.
+    }
+    final cle = _maitresse;
+    if (cle == null) return;
+    try {
+      await _poser(await compute(_poserIsole, (cle, motDePasse)));
+      debugPrint('[e2ee] serrure « mot de passe » périmée, refaite.');
+    } catch (e) {
+      debugPrint('[e2ee] serrure périmée, réparation impossible : $e');
+    }
+  }
+
+  /// Relie l'archive ouverte au mot de passe [motDePasse] — déjà vérifié par
+  /// l'appelant — en refaisant sa serrure, même si une autre existe.
+  Future<bool> relierAuMotDePasse(String motDePasse) async {
+    final cle = _maitresse;
+    if (cle == null) return false;
+    try {
+      await _poser(await compute(_poserIsole, (cle, motDePasse)));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Une archive existe-t-elle pour ce compte ? Faux en cas de doute.
+  Future<bool> aUneArchive() async {
+    try {
+      return (await lireCoffre()).serrures.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// L'archive a-t-elle une clé de récupération ? Faux en cas de doute.
+  Future<bool> aUneCleDeRecuperation() async {
+    try {
+      return (await lireCoffre()).serrures.any((s) => s.type == 'recuperation');
     } catch (_) {
       return false;
     }

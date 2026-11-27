@@ -6,6 +6,7 @@ import '../../../core/api_client.dart';
 import '../../../core/app_snackbar.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
+import '../../../core/device_registry.dart';
 import '../account_repository.dart';
 import '../../../l10n/app_localizations.dart';
 
@@ -24,6 +25,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
   bool _obscureCurrent = true;
   bool _obscureNew = true;
   bool _submitting = false;
+  bool _deconnecterAutres = false;
   String? _error;
 
   @override
@@ -57,7 +59,12 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
       _error = null;
     });
     try {
-      await context.read<AccountRepository>().changePassword(current, next);
+      await context.read<AccountRepository>().changePassword(
+            current,
+            next,
+            deconnecterAutres: _deconnecterAutres,
+            appareilCourant: await DeviceRegistry.instance.deviceId(),
+          );
 
       /*
        * 🐛 LA SAUVEGARDE DOIT SUIVRE, SINON ELLE CASSE EN SILENCE. Sa serrure
@@ -71,10 +78,31 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
        *
        * ⚠️ RIEN N'EST RECHIFFRÉ : on ré-enveloppe 32 octets.
        */
-      if (context.mounted) {
-        await context.e2ee?.sauvegarde.suivreChangementMotDePasse(next);
-      }
+      final sauvegarde = context.e2ee?.sauvegarde;
+      final suivi = await sauvegarde?.suivreChangementMotDePasse(next) ?? true;
       if (!mounted) return;
+      /*
+       * 🔴 UN ÉCHEC SE DIT (27/11/2026). Il passait sous silence, et l'on
+       * découvrait l'archive fermée au changement d'appareil. Seulement s'il y
+       * a une archive : sans elle, il n'y avait rien à faire suivre. La
+       * prochaine connexion sur cet appareil la répare.
+       */
+      if (!suivi && sauvegarde != null && await sauvegarde.aUneArchive()) {
+        if (!mounted) return;
+        await showDialog<void>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            content: Text(tr(ctx, 'arch_suivi_echoue')),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+        if (!mounted) return;
+      }
       showAppSnackBar(tr(context, 'password_changed'));
       Navigator.of(context).pop();
     } on ApiException catch (e) {
@@ -130,7 +158,20 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                         dark: AlanyaColors.erreurNuit),
                     fontSize: 13)),
           ],
-          const SizedBox(height: 28),
+          const SizedBox(height: 16),
+          // « Déconnecter mes autres appareils » (27/11/2026) : facultatif,
+          // cet appareil reste connecté.
+          CheckboxListTile(
+            value: _deconnecterAutres,
+            onChanged: _submitting
+                ? null
+                : (v) => setState(() => _deconnecterAutres = v ?? false),
+            contentPadding: EdgeInsets.zero,
+            controlAffinity: ListTileControlAffinity.leading,
+            title: Text(tr(context, 'arch_deconnecter_autres')),
+            subtitle: Text(tr(context, 'arch_deconnecter_autres_d')),
+          ),
+          const SizedBox(height: 20),
           ElevatedButton(
             onPressed: _submitting ? null : _submit,
             child: _submitting

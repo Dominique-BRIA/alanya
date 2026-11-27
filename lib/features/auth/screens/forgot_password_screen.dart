@@ -254,6 +254,32 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                     textAlign: TextAlign.center,
                     style: TextStyle(color: mutedOf(context, Colors.black54)),
                   ),
+                  /*
+                   * 🔴 PRÉVENIR AVANT (27/11/2026) : réinitialiser le mot de
+                   * passe sans connaître l'ancien laisse l'archive sous
+                   * l'ancien — seule la clé de récupération l'ouvre ensuite.
+                   */
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: accentOf(context).withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(Icons.info_outline, size: 18, color: accentOf(context)),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            tr(context, 'arch_oubli_avertissement'),
+                            style: const TextStyle(fontSize: 13, height: 1.4),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                   const SizedBox(height: 32),
 
                   // ═══ Chemin par IDENTIFIANT DE RÉCUPÉRATION ═══

@@ -1,4 +1,5 @@
 import '../../core/crash_journal.dart';
+import '../parametres/invitation_cle_recuperation.dart';
 import '../chat/preparations_envoi.dart';
 import '../media/media_repository.dart';
 import 'dart:async';
@@ -286,6 +287,9 @@ class _HomeScreenState extends State<HomeScreen> {
       // La dernière fermeture brutale, s'il y en a eu une : montrée une fois,
       // à partager (voir CrashJournal).
       await CrashJournal.verifierAuDemarrage(context);
+      if (!mounted) return;
+      // Noter sa clé de récupération, proposé une seule fois (27/11/2026).
+      await InvitationCleRecuperation.peutEtreProposer(context);
       if (!mounted) return;
       // Les envois qui attendaient la fin d'une compression quand
       // l'application a été fermée repartent (voir PreparationsEnvoi).

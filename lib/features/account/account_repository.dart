@@ -81,10 +81,22 @@ class AccountRepository {
 
   /// Change le mot de passe de l'utilisateur connecté (vérifie l'actuel).
   /// Lève ApiException avec un message lisible en cas d'échec.
-  Future<void> changePassword(String currentPassword, String newPassword) async {
+  ///
+  /// [deconnecterAutres] (27/11/2026) : le serveur révoque toutes les sessions
+  /// du compte sauf celles de [appareilCourant], cet appareil.
+  Future<void> changePassword(
+    String currentPassword,
+    String newPassword, {
+    bool deconnecterAutres = false,
+    String? appareilCourant,
+  }) async {
     await _api.post("/api/account/password", {
       "currentPassword": currentPassword,
       "newPassword": newPassword,
+      if (deconnecterAutres && appareilCourant != null) ...{
+        "deconnecterAutres": true,
+        "appareilCourant": appareilCourant,
+      },
     });
   }
 

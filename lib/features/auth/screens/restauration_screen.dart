@@ -17,6 +17,7 @@
 /// d'ouvrir la serrure.
 library;
 
+import '../../../l10n/app_localizations.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -39,6 +40,19 @@ class _RestaurationScreenState extends State<RestaurationScreen> {
     EtapeRestauration.ouverture,
     0,
   );
+
+  /// L'archive ne s'est pas ouverte avec le mot de passe, mais elle a une clé
+  /// de récupération : on la propose, sans bloquer (27/11/2026).
+  bool _proposerCle = false;
+  final TextEditingController _mots = TextEditingController();
+  bool _ouvertureEnCours = false;
+  String? _erreur;
+
+  @override
+  void dispose() {
+    _mots.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -126,7 +140,53 @@ class _RestaurationScreenState extends State<RestaurationScreen> {
      * changé, archive protégée par la seule clé de récupération), la seconde
      * est passagère (réseau). Les deux entrent — mais seule la seconde mérite
      * qu'on retente, et le rattrapage s'en charge.
+     *
+     * 🔴 SAUF UNE PROPOSITION, DISCRÈTE (demande du user, 27/11/2026) : si
+     * l'archive est fermée ET qu'elle a une clé de récupération, on la
+     * propose — « Plus tard » entre aussitôt. Sans clé, rien à proposer.
      */
+    if (r.issue == IssueConnexion.fermee &&
+        await pile.sauvegarde.aUneCleDeRecuperation()) {
+      if (mounted) setState(() => _proposerCle = true);
+      return;
+    }
+    _entrer();
+  }
+
+  /// Les 12 mots saisis : on ouvre, on RELIE l'archive au mot de passe qu'on
+  /// vient de taper (les appareils suivants s'ouvriront avec lui), on restaure.
+  Future<void> _ouvrirParCle() async {
+    final saisie = _mots.text.trim();
+    if (saisie.isEmpty || _ouvertureEnCours) return;
+    setState(() {
+      _ouvertureEnCours = true;
+      _erreur = null;
+    });
+    final pile = context.e2ee;
+    if (pile == null) {
+      _entrer();
+      return;
+    }
+    final ok = await pile.sauvegarde.ouvrirParRecuperation(
+      saisie,
+      pile.coffre,
+      motDePasse: widget.motDePasse,
+    );
+    if (!mounted) return;
+    if (!ok) {
+      setState(() {
+        _ouvertureEnCours = false;
+        _erreur = tr(context, 'arch_cle_refusee');
+      });
+      return;
+    }
+    setState(() => _proposerCle = false);
+    try {
+      await pile.sauvegarde.restaurer(suivi: (p) {
+        if (mounted) setState(() => _progression = p);
+      });
+    } catch (_) {}
+    unawaited(pile.fil.groupe.restaurerTous());
     _entrer();
   }
 
@@ -171,7 +231,7 @@ class _RestaurationScreenState extends State<RestaurationScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                ..._enCours(theme),
+                if (_proposerCle) ..._propositionCle(theme) else ..._enCours(theme),
               ],
             ),
           ),
@@ -179,6 +239,49 @@ class _RestaurationScreenState extends State<RestaurationScreen> {
       ),
     );
   }
+
+  List<Widget> _propositionCle(ThemeData theme) => [
+        Text(
+          tr(context, 'arch_cle_proposee_titre'),
+          textAlign: TextAlign.center,
+          style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          tr(context, 'arch_cle_proposee_texte'),
+          textAlign: TextAlign.center,
+          style: theme.textTheme.bodyMedium,
+        ),
+        const SizedBox(height: 20),
+        TextField(
+          controller: _mots,
+          minLines: 2,
+          maxLines: 3,
+          autocorrect: false,
+          enableSuggestions: false,
+          decoration: InputDecoration(
+            labelText: tr(context, 'arch_cle_saisie'),
+            border: const OutlineInputBorder(),
+            errorText: _erreur,
+          ),
+        ),
+        const SizedBox(height: 16),
+        FilledButton(
+          onPressed: _ouvertureEnCours ? null : _ouvrirParCle,
+          child: _ouvertureEnCours
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Text(tr(context, 'arch_cle_restaurer')),
+        ),
+        const SizedBox(height: 8),
+        TextButton(
+          onPressed: _ouvertureEnCours ? null : _entrer,
+          child: Text(tr(context, 'arch_plus_tard')),
+        ),
+      ];
 
   List<Widget> _enCours(ThemeData theme) {
     final texteCompteur = compteur(_progression);

@@ -8,6 +8,9 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../../l10n/app_localizations.dart';
+import '../../account/account_repository.dart';
+import 'package:provider/provider.dart';
 
 import '../../../core/app_snackbar.dart';
 import '../../../core/erreur_lisible.dart';
@@ -200,6 +203,10 @@ class _SauvegardeChiffreeScreenState extends State<SauvegardeChiffreeScreen> {
           showAppSnackBar("Ces mots n'ouvrent pas la sauvegarde.");
           return;
         }
+        // Relier l'archive au mot de passe actuel (27/11/2026) : sans cela,
+        // chaque nouvel appareil redemanderait les 12 mots.
+        await _relierAuMotDePasse(pile);
+        if (!mounted) return;
         final r = await pile.sauvegarde.restaurer();
         if (!mounted) return;
         showAppSnackBar(
@@ -210,6 +217,52 @@ class _SauvegardeChiffreeScreenState extends State<SauvegardeChiffreeScreen> {
         );
         await _relire();
       });
+
+  /// Après une ouverture par les 12 mots : on demande le mot de passe actuel,
+  /// on le vérifie auprès du serveur, et la serrure « mot de passe » est
+  /// refaite avec lui. Facultatif : « Plus tard » laisse l'archive telle
+  /// quelle, et la prochaine connexion sur cet appareil la réparera.
+  Future<void> _relierAuMotDePasse(PileE2ee pile) async {
+    final ctrl = TextEditingController();
+    final mdp = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(tr(ctx, 'arch_relier_titre')),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(tr(ctx, 'arch_relier_texte')),
+          const SizedBox(height: 12),
+          TextField(
+            controller: ctrl,
+            obscureText: true,
+            autofocus: true,
+            decoration: InputDecoration(labelText: tr(ctx, 'current_password')),
+            onSubmitted: (v) => Navigator.pop(ctx, v),
+          ),
+        ]),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(tr(ctx, 'arch_plus_tard')),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text),
+            child: Text(tr(ctx, 'save')),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (mdp == null || mdp.isEmpty || !mounted) return;
+    try {
+      await context.read<AccountRepository>().verifierMotDePasse(mdp);
+    } catch (_) {
+      if (mounted) showAppSnackBar(tr(context, 'arch_mdp_incorrect'));
+      return;
+    }
+    if (await pile.sauvegarde.relierAuMotDePasse(mdp) && mounted) {
+      showAppSnackBar(tr(context, 'arch_relier_ok'));
+    }
+  }
 
   /// Supprime tout — définitivement.
   ///
