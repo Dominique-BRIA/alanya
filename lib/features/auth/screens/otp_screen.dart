@@ -38,6 +38,9 @@ class _OtpScreenState extends State<OtpScreen> {
           builder: (_) => SetupScreen(
             setupToken: result.setupToken,
             publicNumber: result.publicNumber,
+            // L'écran de fin le montre, comme pour une inscription sans
+            // adresse (27/11/2026).
+            idRecuperation: result.idRecuperation,
           ),
         ),
       );

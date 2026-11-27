@@ -21,7 +21,8 @@ class VerifyResult {
   /// reconnecté, son compte est perdu. L'écran DOIT donc le lui faire
   /// confirmer, pas seulement l'afficher.
   ///
-  /// Nul pour une inscription avec adresse.
+  /// Inscription AVEC adresse aussi depuis le 27/11/2026 (demande du user) :
+  /// tout compte reçoit son code, montré par l'écran de fin d'inscription.
   final String? idRecuperation;
 
   VerifyResult(
@@ -137,6 +138,8 @@ class AuthRepository {
       data["setupToken"] as String,
       data["publicNumber"] as String,
       (data["needsSetup"] as bool?) ?? true,
+      // Le code de récupération, tiré aussi pour un compte avec adresse.
+      idRecuperation: data["idRecuperation"] as String?,
     );
   }
 
