@@ -85,15 +85,27 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
     try {
       final deconnecter = _deconnecterAutres && !_deconnecterBloque;
       final realtime = context.read<RealtimeClient>();
+      final depot = context.read<AccountRepository>();
       // Pris avant toute attente : le contexte ne se relit plus ensuite.
-      final sauvegarde = context.e2ee?.sauvegarde;
-      final revoques = await context.read<AccountRepository>().changePassword(
+      final pile = context.e2ee;
+      final sauvegarde = pile?.sauvegarde;
+      /*
+       * 🔴 COUCHE A (27/11/2026) : la serrure du nouveau mot de passe est
+       * fabriquée AVANT, et part dans la même requête. Le serveur écrit les
+       * deux ensemble ; il n'y a plus rien à faire suivre après coup.
+       */
+      final serrure = pile == null
+          ? null
+          : await pile.sauvegarde.preparerSerrureMotDePasse(current, next, pile.compteId);
+      final reponse = await depot.changePassword(
             current,
             next,
             deconnecterAutres: deconnecter,
             appareilCourant: await DeviceRegistry.instance.deviceId(),
             jetonCourant: deconnecter ? await TokenStorage().refreshToken : null,
+            serrure: serrure?.enJson(),
           );
+      final revoques = reponse.revoques;
       // Les sockets des appareils révoqués se ferment tout de suite : sans
       // cette annonce, ils garderaient le temps réel jusqu'à 15 minutes.
       for (final id in revoques) {
@@ -112,7 +124,9 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
        *
        * ⚠️ RIEN N'EST RECHIFFRÉ : on ré-enveloppe 32 octets.
        */
-      final suivi = await sauvegarde?.suivreChangementMotDePasse(next) ?? true;
+      // Serveur d'avant la couche A, ou serrure impossible à fabriquer ici.
+      final suivi = reponse.serrurePosee ||
+          (await sauvegarde?.suivreChangementMotDePasse(next) ?? true);
       if (!mounted) return;
       /*
        * 🔴 UN ÉCHEC SE DIT (27/11/2026). Il passait sous silence, et l'on
@@ -121,6 +135,8 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
        * prochaine connexion sur cet appareil la répare.
        */
       if (!suivi && sauvegarde != null && await sauvegarde.aUneArchive()) {
+        // Les appareils qui ont la clé affichent le bandeau de la couche B.
+        realtime.sendSignalSauvegarde('serrure_perimee');
         if (!mounted) return;
         await showDialog<void>(
           context: context,

@@ -21,8 +21,15 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show compute, debugPrint, visibleForTesting;
 
+import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart' show Curve;
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../core/api_client.dart' show ApiException;
 import 'e2ee_coffre.dart';
+import 'e2ee_compte.dart' show aadCleCompte;
+import 'e2ee_groupe.dart' show ContexteEmballage, deballerCle, emballerCle;
 import 'e2ee_serrures.dart';
+import 'e2ee_trousseau_perso.dart' show chiffrerCopie, dechiffrerCopie;
 import '../../core/message_cache.dart';
 import 'e2ee_service.dart';
 
@@ -68,6 +75,63 @@ Serrure _poserIsole((Uint8List, String) a) =>
 ({Uint8List maitresse, List<Serrure> serrures}) _creerIsole(String mdp) =>
     creerArchive({TypeSerrure.motdepasse: mdp});
 
+/* ══════════════ LE BLOC DE CONTRÔLE (27/11/2026) ══════════════ */
+
+/// Le texte connu que chiffre le bloc de contrôle. Jumeau du web.
+const texteControle = 'alanya-controle-archive-v1';
+
+Uint8List aadControle(String compte) =>
+    Uint8List.fromList(utf8.encode('alanya.e2ee.controle\n$compte'));
+
+/// Fabrique le bloc de contrôle de [maitresse] : même forme que les copies de
+/// trousseau, base64( 0x01 | nonce 12 | AES-256-GCM ).
+String creerControle(Uint8List maitresse, String compte) =>
+    chiffrerCopie(maitresse, texteControle, aadControle(compte));
+
+/// [maitresse] ouvre-t-elle le bloc de contrôle ? Faux en cas de doute.
+bool controleValide(Uint8List maitresse, String controle, String compte) {
+  try {
+    return dechiffrerCopie(maitresse, controle, aadControle(compte)) == texteControle;
+  } catch (_) {
+    return false;
+  }
+}
+
+/// Le contexte d'une demande de clé : celui des emballages de groupe, la
+/// demande tenant lieu de conversation. Jumeau du web.
+ContexteEmballage contexteDemande(String id, String compte) =>
+    ContexteEmballage(convId: id, destinataireId: compte, version: 1, versionCompte: 1);
+
+/// Ce qu'a donné la relecture de MA demande de clé.
+enum IssueDemande { aucune, attente, recue, refusee, expiree, rejetee }
+
+/// Une demande d'un AUTRE appareil du compte, vue par celui qui a la clé.
+class DemandeCle {
+  const DemandeCle({
+    required this.id,
+    required this.appareil,
+    required this.libelle,
+    required this.clePublique,
+    required this.auto,
+  });
+
+  final String id;
+  final String appareil;
+  final String libelle;
+  final String clePublique;
+
+  /// La clé peut partir sans rien demander (le serveur en décide).
+  final bool auto;
+
+  static DemandeCle depuisJson(Map<String, dynamic> j) => DemandeCle(
+        id: j['id'] as String,
+        appareil: (j['appareil'] as String?) ?? '',
+        libelle: (j['libelle'] as String?) ?? '',
+        clePublique: j['clePublique'] as String,
+        auto: j['auto'] == true,
+      );
+}
+
 class E2eeSauvegarde {
   E2eeSauvegarde(this._api);
 
@@ -108,6 +172,9 @@ class E2eeSauvegarde {
       _changeLeFourni = r.containsKey('motDePasseChangeLe');
       _motDePasseChangeLe =
           DateTime.tryParse((r['motDePasseChangeLe'] as String?) ?? '');
+      // Le bloc de contrôle : `_controleFourni` faux = serveur d'avant lui.
+      _controleFourni = r.containsKey('controle');
+      _controle = r['controle'] as String?;
       return (serrures: liste, refusee: r['refusee'] == true);
     } catch (_) {
       /*
@@ -133,12 +200,76 @@ class E2eeSauvegarde {
   /// coûte un Argon2id — une à deux secondes et 64 Mio — à chaque connexion,
   /// pour rien la plupart du temps. Un serveur plus ancien ne date rien : on
   /// éprouve comme avant.
-  bool _aEprouver(Serrure s) {
+  bool _aEprouver(Serrure s, {bool dejaEprouveeIci = false}) {
     if (!_changeLeFourni) return true;
+    if (_perimeeSelonDates(s)) return true;
+    /*
+     * ⚠️ DATE VIDE : mot de passe jamais changé depuis l'ajout de la colonne.
+     * Une serrure posée AVANT a pu se périmer sans laisser de trace : on
+     * l'éprouve UNE fois sur cet appareil, en silence.
+     */
+    return _motDePasseChangeLe == null && !dejaEprouveeIci;
+  }
+
+  /// La serrure est-elle plus ancienne que le dernier changement de mot de passe ?
+  bool _perimeeSelonDates(Serrure s) {
     final change = _motDePasseChangeLe;
-    if (change == null) return false;
+    if (!_changeLeFourni || change == null) return false;
     final posee = s.majLe;
     return posee == null || posee.isBefore(change);
+  }
+
+  static String _cleEprouvee(String compte) => 'serrure_eprouvee_$compte';
+
+  Future<bool> _eprouveeIci(String? compte) async {
+    if (compte == null) return false;
+    try {
+      return (await SharedPreferences.getInstance()).getBool(_cleEprouvee(compte)) ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _marquerEprouvee(String? compte) async {
+    if (compte == null) return;
+    try {
+      await (await SharedPreferences.getInstance()).setBool(_cleEprouvee(compte), true);
+    } catch (_) {}
+  }
+
+  /* ── Le bloc de contrôle, côté appareil ── */
+
+  bool _controleFourni = false;
+  String? _controle;
+
+  /// Dépose le bloc de contrôle — une fois prouvée la clé. Ne lève jamais.
+  Future<void> _deposerControle(Uint8List maitresse, String? compte) async {
+    if (compte == null || !_controleFourni || _controle != null) return;
+    try {
+      await _api('PUT', '/api/e2ee/controle', {'controle': creerControle(maitresse, compte)});
+    } catch (_) {}
+  }
+
+  /// La clé de cet appareil, PROUVÉE — ou `null`. À appeler après `lireCoffre`.
+  ///
+  /// Par le bloc de contrôle s'il existe. Sinon par la copie de la clé de
+  /// compte, chiffrée par la même clé maîtresse : l'ouvrir prouve la clé, et le
+  /// bloc est alors posé pour les suivants. Sans l'un ni l'autre, rien.
+  Future<Uint8List?> _cleProuvee(String compte) async {
+    final m = _maitresse;
+    if (m == null || !_controleFourni) return null;
+    final controle = _controle;
+    if (controle != null) return controleValide(m, controle, compte) ? m : null;
+    try {
+      final r = await _api('GET', '/api/e2ee/compte', null);
+      final cle = r['cle'] as Map<String, dynamic>?;
+      if (cle == null) return null;
+      dechiffrerCopie(m, cle['priveeChiffree'] as String, aadCleCompte(compte, cle['version'] as int));
+    } catch (_) {
+      return null;
+    }
+    await _deposerControle(m, compte);
+    return m;
   }
 
   /// Réessaie [travail] sur une erreur passagère : la plupart des échecs à
@@ -204,6 +335,8 @@ class E2eeSauvegarde {
     String motDePasse,
     CoffreE2ee coffre, {
     SuiviRestauration? suivi,
+    // Le compte (27/11/2026) : il lie le bloc de contrôle. Sans lui, pas de bloc.
+    String? compte,
   }) async {
     const rien = (issue: IssueConnexion.rienARestaurer, restaures: 0, illisibles: 0);
     const echec = (issue: IssueConnexion.echec, restaures: 0, illisibles: 0);
@@ -230,6 +363,8 @@ class E2eeSauvegarde {
         }
         _maitresse = a.maitresse;
         await coffre.rangerMaitresse(a.maitresse);
+        // La clé vient d'être tirée : la bonne par définition (27/11/2026).
+        unawaited(_deposerControle(a.maitresse, compte));
       } catch (_) {
         return echec;
       }
@@ -237,6 +372,20 @@ class E2eeSauvegarde {
     }
 
     _maitresse = await coffre.lireMaitresse();
+    /*
+     * 🔴 LA CLÉ DE CET APPAREIL EST-ELLE ENCORE LA BONNE ? (27/11/2026) Si le
+     * bloc de contrôle la refuse, elle vient d'une sauvegarde supprimée puis
+     * recréée ailleurs : on l'oublie, et l'on rouvre par le mot de passe.
+     */
+    final controleLu = _controle;
+    if (_maitresse != null &&
+        compte != null &&
+        controleLu != null &&
+        !controleValide(_maitresse!, controleLu, compte)) {
+      debugPrint('[e2ee] la clé de cet appareil n\'est plus celle de la sauvegarde : oubliée.');
+      _maitresse = null;
+    }
+    final dejaEprouvee = await _eprouveeIci(compte);
     // La clé maîtresse vient-elle de l'appareil (et non du mot de passe) ?
     // Alors la serrure « mot de passe » n'a pas été éprouvée : voir ②.
     final dejaSurAppareil = _maitresse != null;
@@ -260,9 +409,12 @@ class E2eeSauvegarde {
       // Elle vient de s'ouvrir avec ce mot de passe : la clé est la bonne. Si
       // le serveur la dit antérieure au dernier changement, on la repose pour
       // que la question ne revienne pas (27/11/2026).
-      if (_changeLeFourni && _aEprouver(mdp.first)) {
+      if (_perimeeSelonDates(mdp.first)) {
         unawaited(relierAuMotDePasse(motDePasse));
       }
+      unawaited(_marquerEprouvee(compte));
+      // Ouverte par une serrure : la clé est prouvée, le bloc peut se poser.
+      unawaited(_deposerControle(_maitresse!, compte));
     }
 
     final serruresMdp = etat.serrures.where((s) => s.type == 'motdepasse').toList();
@@ -286,7 +438,11 @@ class E2eeSauvegarde {
        * la serrure avec elle fermerait l'archive pour de bon. Un message
        * déchiffré prouve que c'est la bonne. Même règle que le web.
        */
-      if (dejaSurAppareil && r.messages.isNotEmpty) {
+      // Prouvée par le bloc (vérifié plus haut), ou par un message déchiffré.
+      final prouvee = _controle != null || r.messages.isNotEmpty;
+      if (dejaSurAppareil && prouvee) {
+        final m = _maitresse;
+        if (m != null) unawaited(_deposerControle(m, compte));
         if (serruresMdp.isEmpty) {
           /*
            * ── ② COMPLÉTER LES SERRURES ── Le seul moment où le mot de passe
@@ -296,11 +452,12 @@ class E2eeSauvegarde {
            * une archive qu'ils ne liraient pas.
            */
           unawaited(relierAuMotDePasse(motDePasse));
-        } else if (_aEprouver(serruresMdp.first)) {
+        } else if (_aEprouver(serruresMdp.first, dejaEprouveeIci: dejaEprouvee)) {
           unawaited(_reparerSerrureSiPerimee(
             motDePasse,
             serruresMdp.first,
-            refaireSiOuvre: _changeLeFourni,
+            refaireSiOuvre: _perimeeSelonDates(serruresMdp.first),
+            compte: compte,
           ));
         }
       }
@@ -364,10 +521,12 @@ class E2eeSauvegarde {
     String motDePasse,
     Serrure serrure, {
     bool refaireSiOuvre = false,
+    String? compte,
   }) async {
     try {
       await compute(_ouvrirIsole, (motDePasse, serrure));
       if (refaireSiOuvre) await relierAuMotDePasse(motDePasse);
+      await _marquerEprouvee(compte);
       return; // Elle s'ouvre : rien à réparer.
     } catch (_) {
       // Elle refuse ce mot de passe : périmée.
@@ -376,6 +535,7 @@ class E2eeSauvegarde {
     if (cle == null) return;
     try {
       await _poser(await compute(_poserIsole, (cle, motDePasse)));
+      await _marquerEprouvee(compte);
       debugPrint('[e2ee] serrure « mot de passe » périmée, refaite.');
     } catch (e) {
       debugPrint('[e2ee] serrure périmée, réparation impossible : $e');
@@ -384,14 +544,211 @@ class E2eeSauvegarde {
 
   /// Relie l'archive ouverte au mot de passe [motDePasse] — déjà vérifié par
   /// l'appelant — en refaisant sa serrure, même si une autre existe.
-  Future<bool> relierAuMotDePasse(String motDePasse) async {
+  ///
+  /// [compte] : la clé est d'abord éprouvée contre le bloc de contrôle — la
+  /// poser fausse fermerait la sauvegarde aux autres appareils.
+  Future<bool> relierAuMotDePasse(String motDePasse, {String? compte}) async {
     final cle = _maitresse;
     if (cle == null) return false;
+    if (compte != null) {
+      await lireCoffre();
+      final controle = _controle;
+      if (controle != null && !controleValide(cle, controle, compte)) return false;
+    }
     try {
       await _poser(await compute(_poserIsole, (cle, motDePasse)));
       return true;
     } catch (_) {
       return false;
+    }
+  }
+
+  /* ══════════════ COUCHE A : LA SERRURE AVEC LE MOT DE PASSE ══════════════ */
+
+  /// Fabrique, AVANT le changement de mot de passe, la serrure du nouveau
+  /// (27/11/2026). Elle part dans la même requête que lui, et le serveur écrit
+  /// les deux ensemble : une coupure ne peut plus les séparer.
+  ///
+  /// La clé vient de l'ancienne serrure ouverte par l'ancien mot de passe — ce
+  /// qui la prouve — ou, si celle-ci est déjà périmée, de cet appareil, prouvée
+  /// par le bloc de contrôle. `null` : rien à joindre.
+  Future<Serrure?> preparerSerrureMotDePasse(String ancien, String nouveau, String compte) async {
+    try {
+      final etat = await lireCoffre();
+      if (etat.serrures.isEmpty) return null;
+      final ancienne = etat.serrures.where((s) => s.type == 'motdepasse');
+      if (ancienne.isNotEmpty) {
+        try {
+          final m = await compute(_ouvrirIsole, (ancien, ancienne.first));
+          return await compute(_poserIsole, (m, nouveau));
+        } catch (_) {
+          // Périmée : on passe à la clé de cet appareil.
+        }
+      }
+      final m = await _cleProuvee(compte);
+      return m == null ? null : await compute(_poserIsole, (m, nouveau));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /* ══════════════ COUCHE B : LA SERRURE PÉRIMÉE ══════════════ */
+
+  /// Cet appareil a-t-il la clé, alors que la serrure « mot de passe » ne suit
+  /// plus le mot de passe du compte ? Les autres appareils trouvent alors la
+  /// sauvegarde fermée ; celui-ci peut la réparer s'il connaît le mot de passe
+  /// actuel — d'où le bandeau qui le demande. Faux en cas de doute.
+  Future<bool> serrureMotDePassePerimee(String compte) async {
+    if (_maitresse == null) return false;
+    final etat = await lireCoffre();
+    if (etat.serrures.isEmpty) return false;
+    if (await _cleProuvee(compte) == null) return false;
+    final s = etat.serrures.where((x) => x.type == 'motdepasse');
+    return s.isEmpty || _perimeeSelonDates(s.first);
+  }
+
+  /* ══════════════ COUCHE C : LA CLÉ PASSE D'UN APPAREIL À L'AUTRE ══════════════ */
+
+  /*
+   * 🔴 LE CAS QUE TOUT CELA RÈGLE (27/11/2026) : le mot de passe a changé, la
+   * serrure n'a pas suivi, et l'on se connecte sur un NOUVEL appareil — la
+   * sauvegarde y reste fermée. Un appareil déjà connecté, lui, a la clé.
+   *
+   * Le nouvel appareil tire une paire éphémère et dépose la publique ; l'autre
+   * lui scelle la clé maîtresse (le format des emballages de groupe, éprouvé
+   * et jumeau du web) ; le nouvel appareil la vérifie par le bloc de contrôle,
+   * la range et refait la serrure avec le mot de passe qu'il vient de taper.
+   *
+   * ⚠️ LA CLÉ PRIVÉE ÉPHÉMÈRE RESTE EN MÉMOIRE : le coffre n'a pas de place
+   * pour elle, et l'écrire à côté de lui, hors de sa file d'accès, réveillerait
+   * le défaut « Failed to unwrap key ». Une application relancée redemande
+   * (voir la veille).
+   */
+  ({String id, Uint8List priv})? _demande;
+
+  /// Une demande de cet appareil attend-elle la clé ?
+  bool get demandeEnAttente => _demande != null;
+
+  /// Demande la clé aux autres appareils du compte. [motDePasse] : celui qu'on
+  /// vient de taper, vérifié par le serveur — c'est ce qui rend l'accord
+  /// automatique possible. Rend l'identifiant de la demande, ou `null`.
+  Future<String?> demanderCleAuxAppareils({
+    required String appareil,
+    required String libelle,
+    String? motDePasse,
+  }) async {
+    try {
+      final paire = Curve.generateKeyPair();
+      final r = await _api('POST', '/api/e2ee/demandes-cle', {
+        'appareil': appareil,
+        'libelle': libelle,
+        'clePublique': base64.encode(paire.publicKey.serialize()),
+        if (motDePasse != null && motDePasse.isNotEmpty) 'motDePasse': motDePasse,
+      });
+      final id = r['id'] as String;
+      _demande = (id: id, priv: Uint8List.fromList(paire.privateKey.serialize()));
+      return id;
+    } catch (e) {
+      debugPrint('[e2ee] demande de clé impossible : $e');
+      return null;
+    }
+  }
+
+  /// Relit MA demande. `recue` : la clé est là, vérifiée et rangée.
+  /// [motDePasse] : s'il est connu, la serrure est refaite avec lui aussitôt.
+  ///
+  /// `rejetee` : la clé reçue ne passe pas le bloc de contrôle. On ne s'en sert
+  /// pas — une clé fausse, rangée puis posée, fermerait la sauvegarde pour tous.
+  Future<IssueDemande> relireDemandeCle(
+    CoffreE2ee coffre,
+    String compte, {
+    String? motDePasse,
+  }) async {
+    final d = _demande;
+    if (d == null) return IssueDemande.aucune;
+    final Map<String, dynamic> r;
+    try {
+      r = await _api('GET', '/api/e2ee/demandes-cle/${Uri.encodeComponent(d.id)}', null);
+    } on ApiException catch (e) {
+      if (e.statusCode == 404) {
+        _demande = null;
+        return IssueDemande.aucune;
+      }
+      return IssueDemande.attente;
+    } catch (_) {
+      return IssueDemande.attente;
+    }
+    final etat = r['etat'] as String? ?? '';
+    if (etat == 'ouverte') return IssueDemande.attente;
+    _demande = null;
+    if (etat == 'servie' && r['enveloppe'] is String) {
+      final Uint8List m;
+      try {
+        m = deballerCle(r['enveloppe'] as String, d.priv, contexteDemande(d.id, compte));
+      } catch (_) {
+        return IssueDemande.rejetee;
+      }
+      await lireCoffre();
+      final controle = _controle;
+      // L'appareil qui sert dépose le bloc avant de servir : sans lui, refus.
+      if (controle == null || !controleValide(m, controle, compte)) return IssueDemande.rejetee;
+      _maitresse = m;
+      await coffre.rangerMaitresse(m);
+      if (motDePasse != null && motDePasse.isNotEmpty) {
+        unawaited(relierAuMotDePasse(motDePasse, compte: compte));
+      }
+      return IssueDemande.recue;
+    }
+    if (etat == 'refusee') return IssueDemande.refusee;
+    return IssueDemande.expiree;
+  }
+
+  /// Les demandes ouvertes des AUTRES appareils — seulement si la clé est ici.
+  Future<List<DemandeCle>> demandesCleOuvertes(String appareil) async {
+    if (_maitresse == null) return const [];
+    try {
+      final r = await _api(
+        'GET',
+        '/api/e2ee/demandes-cle?appareil=${Uri.encodeQueryComponent(appareil)}',
+        null,
+      );
+      return (r['demandes'] as List? ?? const [])
+          .cast<Map<String, dynamic>>()
+          .map(DemandeCle.depuisJson)
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// Scelle la clé maîtresse pour l'appareil qui la demande.
+  ///
+  /// ⚠️ SEULEMENT UNE CLÉ PROUVÉE (bloc de contrôle, ou copie de la clé de
+  /// compte — le bloc est alors posé). Transmettre une clé fausse ferait plus
+  /// de mal que de ne rien transmettre.
+  Future<bool> servirDemandeCle(DemandeCle d, String compte) async {
+    await lireCoffre();
+    final m = await _cleProuvee(compte);
+    if (m == null) return false;
+    try {
+      final enveloppe = emballerCle(m, base64.decode(d.clePublique), contexteDemande(d.id, compte));
+      await _api('POST', '/api/e2ee/demandes-cle/${Uri.encodeComponent(d.id)}/reponse',
+          {'enveloppe': enveloppe});
+      return true;
+    } catch (e) {
+      debugPrint('[e2ee] clé non transmise : $e');
+      return false;
+    }
+  }
+
+  /// « Ce n'est pas moi » : refuse, et le serveur déconnecte l'appareil. Rend
+  /// son identifiant, à annoncer au temps réel, ou `null`.
+  Future<String?> refuserDemandeCle(DemandeCle d) async {
+    try {
+      final r = await _api('POST', '/api/e2ee/demandes-cle/${Uri.encodeComponent(d.id)}/refus', {});
+      return r['appareil'] as String?;
+    } catch (_) {
+      return null;
     }
   }
 

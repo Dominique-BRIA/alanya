@@ -93,6 +93,9 @@ class DeviceRegistry {
   /// commence par la marque et le produit — « samsung/a54xnaxx/… ». On en tire
   /// un nom reconnaissable ; à défaut, un libellé générique que l'utilisateur
   /// pourra renommer.
+  /// Ce que les autres appareils du compte montrent de celui-ci (27/11/2026).
+  String get libelle => _libelle;
+
   String get _libelle {
     if (Platform.isAndroid) {
       final apres = Platform.operatingSystemVersion.split(', ');

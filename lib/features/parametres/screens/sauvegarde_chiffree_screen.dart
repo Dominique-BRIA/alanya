@@ -259,7 +259,7 @@ class _SauvegardeChiffreeScreenState extends State<SauvegardeChiffreeScreen> {
       if (mounted) showAppSnackBar(tr(context, 'arch_mdp_incorrect'));
       return;
     }
-    if (await pile.sauvegarde.relierAuMotDePasse(mdp) && mounted) {
+    if (await pile.sauvegarde.relierAuMotDePasse(mdp, compte: pile.compteId) && mounted) {
       showAppSnackBar(tr(context, 'arch_relier_ok'));
     }
   }

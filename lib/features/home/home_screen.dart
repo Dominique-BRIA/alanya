@@ -1,5 +1,6 @@
 import '../../core/crash_journal.dart';
 import '../parametres/invitation_cle_recuperation.dart';
+import '../parametres/veille_sauvegarde.dart';
 import '../chat/preparations_envoi.dart';
 import '../media/media_repository.dart';
 import 'dart:async';
@@ -291,6 +292,9 @@ class _HomeScreenState extends State<HomeScreen> {
       // Noter sa clé de récupération, proposé une seule fois (27/11/2026).
       await InvitationCleRecuperation.peutEtreProposer(context);
       if (!mounted) return;
+      // La sauvegarde entre mes appareils : clé demandée, clé à transmettre,
+      // serrure à refaire (27/11/2026).
+      VeilleSauvegarde.instance.brancher(context);
       // Les envois qui attendaient la fin d'une compression quand
       // l'application a été fermée repartent (voir PreparationsEnvoi).
       unawaited(PreparationsEnvoi.instance.brancher(
@@ -380,6 +384,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    VeilleSauvegarde.instance.debrancher();
     MissedCalls.instance.removeListener(_onManquesChanges);
     HomeScreen.ongletDemande.removeListener(_ongletDemande);
     LiensEntrants.instance.enAttente.removeListener(_traiterLienEnAttente);

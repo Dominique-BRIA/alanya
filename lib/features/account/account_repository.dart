@@ -88,16 +88,21 @@ class AccountRepository {
   /// [jetonCourant] : le jeton de rafraîchissement de cette session, pour que
   /// le serveur la garde même sans appareil connu. Rend les appareils révoqués,
   /// à annoncer au temps réel.
-  Future<List<String>> changePassword(
+  ///
+  /// [serrure] (couche A) : la serrure « mot de passe » du nouveau, écrite par
+  /// le serveur dans la même transaction. `serrurePosee` le confirme.
+  Future<({List<String> revoques, bool serrurePosee})> changePassword(
     String currentPassword,
     String newPassword, {
     bool deconnecterAutres = false,
     String? appareilCourant,
     String? jetonCourant,
+    Map<String, dynamic>? serrure,
   }) async {
     final r = await _api.post("/api/account/password", {
       "currentPassword": currentPassword,
       "newPassword": newPassword,
+      if (serrure != null) "serrure": serrure,
       if (deconnecterAutres && appareilCourant != null) ...{
         "deconnecterAutres": true,
         "appareilCourant": appareilCourant,
@@ -105,7 +110,10 @@ class AccountRepository {
       },
     });
     final liste = r["appareilsRevoques"];
-    return liste is List ? liste.whereType<String>().toList() : const [];
+    return (
+      revoques: liste is List ? liste.whereType<String>().toList() : const <String>[],
+      serrurePosee: r["serrurePosee"] == true,
+    );
   }
 
   /// Supprime définitivement le compte (vérifie le mot de passe).

@@ -26,6 +26,8 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../services/e2ee/e2ee_fournisseur.dart';
+import '../../../core/device_registry.dart';
+import '../../../core/realtime_client.dart';
 import '../auth_controller.dart';
 import '../../../services/e2ee/e2ee_sauvegarde.dart';
 import '../restauration_progression.dart';
@@ -52,10 +54,58 @@ class _RestaurationScreenState extends State<RestaurationScreen> {
   bool _ouvertureEnCours = false;
   String? _erreur;
 
+  /*
+   * 🔴 COUCHE C (27/11/2026) : la sauvegarde reste fermée ici, mais un autre
+   * appareil du compte a la clé. On la lui demande dès l'arrivée ; elle arrive
+   * toute seule s'il est ouvert, ou plus tard (la veille la reprendra).
+   */
+  bool _attente = false;
+  bool _refusParAppareil = false;
+  bool _motsVisibles = false;
+  Timer? _minuterie;
+  StreamSubscription<Map<String, dynamic>>? _signaux;
+
   @override
   void dispose() {
+    _minuterie?.cancel();
+    _signaux?.cancel();
     _mots.dispose();
     super.dispose();
+  }
+
+  void _attendreLaCle(PileE2ee pile) {
+    _minuterie?.cancel();
+    _minuterie = Timer.periodic(const Duration(seconds: 4), (_) => _relire(pile));
+    _signaux?.cancel();
+    _signaux = context.read<RealtimeClient>().events.listen((e) {
+      if (e['type'] == 'e2ee_sauvegarde' && e['quoi'] == 'demande_cle_traitee') _relire(pile);
+    });
+  }
+
+  bool _lecture = false;
+
+  Future<void> _relire(PileE2ee pile) async {
+    if (_lecture || !mounted) return;
+    _lecture = true;
+    final r = await pile.sauvegarde
+        .relireDemandeCle(pile.coffre, pile.compteId, motDePasse: widget.motDePasse);
+    _lecture = false;
+    if (!mounted || r == IssueDemande.attente) return;
+    _minuterie?.cancel();
+    _signaux?.cancel();
+    if (r == IssueDemande.recue) {
+      setState(() {
+        _attente = false;
+        _proposerCle = false;
+      });
+      // La clé est dans le coffre : la restauration reprend, et réussit.
+      await _lancer();
+      return;
+    }
+    setState(() {
+      _attente = false;
+      _refusParAppareil = r == IssueDemande.refusee;
+    });
   }
 
   @override
@@ -95,6 +145,7 @@ class _RestaurationScreenState extends State<RestaurationScreen> {
     final r = await pile.sauvegarde.ouvrirEtRestaurer(
       widget.motDePasse,
       pile.coffre,
+      compte: pile.compteId,
       suivi: (p) {
         if (mounted) setState(() => _progression = p);
       },
@@ -149,11 +200,28 @@ class _RestaurationScreenState extends State<RestaurationScreen> {
      * l'archive est fermée ET qu'elle a une clé de récupération, on la
      * propose — « Plus tard » entre aussitôt. Sans clé, rien à proposer.
      */
-    if (r.issue == IssueConnexion.fermee &&
-        !await _propositionReportee() &&
-        await pile.sauvegarde.aUneCleDeRecuperation()) {
-      if (mounted) setState(() => _proposerCle = true);
-      return;
+    if (r.issue == IssueConnexion.fermee) {
+      final rt = context.read<RealtimeClient>();
+      final reportee = await _propositionReportee();
+      final avecCle = await pile.sauvegarde.aUneCleDeRecuperation();
+      // La demande aux autres appareils part dans tous les cas (couche C).
+      final id = await pile.sauvegarde.demanderCleAuxAppareils(
+        appareil: await DeviceRegistry.instance.deviceId(),
+        libelle: DeviceRegistry.instance.libelle,
+        motDePasse: widget.motDePasse,
+      );
+      if (id != null) rt.sendSignalSauvegarde('demande_cle', id: id);
+      if (!mounted) return;
+      // Déjà proposée et remise à plus tard : on entre — la veille reprendra
+      // la clé si elle arrive.
+      if (!reportee && (id != null || avecCle)) {
+        setState(() {
+          _proposerCle = avecCle;
+          _attente = id != null;
+        });
+        if (id != null) _attendreLaCle(pile);
+        return;
+      }
     }
     _entrer();
   }
@@ -264,7 +332,10 @@ class _RestaurationScreenState extends State<RestaurationScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                if (_proposerCle) ..._propositionCle(theme) else ..._enCours(theme),
+                if (_attente || _proposerCle || _refusParAppareil)
+                  ..._fermee(theme)
+                else
+                  ..._enCours(theme),
               ],
             ),
           ),
@@ -272,6 +343,51 @@ class _RestaurationScreenState extends State<RestaurationScreen> {
       ),
     );
   }
+
+  /// La sauvegarde reste fermée : on attend la clé, et l'on propose les 12 mots.
+  List<Widget> _fermee(ThemeData theme) => [
+        if (_attente) ...[
+          Text(
+            tr(context, 'arch_attente_titre'),
+            textAlign: TextAlign.center,
+            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            tr(context, 'arch_attente_texte'),
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 20),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: const LinearProgressIndicator(minHeight: 8),
+          ),
+          const SizedBox(height: 20),
+        ],
+        if (_refusParAppareil) ...[
+          Text(
+            tr(context, 'arch_demande_refusee'),
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.error),
+          ),
+          const SizedBox(height: 16),
+        ],
+        if (_proposerCle && _attente && !_motsVisibles)
+          OutlinedButton(
+            onPressed: () => setState(() => _motsVisibles = true),
+            child: Text(tr(context, 'arch_jai_ma_cle')),
+          ),
+        if (_proposerCle && (!_attente || _motsVisibles))
+          ..._propositionCle(theme)
+        else ...[
+          const SizedBox(height: 8),
+          TextButton(
+            onPressed: _proposerCle ? _reporterEtEntrer : _entrer,
+            child: Text(tr(context, _attente ? 'arch_attente_continuer' : 'rest_continuer_sans')),
+          ),
+        ],
+      ];
 
   List<Widget> _propositionCle(ThemeData theme) => [
         Text(

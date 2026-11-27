@@ -369,6 +369,14 @@ class RealtimeClient extends ChangeNotifier {
         "callId": callId,
       });
 
+  /// Signal de la sauvegarde à MES autres appareils (27/11/2026) : « va voir »,
+  /// jamais un secret. `demande_cle`, `demande_cle_traitee`, `serrure_perimee`.
+  void sendSignalSauvegarde(String quoi, {String? id}) => _send({
+        "type": "e2ee_sauvegarde",
+        "quoi": quoi,
+        if (id != null) "id": id,
+      });
+
   void sendSessionRevoked(String deviceId, {String? raison}) => _send({
         "type": "session_revoked",
         "deviceId": deviceId,
