@@ -2634,7 +2634,7 @@ class _ConversationsTabState extends State<_ConversationsTab>
                   context: context,
                   builder: (_) => AlertDialog(
                     title: Text(tr(context, 'home_delete_conversation_q')),
-                    content: Text(tr(context, 'action_irreversible')),
+                    content: Text(tr(context, 'suppr_pour_vous_d')),
                     actions: [
                       TextButton(
                           onPressed: () => Navigator.pop(context, false),
@@ -2761,7 +2761,8 @@ class _ConversationsTabState extends State<_ConversationsTab>
       context: context,
       builder: (_) => AlertDialog(
         title: Text(tr(context, 'home_delete_n_q', {'n': '$count'})),
-        content: Text(tr(context, 'action_irreversible')),
+        // Pour moi seul depuis le 27/11/2026 (route du serveur).
+        content: Text(tr(context, 'suppr_pour_vous_d')),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),

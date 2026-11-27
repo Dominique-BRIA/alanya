@@ -5735,6 +5735,26 @@ class _ChatScreenState extends State<ChatScreen>
         peutEncoreSupprimerPourTous(m.createdAt);
     final scope = await _showDeleteDialog(canDeleteForAll);
     if (scope == null || !mounted) return;
+    // Toujours confirmer une suppression (demande du user, 27/11/2026) : le
+    // choix « pour moi / pour tous » ne suffisait pas, un appui la lançait.
+    final pourMoi = scope == "me";
+    final oui = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(tr(ctx, pourMoi ? 'suppr_msg_moi_q' : 'suppr_msg_tous_q')),
+        content: Text(tr(ctx, pourMoi ? 'suppr_msg_moi_d' : 'suppr_msg_tous_d')),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(tr(ctx, 'cancel'))),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(tr(ctx, 'delete'),
+                  style: TextStyle(color: dangerOf(ctx)))),
+        ],
+      ),
+    );
+    if (oui != true || !mounted) return;
     final rt = context.read<RealtimeClient>();
     try {
       if (rt.connected) {
