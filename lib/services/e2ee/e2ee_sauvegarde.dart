@@ -229,7 +229,11 @@ class E2eeSauvegarde {
       try {
         await _poser(await compute(_poserIsole, (_maitresse!, motDePasse)));
       } catch (_) {}
-    } else if (dejaSurAppareil) {
+    }
+
+    /* ── ③ RESTAURER ─────────────────────────────────────────────── */
+    try {
+      final r = await restaurer(suivi: suivi);
       /*
        * 🔴 UNE SERRURE PÉRIMÉE SE RÉPARE ICI (27/11/2026). Après un mot de
        * passe oublié, ou un changement dont la serrure n'a pas suivi, la
@@ -240,13 +244,15 @@ class E2eeSauvegarde {
        * On l'éprouve avec le mot de passe qu'on vient de taper ; si elle
        * refuse, on la refait. EN FOND : Argon2id prend une à deux secondes,
        * l'entrée n'attend pas.
+       *
+       * ⚠️ SEULEMENT SI LA CLÉ A LU QUELQUE CHOSE. Une clé restée d'une
+       * archive supprimée puis recréée ailleurs n'est plus la bonne : refaire
+       * la serrure avec elle fermerait l'archive pour de bon. Un message
+       * déchiffré prouve que c'est la bonne. Même règle que le web.
        */
-      unawaited(_reparerSerrureSiPerimee(motDePasse, serruresMdp.first));
-    }
-
-    /* ── ③ RESTAURER ─────────────────────────────────────────────── */
-    try {
-      final r = await restaurer(suivi: suivi);
+      if (dejaSurAppareil && serruresMdp.isNotEmpty && r.messages.isNotEmpty) {
+        unawaited(_reparerSerrureSiPerimee(motDePasse, serruresMdp.first));
+      }
       return (
         issue: IssueConnexion.restauree,
         restaures: r.messages.length,
