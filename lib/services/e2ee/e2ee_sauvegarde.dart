@@ -103,6 +103,11 @@ class E2eeSauvegarde {
           .cast<Map<String, dynamic>>()
           .map(Serrure.depuisJson)
           .toList();
+      // La date du dernier changement de mot de passe (27/11/2026) : voir
+      // `_aEprouver`. Absente d'un serveur plus ancien.
+      _changeLeFourni = r.containsKey('motDePasseChangeLe');
+      _motDePasseChangeLe =
+          DateTime.tryParse((r['motDePasseChangeLe'] as String?) ?? '');
       return (serrures: liste, refusee: r['refusee'] == true);
     } catch (_) {
       /*
@@ -116,6 +121,39 @@ class E2eeSauvegarde {
 
   Future<void> _poser(Serrure s) =>
       _api('PUT', '/api/e2ee/coffre', s.enJson());
+
+  /// Ce que la dernière lecture du coffre a dit du dernier changement de mot
+  /// de passe. `_changeLeFourni` faux : serveur d'avant cette date.
+  bool _changeLeFourni = false;
+  DateTime? _motDePasseChangeLe;
+
+  /// Faut-il éprouver la serrure « mot de passe » ? (27/11/2026)
+  ///
+  /// 🔴 SEULEMENT SI ELLE EST PLUS ANCIENNE QUE LE DERNIER CHANGEMENT. L'éprouver
+  /// coûte un Argon2id — une à deux secondes et 64 Mio — à chaque connexion,
+  /// pour rien la plupart du temps. Un serveur plus ancien ne date rien : on
+  /// éprouve comme avant.
+  bool _aEprouver(Serrure s) {
+    if (!_changeLeFourni) return true;
+    final change = _motDePasseChangeLe;
+    if (change == null) return false;
+    final posee = s.majLe;
+    return posee == null || posee.isBefore(change);
+  }
+
+  /// Réessaie [travail] sur une erreur passagère : la plupart des échecs à
+  /// faire suivre la serrure sont des coupures réseau.
+  Future<T> _avecReessais<T>(Future<T> Function() travail) async {
+    const attentes = [Duration(milliseconds: 1500), Duration(seconds: 4)];
+    for (var i = 0;; i++) {
+      try {
+        return await travail();
+      } catch (_) {
+        if (i >= attentes.length) rethrow;
+        await Future<void>.delayed(attentes[i]);
+      }
+    }
+  }
 
   /* ══════════════ ACTIVER / OUVRIR ══════════════ */
 
@@ -219,17 +257,15 @@ class E2eeSauvegarde {
         return fermee;
       }
       await coffre.rangerMaitresse(_maitresse!);
+      // Elle vient de s'ouvrir avec ce mot de passe : la clé est la bonne. Si
+      // le serveur la dit antérieure au dernier changement, on la repose pour
+      // que la question ne revienne pas (27/11/2026).
+      if (_changeLeFourni && _aEprouver(mdp.first)) {
+        unawaited(relierAuMotDePasse(motDePasse));
+      }
     }
 
-    /* ── ② COMPLÉTER LES SERRURES ────────────────────────────────── */
-    // Le seul moment où le mot de passe existe : on pose sa serrure s'il n'y
-    // en a pas. Un échec ici n'empêche pas de restaurer.
     final serruresMdp = etat.serrures.where((s) => s.type == 'motdepasse').toList();
-    if (serruresMdp.isEmpty) {
-      try {
-        await _poser(await compute(_poserIsole, (_maitresse!, motDePasse)));
-      } catch (_) {}
-    }
 
     /* ── ③ RESTAURER ─────────────────────────────────────────────── */
     try {
@@ -250,8 +286,23 @@ class E2eeSauvegarde {
        * la serrure avec elle fermerait l'archive pour de bon. Un message
        * déchiffré prouve que c'est la bonne. Même règle que le web.
        */
-      if (dejaSurAppareil && serruresMdp.isNotEmpty && r.messages.isNotEmpty) {
-        unawaited(_reparerSerrureSiPerimee(motDePasse, serruresMdp.first));
+      if (dejaSurAppareil && r.messages.isNotEmpty) {
+        if (serruresMdp.isEmpty) {
+          /*
+           * ── ② COMPLÉTER LES SERRURES ── Le seul moment où le mot de passe
+           * existe : on pose sa serrure s'il n'y en a pas. APRÈS la
+           * restauration et sous la même garde (27/11/2026) : la poser avec une
+           * clé qui n'est plus la bonne enverrait les appareils suivants vers
+           * une archive qu'ils ne liraient pas.
+           */
+          unawaited(relierAuMotDePasse(motDePasse));
+        } else if (_aEprouver(serruresMdp.first)) {
+          unawaited(_reparerSerrureSiPerimee(
+            motDePasse,
+            serruresMdp.first,
+            refaireSiOuvre: _changeLeFourni,
+          ));
+        }
       }
       return (
         issue: IssueConnexion.restauree,
@@ -305,10 +356,19 @@ class E2eeSauvegarde {
   /// La serrure « mot de passe » refuse-t-elle [motDePasse] ? Alors elle est
   /// périmée : on la refait avec la clé maîtresse de cet appareil. Ne lève
   /// jamais.
-  Future<void> _reparerSerrureSiPerimee(String motDePasse, Serrure serrure) async {
+  ///
+  /// [refaireSiOuvre] : le serveur la dit antérieure au dernier changement —
+  /// même si elle s'ouvre, on la repose (sel neuf, date neuve), sans quoi la
+  /// question reviendrait à chaque connexion.
+  Future<void> _reparerSerrureSiPerimee(
+    String motDePasse,
+    Serrure serrure, {
+    bool refaireSiOuvre = false,
+  }) async {
     try {
       await compute(_ouvrirIsole, (motDePasse, serrure));
-      return; // Elle s'ouvre : rien à faire.
+      if (refaireSiOuvre) await relierAuMotDePasse(motDePasse);
+      return; // Elle s'ouvre : rien à réparer.
     } catch (_) {
       // Elle refuse ce mot de passe : périmée.
     }
@@ -452,11 +512,16 @@ class E2eeSauvegarde {
   /// ⚠️ NE LÈVE JAMAIS : le mot de passe du compte a DÉJÀ changé quand on
   /// arrive ici. Échouer bruyamment laisserait croire que le changement n'a pas
   /// eu lieu.
+  ///
+  /// 🐛 ARGON2ID HORS DE L'ÉCRAN (27/11/2026) : la serrure se fabriquait sur le
+  /// fil de l'interface, qui se figeait une à deux secondes. Et l'envoi
+  /// réessaie deux fois — le nouveau mot de passe n'est connu que maintenant.
   Future<bool> suivreChangementMotDePasse(String nouveau) async {
     final cle = _maitresse;
     if (cle == null) return false;
     try {
-      await _poser(poserSerrure(cle, TypeSerrure.motdepasse, nouveau));
+      final serrure = await compute(_poserIsole, (cle, nouveau));
+      await _avecReessais(() => _poser(serrure));
       return true;
     } catch (_) {
       return false;

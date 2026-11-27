@@ -32,6 +32,7 @@ class Serrure {
     required this.algo,
     required this.parametres,
     this.appareil = '',
+    this.majLe,
   });
 
   final String type;
@@ -45,6 +46,11 @@ class Serrure {
   /// suivent la PERSONNE ; un trousseau appartient à UN APPAREIL. Le serveur
   /// porte cette règle par une contrainte, et la refuse autrement.
   final String appareil;
+
+  /// Dernière pose, datée par le serveur (27/11/2026). Plus ancienne que le
+  /// dernier changement de mot de passe : la serrure « mot de passe » est
+  /// périmée. Nulle pour une serrure qu'on vient de fabriquer. Jamais envoyée.
+  final DateTime? majLe;
 
   Map<String, dynamic> enJson() => {
         'type': type,
@@ -64,6 +70,7 @@ class Serrure {
         algo: j['algo'] as String,
         parametres: j['parametres'] as String,
         appareil: (j['appareil'] as String?) ?? '',
+        majLe: DateTime.tryParse((j['updatedAt'] as String?) ?? ''),
       );
 }
 

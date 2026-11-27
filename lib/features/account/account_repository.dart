@@ -84,20 +84,28 @@ class AccountRepository {
   ///
   /// [deconnecterAutres] (27/11/2026) : le serveur révoque toutes les sessions
   /// du compte sauf celles de [appareilCourant], cet appareil.
-  Future<void> changePassword(
+  ///
+  /// [jetonCourant] : le jeton de rafraîchissement de cette session, pour que
+  /// le serveur la garde même sans appareil connu. Rend les appareils révoqués,
+  /// à annoncer au temps réel.
+  Future<List<String>> changePassword(
     String currentPassword,
     String newPassword, {
     bool deconnecterAutres = false,
     String? appareilCourant,
+    String? jetonCourant,
   }) async {
-    await _api.post("/api/account/password", {
+    final r = await _api.post("/api/account/password", {
       "currentPassword": currentPassword,
       "newPassword": newPassword,
       if (deconnecterAutres && appareilCourant != null) ...{
         "deconnecterAutres": true,
         "appareilCourant": appareilCourant,
+        if (jetonCourant != null) "jetonCourant": jetonCourant,
       },
     });
+    final liste = r["appareilsRevoques"];
+    return liste is List ? liste.whereType<String>().toList() : const [];
   }
 
   /// Supprime définitivement le compte (vérifie le mot de passe).

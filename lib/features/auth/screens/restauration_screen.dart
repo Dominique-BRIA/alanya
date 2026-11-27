@@ -22,7 +22,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
 import '../../../services/e2ee/e2ee_fournisseur.dart';
+import '../auth_controller.dart';
 import '../../../services/e2ee/e2ee_sauvegarde.dart';
 import '../restauration_progression.dart';
 
@@ -146,9 +150,38 @@ class _RestaurationScreenState extends State<RestaurationScreen> {
      * propose — « Plus tard » entre aussitôt. Sans clé, rien à proposer.
      */
     if (r.issue == IssueConnexion.fermee &&
+        !await _propositionReportee() &&
         await pile.sauvegarde.aUneCleDeRecuperation()) {
       if (mounted) setState(() => _proposerCle = true);
       return;
+    }
+    _entrer();
+  }
+
+  /*
+   * « Plus tard » sur la proposition des 12 mots : on ne la refait pas avant
+   * sept jours sur cet appareil (27/11/2026).
+   */
+  static const _report = Duration(days: 7);
+
+  String? _cleReport() {
+    final moi = context.read<AuthController>().user?.id;
+    return moi == null ? null : 'proposition_cle_reportee_$moi';
+  }
+
+  Future<bool> _propositionReportee() async {
+    final cle = _cleReport();
+    if (cle == null) return false;
+    final quand = (await SharedPreferences.getInstance()).getInt(cle);
+    return quand != null &&
+        DateTime.now().millisecondsSinceEpoch - quand < _report.inMilliseconds;
+  }
+
+  Future<void> _reporterEtEntrer() async {
+    final cle = _cleReport();
+    if (cle != null) {
+      await (await SharedPreferences.getInstance())
+          .setInt(cle, DateTime.now().millisecondsSinceEpoch);
     }
     _entrer();
   }
@@ -224,7 +257,7 @@ class _RestaurationScreenState extends State<RestaurationScreen> {
                 ),
                 const SizedBox(height: 20),
                 Text(
-                  'Préparation de vos messages',
+                  tr(context, 'rest_titre'),
                   textAlign: TextAlign.center,
                   style: theme.textTheme.titleLarge?.copyWith(
                     fontWeight: FontWeight.bold,
@@ -278,13 +311,17 @@ class _RestaurationScreenState extends State<RestaurationScreen> {
         ),
         const SizedBox(height: 8),
         TextButton(
-          onPressed: _ouvertureEnCours ? null : _entrer,
+          onPressed: _ouvertureEnCours ? null : _reporterEtEntrer,
           child: Text(tr(context, 'arch_plus_tard')),
         ),
       ];
 
   List<Widget> _enCours(ThemeData theme) {
-    final texteCompteur = compteur(_progression);
+    final texteCompteur = compteur(
+      _progression,
+      blocs: tr(context, 'rest_blocs'),
+      messages: tr(context, 'rest_messages'),
+    );
     return [
       /*
        * ⚠️ PAS UN MOT DE « CHIFFRÉ » ICI (décision du user, 12/10/2026).
@@ -293,13 +330,15 @@ class _RestaurationScreenState extends State<RestaurationScreen> {
        * besoin de savoir, c'est que ça arrive et que ça ne dépend pas de lui.
        */
       Text(
-        'Vos messages reviennent sur cet appareil. '
-        'Vous pouvez continuer, cela se termine tout seul.',
+        tr(context, 'rest_sous'),
         textAlign: TextAlign.center,
         style: theme.textTheme.bodyMedium,
       ),
       const SizedBox(height: 32),
-      Text(libelleEtape(_progression.etape), style: theme.textTheme.bodyLarge),
+      Text(
+        tr(context, 'rest_etape_${_progression.etape.name}'),
+        style: theme.textTheme.bodyLarge,
+      ),
       const SizedBox(height: 10),
       ClipRRect(
         borderRadius: BorderRadius.circular(6),
@@ -322,11 +361,11 @@ class _RestaurationScreenState extends State<RestaurationScreen> {
       const SizedBox(height: 28),
       OutlinedButton(
         onPressed: _entrer,
-        child: const Text('Continuer en arrière-plan'),
+        child: Text(tr(context, 'rest_arriere_plan')),
       ),
       const SizedBox(height: 8),
       Text(
-        'La récupération se poursuit pendant que vous utilisez l’application.',
+        tr(context, 'rest_note'),
         textAlign: TextAlign.center,
         style: theme.textTheme.bodySmall,
       ),

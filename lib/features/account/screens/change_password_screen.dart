@@ -7,6 +7,8 @@ import '../../../core/app_snackbar.dart';
 import '../../../theme/alanya_theme.dart';
 import '../../../widgets/back_app_bar.dart';
 import '../../../core/device_registry.dart';
+import '../../../core/realtime_client.dart';
+import '../../../core/token_storage.dart';
 import '../account_repository.dart';
 import '../../../l10n/app_localizations.dart';
 
@@ -26,7 +28,29 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
   bool _obscureNew = true;
   bool _submitting = false;
   bool _deconnecterAutres = false;
+  /*
+   * 🔴 LA CASE SE BLOQUE QUAND L'ARCHIVE EST FERMÉE ICI (27/11/2026). Les
+   * autres appareils gardent peut-être la seule copie de la clé : les
+   * déconnecter pourrait vider leur coffre, et l'historique serait perdu.
+   */
+  bool _deconnecterBloque = false;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final sauvegarde = context.e2ee?.sauvegarde;
+      if (sauvegarde == null || sauvegarde.estOuverte) return;
+      final bloque = await sauvegarde.aUneArchive();
+      if (mounted && bloque) {
+        setState(() {
+          _deconnecterBloque = true;
+          _deconnecterAutres = false;
+        });
+      }
+    });
+  }
 
   @override
   void dispose() {
@@ -59,12 +83,22 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
       _error = null;
     });
     try {
-      await context.read<AccountRepository>().changePassword(
+      final deconnecter = _deconnecterAutres && !_deconnecterBloque;
+      final realtime = context.read<RealtimeClient>();
+      // Pris avant toute attente : le contexte ne se relit plus ensuite.
+      final sauvegarde = context.e2ee?.sauvegarde;
+      final revoques = await context.read<AccountRepository>().changePassword(
             current,
             next,
-            deconnecterAutres: _deconnecterAutres,
+            deconnecterAutres: deconnecter,
             appareilCourant: await DeviceRegistry.instance.deviceId(),
+            jetonCourant: deconnecter ? await TokenStorage().refreshToken : null,
           );
+      // Les sockets des appareils révoqués se ferment tout de suite : sans
+      // cette annonce, ils garderaient le temps réel jusqu'à 15 minutes.
+      for (final id in revoques) {
+        realtime.sendSessionRevoked(id);
+      }
 
       /*
        * 🐛 LA SAUVEGARDE DOIT SUIVRE, SINON ELLE CASSE EN SILENCE. Sa serrure
@@ -78,7 +112,6 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
        *
        * ⚠️ RIEN N'EST RECHIFFRÉ : on ré-enveloppe 32 octets.
        */
-      final sauvegarde = context.e2ee?.sauvegarde;
       final suivi = await sauvegarde?.suivreChangementMotDePasse(next) ?? true;
       if (!mounted) return;
       /*
@@ -101,8 +134,8 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
             ],
           ),
         );
-        if (!mounted) return;
       }
+      if (!mounted) return;
       showAppSnackBar(tr(context, 'password_changed'));
       Navigator.of(context).pop();
     } on ApiException catch (e) {
@@ -163,13 +196,16 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
           // cet appareil reste connecté.
           CheckboxListTile(
             value: _deconnecterAutres,
-            onChanged: _submitting
+            onChanged: _submitting || _deconnecterBloque
                 ? null
                 : (v) => setState(() => _deconnecterAutres = v ?? false),
             contentPadding: EdgeInsets.zero,
             controlAffinity: ListTileControlAffinity.leading,
             title: Text(tr(context, 'arch_deconnecter_autres')),
-            subtitle: Text(tr(context, 'arch_deconnecter_autres_d')),
+            subtitle: Text(tr(
+              context,
+              _deconnecterBloque ? 'arch_deconnecter_bloque' : 'arch_deconnecter_autres_d',
+            )),
           ),
           const SizedBox(height: 20),
           ElevatedButton(

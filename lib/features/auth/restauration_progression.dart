@@ -45,10 +45,16 @@ String libelleEtape(EtapeRestauration e) => switch (e) {
 };
 
 /// Le compteur sous la barre : « 1 250 / 2 100 », ou rien.
-String? compteur(ProgressionRestauration p) {
+///
+/// [blocs] et [messages] : les unités, traduites par l'écran (27/11/2026).
+String? compteur(
+  ProgressionRestauration p, {
+  String blocs = 'blocs',
+  String messages = 'messages',
+}) {
   final total = p.total;
   if (p.etape == EtapeRestauration.ouverture || total == null) return null;
-  final unite = p.etape == EtapeRestauration.rangement ? 'messages' : 'blocs';
+  final unite = p.etape == EtapeRestauration.rangement ? messages : blocs;
   return '${_milliers(p.fait)} / ${_milliers(total)} $unite';
 }
 
