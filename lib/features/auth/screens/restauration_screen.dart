@@ -25,6 +25,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../services/e2ee/e2ee_contacts_recuperation.dart';
 import '../../../services/e2ee/e2ee_fournisseur.dart';
 import '../../../core/device_registry.dart';
 import '../../../core/realtime_client.dart';
@@ -63,12 +64,62 @@ class _RestaurationScreenState extends State<RestaurationScreen> {
   bool _refusParAppareil = false;
   bool _motsVisibles = false;
   String? _idDemande;
+
+  /*
+   * 🔴 CHANTIER 2 (27/11/2026) : les contacts de récupération, troisième
+   * sortie. Proposés quand la sauvegarde reste fermée et que deux contacts au
+   * moins ont accepté.
+   */
+  bool _contactsActifs = false;
+  bool _aideEnCours = false;
+  String? _aideMessage;
+  Timer? _minuterieAide;
+
+  Future<void> _demanderAuxContacts(PileE2ee pile) async {
+    setState(() => _aideMessage = null);
+    final c = ContactsRecuperation(pile);
+    final r = await c.demander(await DeviceRegistry.instance.deviceId());
+    if (!mounted) return;
+    if (!r.envoyee) {
+      final date = r.jusquA == null
+          ? '…'
+          : MaterialLocalizations.of(context).formatMediumDate(r.jusquA!.toLocal());
+      setState(() => _aideMessage =
+          r.jusquA == null ? tr(context, 'recup_erreur') : tr(context, 'recup_trop').replaceAll('{date}', date));
+      return;
+    }
+    setState(() => _aideEnCours = true);
+    _minuterieAide?.cancel();
+    _minuterieAide = Timer.periodic(const Duration(seconds: 4), (_) async {
+      final issue = await c.relire(motDePasse: widget.motDePasse);
+      if (!mounted || issue == IssueAide.attente) {
+        if (mounted) setState(() {});
+        return;
+      }
+      _minuterieAide?.cancel();
+      if (issue == IssueAide.recue) {
+        _minuterie?.cancel();
+        setState(() {
+          _aideEnCours = false;
+          _attente = false;
+          _proposerCle = false;
+        });
+        await _lancer();
+        return;
+      }
+      setState(() {
+        _aideEnCours = false;
+        _aideMessage = tr(context, issue == IssueAide.refusee ? 'recup_refusee' : 'recup_echec');
+      });
+    });
+  }
   Timer? _minuterie;
   StreamSubscription<Map<String, dynamic>>? _signaux;
 
   @override
   void dispose() {
     _minuterie?.cancel();
+    _minuterieAide?.cancel();
     _signaux?.cancel();
     _mots.dispose();
     super.dispose();
@@ -224,10 +275,16 @@ class _RestaurationScreenState extends State<RestaurationScreen> {
       if (!mounted) return;
       // Déjà proposée et remise à plus tard : on entre — la veille reprendra
       // la clé si elle arrive.
-      if (!reportee && (id != null || avecCle)) {
+      bool actifs = false;
+      try {
+        actifs = (await ContactsRecuperation(pile).mesContacts()).actif;
+      } catch (_) {}
+      if (!mounted) return;
+      if (!reportee && (id != null || avecCle || actifs)) {
         setState(() {
           _proposerCle = avecCle;
           _attente = id != null;
+          _contactsActifs = actifs;
         });
         if (id != null) _attendreLaCle(pile);
         return;
@@ -342,7 +399,7 @@ class _RestaurationScreenState extends State<RestaurationScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                if (_attente || _proposerCle || _refusParAppareil)
+                if (_attente || _proposerCle || _refusParAppareil || _contactsActifs)
                   ..._fermee(theme)
                 else
                   ..._enCours(theme),
@@ -375,6 +432,31 @@ class _RestaurationScreenState extends State<RestaurationScreen> {
           ),
           const SizedBox(height: 20),
         ],
+        if (_contactsActifs && !_aideEnCours)
+          OutlinedButton(
+            onPressed: () {
+              final pile = context.e2ee;
+              if (pile != null) _demanderAuxContacts(pile);
+            },
+            child: Text(tr(context, 'recup_demander')),
+          ),
+        if (_aideEnCours)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text(
+              tr(context, 'recup_attente').replaceAll('{n}', '${ContactsRecuperation.accordsLus}'),
+              textAlign: TextAlign.center,
+            ),
+          ),
+        if (_aideMessage != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text(
+              _aideMessage!,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.error),
+            ),
+          ),
         if (_refusParAppareil) ...[
           Text(
             tr(context, 'arch_demande_refusee'),

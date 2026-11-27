@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../account/account_repository.dart';
+import '../contacts_recuperation_section.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/app_snackbar.dart';
@@ -536,6 +537,8 @@ class _SauvegardeChiffreeScreenState extends State<SauvegardeChiffreeScreen> {
                       child: const Text('Ouvrir avec cet appareil'),
                     ),
                 ],
+                // Les contacts de récupération (27/11/2026, chantier 2).
+                if (active) const ContactsRecuperationSection(),
                 if (active) ...[
                   const SizedBox(height: 24),
                   TextButton(

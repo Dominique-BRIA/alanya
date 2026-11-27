@@ -8,6 +8,7 @@ import '../../core/app_snackbar.dart';
 import '../../core/device_registry.dart';
 import '../../core/realtime_client.dart';
 import '../../l10n/app_localizations.dart';
+import '../../services/e2ee/e2ee_contacts_recuperation.dart';
 import '../../services/e2ee/e2ee_fournisseur.dart';
 import '../../services/e2ee/e2ee_sauvegarde.dart';
 import '../account/account_repository.dart';
@@ -56,7 +57,9 @@ class VeilleSauvegarde {
     _contexte = context;
     _signaux?.cancel();
     _signaux = context.read<RealtimeClient>().events.listen((e) {
-      if (e['type'] == 'e2ee_sauvegarde') unawaited(verifier(force: true));
+      if (e['type'] == 'e2ee_sauvegarde' || e['type'] == 'e2ee_recuperation') {
+        unawaited(verifier(force: true));
+      }
     });
     _cycle?.dispose();
     _cycle = AppLifecycleListener(
@@ -147,6 +150,19 @@ class VeilleSauvegarde {
         }
       }
 
+      // ①bis Mon aide demandée à mes contacts : arrivée ?
+      final contacts = ContactsRecuperation(pile);
+      if (contacts.aideEnAttente && await contacts.relire() == IssueAide.recue) {
+        if (ctx.mounted) showAppSnackBar(tr(ctx, 'arch_cle_recue'));
+        try {
+          await s.restaurer();
+        } catch (_) {}
+        unawaited(pile.fil.groupe.restaurerTous());
+      }
+
+      // ②bis Ce que d'autres me demandent, en tant que contact de récupération.
+      if (ctx.mounted) await _recuperation(ctx, contacts);
+
       if (!s.estOuverte) return;
 
       // ② Les demandes des autres appareils.
@@ -173,6 +189,64 @@ class VeilleSauvegarde {
         _relancer = false;
         unawaited(verifier(force: true));
       }
+    }
+  }
+
+  /// Invitations et demandes d'aide qui m'attendent, en tant que contact.
+  Future<void> _recuperation(BuildContext ctx, ContactsRecuperation contacts) async {
+    final a = await contacts.aTraiter();
+    final inv = a.invitations.where((i) => !_ecartees.contains(i.id)).firstOrNull;
+    if (inv != null && ctx.mounted) {
+      final nom = inv.nom ?? '—';
+      final choix = await showDialog<String>(
+        context: ctx,
+        barrierDismissible: false,
+        builder: (c) => AlertDialog(
+          icon: const Icon(Icons.groups_outlined),
+          title: Text(tr(c, 'recup_titre')),
+          content: Text(tr(c, 'recup_invitation_texte').replaceAll('{nom}', nom)),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, 'plus_tard'), child: Text(tr(c, 'arch_plus_tard'))),
+            TextButton(onPressed: () => Navigator.pop(c, 'non'), child: Text(tr(c, 'recup_refuser'))),
+            FilledButton(onPressed: () => Navigator.pop(c, 'oui'), child: Text(tr(c, 'recup_accepter'))),
+          ],
+        ),
+      );
+      if (choix == 'oui' || choix == 'non') {
+        await contacts.repondreInvitation(inv.id, choix == 'oui');
+      } else {
+        _ecartees.add(inv.id);
+      }
+      return;
+    }
+    final d = a.demandes.where((x) => !_ecartees.contains(x.id)).firstOrNull;
+    if (d == null || !ctx.mounted) return;
+    final nom = d.nom ?? '—';
+    final choix = await showDialog<String>(
+      context: ctx,
+      barrierDismissible: false,
+      builder: (c) => AlertDialog(
+        icon: const Icon(Icons.support_outlined),
+        title: Text(tr(c, 'recup_demande_titre').replaceAll('{nom}', nom)),
+        content: Text(tr(c, 'recup_demande_texte').replaceAll('{nom}', nom)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, 'plus_tard'), child: Text(tr(c, 'arch_plus_tard'))),
+          TextButton(
+            onPressed: () => Navigator.pop(c, 'non'),
+            style: TextButton.styleFrom(foregroundColor: Theme.of(c).colorScheme.error),
+            child: Text(tr(c, 'recup_je_refuse')),
+          ),
+          FilledButton(onPressed: () => Navigator.pop(c, 'oui'), child: Text(tr(c, 'recup_aider'))),
+        ],
+      ),
+    );
+    if (choix == 'oui') {
+      final ok = await contacts.aider(d);
+      if (ctx.mounted) showAppSnackBar(tr(ctx, ok ? 'recup_aide_envoyee' : 'recup_erreur'));
+    } else if (choix == 'non') {
+      await contacts.refuserAide(d);
+    } else {
+      _ecartees.add(d.id);
     }
   }
 

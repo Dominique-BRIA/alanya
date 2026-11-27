@@ -14,7 +14,11 @@ class ApiException implements Exception {
   final int statusCode;
   final String message;
   final String? code;
-  ApiException(this.statusCode, this.message, [this.code]);
+
+  /// Le corps `error` de la réponse (27/11/2026) : certains refus portent un
+  /// détail utile à l'écran — la date jusqu'à laquelle attendre, par exemple.
+  final Map<String, dynamic>? detail;
+  ApiException(this.statusCode, this.message, [this.code, this.detail]);
 
   @override
   String toString() => message;
@@ -317,7 +321,7 @@ class ApiClient {
       final code = err?["code"] as String?;
       // Le serveur est en maintenance : l'écran d'attente prend le relais.
       if (res.statusCode == 503 && code == "MAINTENANCE") Maintenance.signaler();
-      throw ApiException(res.statusCode, msg, code);
+      throw ApiException(res.statusCode, msg, code, err);
     }
     return data;
   }

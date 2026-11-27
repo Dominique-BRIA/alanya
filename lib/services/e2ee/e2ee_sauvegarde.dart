@@ -137,6 +137,9 @@ class E2eeSauvegarde {
 
   final AppelApi _api;
 
+  /// L'appel à l'API, pour les contacts de récupération (chantier 2).
+  AppelApi get api => _api;
+
   Uint8List? _maitresse;
 
   bool get estOuverte => _maitresse != null;
@@ -589,6 +592,46 @@ class E2eeSauvegarde {
       return m == null ? null : await compute(_poserIsole, (m, nouveau));
     } catch (_) {
       return null;
+    }
+  }
+
+  /* ══════════════ CHANTIER 2 : LA SERRURE « CONTACTS » ══════════════ */
+
+  /// Pose (ou remplace) la serrure « contacts » avec [secret]. La clé doit
+  /// être prouvée : une serrure sur une clé fausse rendrait les parts inutiles.
+  Future<bool> poserSerrureContacts(String secret, String compte) async {
+    try {
+      await lireCoffre();
+      final m = await _cleProuvee(compte);
+      if (m == null) return false;
+      await _poser(poserSerrure(m, TypeSerrure.contacts, secret));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Ouvre l'archive avec le secret refait par les contacts, la range, et
+  /// refait la serrure « mot de passe » si [motDePasse] est connu.
+  Future<bool> ouvrirParContacts(
+    String secret,
+    CoffreE2ee coffre, {
+    String? motDePasse,
+    String? compte,
+  }) async {
+    try {
+      final etat = await lireCoffre();
+      final s = etat.serrures.where((x) => x.type == 'contacts');
+      if (s.isEmpty) return false;
+      final cle = ouvrirArchive(secret, s.first);
+      _maitresse = cle;
+      await coffre.rangerMaitresse(cle);
+      if (motDePasse != null && motDePasse.isNotEmpty) {
+        unawaited(relierAuMotDePasse(motDePasse, compte: compte));
+      }
+      return true;
+    } catch (_) {
+      return false;
     }
   }
 

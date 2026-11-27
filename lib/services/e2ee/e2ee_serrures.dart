@@ -20,7 +20,9 @@ import 'package:pointycastle/export.dart';
 import 'mots_recuperation.dart';
 
 /// D'où vient le secret qui ouvre une serrure.
-enum TypeSerrure { trousseau, motdepasse, recuperation }
+/// `contacts` (27/11/2026, chantier 2) : un secret tiré au sort, partagé en 2
+/// sur 3 entre les contacts de récupération. Personne ne le tape.
+enum TypeSerrure { trousseau, motdepasse, recuperation, contacts }
 
 /// Une serrure, telle qu'elle se range sur le serveur.
 class Serrure {
@@ -101,6 +103,7 @@ class Serrure {
       );
     case TypeSerrure.trousseau:
     case TypeSerrure.recuperation:
+    case TypeSerrure.contacts:
       // Un secret TIRÉ AU SORT : 256 bits pour le trousseau, 132 pour la clé de
       // récupération (12 mots parmi 2 048). Une itération suffit — étirer ne
       // protège que ce qui se devine.
