@@ -62,6 +62,7 @@ class _RestaurationScreenState extends State<RestaurationScreen> {
   bool _attente = false;
   bool _refusParAppareil = false;
   bool _motsVisibles = false;
+  String? _idDemande;
   Timer? _minuterie;
   StreamSubscription<Map<String, dynamic>>? _signaux;
 
@@ -75,7 +76,15 @@ class _RestaurationScreenState extends State<RestaurationScreen> {
 
   void _attendreLaCle(PileE2ee pile) {
     _minuterie?.cancel();
-    _minuterie = Timer.periodic(const Duration(seconds: 4), (_) => _relire(pile));
+    final rt = context.read<RealtimeClient>();
+    var tours = 0;
+    _minuterie = Timer.periodic(const Duration(seconds: 4), (_) {
+      // Le signal se renvoie toutes les vingt secondes : le premier a pu partir
+      // pendant que la socket se rouvrait, juste après la connexion.
+      final id = _idDemande;
+      if (++tours % 5 == 0 && id != null) rt.sendSignalSauvegarde('demande_cle', id: id);
+      _relire(pile);
+    });
     _signaux?.cancel();
     _signaux = context.read<RealtimeClient>().events.listen((e) {
       if (e['type'] == 'e2ee_sauvegarde' && e['quoi'] == 'demande_cle_traitee') _relire(pile);
@@ -211,6 +220,7 @@ class _RestaurationScreenState extends State<RestaurationScreen> {
         motDePasse: widget.motDePasse,
       );
       if (id != null) rt.sendSignalSauvegarde('demande_cle', id: id);
+      _idDemande = id;
       if (!mounted) return;
       // Déjà proposée et remise à plus tard : on entre — la veille reprendra
       // la clé si elle arrive.

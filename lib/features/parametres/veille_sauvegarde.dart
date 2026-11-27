@@ -37,12 +37,19 @@ class VeilleSauvegarde {
   StreamSubscription<Map<String, dynamic>>? _signaux;
   AppLifecycleListener? _cycle;
   bool _enCours = false;
+  // Un signal arrivé pendant une vérification n'est pas perdu : on refait un tour.
+  bool _relancer = false;
+  Timer? _releve;
+  bool _premierPlan = true;
   DateTime _dernier = DateTime.fromMillisecondsSinceEpoch(0);
   final _ecartees = <String>{};
   bool _bandeauEcarte = false;
   bool _bandeauAffiche = false;
 
   static const _pause = Duration(minutes: 1);
+  /// Les demandes des autres appareils se relisent aussi d'elles-mêmes, au
+  /// premier plan : le signal temps réel peut se perdre. Une requête légère.
+  static const _relectureDemandes = Duration(seconds: 30);
   static const _entreDeuxRedemandes = Duration(hours: 12);
 
   void brancher(BuildContext context) {
@@ -52,11 +59,49 @@ class VeilleSauvegarde {
       if (e['type'] == 'e2ee_sauvegarde') unawaited(verifier(force: true));
     });
     _cycle?.dispose();
-    _cycle = AppLifecycleListener(onResume: () => unawaited(verifier()));
+    _cycle = AppLifecycleListener(
+      onResume: () {
+        _premierPlan = true;
+        unawaited(verifier());
+      },
+      onPause: () => _premierPlan = false,
+    );
+    _releve?.cancel();
+    _releve = Timer.periodic(_relectureDemandes, (_) {
+      if (_premierPlan) unawaited(_relireDemandes());
+    });
     unawaited(verifier(force: true));
   }
 
+  /// Seulement les demandes des autres appareils : le tour léger.
+  Future<void> _relireDemandes() async {
+    final ctx = _contexte;
+    if (ctx == null || !ctx.mounted || _enCours) return;
+    final pile = ctx.e2ee;
+    if (pile == null || !pile.sauvegarde.estOuverte) return;
+    final rt = ctx.read<RealtimeClient>();
+    _enCours = true;
+    try {
+      final s = pile.sauvegarde;
+      for (final d in await s.demandesCleOuvertes(await DeviceRegistry.instance.deviceId())) {
+        if (d.auto) {
+          if (await s.servirDemandeCle(d, pile.compteId)) {
+            rt.sendSignalSauvegarde('demande_cle_traitee', id: d.id);
+          }
+          continue;
+        }
+        if (_ecartees.contains(d.id) || !ctx.mounted) continue;
+        await _demander(ctx, d, pile.compteId);
+        break;
+      }
+    } finally {
+      _enCours = false;
+    }
+  }
+
   void debrancher() {
+    _releve?.cancel();
+    _releve = null;
     _signaux?.cancel();
     _signaux = null;
     _cycle?.dispose();
@@ -66,7 +111,11 @@ class VeilleSauvegarde {
 
   Future<void> verifier({bool force = false}) async {
     final ctx = _contexte;
-    if (ctx == null || !ctx.mounted || _enCours) return;
+    if (ctx == null || !ctx.mounted) return;
+    if (_enCours) {
+      if (force) _relancer = true;
+      return;
+    }
     if (!force && DateTime.now().difference(_dernier) < _pause) return;
     final pile = ctx.e2ee;
     if (pile == null) return;
@@ -120,6 +169,10 @@ class VeilleSauvegarde {
       }
     } finally {
       _enCours = false;
+      if (_relancer) {
+        _relancer = false;
+        unawaited(verifier(force: true));
+      }
     }
   }
 
