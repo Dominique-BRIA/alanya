@@ -442,11 +442,30 @@ class AuthController extends ChangeNotifier {
   }
 
   /// Met à jour localement le profil après une modification réussie côté API.
+  /// Applique le profil que le serveur vient de confirmer.
+  ///
+  /// 🐛 « ON NE PEUT PAS CHANGER SON NOM » — LA MOITIÉ TÉLÉPHONE (28/11/2026).
+  ///
+  /// Le compte porte DEUX noms, ici comme en base : `nom` et `pseudo`, et
+  /// `AuthUser.nomAffiche` rend le premier, le second seulement en repli —
+  /// même règle que `display-name.mjs`. Cette méthode n'écrivait que `pseudo` :
+  /// le serveur enregistrait bien le nouveau nom (corrigé le 27/11), le
+  /// rendait bien dans sa réponse, et l'écran affichait quand même l'ANCIEN,
+  /// parce que le `nom` gardé sur l'appareil n'avait pas bougé.
+  ///
+  /// ⚠️ ET CE NOM-LÀ PART SUR LE RÉSEAU. `nomAffiche` est ce que `bindUser`
+  /// annonce au serveur temps réel : sans cette ligne, quelqu'un qui venait de
+  /// changer de nom se présentait encore sous l'ancien en appel et en réunion,
+  /// chez tout le monde.
+  ///
+  /// Le champ `pseudo` de la réponse EST le nom d'affichage (`nomAffichage`),
+  /// la clé n'ayant gardé que son nom d'origine : les deux champs locaux
+  /// reçoivent donc la même valeur, exactement comme les deux colonnes.
   void applyProfile({String? pseudo, String? avatarUrl, String? statusMsg}) {
     final current = user;
     if (current == null) return;
     user = current.copyWith(
-        pseudo: pseudo, avatarUrl: avatarUrl, statusMsg: statusMsg);
+        pseudo: pseudo, nom: pseudo, avatarUrl: avatarUrl, statusMsg: statusMsg);
     _saveUserCache(user!); // fire-and-forget
     notifyListeners();
   }
