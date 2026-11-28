@@ -446,7 +446,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final tabs = [
       const _ConversationsTab(),
-      const _StatusTab(),
+      // `actif` : l'onglet relit le fil quand on revient sur lui. L'`IndexedStack`
+      // garde les onglets VIVANTS — sans ce drapeau, `initState` ne se rejoue
+      // jamais et la liste reste celle de l'ouverture de l'application.
+      _StatusTab(actif: _tab == HomeScreen.ongletStatuts),
       const CallsScreen(),
       const MeetingsScreen(),
       // L agent recoit l ANNUAIRE — ses collegues ET les entreprises, en deux
@@ -1142,6 +1145,11 @@ class _ConversationsTabState extends State<_ConversationsTab>
       // Une liste a pu être créée ou renommée depuis un autre appareil — ou
       // depuis le carnet, sur celui-ci.
       _chargerListes();
+      // Les anneaux de statut autour des avatars : ils venaient du seul fil
+      // chargé à l'`initState`, et un statut publié ailleurs — sur le web, ou
+      // sur un autre appareil — n'entourait aucun avatar jusqu'au prochain
+      // lancement. Même défaut que l'onglet Statuts, même remède.
+      unawaited(StatutsEnDirect.instance.charger(context.read<StatusRepository>()));
     }
   }
 
@@ -2798,23 +2806,88 @@ const double _tailleVignetteStatut = 57;
 const double _rayonAvatarCercle = 23;
 
 class _StatusTab extends StatefulWidget {
-  const _StatusTab();
+  const _StatusTab({required this.actif});
+
+  /// Vrai quand c'est CET onglet qu'on regarde. Voir [_StatusTabState].
+  final bool actif;
 
   @override
   State<_StatusTab> createState() => _StatusTabState();
 }
 
-class _StatusTabState extends State<_StatusTab> {
+class _StatusTabState extends State<_StatusTab> with WidgetsBindingObserver {
   StatusFeed? _feed;
   bool _error = false;
 
   /// Statuts qui attendent le réseau — voir [_compterAttente].
   int _enAttente = 0;
 
+  /*
+   * 🐛 « LES STATUTS PUBLIÉS SUR LE WEB NE SE VOIENT PAS SUR LE TÉLÉPHONE »
+   * (un testeur, rapporté le 28/11/2026).
+   *
+   * LA CAUSE. Cet onglet ne lisait le fil qu'à son `initState`, et
+   * l'`IndexedStack` du bas garde les onglets VIVANTS : `initState` ne se
+   * rejoue donc jamais de toute la session. Revenir sur l'onglet, ou revenir
+   * dans l'application, ne demandait rien au serveur — et le serveur ne
+   * prévient pas d'un nouveau statut. Un statut publié depuis le web
+   * n'apparaissait qu'après avoir tué et relancé l'application.
+   *
+   * Le web avait la MÊME MALADIE, dans l'autre sens, corrigée le 27/11 : on
+   * reprend ici exactement son remède, pour que les deux se comportent pareil.
+   *
+   *  - on relit en revenant sur l'onglet (`didUpdateWidget`) ;
+   *  - on relit en revenant au premier plan (`resumed`) ;
+   *  - et chaque minute tant que l'onglet est devant.
+   *
+   * ⚠️ LE MINUTEUR NE TOURNE QUE DEVANT. Un onglet caché, ou une application
+   * en arrière-plan, n'interroge plus rien : ce serait de la batterie et des
+   * données pour une liste que personne ne regarde.
+   */
+  Timer? _minuteur;
+
+  /// Entre deux relectures automatiques. La même minute que sur le web.
+  static const Duration _intervalle = Duration(minutes: 1);
+
+  void _reglerMinuteur() {
+    _minuteur?.cancel();
+    _minuteur = null;
+    if (!widget.actif) return;
+    _minuteur = Timer.periodic(_intervalle, (_) {
+      if (mounted) unawaited(_load(silencieux: true));
+    });
+  }
+
+  @override
+  void didUpdateWidget(_StatusTab ancien) {
+    super.didUpdateWidget(ancien);
+    if (ancien.actif == widget.actif) return;
+    // On vient d'arriver sur l'onglet : la liste peut avoir des heures.
+    if (widget.actif) unawaited(_load(silencieux: true));
+    _reglerMinuteur();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) {
+      // En arrière-plan, plus une seule requête : ni minuteur, ni relecture.
+      _minuteur?.cancel();
+      _minuteur = null;
+      return;
+    }
+    if (widget.actif) unawaited(_load(silencieux: true));
+    // Un statut a pu partir, ou se mettre en attente, pendant que l'écran
+    // était éteint : la publication se poursuit hors de l'application.
+    unawaited(_compterAttente());
+    _reglerMinuteur();
+  }
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
+    _reglerMinuteur();
     // La publication continue APRÈS la fermeture de l'écran de composition, et
     // même après la sortie de l'application : la liste ne peut donc pas se
     // contenter de se recharger au retour de cet écran. Le publieur la prévient.
@@ -2841,6 +2914,8 @@ class _StatusTabState extends State<_StatusTab> {
 
   @override
   void dispose() {
+    _minuteur?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     PublicationStatuts.instance.surPublication = null;
     PublicationStatuts.instance.surAttente = null;
     super.dispose();
@@ -2849,7 +2924,9 @@ class _StatusTabState extends State<_StatusTab> {
   /// Vrai pendant que la version du serveur arrive : la fine barre en haut.
   bool _miseAJour = false;
 
-  Future<void> _load() async {
+  /// [silencieux] : sans la fine barre du haut. Une relecture automatique ne
+  /// doit pas faire clignoter l'écran de quelqu'un qui n'a rien demandé.
+  Future<void> _load({bool silencieux = false}) async {
     final repo = context.read<StatusRepository>();
     // La copie du téléphone d'abord, seulement si rien n'est encore affiché.
     if (_feed == null) {
@@ -2859,7 +2936,7 @@ class _StatusTabState extends State<_StatusTab> {
         StatutsEnDirect.instance.retenirFil(copie);
       }
     }
-    if (mounted) setState(() => _miseAJour = true);
+    if (mounted && !silencieux) setState(() => _miseAJour = true);
     try {
       final feed = await repo.feed();
       if (!mounted) return;
@@ -2873,7 +2950,7 @@ class _StatusTabState extends State<_StatusTab> {
       // Hors ligne avec une copie : on la garde, sans message d'erreur.
       if (mounted) setState(() => _error = _feed == null);
     } finally {
-      if (mounted) setState(() => _miseAJour = false);
+      if (mounted && !silencieux) setState(() => _miseAJour = false);
     }
   }
 
